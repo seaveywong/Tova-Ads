@@ -671,7 +671,7 @@ onMounted(() => {
   loadTrend()
   updateCountdown()
   _timer = setInterval(updateCountdown, 1000)
-  _refreshTimer = setInterval(() => loadDashboard(), 60000)
+  _refreshTimer = setInterval(() => { if (!document.hidden) loadDashboard() }, 60000)
   const obs = new IntersectionObserver((entries) => {
     // 锁定期间不抢高亮（点击跳转的 smooth 滚动中）；松开后才跟手动滚动
     if (_anchorLock) return
