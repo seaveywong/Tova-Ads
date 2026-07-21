@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="facebook-domain-verification" content="qzkcn47p3xwvaid70pvi9tgcu80qkk" />
+<title>数据使用说明 — Tova Ads</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;line-height:1.7;padding:40px 20px}
+.container{max-width:720px;margin:0 auto}
+h1{font-size:24px;margin-bottom:8px;color:#fff}
+.meta{font-size:13px;color:#888;margin-bottom:32px}
+h2{font-size:17px;margin:28px 0 10px;color:#0a84ff}
+p,li{font-size:14px;margin-bottom:8px;color:#bbb}
+ul{padding-left:20px;margin-bottom:12px}
+a{color:#0a84ff}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th,td{border:1px solid #333;padding:8px;text-align:left}
+th{background:#222;color:#0a84ff}
+.footer{margin-top:40px;padding-top:20px;border-top:1px solid #333;font-size:12px;color:#666}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>数据使用说明</h1>
+<div class="meta">最近更新：2026 年 7 月 19 日</div>
+
+<h2>1. 应用概述</h2>
+<p>Tova Ads 是一个 Facebook 广告管理平台（SaaS），帮助广告主通过自动化规则监控广告表现、执行止损策略、管理落地页和追踪转化。</p>
+
+<h2>2. 申请的 Facebook 权限及用途</h2>
+<table>
+<tr><th>权限</th><th>用途</th><th>是否必需</th></tr>
+<tr><td>ads_management</td><td>管理广告：暂停/恢复广告、修改预算、更改状态（自动止损核心功能）</td><td>必需</td></tr>
+<tr><td>ads_read</td><td>读取广告结构、性能数据（消耗、转化、覆盖等）用于看板和巡检</td><td>必需</td></tr>
+<tr><td>pages_show_list</td><td>显示用户管理的主页列表（合规认证、主页选择）</td><td>按需</td></tr>
+<tr><td>pages_read_engagement</td><td>读取主页互动数据</td><td>按需</td></tr>
+<tr><td>email</td><td>获取用户邮箱（账户标识、通知）</td><td>必需</td></tr>
+</table>
+
+<h2>3. 数据使用方式</h2>
+<ul>
+<li><strong>广告监控</strong>：定时（每 5-30 分钟可配）从 Facebook 拉取广告性能快照，用于趋势分析和止损规则评估。</li>
+<li><strong>自动止损</strong>：根据用户配置的规则（如消耗≥$20 无转化），自动暂停表现不佳的广告。暂停操作通过 Facebook Marketing API 执行。</li>
+<li><strong>落地页管理</strong>：生成和管理落地页（部署到 Cloudflare Pages），配置流量防护（国家/设备/VPN 屏蔽）。</li>
+<li><strong>转化追踪</strong>：在落地页上部署 Facebook Pixel，追踪访问和转化事件，回传给 Facebook 用于广告归因。</li>
+<li><strong>告警通知</strong>：通过站内消息和 Telegram 推送广告性能、账户状态、止损触发等告警。</li>
+</ul>
+
+<h2>4. 数据不用于</h2>
+<ul>
+<li>我们不将您的广告数据出售给第三方。</li>
+<li>我们不将您的数据用于定向广告。</li>
+<li>我们不与外部共享您的 Facebook 访问令牌。</li>
+<li>我们不在本服务之外使用您的落地页访客数据。</li>
+</ul>
+
+<h2>5. 数据删除</h2>
+<p>当您撤销 Facebook 授权或取消纳管账户时：</p>
+<ul>
+<li>立即停止获取新的广告数据。</li>
+<li>清除该账户的广告配置缓存。</li>
+<li>历史性能数据按保留策略（默认 90 天）自动过期删除。</li>
+<li>您可联系 <a href="mailto:support@tovaads.com">support@tovaads.com</a> 要求立即删除所有关联数据。</li>
+</ul>
+
+<h2>6. 用户责任</h2>
+<ul>
+<li>您需确保拥有管理所绑定广告账户的合法权限。</li>
+<li>您需遵守 Facebook 广告政策和社区标准。</li>
+<li>您需对自动止损规则的配置负责（系统按您设的规则执行）。</li>
+<li>您不得利用本服务进行欺诈、刷量或违反 Facebook 政策的行为。</li>
+</ul>
+
+<h2>7. 服务限制</h2>
+<ul>
+<li>本服务依赖 Facebook API 可用性。Facebook API 故障可能导致数据延迟或操作失败。</li>
+<li>自动止损基于预设规则执行，不保证广告效果，用户应定期审查规则配置。</li>
+<li>落地页防护基于 IP/UA/ASN 等特征，无法 100% 阻止所有无效流量。</li>
+</ul>
+
+<h2>8. 联系我们</h2>
+<p>如有问题，请联系：<a href="mailto:support@tovaads.com">support@tovaads.com</a></p>
+
+<div class="footer">
+<p>© 2026 Tova Ads. All rights reserved.</p>
+</div>
+</div>
+</body>
+</html>

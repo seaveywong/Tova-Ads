@@ -1,0 +1,14 @@
+# Tove Ads 后端依赖（v1）
+fastapi>=0.115
+uvicorn[standard]>=0.32
+gunicorn>=23.0
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg2-binary>=2.9
+pydantic>=2.9
+pydantic-settings>=2.6
+python-jose[cryptography]>=3.3   # JWT 签发/校验
+passlib[bcrypt]>=1.7             # 密码哈希
+python-multipart>=0.0.12         # 表单
+httpx>=0.27                       # FB Graph API 调用
+apscheduler>=3.10                # 定时任务（巡检/同步/预热）

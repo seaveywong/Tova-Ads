@@ -1,0 +1,104 @@
+/* ========== Tova Ads 全局样式 — 双主题（暗色/亮色）========== */
+
+/* ── z-index 层级（防下层挡上层）── */
+:root {
+  --z-content: 1;
+  --z-sidebar: 50;
+  --z-topbar: 40;
+  --z-dropdown: 200;
+  --z-drawer: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+}
+
+/* ── 暗色主题（默认）── */
+:root, [data-theme="dark"] {
+  --bg: #1a1a2e;
+  --bg2: #232342;
+  --bg3: #2a2a4a;
+  --bgh: #303060;
+  --sidebar-bg: #15152a;
+  --topbar-bg: rgba(26,26,46,0.85);
+  --t1: #e4e4ef;
+  --t2: #9898b0;
+  --t3: #6c6c84;
+  --ac: #0a84ff;
+  --ach: #409cff;
+  --acg: rgba(10,132,255,0.12);
+  --bd: #333355;
+  --bd2: #3a3a5c;
+  --success: #30d158;
+  --error: #ff453a;
+  --warning: #ffd60a;
+  --rs: 8px;
+  --rs2: 12px;
+  --sw: 244px;
+  --topbar-h: 58px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-dropdown: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+/* ── 亮色主题 ── */
+[data-theme="light"] {
+  --bg: #f5f5f7;
+  --bg2: #ffffff;
+  --bg3: #fbfbfd;
+  --bgh: #f0f0f3;
+  --sidebar-bg: #f0f0f3;
+  --topbar-bg: rgba(255,255,255,0.85);
+  --t1: #1d1d1f;
+  --t2: #515154;
+  --t3: #86868b;
+  --ac: #0071e3;
+  --ach: #0066cc;
+  --acg: rgba(0,113,227,0.10);
+  --bd: #d8d8df;
+  --bd2: #b8bcc6;
+  --success: #34c759;
+  --error: #ff3b30;
+  --warning: #ff9500;
+  --shadow-card: 0 1px 4px rgba(0,0,0,0.06);
+  --shadow-dropdown: 0 8px 32px rgba(0,0,0,0.12);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* 主题切换过渡：所有元素的背景/文字/边框一起缓慢过渡（不只是 body 瞬切）。
+   局部组件 scoped transition 特异性更高，不受影响。 */
+*, *::before, *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--t1);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--ac); text-decoration: none; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Element Plus 主题覆盖 */
+.el-button--primary { --el-button-bg-color: var(--ac); --el-button-border-color: var(--ac); }
+.el-menu { border-right: none !important; }
+.el-input__wrapper { background: var(--bg3) !important; box-shadow: 0 0 0 1px var(--bd) inset !important; }
+.el-input__inner { color: var(--t1) !important; }
+.el-input__wrapper.is-focus { box-shadow: 0 0 0 1px var(--ac) inset !important; }
+.el-switch__core { border-color: var(--bd) !important; }
+.el-dropdown__popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
+.el-dropdown-menu__item { color: var(--t1) !important; }
+.el-dropdown-menu__item:hover { background: var(--bg3) !important; }
+.el-loading-mask { background: var(--bg) !important; opacity: 0.7; }
+.el-badge__content { border: none !important; }
+.el-popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
+.el-drawer { background: var(--bg2) !important; }
+.el-drawer__header { color: var(--t1) !important; margin-bottom: 16px; }
+.el-drawer__title { white-space: normal !important; line-height: 1.4; font-size: 15px; }
+.el-drawer__close-btn { color: var(--t3) !important; }
+.el-drawer__body { color: var(--t1); }
