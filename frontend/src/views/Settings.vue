@@ -58,12 +58,14 @@ const loadSched = async () => {
   } catch {}
 }
 const saveSched = async () => {
-  // dirty 判断：没改值不提交
+  // dirty 判断：比对 effective 里的实际间隔值（inspect 是基准×乘数的结果）
   const e = sched.value?.effective || {}
-  if (Number(sched.value.base_minutes) === e.base && Number(sched.value.sentinel_minutes) === (e.sentinel ?? sched.value.sentinel_minutes) && JSON.stringify(sched.value.multipliers) === JSON.stringify(e.multipliers || {})) {
+  const effInspect = e.inspect ?? 0
+  const curInspect = Math.round(Number(sched.value.base_minutes) * (sched.value.multipliers?.inspect || 1))
+  if (Number(sched.value.sentinel_minutes) === (e.sentinel ?? 0) && curInspect === effInspect) {
     return ElMessage.info('无变更')
   }
-  if (Number(sched.value.sentinel_minutes) !== (e.sentinel ?? sched.value.sentinel_minutes)) {
+  if (Number(sched.value.sentinel_minutes) !== (e.sentinel ?? 0)) {
     try {
       await ElMessageBox.confirm(
         `哨兵巡逻间隔将改为 ${sched.value.sentinel_minutes} 分钟，确认？`,

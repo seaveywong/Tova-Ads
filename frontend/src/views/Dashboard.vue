@@ -674,7 +674,7 @@ onMounted(() => {
   _refreshTimer = setInterval(() => {
     if (document.hidden) return
     // 用户正在操作（展开明细/勾选账户）时跳过自动刷新，避免打断
-    if (selectedIds.value.size > 0 || kpiExpanded.value !== null || expandedCard.value !== null) return
+    if (selectedIds.value.size > 0 || kpiExpanded.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
     loadDashboard()
   }, 60000)
   const obs = new IntersectionObserver((entries) => {
