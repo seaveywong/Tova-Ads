@@ -716,17 +716,32 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <span class="sub-pass" v-if="s.click_count > 0">{{ s.click_count }} 通过</span>
             <span class="st-tag" :class="s.status==='active'?'ok':(s.status==='reserved'?'off':(s.status==='deleted'?'err':'warn'))">{{ s.status }}</span>
             <span class="sub-stat">{{ s.visit_count||0 }}访/{{ s.click_count||0 }}转</span>
+            <span v-if="subFbStatus[s.slug] && !subFbStatus[s.slug].loading" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? 'FB正常' : (subFbStatus[s.slug].status === 'fail' ? 'FB封禁' : 'FB未知') }}</span>
             <template v-if="subStatus !== 'trash'">
-              <span v-if="subFbStatus[s.slug]" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? 'FB✓' : (subFbStatus[s.slug].status === 'fail' ? 'FB✗' : 'FB?') }}</span>
-              <button class="mb" style="margin-left:auto" @click="goSubLogs(s)">日志</button>
-              <button class="mb" @click="router.push({ name: 'ad-manager', query: { act: s.act_id || '' } })">广告</button>
-              <button class="mb" @click="copyUrl(s.slug)">复制</button>
-              <button class="mb" :disabled="subFbStatus[s.slug]?.loading" @click="checkSubFb(s)" title="检测此子码 URL 在 FB 是否被封">FB</button>
-              <button class="mb danger" @click="archiveSub(s)">归档</button>
+              <div class="sub-ops">
+                <button class="mb" @click="goSubLogs(s)">日志</button>
+                <button class="mb" @click="copyUrl(s.slug)">复制</button>
+                <el-dropdown trigger="click" @command="cmd => {
+                  if (cmd === 'fb') checkSubFb(s)
+                  else if (cmd === 'ad') router.push({ name: 'ad-manager', query: { act: s.act_id || '' } })
+                  else if (cmd === 'archive') archiveSub(s)
+                }">
+                  <button class="mb" :class="{ spin: subFbStatus[s.slug]?.loading }" title="更多操作">⋯</button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="fb" :disabled="subFbStatus[s.slug]?.loading">{{ subFbStatus[s.slug]?.loading ? 'FB检测中…' : 'FB封禁检测' }}</el-dropdown-item>
+                      <el-dropdown-item command="ad">广告管理</el-dropdown-item>
+                      <el-dropdown-item command="archive" divided>归档</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </template>
             <template v-else>
-              <button class="mb" style="margin-left:auto" @click="restoreSub(s)">恢复</button>
-              <button class="mb danger" @click="hardDeleteSub(s)">永久删除</button>
+              <div class="sub-ops">
+                <button class="mb" @click="restoreSub(s)">恢复</button>
+                <button class="mb danger" @click="hardDeleteSub(s)">永久删除</button>
+              </div>
             </template>
           </div>
           <div class="sub-target" v-if="subTargetEdit[s.id] !== undefined">
@@ -913,8 +928,10 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .sub-slug{color:var(--ac);font-family:'SF Mono',monospace}
 .sub-ad{color:var(--t3);font-family:'SF Mono',monospace;font-size:11px}
 .sub-pass{color:var(--success);font-size:11px;font-weight:600}
-.fb-badge{font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;white-space:nowrap}
-.fb-badge.pass{color:var(--success);background:rgba(52,199,89,.12)}
-.fb-badge.fail{color:var(--error);background:rgba(255,69,58,.12)}
-.fb-badge.warn{color:var(--warning);background:rgba(255,159,10,.12)}
+.fb-badge{font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.fb-badge.pass{color:var(--success);background:rgba(52,199,89,.1)}
+.fb-badge.fail{color:var(--error);background:rgba(255,69,58,.1)}
+.fb-badge.warn{color:var(--warning);background:rgba(255,159,10,.1)}
+.sub-ops{display:flex;gap:4px;align-items:center;margin-left:auto;flex-shrink:0}
+.mb.spin{opacity:.5;pointer-events:none}
 </style>
