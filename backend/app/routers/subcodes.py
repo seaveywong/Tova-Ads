@@ -335,6 +335,3 @@ def fb_check_batch(
         results.append({"slug": link.slug, "status": status, "detail": detail, "url": url})
     blocked = [r for r in results if r["status"] == "fail"]
     return {"total": len(results), "blocked": len(blocked), "results": results}
-              action_type="restore", source="user", result="success")
-    db.commit()
-    return {"id": sid, "status": "reserved"}
