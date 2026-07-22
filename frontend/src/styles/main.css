@@ -91,6 +91,7 @@ a { color: var(--ac); text-decoration: none; }
 .el-input__inner { color: var(--t1) !important; }
 .el-input__wrapper.is-focus { box-shadow: 0 0 0 1px var(--ac) inset !important; }
 .el-switch__core { border-color: var(--bd) !important; }
+.el-switch.is-checked .el-switch__core { background-color: var(--ac) !important; border-color: var(--ac) !important; }
 .el-dropdown__popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
 .el-dropdown-menu__item { color: var(--t1) !important; }
 .el-dropdown-menu__item:hover { background: var(--bg3) !important; }

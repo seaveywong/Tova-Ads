@@ -597,7 +597,7 @@ const deleteToken = async (t) => {
 .mb.danger:hover{color:var(--error);border-color:var(--error)}
 
 /* 8 列：状态|名称|FB用户|账户|主页|BM|类型|操作 */
-.tbl{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.tbl{border:1px solid var(--bd);border-radius:8px;overflow-x:auto}
 .row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) 52px 52px 52px 64px 36px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
 .row.head{color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg2);cursor:default;padding:8px 14px}
 .row:not(.head):hover{background:var(--bg3)}

@@ -207,7 +207,7 @@ onMounted(async () => {
 .refresh-btn:hover { filter: brightness(1.08) }
 .cnt { font-size: 13px; color: var(--t3); font-weight: 400 }
 .rng { color: var(--t3); font-weight: 400; font-size: 11px }
-.tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow: hidden }
+.tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
 .row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd) }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }

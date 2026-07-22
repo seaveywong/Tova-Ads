@@ -231,7 +231,7 @@ const permLabel = (key) => {
 .btn:hover { background: var(--bg3) }
 .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac) }
 
-.tbl { border: 1px solid var(--bd); border-radius: 8px; overflow: hidden }
+.tbl { border: 1px solid var(--bd); border-radius: 8px; overflow-x: auto }
 .row { display: grid; grid-template-columns: 1fr 200px 100px 80px; gap: 8px; padding: 9px 16px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd) }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }
 .row:last-child { border-bottom: none }

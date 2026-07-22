@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, setToken, GET } from '../api'
 import { setUserPerms } from '../router'
@@ -9,8 +9,10 @@ const router = useRouter()
 const email = ref('')
 const password = ref('')
 const loading = ref(false)
+const canLogin = computed(() => email.value.trim() && password.value)
 
 const login = async () => {
+  if (!email.value.trim() || !password.value) return ElMessage.warning('填邮箱和密码')
   loading.value = true
   try {
     const res = await api('POST', '/auth/login', { email: email.value, password: password.value })
@@ -33,7 +35,7 @@ const login = async () => {
       <p class="login-sub">广告投放管理系统</p>
       <el-input v-model="email" placeholder="邮箱" class="login-input" @keyup.enter="login" />
       <el-input v-model="password" type="password" placeholder="密码" class="login-input" show-password @keyup.enter="login" />
-      <el-button type="primary" class="login-btn" :loading="loading" @click="login">登录</el-button>
+      <el-button type="primary" class="login-btn" :loading="loading" :disabled="!canLogin" @click="login">登录</el-button>
     </div>
   </div>
 </template>

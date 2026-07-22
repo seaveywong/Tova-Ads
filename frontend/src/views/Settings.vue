@@ -58,7 +58,12 @@ const loadSched = async () => {
   } catch {}
 }
 const saveSched = async () => {
-  if (Number(sched.value.sentinel_minutes) !== (sched.value.effective?.sentinel ?? sched.value.sentinel_minutes)) {
+  // dirty 判断：没改值不提交
+  const e = sched.value?.effective || {}
+  if (Number(sched.value.base_minutes) === e.base && Number(sched.value.sentinel_minutes) === (e.sentinel ?? sched.value.sentinel_minutes) && JSON.stringify(sched.value.multipliers) === JSON.stringify(e.multipliers || {})) {
+    return ElMessage.info('无变更')
+  }
+  if (Number(sched.value.sentinel_minutes) !== (e.sentinel ?? sched.value.sentinel_minutes)) {
     try {
       await ElMessageBox.confirm(
         `哨兵巡逻间隔将改为 ${sched.value.sentinel_minutes} 分钟，确认？`,
@@ -221,9 +226,9 @@ const runRetentionNow = async () => {
       <div class="form-l"><label>用户名</label><input v-model="acctEmail" class="input" placeholder="登录邮箱" /></div>
       <button class="btn primary" :disabled="acctSaving" @click="saveEmail">保存用户名</button>
       <div class="acct-sep"></div>
-      <div class="form-l"><label>旧密码</label><input v-model="pwdForm.old" type="password" class="input" placeholder="当前密码" /></div>
-      <div class="form-l"><label>新密码</label><input v-model="pwdForm.new" type="password" class="input" placeholder="至少 8 位" /></div>
-      <div class="form-l"><label>确认</label><input v-model="pwdForm.confirm" type="password" class="input" /></div>
+      <div class="form-l"><label>旧密码</label><el-input v-model="pwdForm.old" type="password" show-password class="ep-input" placeholder="当前密码" /></div>
+      <div class="form-l"><label>新密码</label><el-input v-model="pwdForm.new" type="password" show-password class="ep-input" placeholder="至少 8 位" /></div>
+      <div class="form-l"><label>确认</label><el-input v-model="pwdForm.confirm" type="password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? '两次不一致' : '再次输入新密码'" /></div>
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">修改密码</button>
     </div>
 

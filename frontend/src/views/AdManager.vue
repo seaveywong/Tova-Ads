@@ -400,7 +400,7 @@ const isSelected = (id) => selected.value.has(id)
 .tab.on { color: var(--t1); border-bottom-color: var(--ac); font-weight: 600 }
 .drill-tag { margin-left: auto; font-size: 11px; color: var(--t2); background: var(--bg3); padding: 2px 8px; border-radius: 10px }
 .drill-tag span { cursor: pointer; color: var(--t3); margin-left: 4px }
-.tbl { border: 1px solid var(--bd); border-radius: 8px; overflow: hidden }
+.tbl { border: 1px solid var(--bd); border-radius: 8px; overflow-x: auto }
 .row { display: grid; gap: 4px; padding: 5px 8px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd) }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }
 .row:last-child { border-bottom: none }
