@@ -300,7 +300,7 @@ watch(() => route.query, (q) => {
         <div class="t-time">{{ fmtTime(e.created_at) }}</div>
         <div><code class="slug" @click="goSlug(e.slug)" :title="'点击过滤子码 ' + e.slug">/a/{{ e.slug }}</code></div>
         <div class="t-act" :title="e.act_id || ''">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
-        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\nFB点击ID: ' + e.fbclid : '')"><span class="ad-id">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? '已设：' + redirectMap[e.ad_id] : '设跳转链接'">跳转</button></div>
+        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\nFB点击ID: ' + e.fbclid : '')"><span class="ad-id">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? '已设：' + redirectMap[e.ad_id] : '设跳转链接'">跳</button></div>
         <div class="t-px" :title="e.fired_pixel_ids ? '真实 fire 的像素：' + e.fired_pixel_ids : '未记录（worker 旧版 / redirect 模式 / 未 fire）——不推断'">
           <code v-if="e.fired_pixel_ids">{{ pixelLabel(e) }}</code>
           <span v-else class="muted">—</span>
@@ -363,7 +363,7 @@ watch(() => route.query, (q) => {
 .ctrl-btn.on { background: var(--ac); color: #fff; border-color: var(--ac) }
 .ctrl-btn:disabled { opacity: .5; cursor: not-allowed }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 140px 76px 130px 108px 96px 118px 112px 68px 80px 78px minmax(80px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1140px }
+.row { display: grid; grid-template-columns: 140px 76px 130px 132px 86px 110px 112px 68px 80px 78px minmax(80px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1160px }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .row:hover { background: var(--bg2) }
