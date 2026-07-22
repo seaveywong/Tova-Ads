@@ -1037,10 +1037,31 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
                        "detail": f"已开 · {n} 条规则" if n else "已开但无规则"})
     else:
         checks.append({"key": "protection", "label": "防护规则", "status": "warn", "detail": "未开启"})
-    # 8. FB 平台封禁（慢，发布时跳过）
+    # 8. FB 平台封禁（慢，发布时跳过）——域名级 + 子码级
     if include_fb:
         fb_status, fb_detail = _fb_ban_probe(db, p.tenant_id, base)
-        checks.append({"key": "fb_ban", "label": "FB平台封禁", "status": fb_status, "detail": fb_detail})
+        checks.append({"key": "fb_ban", "label": "FB域名封禁", "status": fb_status, "detail": fb_detail})
+        # 子码级 FB 封禁检测（扫描所有 active 子码）
+        from ..models.launch import LandingAdLink
+        _active_links = db.query(LandingAdLink).filter(
+            LandingAdLink.page_id == p.id, LandingAdLink.tenant_id == p.tenant_id,
+            LandingAdLink.status == "active"
+        ).all()
+        if _active_links:
+            _blocked_slugs = []
+            for _link in _active_links:
+                _sub_url = f"{base.rstrip('/')}/a/{_link.slug}"
+                _st, _ = _fb_ban_probe(db, p.tenant_id, _sub_url)
+                if _st == "fail":
+                    _blocked_slugs.append(_link.slug)
+            if _blocked_slugs:
+                checks.append({"key": "fb_subcode", "label": "子码FB封禁",
+                               "status": "fail",
+                               "detail": f"{len(_blocked_slugs)}/{len(_active_links)} 个子码被封：{','.join(_blocked_slugs[:5])}"})
+            else:
+                checks.append({"key": "fb_subcode", "label": "子码FB封禁",
+                               "status": "pass",
+                               "detail": f"{len(_active_links)} 个子码全部正常"})
     # 9. 预览模式（关=正常运营 pass；开=提醒审核完关掉 warn，避免每页都黄）
     checks.append({"key": "preview", "label": "预览模式",
                    "status": "warn" if p.preview_enabled else "pass",

@@ -260,3 +260,81 @@ def restore_subcode(
               action_type="restore", source="user", result="success")
     db.commit()
     return {"id": sid, "status": "reserved"}
+
+
+class FbCheckIn(BaseModel):
+    page_id: int
+    slug: str = ""
+
+
+def _resolve_page_base(db, tenant_id, page_id):
+    """取落地页的公网 base URL（复用 _run_self_check 的解析逻辑）。"""
+    import json as _j
+    from ..models.launch import LandingPage
+    p = db.query(LandingPage).filter(
+        LandingPage.id == page_id, LandingPage.tenant_id == tenant_id).first()
+    if not p:
+        return None, None
+    base = ""
+    if p.custom_domain:
+        base = p.custom_domain if p.custom_domain.startswith("http") else f"https://{p.custom_domain}"
+    elif p.custom_domains:
+        try:
+            ds = _j.loads(p.custom_domains)
+            if ds:
+                base = ds[0] if ds[0].startswith("http") else f"https://{ds[0]}"
+        except Exception:
+            pass
+    if not base:
+        base = f"https://tovaads-landing-{p.id}.pages.dev"
+    return base, p
+
+
+@router.post("/fb-check")
+def fb_check_subcode(
+    body: FbCheckIn,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """检测单个子码 URL 在 FB 是否被封（Graph API scrape 完整 URL /a/{slug}）。
+
+    返回 {status: pass/warn/fail, detail, url}。
+    """
+    from .landing import _fb_ban_probe
+    base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    url = f"{base.rstrip('/')}/a/{body.slug}"
+    status, detail = _fb_ban_probe(db, user.tenant_id, url)
+    return {"status": status, "detail": detail, "url": url}
+
+
+@router.post("/fb-check-batch")
+def fb_check_batch(
+    body: FbCheckIn,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """批量检测页下所有 active 子码在 FB 是否被封。
+
+    返回 [{slug, status, detail, url}, ...]。
+    """
+    from .landing import _fb_ban_probe
+    base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    links = db.query(LandingAdLink).filter(
+        LandingAdLink.page_id == body.page_id,
+        LandingAdLink.tenant_id == user.tenant_id,
+        LandingAdLink.status == "active",
+    ).all()
+    results = []
+    for link in links:
+        url = f"{base.rstrip('/')}/a/{link.slug}"
+        status, detail = _fb_ban_probe(db, user.tenant_id, url)
+        results.append({"slug": link.slug, "status": status, "detail": detail, "url": url})
+    blocked = [r for r in results if r["status"] == "fail"]
+    return {"total": len(results), "blocked": len(blocked), "results": results}
+              action_type="restore", source="user", result="success")
+    db.commit()
+    return {"id": sid, "status": "reserved"}

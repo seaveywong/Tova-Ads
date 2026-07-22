@@ -323,6 +323,32 @@ const copyUrl = (slug) => {
     dangerouslyUseHTMLString: true, type: 'success', duration: 6000,
   })
 }
+// 子码 FB 封禁检测（单个 + 批量）
+const subFbStatus = ref({})  // {slug: {status, detail, loading}}
+const checkSubFb = async (s) => {
+  subFbStatus.value[s.slug] = { loading: true }
+  try {
+    const r = await POST('/subcodes/fb-check', { page_id: subPage.value.id, slug: s.slug })
+    subFbStatus.value[s.slug] = { status: r.status, detail: r.detail }
+    if (r.status === 'fail') ElMessage.error(`/a/${s.slug} 被 FB 封禁`)
+    else if (r.status === 'pass') ElMessage.success(`/a/${s.slug} FB 正常`)
+    else ElMessage.warning(`/a/${s.slug}：${r.detail}`)
+  } catch (e) { subFbStatus.value[s.slug] = { status: 'warn', detail: e.message || '失败' }; ElMessage.error('检测失败') }
+}
+const subFbBatchLoading = ref(false)
+const checkAllSubFb = async () => {
+  if (!subcodes.value.length) return ElMessage.warning('无子码')
+  subFbBatchLoading.value = true
+  try {
+    const r = await POST('/subcodes/fb-check-batch', { page_id: subPage.value.id })
+    const m = {}
+    for (const item of r.results) m[item.slug] = { status: item.status, detail: item.detail }
+    subFbStatus.value = m
+    if (r.blocked > 0) ElMessage.error(`${r.blocked}/${r.total} 个子码被 FB 封禁`)
+    else ElMessage.success(`${r.total} 个子码全部 FB 正常`)
+  } catch (e) { ElMessage.error('批量检测失败：' + (e.message || '')) }
+  subFbBatchLoading.value = false
+}
 const subEvents = ref([])
 const subEventsOpen = ref(false)
 const subEventsLoading = ref(false)
@@ -679,6 +705,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <option value="created">按创建</option>
             <option value="visits">按访问</option>
           </select>
+          <button v-if="subStatus !== 'trash'" class="btn sm" :disabled="subFbBatchLoading" @click="checkAllSubFb" title="检测所有子码 URL 在 FB 是否被封">{{ subFbBatchLoading ? '检测中…' : '批量FB检测' }}</button>
         </div>
       </div>
       <div class="sub-list" v-loading="subLoading">
@@ -690,9 +717,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <span class="st-tag" :class="s.status==='active'?'ok':(s.status==='reserved'?'off':(s.status==='deleted'?'err':'warn'))">{{ s.status }}</span>
             <span class="sub-stat">{{ s.visit_count||0 }}访/{{ s.click_count||0 }}转</span>
             <template v-if="subStatus !== 'trash'">
+              <span v-if="subFbStatus[s.slug]" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? 'FB✓' : (subFbStatus[s.slug].status === 'fail' ? 'FB✗' : 'FB?') }}</span>
               <button class="mb" style="margin-left:auto" @click="goSubLogs(s)">日志</button>
               <button class="mb" @click="router.push({ name: 'ad-manager', query: { act: s.act_id || '' } })">广告</button>
               <button class="mb" @click="copyUrl(s.slug)">复制</button>
+              <button class="mb" :disabled="subFbStatus[s.slug]?.loading" @click="checkSubFb(s)" title="检测此子码 URL 在 FB 是否被封">FB</button>
               <button class="mb danger" @click="archiveSub(s)">归档</button>
             </template>
             <template v-else>
@@ -884,4 +913,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .sub-slug{color:var(--ac);font-family:'SF Mono',monospace}
 .sub-ad{color:var(--t3);font-family:'SF Mono',monospace;font-size:11px}
 .sub-pass{color:var(--success);font-size:11px;font-weight:600}
+.fb-badge{font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;white-space:nowrap}
+.fb-badge.pass{color:var(--success);background:rgba(52,199,89,.12)}
+.fb-badge.fail{color:var(--error);background:rgba(255,69,58,.12)}
+.fb-badge.warn{color:var(--warning);background:rgba(255,159,10,.12)}
 </style>
