@@ -140,8 +140,12 @@ const save = async () => {
 }
 const onToggle = async (r, val) => {
   // v-model 已先翻转 r.enabled；PUT 失败则回滚
+  if (!val) {
+    try { await ElMessageBox.confirm(`停用规则「${r.name}」？该规则将停止评估，名下广告失去此条保护。`, '确认停用', { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' }) }
+    catch { r.enabled = true; return }  // 取消 → 回滚开关
+  }
   try { await PUT(`/guard/rules/${r.id}`, { enabled: val }) }
-  catch (e) { r.enabled = !val; ElMessage.error('开关失败') }
+  catch (e) { r.enabled = !val; ElMessage.error('开关失败：' + (e.message || '')) }
 }
 const remove = async (r) => {
   try { await ElMessageBox.confirm(`删除规则「${r.name}」？`, '确认', { type: 'warning' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success('已删'); await load() }
@@ -288,7 +292,7 @@ const doInspect = async (force = false) => {
 .rule-ops{display:flex;gap:6px}
 .empty{text-align:center;color:var(--t3);padding:32px;font-size:13px;line-height:1.6;background:var(--bg2);border:1px dashed var(--bd);border-radius:8px}
 
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2500;display:flex;align-items:center;justify-content:center}
 .modal{background:var(--bg2);border-radius:12px;padding:20px;width:480px;max-width:90vw;box-shadow:var(--shadow-dropdown);max-height:88vh;overflow-y:auto}
 .m-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:14px}
 .form-l{display:flex;align-items:flex-start;gap:8px;margin-bottom:10px}

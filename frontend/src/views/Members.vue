@@ -208,7 +208,7 @@ const permLabel = (key) => {
       <div class="modal">
         <div class="m-title">邀请成员</div>
         <div class="form-l"><label>邮箱</label><input v-model="inviteForm.email" class="input" placeholder="新成员邮箱" /></div>
-        <div class="form-l"><label>密码</label><input v-model="inviteForm.password" class="input" placeholder="留空=默认 Welcome123!" /></div>
+        <div class="form-l"><label>密码</label><input v-model="inviteForm.password" class="input" type="password" placeholder="留空=默认 Welcome123!" /></div>
         <div class="form-l"><label>角色</label>
           <select v-model="inviteForm.role" class="input">
             <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ r.permissions.length }}权限）</option>
@@ -260,7 +260,7 @@ const permLabel = (key) => {
 .perm-chip { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: var(--bg3); color: var(--t2) }
 .role-desc { font-size: 12px; color: var(--t3); margin-top: 6px }
 
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; display: flex; align-items: center; justify-content: center }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2500; display: flex; align-items: center; justify-content: center }
 .modal { background: var(--bg2); border-radius: 12px; padding: 20px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; box-shadow: var(--shadow-dropdown) }
 .role-modal { width: 640px }
 .m-title { font-size: 16px; font-weight: 600; color: var(--t1); margin-bottom: 14px }

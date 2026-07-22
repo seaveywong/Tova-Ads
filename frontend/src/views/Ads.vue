@@ -229,7 +229,7 @@ onMounted(async () => {
 .batch-btn.danger { border-color: var(--error); color: var(--error); background: rgba(239,68,68,.1) }
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: 2000 }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: 2500 }
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }
 .load-list { max-height: 360px; overflow: auto }

@@ -158,6 +158,10 @@ const deleteItem = async (item) => {
 }
 const batchStatus = async (status) => {
   if (!selected.value.size) return ElMessage.warning('先点选广告行')
+  if (status === 'PAUSED') {
+    try { await ElMessageBox.confirm(`批量暂停 ${selected.value.size} 条广告？`, '确认批量暂停', { type: 'warning', confirmButtonText: '暂停', cancelButtonText: '取消' }) }
+    catch { return }
+  }
   const items = []; for (const id of selected.value) { const it = curList.value.find(x => x.id === id); if (it) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
   opLoading.value = true
   try { const r = await POST('/ads/batch-status', { items }); ElMessage.success(`${r.success_count}/${items.length} 成功`); await load(); selected.value = new Set() } catch (e) { ElMessage.error(e.message || '批量操作失败') }
@@ -208,7 +212,7 @@ const isSelected = (id) => selected.value.has(id)
       <div v-if="showCustom" class="custom-range"><input type="date" v-model="customFrom" class="date-input" /><span class="sep">—</span><input type="date" v-model="customTo" class="date-input" /><button class="ctrl-btn apply" @click="load">查询</button></div>
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable placeholder="全部账户" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">全部</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">投放中</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">暂停</button></div>
-      <input v-model="searchQ" class="ctrl-btn search-input" placeholder="搜索广告名/ID" @keyup.enter="" />
+      <input v-model="searchQ" class="ctrl-btn search-input" placeholder="搜索广告名/ID" />
       <button class="ctrl-btn" @click="openRedirectMgmt">跳转链接<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
       <button class="ctrl-btn primary" :disabled="loading" @click="load" style="margin-left:auto">{{ loading ? '加载中…' : '刷新' }}</button>
     </div>

@@ -40,7 +40,7 @@ const drawerOpen = ref(false)
 const editingId = ref(null)
 const saving = ref(false)
 const emptyForm = () => ({
-  title: '', description: 'Our product', target_urls: [], rotation_mode: 'first',
+  title: '', description: '', target_urls: [], rotation_mode: 'first',
   custom_domain: '', custom_domains: [], pixel_ids: [], conversion_events: [],
   redirect_mode: 'display', block_enabled: false, preview_enabled: false, preview_url: '',
   subdomain_prefix: '', dedup_enabled: false, dedup_window_hours: 24,
@@ -83,7 +83,7 @@ const openEdit = async (p) => {
   try {
     const detail = await GET(`/landing/pages/${p.id}`)
     form.value = {
-      title: detail.title || '', description: 'Our product', custom_domain: detail.custom_domain || '',
+      title: detail.title || '', description: detail.description || '', custom_domain: detail.custom_domain || '',
       target_urls: detail.target_urls || [], rotation_mode: detail.rotation_mode || 'first',
       custom_domains: detail.custom_domains || (detail.custom_domain ? [detail.custom_domain.replace(/^https?:\/\//,'')] : []),
       pixel_ids: detail.pixel_ids || [], conversion_events: detail.conversion_events || [],
@@ -213,7 +213,7 @@ const archive = async (p) => {
 
 // ── 落地页自检 ──
 const healthResult = ref(null)
-const healthChecking = ref(false)
+const healthCheckingId = ref(null)
 // 自检报告弹窗（checkHealth 手动 + 发布后自动 共用）
 const _esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const showSelfCheck = (r, title) => {
@@ -229,14 +229,14 @@ const showSelfCheck = (r, title) => {
   ElMessageBox.alert(note + (lines || '无检查项'), `${title} · ${overallTxt}`, { dangerouslyUseHTMLString: true, confirmButtonText: '知道了', customClass: 'sc-alert' })
 }
 const checkHealth = async (p) => {
-  healthChecking.value = true
+  healthCheckingId.value = p.id
   try {
     const r = await GET(`/landing/pages/${p.id}/health`)
     healthResult.value = r
     await loadPages()
     showSelfCheck(r, '自检')
   } catch (e) { ElMessage.error('自检失败：' + (e.message || '')) }
-  healthChecking.value = false
+  healthCheckingId.value = null
 }
 const protTestResult = ref(null)
 const protTesting = ref(false)
@@ -504,7 +504,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div class="lp-foot">
           <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">预览</a>
           <button class="mb" @click="openSubcodes(p)">子码</button>
-          <button class="mb" :disabled="healthChecking" @click="checkHealth(p)">{{ healthChecking ? '自检中…' : '自检' }}</button>
+          <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? '自检中…' : '自检' }}</button>
           <button class="mb" @click="openEdit(p)">编辑</button>
           <button class="mb danger" @click="archive(p)">归档</button>
         </div>

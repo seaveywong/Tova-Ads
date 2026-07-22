@@ -791,7 +791,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
         <div v-else class="trend-empty">所选范围暂无数据</div>
       </div>
-      <div v-if="!loading" class="task-block">
+      <div v-show="!loading" class="task-block">
         <div class="block-title">待处理事项</div>
         <div class="task-grid">
           <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length }]" @click="toggleCard(i)">

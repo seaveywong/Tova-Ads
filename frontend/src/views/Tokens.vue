@@ -407,8 +407,8 @@ const deleteToken = async (t) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item command="publish">发布广告（即将上线）</el-dropdown-item>
-                    <el-dropdown-item command="insights">查看数据洞察（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>发布广告（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>查看数据洞察（即将上线）</el-dropdown-item>
                     <el-dropdown-item command="unmanage" divided>取消纳管</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -431,8 +431,8 @@ const deleteToken = async (t) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click.stop>改名（即将上线）</el-dropdown-item>
-                    <el-dropdown-item @click.stop>修改类型（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>改名（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>修改类型（即将上线）</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -452,8 +452,8 @@ const deleteToken = async (t) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click.stop>查看成员（即将上线）</el-dropdown-item>
-                    <el-dropdown-item @click.stop>管理资产（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>查看成员（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>管理资产（即将上线）</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
