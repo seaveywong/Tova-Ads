@@ -329,6 +329,7 @@ const runRetentionNow = async () => {
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
+.ep-input{flex:1}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:18px}
 .t{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:6px}
 .d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:14px}
