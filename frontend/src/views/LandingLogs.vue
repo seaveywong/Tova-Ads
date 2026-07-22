@@ -207,6 +207,8 @@ const fmtTime = (iso) => {
   catch (e) { return iso }
 }
 const goSlug = (slug) => { fSlug.value = slug; offset.value = 0; load() }
+const goAct = (actId) => { if (!actId) return; fAct.value = actId; offset.value = 0; load() }
+const goAd = (adId) => { if (!adId) return; fAd.value = adId; offset.value = 0; load() }
 // 广告级跳转链接（就近在日志里给某条广告设专属跳转）
 const redirectMap = ref({})
 const redirectDialog = ref(false)
@@ -299,8 +301,8 @@ watch(() => route.query, (q) => {
       <div v-for="e in items" :key="e.id" class="row">
         <div class="t-time">{{ fmtTime(e.created_at) }}</div>
         <div><code class="slug" @click="goSlug(e.slug)" :title="'点击过滤子码 ' + e.slug">/a/{{ e.slug }}</code></div>
-        <div class="t-act" :title="e.act_id || ''">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
-        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\nFB点击ID: ' + e.fbclid : '')"><span class="ad-id">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? '已设：' + redirectMap[e.ad_id] : '设跳转链接'">跳</button></div>
+        <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? '点击过滤账户 ' + e.act_name : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
+        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\nFB点击ID: ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? '点击过滤广告 ' + e.ad_id : ''" @click="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? '已设：' + redirectMap[e.ad_id] : '设跳转链接'">跳</button></div>
         <div class="t-px" :title="e.fired_pixel_ids ? '真实 fire 的像素：' + e.fired_pixel_ids : '未记录（worker 旧版 / redirect 模式 / 未 fire）——不推断'">
           <code v-if="e.fired_pixel_ids">{{ pixelLabel(e) }}</code>
           <span v-else class="muted">—</span>
@@ -372,7 +374,11 @@ watch(() => route.query, (q) => {
 .slug:hover { text-decoration: underline }
 .t-ad { color: var(--t3); font-size: 11px; display: flex; align-items: center; gap: 4px; min-width: 0; font-variant-numeric: tabular-nums }
 .ad-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto }
+.ad-id.clk { color: var(--ac); cursor: pointer }
+.ad-id.clk:hover { text-decoration: underline }
 .t-act { color: var(--t2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.t-act.clk { color: var(--ac); cursor: pointer }
+.t-act.clk:hover { text-decoration: underline }
 .rd-link { font-size: 10px; padding: 1px 5px; border: 1px solid var(--bd); background: transparent; color: var(--t3); border-radius: 4px; cursor: pointer; flex-shrink: 0 }
 .rd-link:hover { color: var(--ac); border-color: var(--ac) }
 .rd-link.on { color: var(--ac); border-color: var(--ac); background: rgba(10,132,255,.1) }
