@@ -110,6 +110,8 @@ def _tenant_name(db, tid):
 
 class TenantIn(BaseModel):
     name: str
+    owner_email: str = ""       # 首任 owner（建团队同时建/复用用户+加 membership）
+    owner_password: str = ""    # owner 密码（留空=随机）
 
 
 @router.get("/tenants/detail")
@@ -133,33 +135,58 @@ def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(
 
 @router.post("/tenants")
 def create_tenant(body: TenantIn, user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
-    """建团队 → 自动种 owner/operator/finance 三个系统角色。"""
+    """建团队 → 自动种 3 个系统角色 + 可选指定首任 owner。"""
+    from ..core.permissions import ALL_PERMISSIONS, ROLE_PERMISSIONS
+    from ..models.auth import User
+    from ..core.security import hash_password
+    import secrets as _sec, json
+
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "团队名不能为空")
     if db.query(Tenant).filter(Tenant.name == name).first():
         raise HTTPException(400, "团队名已存在")
+
     t = Tenant(name=name, status="active")
     db.add(t)
     db.flush()
-    # 种三个默认角色（owner 全权限 / operator 操作 / finance 只读+规则）
-    import json
-    all_perms = ["ads.create", "ads.read", "ads.pause", "ads.resume", "ads.update", "ads.delete",
-                 "rules.create", "rules.edit", "rules.read", "landing.manage", "assets.manage",
-                 "members.invite", "members.manage"]
-    for rname, rperms in [
-        ("owner", all_perms + ["members.manage"]),
-        ("operator", ["ads.create", "ads.read", "ads.pause", "ads.resume", "ads.update",
-                       "rules.create", "rules.edit", "rules.read", "landing.manage", "assets.manage"]),
-        ("finance", ["ads.read", "rules.read"]),
-    ]:
+
+    # 种 3 个默认系统角色（权限从 permissions.py 取，不硬编码）
+    for rname in ("owner", "operator", "finance"):
+        rperms = sorted(ROLE_PERMISSIONS.get(rname, set()))
         db.add(Role(tenant_id=t.id, name=rname, permissions=json.dumps(rperms), is_system=True))
+
+    # 可选：指定首任 owner（建/复用用户 + 加 owner membership）
+    owner_info = {}
+    if body.owner_email.strip():
+        email = body.owner_email.strip().lower()
+        if "@" not in email:
+            raise HTTPException(400, "owner 邮箱格式不对")
+        existing_user = db.query(User).filter(User.email == email).first()
+        pwd = body.owner_password.strip() or _sec.token_urlsafe(8)
+        if existing_user:
+            # 已有用户 → 检查是否已在本团队
+            existing_mem = db.query(TenantMembership).filter(
+                TenantMembership.tenant_id == t.id, TenantMembership.user_id == existing_user.id
+            ).first()
+            if existing_mem:
+                raise HTTPException(400, "该用户已是本团队成员")
+            db.add(TenantMembership(tenant_id=t.id, user_id=existing_user.id, role="owner"))
+            owner_info = {"owner_email": email, "owner_existing": True}
+        else:
+            new_user = User(email=email, password_hash=hash_password(pwd), status="must_change_password")
+            db.add(new_user)
+            db.flush()
+            db.add(TenantMembership(tenant_id=t.id, user_id=new_user.id, role="owner"))
+            owner_info = {"owner_email": email, "owner_password": pwd, "owner_existing": False}
+
     tid = new_trace_id()
     write_log(db, tenant_id=t.id, trace_id=tid, actor_type="user", actor_user_id=user.id,
               target_type="tenant", target_id=str(t.id),
-              action_type="create", source="admin", result="success", metadata={"name": name})
+              action_type="create", source="admin", result="success",
+              metadata={"name": name, **owner_info})
     db.commit()
-    return {"id": t.id, "name": t.name, "created": True}
+    return {"id": t.id, "name": t.name, "created": True, **owner_info}
 
 
 @router.put("/tenants/{tid}")

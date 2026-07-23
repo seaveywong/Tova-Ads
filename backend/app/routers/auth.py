@@ -9,9 +9,17 @@ from sqlalchemy.orm import Session
 from ..core.database import get_system_db
 from ..core.security import hash_password, verify_password, create_access_token
 from ..core.deps import get_current_user, CurrentUser
-from ..models.auth import User, TenantMembership, Invitation
+from ..models.auth import User, TenantMembership, Invitation, Tenant
 from ..schemas.auth import RegisterIn, LoginIn, TokenOut, UserOut, UpdateTimezoneIn, UpdateEmailIn, UpdatePasswordIn
 from pydantic import BaseModel
+
+
+def _tenant_name_of(db, tid):
+    """取租户名（login/switch-tenant 用，内联避免跨模块导入）。"""
+    if not tid:
+        return ""
+    t = db.query(Tenant).filter(Tenant.id == tid).first()
+    return t.name if t else f"团队{tid}"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -49,6 +57,9 @@ def login(body: LoginIn, db: Session = Depends(get_system_db)):
     if user.status not in ("active", "must_change_password"):
         raise HTTPException(403, "用户已停用")
     mems = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).all()
+    # 非超管且无 membership → 拒绝（防止"盲人 token"tenant_id=None 啥都看不到）
+    if not mems and not user.is_superadmin:
+        raise HTTPException(403, "该用户未加入任何团队，请联系管理员")
     # 取第一个 membership 的 tenant/role 作为默认
     mem = mems[0] if mems else None
     tenant_id = mem.tenant_id if mem else None
@@ -57,9 +68,8 @@ def login(body: LoginIn, db: Session = Depends(get_system_db)):
                                 role=role, is_superadmin=bool(user.is_superadmin))
     # 返回所有 memberships 供前端团队切换器用
     memberships = [{"tenant_id": m.tenant_id, "role": m.role} for m in mems]
-    from .admin import _tenant_name
     for ms in memberships:
-        ms["tenant_name"] = _tenant_name(db, ms["tenant_id"])
+        ms["tenant_name"] = _tenant_name_of(db, ms["tenant_id"])
     return {"access_token": token, "token_type": "bearer", "role": role,
             "tenant_id": tenant_id, "is_superadmin": bool(user.is_superadmin),
             "memberships": memberships}
@@ -82,10 +92,9 @@ def switch_tenant(body: SwitchTenantIn,
     token = create_access_token(user_id=user.id, email=user.email,
                                 tenant_id=mem.tenant_id, role=mem.role,
                                 is_superadmin=bool(user.is_superadmin))
-    from .admin import _tenant_name
     return {"access_token": token, "token_type": "bearer",
             "role": mem.role, "tenant_id": mem.tenant_id,
-            "tenant_name": _tenant_name(db, mem.tenant_id),
+            "tenant_name": _tenant_name_of(db, mem.tenant_id),
             "is_superadmin": bool(user.is_superadmin)}
 
 
