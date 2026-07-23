@@ -45,7 +45,7 @@ def login(body: LoginIn, db: Session = Depends(get_system_db)):
     user = db.query(User).filter(User.email == body.email.strip().lower()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "邮箱或密码错误")
-    if user.status != "active":
+    if user.status not in ("active", "must_change_password"):
         raise HTTPException(403, "用户已停用")
     mem = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).first()
     tenant_id = mem.tenant_id if mem else None
