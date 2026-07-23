@@ -20,8 +20,8 @@ from .fb_apps import FbApp
 
 router = APIRouter(prefix="/fb/oauth", tags=["fb-oauth"])
 
-# 申请的 7 个 scope（必须与 FB App Review 提交一致）
-OAUTH_SCOPES = "ads_management,ads_read,read_insights,business_management,pages_show_list,pages_manage_ads,pages_read_engagement"
+# 申请的 8 个 scope（必须与 FB App Review 提交一致）
+OAUTH_SCOPES = "ads_management,ads_read,read_insights,business_management,pages_show_list,pages_manage_ads,pages_read_engagement,pages_manage_metadata"
 STATE_TTL = 600  # state 有效期 10 分钟
 FRONTEND_URL = "https://tovaads.com"
 
