@@ -31,6 +31,13 @@ export async function api(method, path, body) {
     const _newTok = res.headers.get('X-New-Token')
     if (_newTok) setToken(_newTok)
     if (res.status === 401) {
+      // 登录请求的 401 = 凭证错误，不走全局拦截（显示后端返回的真实错误）
+      if (path === '/auth/login') {
+        const text = await res.text()
+        let data = {}
+        try { data = JSON.parse(text) } catch {}
+        throw new Error(data.detail || '邮箱或密码错误')
+      }
       if (!_redirecting401) {
         _redirecting401 = true
         setToken('')
