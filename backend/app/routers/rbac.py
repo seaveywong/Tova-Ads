@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
-from ..core.database import get_db
+from ..core.database import get_db, get_system_db
 from ..core.deps import CurrentUser, require_permission
 from ..core.config import settings
 from ..core.security import hash_password, create_access_token
@@ -17,6 +17,40 @@ from ..models.auth import Role, TenantMembership, User, Invitation
 from ..core.permissions import ALL_PERMISSIONS, PERMISSION_GROUPS
 
 router = APIRouter(prefix="/rbac", tags=["rbac"])
+
+
+# ── 团队管理（owner 自助）──
+
+class TenantRenameIn(BaseModel):
+    name: str
+
+
+@router.put("/tenant")
+def rename_own_tenant(body: TenantRenameIn,
+                      user: CurrentUser = Depends(require_permission("members.manage")),
+                      db: Session = Depends(get_system_db)):
+    """owner 改自己团队名（tenants 表无 RLS，需 super session + 显式 tenant_id 过滤防越权）。"""
+    from ..models.auth import Tenant
+    from ..core.log_utils import write_log, new_trace_id
+    if not user.tenant_id:
+        raise HTTPException(403, "无当前团队")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "团队名不能为空")
+    t = db.query(Tenant).filter(Tenant.id == user.tenant_id, Tenant.status == "active").first()
+    if not t:
+        raise HTTPException(404, "团队不存在或已停用")
+    if db.query(Tenant).filter(Tenant.name == name, Tenant.id != user.tenant_id).first():
+        raise HTTPException(400, "团队名已存在")
+    old_name = t.name
+    t.name = name
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
+              actor_type="user", actor_user_id=user.id,
+              target_type="tenant", target_id=str(user.tenant_id),
+              action_type="rename", source="user", result="success",
+              metadata={"old_name": old_name, "new_name": name})
+    db.commit()
+    return {"id": user.tenant_id, "name": name, "old_name": old_name}
 
 
 # ── 角色 CRUD ──

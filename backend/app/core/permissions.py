@@ -56,7 +56,11 @@ def permissions_for_role(db, tenant_id: int, role_name: str) -> set[str]:
             Role.tenant_id == tenant_id, Role.name == role_name
         ).first()
         if row and row.permissions:
-            return set(row.permissions)
+            perms = row.permissions
+            if isinstance(perms, str):
+                import json as _j
+                perms = _j.loads(perms)
+            return set(perms)
     except Exception as e:
         logger.debug(f"[RBAC] DB 查角色失败，退回硬编码: {e}")
     # 兜底
