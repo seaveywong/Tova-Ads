@@ -8,7 +8,7 @@ const ROUTE_PERMS = {
   'ad-manager':['ads.read'],
   landing:     ['landing.manage'],
   guard:       ['rules.read'],
-  'kpi-mapping':['rules.read'],
+  'kpi-mapping':['__superadmin__'],  // 仅超管可见（前端 isSuperadmin 控制，不走权限矩阵）
   settings:    [],  // 所有人可看自己的设置
   members:     ['members.manage'],
   tokens:      ['ads.read'],
@@ -49,6 +49,9 @@ router.beforeEach((to, from, next) => {
   // 路由级权限拦截：无所需权限 → 跳到第一个有权限的页（或 dashboard）
   const required = ROUTE_PERMS[to.name]
   if (required && required.length) {
+    if (required.includes('__superadmin__')) {
+      if (localStorage.getItem('tova_super') !== '1') return next({ name: 'dashboard' })
+    }
     const perms = getUserPerms()
     const hasAll = required.every(p => perms.includes(p))
     if (!hasAll) {

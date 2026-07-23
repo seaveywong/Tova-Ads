@@ -18,7 +18,7 @@ const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
 // 导航 → 所需权限（同 router/ROUTE_PERMS）
 const NAV_PERMS = {
   dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'],
-  landing: ['landing.manage'], guard: ['rules.read'], 'kpi-mapping': ['rules.read'],
+  landing: ['landing.manage'], guard: ['rules.read'],
   settings: [], members: ['members.manage'], tokens: ['ads.read'],
 }
 
@@ -49,6 +49,7 @@ const navGroups = computed(() => {
   const perms = myPerms.value
   return allNavGroups
     .map(g => ({ ...g, items: g.items.filter(item => {
+        if (item.name === 'kpi-mapping' && !isSuperadmin.value) return false
         const required = NAV_PERMS[item.name] || []
         return required.length === 0 || required.every(p => perms.includes(p))
       }) }))
