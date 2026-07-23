@@ -1,18 +1,18 @@
-"""平台超管路由：CF 域名发现 + 分配给租户（落地页重做 ③，用户决策：平台导入→分配给租户）。
+"""平台超管路由：CF 域名管理 + 团队(tenant) CRUD。
 
 模型：超管在 CF 发现所有域名（平台池）→ 分配给租户（内部团队）→ 租户只能看/用分配给自己的（RLS）。
-购买/支付后期再说（v2）。
 """
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from ..core.database import get_system_db
 from ..core.deps import require_superadmin
 from ..core.config import settings
 from ..core.cf_client import CfClient
 from ..core.log_utils import write_log, new_trace_id
-from ..models.auth import Tenant
+from ..models.auth import Tenant, TenantMembership, Role
 from ..models.landing_lib import LandingDomain
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -98,3 +98,81 @@ def unassign_domain(did: int, user=Depends(require_superadmin), db: Session = De
               metadata={"domain": domain, "tenant_id": tenant_id})
     db.commit()
     return {"id": did, "unassigned": True, "domain": domain}
+
+
+def _tenant_name(db, tid):
+    """取租户名（login/switch-tenant 用）。"""
+    t = db.query(Tenant).filter(Tenant.id == tid).first()
+    return t.name if t else f"团队{tid}"
+
+
+# ── 团队(tenant) CRUD ──
+
+class TenantIn(BaseModel):
+    name: str
+
+
+@router.get("/tenants/detail")
+def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """团队列表 + 概况（成员数/广告账户数），超管用。"""
+    from ..models.fb import Account
+    tenants = db.query(Tenant).order_by(Tenant.id).all()
+    result = []
+    for t in tenants:
+        member_count = db.query(func.count(TenantMembership.id)).filter(
+            TenantMembership.tenant_id == t.id).scalar() or 0
+        account_count = db.query(func.count(Account.id)).filter(
+            Account.tenant_id == t.id, Account.is_managed == True).scalar() or 0
+        result.append({
+            "id": t.id, "name": t.name, "plan": t.plan, "status": t.status,
+            "members": member_count, "accounts": account_count,
+            "created_at": str(t.created_at) if t.created_at else "",
+        })
+    return result
+
+
+@router.post("/tenants")
+def create_tenant(body: TenantIn, user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """建团队 → 自动种 owner/operator/finance 三个系统角色。"""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "团队名不能为空")
+    if db.query(Tenant).filter(Tenant.name == name).first():
+        raise HTTPException(400, "团队名已存在")
+    t = Tenant(name=name, status="active")
+    db.add(t)
+    db.flush()
+    # 种三个默认角色（owner 全权限 / operator 操作 / finance 只读+规则）
+    import json
+    all_perms = ["ads.create", "ads.read", "ads.pause", "ads.resume", "ads.update", "ads.delete",
+                 "rules.create", "rules.edit", "rules.read", "landing.manage", "assets.manage",
+                 "members.invite", "members.manage"]
+    for rname, rperms in [
+        ("owner", all_perms + ["members.manage"]),
+        ("operator", ["ads.create", "ads.read", "ads.pause", "ads.resume", "ads.update",
+                       "rules.create", "rules.edit", "rules.read", "landing.manage", "assets.manage"]),
+        ("finance", ["ads.read", "rules.read"]),
+    ]:
+        db.add(Role(tenant_id=t.id, name=rname, permissions=json.dumps(rperms), is_system=True))
+    tid = new_trace_id()
+    write_log(db, tenant_id=t.id, trace_id=tid, actor_type="user", actor_user_id=user.id,
+              target_type="tenant", target_id=str(t.id),
+              action_type="create", source="admin", result="success", metadata={"name": name})
+    db.commit()
+    return {"id": t.id, "name": t.name, "created": True}
+
+
+@router.put("/tenants/{tid}")
+def update_tenant(tid: int, body: TenantIn, user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """改团队名。"""
+    t = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not t:
+        raise HTTPException(404, "团队不存在")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "团队名不能为空")
+    if db.query(Tenant).filter(Tenant.name == name, Tenant.id != tid).first():
+        raise HTTPException(400, "团队名已存在")
+    t.name = name
+    db.commit()
+    return {"id": tid, "name": name, "updated": True}

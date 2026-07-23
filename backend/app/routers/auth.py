@@ -11,6 +11,7 @@ from ..core.security import hash_password, verify_password, create_access_token
 from ..core.deps import get_current_user, CurrentUser
 from ..models.auth import User, TenantMembership, Invitation
 from ..schemas.auth import RegisterIn, LoginIn, TokenOut, UserOut, UpdateTimezoneIn, UpdateEmailIn, UpdatePasswordIn
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,21 +40,53 @@ def register(body: RegisterIn, db: Session = Depends(get_system_db)):
     return TokenOut(access_token=token, role="operator", tenant_id=inv.tenant_id)
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login")
 def login(body: LoginIn, db: Session = Depends(get_system_db)):
-    """邮箱密码登录 → 返 token（含第一个 membership 的 tenant/role）。"""
+    """邮箱密码登录 → 返 token（含第一个 membership 的 tenant/role）+ 所有 memberships。"""
     user = db.query(User).filter(User.email == body.email.strip().lower()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "邮箱或密码错误")
     if user.status not in ("active", "must_change_password"):
         raise HTTPException(403, "用户已停用")
-    mem = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).first()
+    mems = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).all()
+    # 取第一个 membership 的 tenant/role 作为默认
+    mem = mems[0] if mems else None
     tenant_id = mem.tenant_id if mem else None
     role = mem.role if mem else None
     token = create_access_token(user_id=user.id, email=user.email, tenant_id=tenant_id,
                                 role=role, is_superadmin=bool(user.is_superadmin))
-    return TokenOut(access_token=token, role=role, tenant_id=tenant_id,
-                    is_superadmin=bool(user.is_superadmin))
+    # 返回所有 memberships 供前端团队切换器用
+    memberships = [{"tenant_id": m.tenant_id, "role": m.role} for m in mems]
+    from .admin import _tenant_name
+    for ms in memberships:
+        ms["tenant_name"] = _tenant_name(db, ms["tenant_id"])
+    return {"access_token": token, "token_type": "bearer", "role": role,
+            "tenant_id": tenant_id, "is_superadmin": bool(user.is_superadmin),
+            "memberships": memberships}
+
+
+class SwitchTenantIn(BaseModel):
+    tenant_id: int
+
+
+@router.post("/switch-tenant")
+def switch_tenant(body: SwitchTenantIn,
+                  user=Depends(get_current_user),
+                  db: Session = Depends(get_system_db)):
+    """切换当前团队 → 重 mint token（新 tenant_id + role）。"""
+    mem = db.query(TenantMembership).filter(
+        TenantMembership.user_id == user.id, TenantMembership.tenant_id == body.tenant_id
+    ).first()
+    if not mem:
+        raise HTTPException(403, "你不属于该团队")
+    token = create_access_token(user_id=user.id, email=user.email,
+                                tenant_id=mem.tenant_id, role=mem.role,
+                                is_superadmin=bool(user.is_superadmin))
+    from .admin import _tenant_name
+    return {"access_token": token, "token_type": "bearer",
+            "role": mem.role, "tenant_id": mem.tenant_id,
+            "tenant_name": _tenant_name(db, mem.tenant_id),
+            "is_superadmin": bool(user.is_superadmin)}
 
 
 @router.get("/me", response_model=UserOut)
