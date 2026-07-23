@@ -590,12 +590,15 @@ def list_accounts(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """列本租户已导入广告账户（全字段+可用额度+近3天消耗+绑令牌）。Operator 只看名下。"""
+    """列本租户已导入广告账户（全字段+可用额度+近3天消耗+绑令牌）。Operator 只看名下。
+    只返回纳管中的（is_managed=True），已移除的不显示。"""
     from sqlalchemy import func
     from ..services.guard_engine import calc_available_balance, from_minor_units, to_usd
     from ..models.perf import PerfSnapshot
     from ..core.fb_tokens import _is_cred_available
-    query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
+    query = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True
+    )
     if user.role == "operator":
         query = query.filter(Account.owner_user_id == user.id)
     accs = query.order_by(Account.account_status.asc()).all()
