@@ -203,3 +203,66 @@ def update_tenant(tid: int, body: TenantIn, user=Depends(require_superadmin), db
     t.name = name
     db.commit()
     return {"id": tid, "name": name, "updated": True}
+
+
+class TenantMemberIn(BaseModel):
+    email: str
+    password: str = ""
+    role: str = "operator"
+
+
+@router.post("/tenants/{tid}/members")
+def add_tenant_member(tid: int, body: TenantMemberIn,
+                      user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """超管给任意团队加成员（不用切团队）。建/复用用户 + 加 membership。"""
+    from ..models.auth import User
+    from ..core.security import hash_password
+    import secrets as _sec
+    t = db.query(Tenant).filter(Tenant.id == tid, Tenant.status == "active").first()
+    if not t:
+        raise HTTPException(404, "团队不存在或已停用")
+    # 校验角色存在
+    role_row = db.query(Role).filter(Role.tenant_id == tid, Role.name == body.role).first()
+    if not role_row:
+        raise HTTPException(400, f"角色 '{body.role}' 不存在于该团队")
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "邮箱格式不对")
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        # 检查是否已在本团队
+        mem = db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == tid, TenantMembership.user_id == existing.id).first()
+        if mem:
+            raise HTTPException(400, "该用户已是本团队成员")
+        db.add(TenantMembership(tenant_id=tid, user_id=existing.id, role=body.role))
+        db.commit()
+        return {"added": True, "email": email, "role": body.role, "existing_user": True}
+    # 新用户
+    pwd = body.password.strip() or _sec.token_urlsafe(8)
+    new_user = User(email=email, password_hash=hash_password(pwd), status="must_change_password")
+    db.add(new_user)
+    db.flush()
+    db.add(TenantMembership(tenant_id=tid, user_id=new_user.id, role=body.role))
+    db.commit()
+    return {"added": True, "email": email, "role": body.role, "password": pwd, "existing_user": False}
+
+
+class TenantStatusIn(BaseModel):
+    status: str  # active / suspended / archived
+
+
+@router.patch("/tenants/{tid}/status")
+def update_tenant_status(tid: int, body: TenantStatusIn,
+                         user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """归档/恢复/停用团队。archived=隐藏但数据保留，suspended=暂停巡检但可见。"""
+    t = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not t:
+        raise HTTPException(404, "团队不存在")
+    if body.status not in ("active", "suspended", "archived"):
+        raise HTTPException(400, "status 只能是 active/suspended/archived")
+    if tid == 1 and body.status != "active":
+        raise HTTPException(400, "主团队不可停用/归档")
+    t.status = body.status
+    db.commit()
+    return {"id": tid, "status": body.status, "updated": True}

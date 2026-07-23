@@ -56,7 +56,7 @@ def login(body: LoginIn, db: Session = Depends(get_system_db)):
         raise HTTPException(401, "邮箱或密码错误")
     if user.status not in ("active", "must_change_password"):
         raise HTTPException(403, "用户已停用")
-    mems = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).all()
+    mems = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).order_by(TenantMembership.tenant_id).all()
     # 非超管且无 membership → 拒绝（防止"盲人 token"tenant_id=None 啥都看不到）
     if not mems and not user.is_superadmin:
         raise HTTPException(403, "该用户未加入任何团队，请联系管理员")
