@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
+import { isSuperadminSync } from '../router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 
@@ -421,7 +422,7 @@ const savePixel = async () => {
 }
 
 // 域名管理（超管：从域名服务商导入）
-const isSuper = ref(localStorage.getItem('tova_super') === '1')
+const isSuper = ref(isSuperadminSync())
 const domainOpen = ref(false)
 const cfZones = ref([])
 const zonesLoading = ref(false)

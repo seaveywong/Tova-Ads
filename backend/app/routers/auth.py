@@ -4,7 +4,7 @@
 /auth/me 用普通连接（toveads_app + RLS），get_current_user 接线 tenant 上下文。
 """
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from ..core.database import get_system_db
 from ..core.security import hash_password, verify_password, create_access_token
@@ -49,16 +49,39 @@ def register(body: RegisterIn, db: Session = Depends(get_system_db)):
 
 
 @router.post("/login")
-def login(body: LoginIn, db: Session = Depends(get_system_db)):
-    """邮箱密码登录 → 返 token（含第一个 membership 的 tenant/role）+ 所有 memberships。"""
-    user = db.query(User).filter(User.email == body.email.strip().lower()).first()
+def login(body: LoginIn, request: Request, db: Session = Depends(get_system_db)):
+    """邮箱密码登录 → 返 token（含第一个 membership 的 tenant/role）+ 所有 memberships。
+
+    记登录日志（成功/失败均记）。失败日志归主团队(tenant 1)供超管安全审计；不记密码明文。
+    """
+    from ..core.log_utils import write_log, new_trace_id
+    email_lc = body.email.strip().lower()
+    ip = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    ua = (request.headers.get("user-agent") or "")[:200]
+    user = db.query(User).filter(User.email == email_lc).first()
+    # 失败：用户不存在 / 密码错（提示不区分防枚举；不记密码明文）
     if not user or not verify_password(body.password, user.password_hash):
+        write_log(db, tenant_id=1, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id if user else None, action_type="login",
+                  source="auth", result="fail", friendly_error="邮箱或密码错误",
+                  metadata={"email": email_lc, "ip": ip, "ua": ua})
+        db.commit()
         raise HTTPException(401, "邮箱或密码错误")
     if user.status not in ("active", "must_change_password"):
+        write_log(db, tenant_id=1, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id, action_type="login", source="auth",
+                  result="fail", friendly_error=f"用户状态:{user.status}",
+                  metadata={"email": email_lc, "ip": ip, "ua": ua})
+        db.commit()
         raise HTTPException(403, "用户已停用")
     mems = db.query(TenantMembership).filter(TenantMembership.user_id == user.id).order_by(TenantMembership.tenant_id).all()
     # 非超管且无 membership → 拒绝（防止"盲人 token"tenant_id=None 啥都看不到）
     if not mems and not user.is_superadmin:
+        write_log(db, tenant_id=1, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id, action_type="login", source="auth",
+                  result="fail", friendly_error="未加入任何团队",
+                  metadata={"email": email_lc, "ip": ip, "ua": ua})
+        db.commit()
         raise HTTPException(403, "该用户未加入任何团队，请联系管理员")
     # 取第一个 membership 的 tenant/role 作为默认
     mem = mems[0] if mems else None
@@ -66,6 +89,11 @@ def login(body: LoginIn, db: Session = Depends(get_system_db)):
     role = mem.role if mem else None
     token = create_access_token(user_id=user.id, email=user.email, tenant_id=tenant_id,
                                 role=role, is_superadmin=bool(user.is_superadmin))
+    # 成功登录日志（写到用户当前团队，该团队 owner 可见 + 超管可见）
+    write_log(db, tenant_id=tenant_id or 1, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, action_type="login", source="auth", result="success",
+              metadata={"ip": ip, "ua": ua, "is_superadmin": bool(user.is_superadmin),
+                        "tenant_id": tenant_id, "role": role})
     # 返回所有 memberships 供前端团队切换器用
     memberships = [{"tenant_id": m.tenant_id, "role": m.role} for m in mems]
     for ms in memberships:
@@ -83,7 +111,8 @@ class SwitchTenantIn(BaseModel):
 def switch_tenant(body: SwitchTenantIn,
                   user=Depends(get_current_user),
                   db: Session = Depends(get_system_db)):
-    """切换当前团队 → 重 mint token（新 tenant_id + role）。"""
+    """切换当前团队 → 重 mint token（新 tenant_id + role）。记切换日志。"""
+    from ..core.log_utils import write_log, new_trace_id
     mem = db.query(TenantMembership).filter(
         TenantMembership.user_id == user.id, TenantMembership.tenant_id == body.tenant_id
     ).first()
@@ -92,6 +121,12 @@ def switch_tenant(body: SwitchTenantIn,
     token = create_access_token(user_id=user.id, email=user.email,
                                 tenant_id=mem.tenant_id, role=mem.role,
                                 is_superadmin=bool(user.is_superadmin))
+    write_log(db, tenant_id=mem.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, action_type="switch_tenant", source="auth",
+              result="success",
+              metadata={"from_tenant_id": user.tenant_id, "to_tenant_id": mem.tenant_id,
+                        "to_role": mem.role})
+    db.commit()
     return {"access_token": token, "token_type": "bearer",
             "role": mem.role, "tenant_id": mem.tenant_id,
             "tenant_name": _tenant_name_of(db, mem.tenant_id),
@@ -102,12 +137,19 @@ def switch_tenant(body: SwitchTenantIn,
 def me(user: CurrentUser = Depends(get_current_user),
        db: Session = Depends(get_system_db)):
     u = db.query(User).filter(User.id == user.id).first()
+    # memberships + 当前团队名（topbar 团队切换器用，跨租户查全）
+    mems = db.query(TenantMembership).filter(
+        TenantMembership.user_id == user.id).order_by(TenantMembership.tenant_id).all()
+    memberships = [{"tenant_id": m.tenant_id, "role": m.role,
+                    "tenant_name": _tenant_name_of(db, m.tenant_id)} for m in mems]
     return UserOut(
         id=user.id, email=user.email, role=user.role,
         tenant_id=user.tenant_id, is_superadmin=user.is_superadmin,
         timezone=user.timezone or "Asia/Shanghai",
         permissions=sorted(user.permissions),
         must_change_password=(u.status == "must_change_password") if u else False,
+        tenant_name=_tenant_name_of(db, user.tenant_id) if user.tenant_id else "",
+        memberships=memberships,
     )
 
 

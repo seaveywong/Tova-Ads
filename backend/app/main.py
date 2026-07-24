@@ -194,30 +194,41 @@ def list_logs(
     user: CurrentUser = Depends(require_permission("audit.read")),
     db: Session = Depends(get_db),
 ):
-    """查 action_logs（RLS 隔离）。三视图（决策⑤）：操作=actor_type=user / 系统=system / 用户活动=actor_user_id。"""
+    """查 action_logs。超管看全部团队（SuperSessionLocal bypass RLS）；普通用户受 RLS 只看本团队。
+    三视图（决策⑤）：操作=actor_type=user / 系统=system / 用户活动=actor_user_id。"""
     from .models.log import ActionLog
-    q = db.query(ActionLog)
-    if actor_type:
-        q = q.filter(ActionLog.actor_type == actor_type)
-    if actor_user_id:
-        q = q.filter(ActionLog.actor_user_id == actor_user_id)
-    if action_type:
-        q = q.filter(ActionLog.action_type == action_type)
-    if target_type:
-        q = q.filter(ActionLog.target_type == target_type)
-    if result:
-        q = q.filter(ActionLog.result == result)
-    if trace_id:
-        q = q.filter(ActionLog.trace_id == trace_id)
-    logs = q.order_by(ActionLog.created_at.desc()).limit(min(max(limit, 1), 500)).all()
-    return [
-        {"id": l.id, "trace_id": l.trace_id, "actor_type": l.actor_type,
-         "actor_user_id": l.actor_user_id, "action_type": l.action_type,
-         "target_type": l.target_type, "target_id": l.target_id, "result": l.result,
-         "trigger_type": l.trigger_type, "friendly_error": l.friendly_error,
-         "created_at": str(l.created_at)}
-        for l in logs
-    ]
+    from .core.database import SuperSessionLocal
+    sdb = SuperSessionLocal() if user.is_superadmin else db
+    try:
+        q = sdb.query(ActionLog)
+        if actor_type:
+            _types = [t.strip() for t in actor_type.split(',') if t.strip()]
+            if _types:
+                q = q.filter(ActionLog.actor_type.in_(_types))
+        if actor_user_id > 0:
+            q = q.filter(ActionLog.actor_user_id == actor_user_id)
+        if action_type:
+            _types = [t.strip() for t in action_type.split(',') if t.strip()]
+            if _types:
+                q = q.filter(ActionLog.action_type.in_(_types))
+        if target_type:
+            q = q.filter(ActionLog.target_type == target_type)
+        if result:
+            q = q.filter(ActionLog.result == result)
+        if trace_id:
+            q = q.filter(ActionLog.trace_id == trace_id)
+        logs = q.order_by(ActionLog.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+        return [
+            {"id": l.id, "trace_id": l.trace_id, "actor_type": l.actor_type,
+             "actor_user_id": l.actor_user_id, "action_type": l.action_type,
+             "target_type": l.target_type, "target_id": l.target_id, "result": l.result,
+             "trigger_type": l.trigger_type, "friendly_error": l.friendly_error,
+             "tenant_id": l.tenant_id, "created_at": str(l.created_at)}
+            for l in logs
+        ]
+    finally:
+        if user.is_superadmin:
+            sdb.close()
 
 
 @app.get("/logs/actors")
@@ -225,20 +236,26 @@ def list_log_actors(
     user: CurrentUser = Depends(require_permission("audit.read")),
     db: Session = Depends(get_db),
 ):
-    """用户活动视图的"人"下拉：近 30 天有操作的用户（id+email）。"""
+    """用户活动视图的"人"下拉：近 30 天有操作的用户（id+email）。超管看全部团队。"""
     from datetime import datetime, timezone, timedelta
     from sqlalchemy import distinct
     from .models.log import ActionLog
     from .models.auth import User
-    since = datetime.now(timezone.utc) - timedelta(days=30)
-    uids = [r[0] for r in db.query(distinct(ActionLog.actor_user_id)).filter(
-        ActionLog.actor_user_id.isnot(None),
-        ActionLog.created_at >= since,
-    ).all()]
-    out = []
-    for uid in uids:
-        u = db.get(User, uid)
-        if u:
-            out.append({"id": u.id, "email": u.email})
-    return out
+    from .core.database import SuperSessionLocal
+    sdb = SuperSessionLocal() if user.is_superadmin else db
+    try:
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        uids = [r[0] for r in sdb.query(distinct(ActionLog.actor_user_id)).filter(
+            ActionLog.actor_user_id.isnot(None),
+            ActionLog.created_at >= since,
+        ).all()]
+        out = []
+        for uid in uids:
+            u = sdb.get(User, uid)
+            if u:
+                out.append({"id": u.id, "email": u.email})
+        return out
+    finally:
+        if user.is_superadmin:
+            sdb.close()
 

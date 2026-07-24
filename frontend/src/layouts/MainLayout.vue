@@ -5,7 +5,7 @@ import { GET, POST, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
 import { setUserTz, fmtTime } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserPerms, setUserPerms } from '../router'
+import { getUserPerms, setUserPerms, isSuperadminSync } from '../router'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,7 +19,7 @@ const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
 const NAV_PERMS = {
   dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'],
   landing: ['landing.manage'], guard: ['rules.read'],
-  settings: [], members: ['members.manage'], tokens: ['ads.read'],
+  settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'],
 }
 
 // 导航
@@ -41,6 +41,8 @@ const allNavGroups = [
   { title: '系统', items: [
     { name: 'settings', label: '设置', icon: 'Setting' },
     { name: 'members', label: '成员权限', icon: 'User' },
+    { name: 'logs', label: '操作日志', icon: 'Document' },
+    { name: 'admin-teams', label: '团队管理', icon: 'OfficeBuilding' },
     { name: 'kpi-mapping', label: '转化映射', icon: 'Histogram' },
   ]},
 ]
@@ -49,7 +51,8 @@ const navGroups = computed(() => {
   const perms = myPerms.value
   return allNavGroups
     .map(g => ({ ...g, items: g.items.filter(item => {
-        if (item.name === 'kpi-mapping' && !isSuperadmin.value) return false
+        if ((item.name === 'kpi-mapping' || item.name === 'admin-teams') && !isSuperadmin.value) return false
+        if (isSuperadmin.value) return true  // 超管看全部导航（平台管理员）
         const required = NAV_PERMS[item.name] || []
         return required.length === 0 || required.every(p => perms.includes(p))
       }) }))
@@ -104,8 +107,21 @@ const emergencyPause = () => {
 
 // 用户
 const userEmail = ref('')
-const isSuperadmin = ref(false)
+const isSuperadmin = ref(isSuperadminSync())  // 初始化即从 token 解码（同步权威），onMounted /auth/me 再确认
 const userRole = ref('')
+// 团队切换（topbar）
+const memberships = ref([])
+const currentTenantName = ref('')
+const currentTenantId = ref(null)
+const switchTeam = async (tid) => {
+  if (tid === currentTenantId.value) return
+  try {
+    const r = await POST('/auth/switch-tenant', { tenant_id: tid })
+    setToken(r.access_token)
+    ElMessage.success(`已切换到「${r.tenant_name}」`)
+    location.reload()  // 新 tenant 上下文：权限/数据全变，整页重载最稳
+  } catch (e) { ElMessage.error(e.message || '切换失败') }
+}
 const logout = () => { setToken(''); setUserPerms([]); localStorage.removeItem('tova_super'); router.push('/login') }
 
 // 轮询
@@ -115,6 +131,9 @@ onMounted(async () => {
     isSuperadmin.value = !!me.is_superadmin
     userRole.value = me.role || ''
     localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0')
+    memberships.value = me.memberships || []
+    currentTenantName.value = me.tenant_name || ''
+    currentTenantId.value = me.tenant_id
     // 存权限到 localStorage（路由守卫 + 导航过滤用）
     myPerms.value = me.permissions || []
     setUserPerms(me.permissions || [])
@@ -181,6 +200,23 @@ const currentTitle = computed(() => route.meta.title || '')
       <header class="topbar">
         <span class="page-title">{{ currentTitle }}</span>
         <div class="topbar-right">
+          <el-dropdown v-if="memberships.length" trigger="click" @command="switchTeam">
+            <span class="team-switcher">
+              <el-icon><OfficeBuilding /></el-icon>
+              <span class="team-name">{{ currentTenantName || '未加入团队' }}</span>
+              <el-icon v-if="memberships.length > 1" class="caret"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="m in memberships" :key="m.tenant_id" :command="m.tenant_id"
+                  :disabled="m.tenant_id === currentTenantId">
+                  <span>{{ m.tenant_name }}</span>
+                  <span class="mute-role">· {{ ROLE_ZH[m.role] || m.role }}</span>
+                  <span v-if="m.tenant_id === currentTenantId" class="cur-mark">当前</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-icon class="topbar-icon" @click="toggleTheme" :title="theme === 'dark' ? '切亮色' : '切暗色'">
             <Sunny v-if="theme === 'dark'" />
             <Moon v-else />
@@ -293,6 +329,19 @@ const currentTitle = computed(() => route.meta.title || '')
 }
 .page-title { font-size: 18px; font-weight: 600; color: var(--t1); }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
+/* 团队切换器 */
+.team-switcher {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: var(--rs);
+  background: var(--bg3); color: var(--t2); cursor: pointer;
+  font-size: 13px; transition: background 0.15s;
+}
+.team-switcher:hover { background: var(--bg2); color: var(--t1); }
+.team-switcher .el-icon { font-size: 15px; }
+.team-switcher .caret { font-size: 11px; opacity: 0.6; }
+.team-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mute-role { color: var(--t3); font-size: 11px; margin-left: 4px; }
+.cur-mark { color: var(--ac); font-size: 11px; margin-left: 6px; }
 .topbar-icon {
   font-size: 20px; color: var(--t2); cursor: pointer;
   transition: color 0.15s;

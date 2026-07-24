@@ -2,12 +2,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
+import { isSuperadminSync } from '../router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const accounts = ref([])
 const loading = ref(true)
-const isSuper = ref(localStorage.getItem('tova_super') === '1')
+const isSuper = ref(isSuperadminSync())
 
 const datePreset = ref('today')
 const showCustom = ref(false)

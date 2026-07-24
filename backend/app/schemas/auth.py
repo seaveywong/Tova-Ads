@@ -30,6 +30,8 @@ class UserOut(BaseModel):
     timezone: str = "Asia/Shanghai"
     permissions: list[str] = []
     must_change_password: bool = False
+    tenant_name: str = ""
+    memberships: list[dict] = []  # [{tenant_id, role, tenant_name}]  topbar 团队切换器用
 
 
 class UpdateTimezoneIn(BaseModel):

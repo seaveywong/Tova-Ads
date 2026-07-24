@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { GET, PATCH, PUT, POST } from '../api'
+import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -25,7 +26,7 @@ const pick = async (z) => {
 }
 
 // 调度（仅超管）
-const isSuper = ref(localStorage.getItem('tova_super') === '1')
+const isSuper = ref(isSuperadminSync())
 const sched = ref({
   base_minutes: 5,
   sentinel_minutes: 3,
