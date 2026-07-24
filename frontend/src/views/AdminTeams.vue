@@ -55,7 +55,7 @@ const rename = async (t) => {
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
-// 状态变更（归档/恢复/停用/激活）
+// 状态变更（归档/恢复/停用/激活，统一入口）
 const setStatus = async (t, status) => {
   const word = STATUS_ZH[status]
   try {
@@ -66,8 +66,21 @@ const setStatus = async (t, status) => {
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
+// 操作下拉分发
+const handleOp = (cmd, t) => {
+  const map = { suspend: 'suspended', activate: 'active', archive: 'archived', restore: 'active' }
+  setStatus(t, map[cmd])
+}
+// 该行是否还有「更多」操作（主团队只有 active 且不可改状态 → 没更多）
+const hasMore = (row) => {
+  if (row.id === 1) return false
+  if (row.status === 'active') return true   // 可停用/归档
+  if (row.status === 'suspended') return true // 可激活/归档
+  if (row.status === 'archived') return true  // 可恢复
+  return false
+}
 
-// 加成员（超管跨团队加）
+// 加成员
 const memberOpen = ref(false)
 const memberForm = ref({ tid: 0, name: '', email: '', role: 'operator', password: '' })
 const memberSaving = ref(false)
@@ -96,38 +109,58 @@ const submitMember = async () => {
   <div class="page">
     <div class="card">
       <div class="head">
-        <div>
+        <div class="head-text">
           <div class="t">团队管理</div>
           <div class="d">平台所有团队（租户）。建团队时自动创建 3 个系统角色，可指定首任管理员。归档后团队隐藏但数据保留。</div>
         </div>
-        <button class="btn primary" @click="openCreate">+ 建团队</button>
+        <button class="btn primary" @click="openCreate"><span class="plus">+</span> 建团队</button>
       </div>
-      <el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="团队名" min-width="180">
+
+      <el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队" row-key="id">
+        <el-table-column prop="id" label="ID" width="56" align="center" />
+        <el-table-column label="团队名" min-width="200">
           <template #default="{ row }">
-            <span class="name">{{ row.name }}</span>
-            <span v-if="row.id === 1" class="tag-main">主团队</span>
+            <div class="name-cell">
+              <span class="name">{{ row.name }}</span>
+              <span v-if="row.id === 1" class="badge-main">主团队</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="96">
           <template #default="{ row }">
-            <span :class="['status', row.status]">{{ STATUS_ZH[row.status] || row.status }}</span>
+            <span :class="['status', row.status]"><i class="sdot"></i>{{ STATUS_ZH[row.status] || row.status }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="members" label="成员" width="70" align="center" />
-        <el-table-column prop="accounts" label="广告账户" width="90" align="center" />
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }"><span class="mute">{{ (row.created_at || '').slice(0,19).replace('T',' ') }}</span></template>
-        </el-table-column>
-        <el-table-column label="操作" width="290" fixed="right">
+        <el-table-column label="成员" width="68" align="center">
           <template #default="{ row }">
-            <button class="link" @click="rename(row)">改名</button>
-            <button class="link" @click="openMember(row)">加成员</button>
-            <button v-if="row.status === 'active' && row.id !== 1" class="link warn" @click="setStatus(row, 'suspended')">停用</button>
-            <button v-if="row.status === 'suspended'" class="link ok" @click="setStatus(row, 'active')">激活</button>
-            <button v-if="row.status !== 'archived' && row.id !== 1" class="link warn" @click="setStatus(row, 'archived')">归档</button>
-            <button v-if="row.status === 'archived'" class="link ok" @click="setStatus(row, 'active')">恢复</button>
+            <span :class="['num', { zero: row.members === 0 }]">{{ row.members }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="广告账户" width="88" align="center">
+          <template #default="{ row }">
+            <span :class="['num', { zero: row.accounts === 0 }]">{{ row.accounts }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="160">
+          <template #default="{ row }"><span class="mute">{{ (row.created_at || '').slice(0,16).replace('T',' ') }}</span></template>
+        </el-table-column>
+        <el-table-column label="操作" width="172" fixed="right">
+          <template #default="{ row }">
+            <div class="ops">
+              <button class="op primary" @click="openMember(row)">加成员</button>
+              <button class="op" @click="rename(row)">改名</button>
+              <el-dropdown v-if="hasMore(row)" trigger="click" @command="c => handleOp(c, row)">
+                <button class="op more" title="更多">⋯</button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-if="row.status === 'active'" command="suspend">停用</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status === 'suspended'" command="activate">激活</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">归档</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status === 'archived'" command="restore">恢复</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -135,10 +168,10 @@ const submitMember = async () => {
 
     <!-- 建团队弹窗 -->
     <el-dialog v-model="createOpen" title="建团队" width="460px">
-      <div class="d">建团队同时种 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。</div>
+      <div class="dlg-d">建团队同时创建 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。</div>
       <div class="form-l"><label>团队名</label><input v-model="createForm.name" class="input" placeholder="如：客户A 投放团队" /></div>
-      <div class="form-l"><label>管理员邮箱</label><input v-model="createForm.owner_email" class="input" placeholder="选填，留空=先建空团队" /></div>
-      <div class="form-l"><label>管理员密码</label><input v-model="createForm.owner_password" class="input" type="password" placeholder="选填，留空=系统随机生成" /></div>
+      <div class="form-l"><label>管理员邮箱</label><input v-model="createForm.owner_email" class="input" placeholder="选填，留空 = 先建空团队" /></div>
+      <div class="form-l"><label>管理员密码</label><input v-model="createForm.owner_password" class="input" type="password" placeholder="选填，留空 = 系统随机生成" /></div>
       <template #footer>
         <button class="btn" @click="createOpen = false">取消</button>
         <button class="btn primary" :disabled="createSaving" @click="submitCreate">{{ createSaving ? '创建中…' : '创建' }}</button>
@@ -153,7 +186,7 @@ const submitMember = async () => {
           <el-option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k" :label="zh" />
         </el-select>
       </div>
-      <div class="form-l"><label>密码</label><input v-model="memberForm.password" class="input" type="password" placeholder="选填，留空=系统随机生成" /></div>
+      <div class="form-l"><label>密码</label><input v-model="memberForm.password" class="input" type="password" placeholder="选填，留空 = 系统随机生成" /></div>
       <template #footer>
         <button class="btn" @click="memberOpen = false">取消</button>
         <button class="btn primary" :disabled="memberSaving" @click="submitMember">{{ memberSaving ? '添加中…' : '添加' }}</button>
@@ -164,26 +197,57 @@ const submitMember = async () => {
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:18px}
-.head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:12px}
-.t{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:4px}
-.d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:14px}
-.btn{padding:8px 16px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:16px}
+.head-text{flex:1;min-width:0}
+.t{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:5px}
+.d{font-size:12px;color:var(--t3);line-height:1.6}
+
+/* 按钮 */
+.btn{padding:8px 16px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:7px;font-size:13px;cursor:pointer;transition:all .15s;font-family:inherit}
+.btn:hover{border-color:var(--ac)}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
-.btn:disabled{opacity:.5}
-.link{background:none;border:none;color:var(--ac);font-size:12px;cursor:pointer;padding:2px 6px;margin-right:2px}
-.link.warn{color:var(--warning)}
-.link.ok{color:var(--success)}
-.link:hover{text-decoration:underline}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.plus{font-weight:600;margin-right:2px}
+
+/* 表格内 */
+.name-cell{display:flex;align-items:center;gap:8px}
 .name{color:var(--t1);font-weight:500}
-.tag-main{font-size:10px;padding:1px 6px;background:var(--acg);color:var(--ac);border-radius:4px;margin-left:6px}
-.status{font-size:12px}
+.badge-main{font-size:10px;padding:2px 7px;background:var(--acg);color:var(--ac);border-radius:10px;font-weight:600;letter-spacing:.02em}
+
+.status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.status .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .status.active{color:var(--success)}
+.status.active .sdot{background:var(--success);box-shadow:0 0 0 3px rgba(52,199,89,.15)}
 .status.suspended{color:var(--warning)}
+.status.suspended .sdot{background:var(--warning);box-shadow:0 0 0 3px rgba(255,159,10,.15)}
 .status.archived{color:var(--t3)}
+.status.archived .sdot{background:var(--t3)}
+
+.num{color:var(--t1);font-variant-numeric:tabular-nums;font-weight:500}
+.num.zero{color:var(--t3);font-weight:400}
 .mute{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums}
-.form-l{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+
+/* 操作列 */
+.ops{display:flex;align-items:center;gap:4px}
+.op{background:transparent;border:1px solid transparent;color:var(--t2);font-size:12px;cursor:pointer;padding:5px 10px;border-radius:6px;transition:all .15s;font-family:inherit;white-space:nowrap}
+.op:hover{background:var(--bg3);color:var(--t1)}
+.op.primary{color:var(--ac);font-weight:500}
+.op.primary:hover{background:var(--acg)}
+.op.more{padding:5px 9px;font-size:15px;line-height:1;letter-spacing:-1px}
+:deep(.danger){color:var(--error)}
+
+/* 弹窗 */
+.dlg-d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:16px;padding:10px 12px;background:var(--bg3);border-radius:7px}
+.form-l{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .form-l > label{font-size:12px;color:var(--t3);width:82px;text-align:right;flex-shrink:0}
-.input{flex:1;padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit;box-sizing:border-box}
+.input{flex:1;padding:8px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:7px;color:var(--t1);font-size:13px;font-family:inherit;box-sizing:border-box;transition:border-color .15s}
 .input:focus{border-color:var(--ac);outline:none}
+.input::placeholder{color:var(--t3);opacity:.7}
+
+/* 表格整体微调 */
+:deep(.el-table){font-size:13px}
+:deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:12px}
+:deep(.el-table tr:hover > td){background:var(--bg3) !important}
 </style>
