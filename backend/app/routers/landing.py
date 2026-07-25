@@ -513,6 +513,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             page.last_health_status = publish_self_check["overall"]
             page.last_health_summary = publish_self_check["summary"]
             page.last_health_checked_at = _dt3.now(_tz3.utc)
+            _emit_health_alert(_s2, page, publish_self_check)
             _s2.commit()
         except Exception:
             try:
@@ -1076,6 +1077,37 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
             "checked_at": _dt.now(_tz.utc).isoformat()}
 
 
+def _emit_health_alert(db, p, res):
+    """自检不通过/被FB屏蔽 → 告警（6h dedup per page；owner+operator）。
+
+    发布后自检(include_fb=False)覆盖配置项 fail；手动 /health(include_fb=True) 覆盖 FB 封禁(critical)。
+    """
+    from ..core.notify_utils import emit_notification, dedup_recent
+    if (res.get("overall") or "pass") == "pass":
+        return
+    if dedup_recent(db, p.tenant_id, "landing_health_alert", str(p.id), 360):
+        return  # 6h 内已发过，避免 spam
+    _tid = new_trace_id()
+    _checks = res.get("checks") or []
+    _fb_blocked = any(c.get("status") == "fail" and c.get("key") in ("fb_ban", "fb_subcode") for c in _checks)
+    if _fb_blocked:
+        _level, _prefix = "critical", "🔴 落地页被FB屏蔽"
+    elif res["overall"] == "fail":
+        _level, _prefix = "warning", "⚠️ 落地页自检未通过"
+    else:
+        _level, _prefix = "info", "落地页自检有提醒"
+    write_log(db, tenant_id=p.tenant_id, trace_id=_tid, actor_type="system",
+              action_type="landing_health_alert", source="landing",
+              target_type="landing_page", target_id=str(p.id), result="success",
+              metadata={"overall": res["overall"], "summary": (res.get("summary") or "")[:100]})
+    emit_notification(db, tenant_id=p.tenant_id, level=_level,
+                      event_type="landing_health", trace_id=_tid,
+                      target_type="landing_page", target_id=str(p.id),
+                      roles=["owner", "operator"],
+                      title=f"{_prefix}：{p.title}",
+                      body=(res.get("summary") or "")[:200])
+
+
 @router.get("/pages/{pid}/health")
 def health_check(
     pid: int,
@@ -1093,6 +1125,7 @@ def health_check(
     p.last_health_status = res["overall"]
     p.last_health_summary = res["summary"]
     p.last_health_checked_at = _dt.now(_tz.utc)
+    _emit_health_alert(db, p, res)
     db.commit()
     return {"success": res["overall"] != "fail", **res}
 
