@@ -62,3 +62,19 @@ class Account(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint("tenant_id", "act_id", name="uq_accounts_tenant_actid"),)
+
+
+class AccountFbCredential(Base):
+    """多令牌同账户关联（多对多）。一账户绑多 token，priority 排序 + 轮询分流。
+
+    accounts.fb_credential_id 保留作"主令牌"（快查/审计/向后兼容），本表是补充（多 token 候选池）。
+    """
+    __tablename__ = "account_fb_credentials"
+    id = Column(BigInteger, primary_key=True)
+    tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=False)
+    fb_credential_id = Column(BigInteger, ForeignKey("fb_credentials.id"), nullable=False)
+    priority = Column(Integer, default=0)   # 数字越小优先级越高（0=最高）；OAuth>manual, operate>manage>user 自动算
+    status = Column(Text, default="active")  # active / disabled
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("account_id", "fb_credential_id", name="uq_acct_cred"),)
