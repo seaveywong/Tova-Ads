@@ -198,9 +198,48 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
             still_orphan.append({"act_id": acc.act_id, "name": acc.name})
     if rebound:
         db.commit()
+    # 发现新账户（token 能管的 adaccounts 不在 accounts 表 → 建 + account_fb_credentials 关联）
+    from ..models.fb import AccountFbCredential
+    existing_acts = {a.act_id for a in db.query(Account).filter(
+        Account.tenant_id == tenant_id).all()}
+    new_count = 0
+    new_links = 0
+    for aid, cid in act_to_cred.items():
+        if aid in existing_acts:
+            # 已有账户：补 account_fb_credentials 关联（多 token 共管）
+            acc = db.query(Account).filter(
+                Account.tenant_id == tenant_id, Account.act_id == aid).first()
+            if acc:
+                has_link = db.query(AccountFbCredential).filter(
+                    AccountFbCredential.account_id == acc.id,
+                    AccountFbCredential.fb_credential_id == cid,
+                ).first()
+                if not has_link:
+                    db.add(AccountFbCredential(
+                        tenant_id=tenant_id, account_id=acc.id,
+                        fb_credential_id=cid, priority=0, status="active",
+                    ))
+                    new_links += 1
+        else:
+            # 新账户：建 Account + account_fb_credentials
+            new_acc = Account(
+                tenant_id=tenant_id, fb_credential_id=cid,
+                act_id=aid, name=aid, currency="USD", timezone_name="UTC",
+                is_managed=True,
+            )
+            db.add(new_acc)
+            db.flush()
+            db.add(AccountFbCredential(
+                tenant_id=tenant_id, account_id=new_acc.id,
+                fb_credential_id=cid, priority=0, status="active",
+            ))
+            new_count += 1
+    if new_count or new_links:
+        db.commit()
     return {"checked": len(orphans), "rebound": rebound,
             "active_creds": len(creds), "covered_acts": len(act_to_cred),
-            "still_orphan": still_orphan}
+            "still_orphan": still_orphan,
+            "new_discovered": new_count, "new_links": new_links}
 
 
 def run_with_fallback(db: Session, tenant_id: int, act_id: str, op_fn):
