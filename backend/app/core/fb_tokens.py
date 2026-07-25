@@ -74,13 +74,39 @@ def _op_ok(c, op_kind: str) -> bool:
 
 def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
                         op_kind: str = "read") -> Optional[FbCredential]:
-    """选满足 op_kind 的可用 cred（绑定优先 + RR 兜底 + cooldown）。
+    """选满足 op_kind 的可用 cred（多令牌候选池 + priority + RR 轮换 + PAUSE 兜底）。
 
-    巡检/操作用（要 cred 写 cooldown / 审计）。op_kind: read/pause/write。
+    优先从 account_fb_credentials 候选池（多令牌同账户）选：
+    - 读：RR 轮换（分摊压力）
+    - 写/PAUSE：绑死 priority 最高（防孤儿 + FB 一致性）
+    回退：accounts.fb_credential_id 主令牌 + 全 tenant RR（向后兼容，候选池空时兜底）。
     """
+    from ..models.fb import AccountFbCredential
     acc = db.query(Account).filter(
         Account.tenant_id == tenant_id, Account.act_id == act_id,
     ).first()
+
+    # 优先：account_fb_credentials 候选池（多令牌同账户）
+    if acc:
+        pool_creds = db.query(FbCredential).join(
+            AccountFbCredential, AccountFbCredential.fb_credential_id == FbCredential.id
+        ).filter(
+            AccountFbCredential.account_id == acc.id,
+            AccountFbCredential.status == "active",
+            FbCredential.status == "active",
+        ).order_by(AccountFbCredential.priority, FbCredential.id).all()
+        pool_avail = [c for c in pool_creds if _is_cred_available(c) and _op_ok(c, op_kind)]
+        if pool_avail:
+            if op_kind in ("write", "pause"):
+                return pool_avail[0]  # 写/PAUSE 绑死 priority 最高（防孤儿）
+            # 读：RR 轮换（分摊压力）
+            key = (tenant_id, act_id, op_kind)
+            cursor = _RR_STATE.get(key, 0)
+            pick = pool_avail[cursor % len(pool_avail)]
+            _RR_STATE[key] = cursor + 1
+            return pick
+
+    # 回退：全 tenant FbCredential（向后兼容 + 候选池空时兜底）
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id,
     ).all()
