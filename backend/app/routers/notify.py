@@ -226,3 +226,79 @@ def user_tg_test(
         return {"status": "sent"}
     except Exception as e:
         raise HTTPException(400, f"发送失败：{e}")
+
+
+# ── TG OAuth（Telegram Login Widget，用户点击授权→自动绑定，不手填）──
+@router.get("/tg/bot-info")
+def tg_bot_info(user: CurrentUser = Depends(require_permission("ads.read")),
+                db: Session = Depends(get_db)):
+    """返 TG bot username（前端 Telegram Login Widget 渲染按钮用）。"""
+    import httpx
+    tb = db.query(TenantTgBinding).filter(
+        TenantTgBinding.tenant_id == user.tenant_id).first()
+    if not tb:
+        return {"configured": False}
+    try:
+        resp = httpx.get(
+            f"https://api.telegram.org/bot{decrypt(tb.bot_token_enc)}/getMe", timeout=10)
+        info = resp.json().get("result", {})
+        return {"configured": True, "bot_username": info.get("username", "")}
+    except Exception:
+        return {"configured": True, "bot_username": ""}
+
+
+class TgOAuthIn(BaseModel):
+    id: int
+    first_name: str = ""
+    last_name: str = ""
+    username: str = ""
+    photo_url: str = ""
+    auth_date: int
+    hash: str
+
+
+@router.post("/tg/oauth-callback")
+def tg_oauth_callback(body: TgOAuthIn,
+                      user: CurrentUser = Depends(require_permission("ads.read")),
+                      db: Session = Depends(get_db)):
+    """Telegram Login Widget OAuth 回调：验 hash → 绑 user_tg_binding（OAuth 式，不手填 bot_token）。
+
+    用租户级 bot_token 验签 → chat_id = Telegram user id。
+    """
+    import hmac, hashlib, time as _time
+    tb = db.query(TenantTgBinding).filter(
+        TenantTgBinding.tenant_id == user.tenant_id).first()
+    if not tb:
+        raise HTTPException(400, "管理员未配置 TG Bot（联系管理员先绑租户 TG）")
+    bot_token = decrypt(tb.bot_token_enc)
+    # Telegram Login Widget hash 验证：secret=SHA256(bot_token), HMAC-SHA256(data_check_string, secret)
+    secret = hashlib.sha256(bot_token.encode()).digest()
+    data = body.dict()
+    received_hash = data.pop("hash", "")
+    data_check = "\n".join(
+        f"{k}={v}" for k, v in sorted(data.items()) if v is not None and v != "")
+    expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+    if expected != received_hash:
+        raise HTTPException(400, "TG 验证失败（hash 不匹配）")
+    # auth_date 新鲜（24h 内）
+    if _time.time() - body.auth_date > 86400:
+        raise HTTPException(400, "TG 登录已过期（超过 24h）")
+    # 绑定 UserTgBinding（用租户 bot + Telegram user id 作 chat_id）
+    chat_id = str(body.id)
+    from ..models.notify import UserTgBinding
+    existing = db.query(UserTgBinding).filter(
+        UserTgBinding.tenant_id == user.tenant_id,
+        UserTgBinding.user_id == user.id,
+    ).first()
+    if existing:
+        existing.chat_id = chat_id
+        existing.bot_token_enc = tb.bot_token_enc
+        existing.verified_at = datetime.now(timezone.utc)
+    else:
+        db.add(UserTgBinding(
+            tenant_id=user.tenant_id, user_id=user.id,
+            bot_token_enc=tb.bot_token_enc, chat_id=chat_id,
+            verified_at=datetime.now(timezone.utc),
+        ))
+    db.commit()
+    return {"bound": True, "tg_username": body.username or str(body.id)}

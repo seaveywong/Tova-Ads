@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { GET, PATCH, PUT, POST } from '../api'
 import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
@@ -174,7 +174,44 @@ const saveCf = async () => {
   } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
   cfSaving.value = false
 }
-onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadRetention(); await loadFx() })
+// TG OAuth 通知绑定
+const tgBot = ref({ configured: false, bot_username: '' })
+const userTg = ref({ bound: false })
+const testTgLoading = ref(false)
+const loadTg = async () => {
+  try {
+    tgBot.value = await GET('/notifications/tg/bot-info')
+    userTg.value = await GET('/notifications/tg/user-binding')
+    if (tgBot.value.configured && tgBot.value.bot_username && !userTg.value.bound) {
+      nextTick(() => {
+        const el = document.getElementById('tg-widget')
+        if (!el || el.firstChild) return
+        const s = document.createElement('script')
+        s.async = true
+        s.src = 'https://telegram.org/js/telegram-widget.js?22'
+        s.setAttribute('data-telegram-login', tgBot.value.bot_username)
+        s.setAttribute('data-size', 'large')
+        s.setAttribute('data-onauth', 'onTelegramAuth(user)')
+        s.setAttribute('data-request-access', 'write')
+        el.appendChild(s)
+        window.onTelegramAuth = async (u) => {
+          try {
+            await POST('/notifications/tg/oauth-callback', u)
+            ElMessage.success(`TG 绑定成功：${u.username || u.id}`)
+            userTg.value = await GET('/notifications/tg/user-binding')
+          } catch (e) { ElMessage.error(e.message || 'TG 绑定失败') }
+        }
+      })
+    }
+  } catch {}
+}
+const testUserTg = async () => {
+  testTgLoading.value = true
+  try { await POST('/notifications/tg/user-test'); ElMessage.success('测试消息已发送') }
+  catch (e) { ElMessage.error(e.message || '发送失败') }
+  testTgLoading.value = false
+}
+onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadRetention(); await loadFx(); await loadTg() })
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -324,6 +361,17 @@ const runRetentionNow = async () => {
       </div>
       <div v-if="fxFetched" class="ret-lastrun">上次同步：{{ fxFetched }} UTC</div>
       <button class="btn" :disabled="fxLoading" @click="runFx" style="margin-top:14px">{{ fxLoading ? '拉取中…' : '立即同步汇率' }}</button>
+    </div>
+
+    <div class="card">
+      <div class="t">Telegram 通知</div>
+      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮用 TG 授权，无需手填。</div>
+      <div v-if="userTg.bound" style="margin-top:12px;display:flex;align-items:center;gap:12px">
+        <span style="color:var(--success);font-size:13px">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
+        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发测试消息' }}</button>
+      </div>
+      <div v-else-if="tgBot.configured" id="tg-widget" style="margin-top:12px;min-height:50px"></div>
+      <div v-else class="d" style="color:var(--warning);margin-top:8px">管理员未配置 TG Bot（通知只进站内信，联系管理员先绑租户 TG）</div>
     </div>
   </div>
 </template>
