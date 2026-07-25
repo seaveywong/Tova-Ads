@@ -11,7 +11,7 @@ from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
-from ..models.fb import FbCredential, Account
+from ..models.fb import FbCredential, Account, AccountFbCredential
 from ..schemas.fb import StoreCredentialIn, FbCredentialOut, ImportAccountsIn
 
 router = APIRouter(prefix="/fb", tags=["fb"])
@@ -560,9 +560,18 @@ def import_accounts(
                 if exists.fb_credential_id != cred.id:
                     exists.fb_credential_id = cred.id
                 exists.is_managed = True  # 重新导入 = 恢复纳管（把软删的拉回活跃管理）
+                # 多令牌同账户：加 account_fb_credentials 关联（已有则跳过 → 多 token 共管）
+                if not db.query(AccountFbCredential).filter(
+                    AccountFbCredential.account_id == exists.id,
+                    AccountFbCredential.fb_credential_id == cred.id,
+                ).first():
+                    db.add(AccountFbCredential(
+                        tenant_id=user.tenant_id, account_id=exists.id,
+                        fb_credential_id=cred.id, priority=0, status="active",
+                    ))
                 skipped_existing += 1
                 continue
-            db.add(Account(
+            new_acc = Account(
                 tenant_id=user.tenant_id,
                 fb_credential_id=cred.id,
                 act_id=aid,
@@ -574,6 +583,12 @@ def import_accounts(
                 balance=str(acc.get("balance", "") or ""),
                 spend_cap=str(acc.get("spend_cap", "") or ""),
                 amount_spent=str(acc.get("amount_spent", "") or ""),
+            )
+            db.add(new_acc)
+            db.flush()  # 拿 new_acc.id 用于关联
+            db.add(AccountFbCredential(
+                tenant_id=user.tenant_id, account_id=new_acc.id,
+                fb_credential_id=cred.id, priority=0, status="active",
             ))
             imported.append(aid)
     db.commit()
