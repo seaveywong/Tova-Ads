@@ -28,6 +28,10 @@ const pick = async (z) => {
 // 调度（仅超管）
 const isSuper = ref(isSuperadminSync())
 const myPerms = ref([])
+const copyText = async (text, tip) => {
+  try { await navigator.clipboard.writeText(text); ElMessage.success(tip || '已复制') }
+  catch { ElMessage.error('复制失败，请手动选中复制') }
+}
 const sched = ref({
   base_minutes: 5,
   sentinel_minutes: 3,

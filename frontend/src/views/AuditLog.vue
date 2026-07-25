@@ -89,7 +89,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
       </div>
 
       <el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
-                :expand-row-keys="expandedRowIds" @expand-change="onExpandChange" @expand="(r, expanded) => { if(!expanded) expandedRowIds = expandedRowIds.filter(id => id !== r.id); else expandedRowIds = [...expandedRowIds, r.id] }">
+                @expand-change="onExpandChange">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="trace-inline" v-loading="row._traceLoading">

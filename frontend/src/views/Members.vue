@@ -213,7 +213,7 @@ const permLabel = (key) => {
       <div class="modal">
         <div class="m-title">邀请成员</div>
         <div class="form-l"><label>邮箱</label><input v-model="inviteForm.email" class="input" placeholder="新成员邮箱" /></div>
-        <div class="form-l"><label>密码</label><input v-model="inviteForm.password" class="input" type="password" placeholder="留空=默认 Welcome123!" /></div>
+        <div class="form-l"><label>密码</label><input v-model="inviteForm.password" class="input" type="password" autocomplete="new-password" placeholder="留空=默认 Welcome123!" /></div>
         <div class="form-l"><label>角色</label>
           <select v-model="inviteForm.role" class="input">
             <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ r.permissions.length }}权限）</option>

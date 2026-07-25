@@ -129,6 +129,7 @@ const logout = () => { setToken(''); setUserPerms([]); localStorage.removeItem('
 
 // 轮询
 let pollTimer = null
+let poll = null  // 提到 setup 顶层，onUnmounted 才能引用
 onMounted(async () => {
   try { const me = await GET('/auth/me'); userEmail.value = me.email; setUserTz(me.timezone)
     isSuperadmin.value = !!me.is_superadmin
@@ -142,22 +143,20 @@ onMounted(async () => {
     setUserPerms(me.permissions || [])
   } catch {}
   if (myPerms.value.includes('ads.pause') || isSuperadmin.value) loadGuard()
-  const poll = async () => {
-    if (document.hidden) return  // 标签页不可见时跳过（防空闲时死连接堆积→切回来卡死）
+  poll = async () => {
+    if (document.hidden) return
     try {
       const all = await GET('/notifications?unread_only=true&limit=50')
       unreadCount.value = (all || []).filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).length
     } catch {}
   }
   poll(); pollTimer = setInterval(poll, 30000)
-  // 标签页恢复可见时立即拉一次（不等下一个30s）
   document.addEventListener('visibilitychange', poll)
-  // 点外部关通知
   document.addEventListener('click', closeNotifsOnOutside)
 })
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
-  document.removeEventListener('visibilitychange', poll)
+  if (poll) document.removeEventListener('visibilitychange', poll)
   document.removeEventListener('click', closeNotifsOnOutside)
 })
 const closeNotifsOnOutside = (e) => {
