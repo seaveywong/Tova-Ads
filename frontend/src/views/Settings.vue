@@ -406,27 +406,18 @@ const runRetentionNow = async () => {
 
       <!-- 未绑定 -->
       <div v-else style="margin-top:14px">
-        <!-- 方式 1：Deep Link（推荐，一键绑定）-->
+        <!-- Deep Link（一键绑定）-->
         <div v-if="tgBindLink" style="margin-bottom:14px">
-          <a :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
-            <span style="font-size:16px">✈️</span> 点击绑定 Telegram
-          </a>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <a :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
+            <button class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
+          </div>
           <div class="d" style="font-size:11px;margin-top:6px">打开 Telegram → 点 Start → 自动绑定完成</div>
         </div>
 
-        <!-- 方式 2：Login Widget（BotFather domain 已设时显示）-->
+        <!-- Login Widget（BotFather domain 已设时显示）-->
         <div v-if="tgBot.configured && tgBot.bot_username">
           <div id="tg-widget" style="min-height:50px"></div>
-        </div>
-
-        <!-- 方式 3：手动填 chat_id（兜底）-->
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)">
-          <div class="d" style="margin-bottom:8px">或手动填写 chat_id</div>
-          <div class="form-l">
-            <label>chat_id</label>
-            <input v-model="tgManual.chat_id" class="input" placeholder="Telegram chat_id（数字）" @keyup.enter="bindTgManual" />
-            <button class="btn" :disabled="tgManual.saving" @click="bindTgManual" style="margin-left:8px">{{ tgManual.saving ? '绑定中…' : '绑定' }}</button>
-          </div>
         </div>
       </div>
 

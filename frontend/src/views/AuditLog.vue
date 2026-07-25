@@ -7,7 +7,6 @@ import { fmtTime } from '../composables/useTz'
 
 const isSuper = ref(isSuperadminSync())
 
-// tab 预设筛选（actor_type/action_type 支持逗号多值）
 const tabs = [
   { key: 'all', label: '全部', params: {} },
   { key: 'user', label: '操作', params: { actor_type: 'user' } },
@@ -23,6 +22,7 @@ const actors = ref([])
 const fAction = ref('')
 const fUser = ref(0)
 const fTrace = ref('')
+const expandedRowIds = ref([])
 
 const buildParams = () => {
   const t = tabs.find(x => x.key === tab.value)
@@ -34,6 +34,7 @@ const buildParams = () => {
 }
 const load = async () => {
   loading.value = true
+  expandedRowIds.value = []
   try { logs.value = await GET('/logs?' + new URLSearchParams(buildParams()).toString()) }
   catch (e) { ElMessage.error(e.message || '加载失败') }
   loading.value = false
@@ -42,35 +43,32 @@ const loadActors = async () => { try { actors.value = await GET('/logs/actors') 
 onMounted(() => { load(); loadActors() })
 const setTab = (k) => { tab.value = k; fTrace.value = ''; load() }
 
-// trace 链路展开
-const expandedTrace = ref('')
-const traceLogs = ref([])
-const traceLoading = ref(false)
-const toggleTrace = async (tid) => {
-  if (expandedTrace.value === tid) { expandedTrace.value = ''; traceLogs.value = []; return }
-  expandedTrace.value = tid
-  traceLoading.value = true
-  try { traceLogs.value = await GET('/logs?trace_id=' + tid + '&limit=50') }
-  catch { traceLogs.value = [] }
-  traceLoading.value = false
+// 行内展开 trace（el-table expand）
+const onExpandChange = async (row, expandedRows) => {
+  if (!expandedRows.find(r => r.id === row.id)) return  // 收起，不处理
+  if (row._traceLogs) return  // 已加载过
+  row._traceLoading = true
+  try {
+    row._traceLogs = await GET('/logs?trace_id=' + row.trace_id + '&limit=50')
+  } catch { row._traceLogs = [] }
+  row._traceLoading = false
 }
 
 const TYPE_ZH = { user: '用户', system: '系统', sentinel: '哨兵', sync: '同步', warmup: '预热' }
+const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
 const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; load() }
 </script>
 
 <template>
   <div class="page">
     <div class="card">
-      <!-- tab + 刷新 -->
       <div class="head">
         <div class="tabs">
           <button v-for="t in tabs" :key="t.key" :class="['tab',{on:tab===t.key}]" @click="setTab(t.key)">{{ t.label }}</button>
         </div>
-        <button class="btn" @click="load"><span class="refresh">↻</span> 刷新</button>
+        <button class="btn" @click="load">刷新</button>
       </div>
 
-      <!-- 筛选条 -->
       <div class="filters">
         <div class="filter-item">
           <span class="flabel">动作</span>
@@ -90,7 +88,30 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         <button v-if="fAction || fUser || fTrace" class="clear" @click="resetFilters">清除</button>
       </div>
 
-      <el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small">
+      <el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
+                :expand-row-keys="expandedRowIds" @expand-change="onExpandChange" @expand="(r, expanded) => { if(!expanded) expandedRowIds = expandedRowIds.filter(id => id !== r.id); else expandedRowIds = [...expandedRowIds, r.id] }">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="trace-inline" v-loading="row._traceLoading">
+              <div class="trace-head-inline">
+                <span class="trace-label">链路 <code>{{ row.trace_id }}</code></span>
+                <span v-if="row._traceLogs" class="trace-count-inline">{{ row._traceLogs.length }} 条</span>
+              </div>
+              <div class="trace-list-inline">
+                <div v-for="l in (row._traceLogs || [])" :key="l.id" class="trace-row">
+                  <span :class="['t-dot', l.result]"></span>
+                  <span class="t-time">{{ (l.created_at || '').slice(11,19) }}</span>
+                  <span :class="['tag sm', l.actor_type]">{{ TYPE_ZH[l.actor_type] || l.actor_type }}</span>
+                  <code class="t-act">{{ l.action_type }}</code>
+                  <span v-if="l.target_type" class="t-tgt">{{ l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
+                  <span :style="{color:rowColor(l)}">{{ l.result === 'success' ? '✓' : '✗' }}</span>
+                  <span v-if="l.friendly_error" class="t-err">{{ l.friendly_error }}</span>
+                </div>
+                <div v-if="row._traceLogs && !row._traceLogs.length && !row._traceLoading" class="trace-empty-inline">该链路无更多记录</div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="时间" width="150">
           <template #default="{ row }"><span class="mute">{{ fmtTime(row.created_at) }}</span></template>
         </el-table-column>
@@ -119,35 +140,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
             <span v-else class="dash">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="链路" width="64" align="center">
-          <template #default="{ row }">
-            <button class="trace-btn" :class="{on: expandedTrace === row.trace_id}" @click="toggleTrace(row.trace_id)">展开</button>
-          </template>
-        </el-table-column>
       </el-table>
-
-      <!-- trace 链路面板 -->
-      <transition name="fade">
-        <div v-if="expandedTrace" class="trace-panel" v-loading="traceLoading">
-          <div class="trace-head">
-            <span class="trace-icon">⇆</span>
-            <span class="trace-label">链路追踪</span>
-            <code class="trace-id">{{ expandedTrace }}</code>
-            <span class="trace-count">{{ traceLogs.length }} 条事件</span>
-          </div>
-          <div class="trace-list">
-            <div v-for="l in traceLogs" :key="l.id" class="trace-row">
-              <span :class="['t-dot', l.result]"></span>
-              <span class="t-time">{{ (l.created_at || '').slice(11,19) }}</span>
-              <span :class="['tag sm', l.actor_type]">{{ TYPE_ZH[l.actor_type] || l.actor_type }}</span>
-              <code class="t-act">{{ l.action_type }}</code>
-              <span v-if="l.target_type" class="t-tgt">{{ l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
-              <span v-if="l.friendly_error" class="t-err">{{ l.friendly_error }}</span>
-            </div>
-            <div v-if="!traceLogs.length && !traceLoading" class="trace-empty">该链路无更多记录</div>
-          </div>
-        </div>
-      </transition>
     </div>
   </div>
 </template>
@@ -155,18 +148,13 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:20px}
-
-/* head: tabs + 刷新 */
 .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}
 .tabs{display:flex;gap:3px;background:var(--bg3);padding:3px;border-radius:8px}
 .tab{padding:6px 15px;border:none;background:transparent;color:var(--t3);border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s;font-family:inherit;font-weight:500}
 .tab:hover{color:var(--t1)}
 .tab.on{background:var(--bg2);color:var(--t1);box-shadow:0 1px 2px rgba(0,0,0,.08)}
-.refresh{display:inline-block;font-size:13px}
-.btn{display:flex;align-items:center;gap:5px;padding:6px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t2);border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit}
+.btn{padding:6px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t2);border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit}
 .btn:hover{color:var(--t1);border-color:var(--ac)}
-
-/* 筛选条 */
 .filters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
 .filter-item{display:flex;align-items:center;gap:6px}
 .flabel{font-size:11px;color:var(--t3);font-weight:500}
@@ -177,8 +165,6 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .sel{padding:6px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:7px;color:var(--t1);font-size:12px;min-width:170px;cursor:pointer}
 .clear{background:transparent;border:none;color:var(--t3);font-size:11px;cursor:pointer;padding:4px 8px;text-decoration:underline}
 .clear:hover{color:var(--error)}
-
-/* 表格内 */
 .mute{color:var(--t3);font-size:11px;font-variant-numeric:tabular-nums}
 .act{font-size:11px;color:var(--ac);font-family:'SF Mono',ui-monospace,monospace;font-weight:500}
 .tgt{font-size:11px;color:var(--t2)}
@@ -186,8 +172,6 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .dash{color:var(--t3);opacity:.5}
 .err{font-size:11px;color:var(--error)}
 .trig{font-size:11px;color:var(--t3)}
-
-/* 类型 tag（分色） */
 .tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;line-height:1.5}
 .tag.sm{font-size:9px;padding:1px 6px}
 .tag.user{color:var(--ac);background:var(--acg)}
@@ -195,44 +179,31 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .tag.sentinel{color:var(--warning);background:rgba(255,159,10,.13)}
 .tag.sync{color:#06b6d4;background:rgba(6,182,212,.13)}
 .tag.warmup{color:var(--t3);background:var(--bg3)}
-
-/* 结果 tag */
 .res{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600}
 .res.success{color:var(--success);background:rgba(52,199,89,.13)}
 .res.fail{color:var(--error);background:rgba(255,69,58,.13)}
 
-/* 链路按钮 */
-.trace-btn{background:transparent;border:1px solid var(--bd);color:var(--t3);font-size:10px;padding:3px 9px;border-radius:5px;cursor:pointer;font-family:inherit;transition:all .15s}
-.trace-btn:hover{color:var(--ac);border-color:var(--ac)}
-.trace-btn.on{background:var(--ac);color:#fff;border-color:var(--ac)}
-
-/* trace 面板（时间线） */
-.trace-panel{margin-top:16px;background:var(--bg3);border:1px solid var(--bd);border-radius:9px;overflow:hidden}
-.trace-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--bd);background:var(--bg2)}
-.trace-icon{color:var(--ac);font-size:14px}
-.trace-label{font-size:12px;color:var(--t2);font-weight:600}
-.trace-id{font-family:'SF Mono',ui-monospace,monospace;font-size:11px;color:var(--ac);background:var(--acg);padding:2px 8px;border-radius:5px}
-.trace-count{font-size:11px;color:var(--t3);margin-left:auto}
-.trace-list{padding:6px 0}
-.trace-row{display:flex;align-items:center;gap:9px;padding:5px 14px;font-size:11px;position:relative}
-.trace-row::before{content:'';position:absolute;left:20px;top:0;bottom:0;width:1px;background:var(--bd)}
-.trace-row:first-child::before{top:50%}
-.trace-row:last-child::before{bottom:50%}
-.t-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;z-index:1;background:var(--t3)}
+/* 行内 trace 展开 */
+.trace-inline{padding:8px 16px 12px;background:var(--bg3);border-radius:8px}
+.trace-head-inline{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.trace-head-inline .trace-label{font-size:11px;color:var(--t2)}
+.trace-head-inline code{font-family:'SF Mono',ui-monospace,monospace;font-size:10px;color:var(--ac);background:var(--acg);padding:2px 7px;border-radius:4px}
+.trace-count-inline{font-size:10px;color:var(--t3)}
+.trace-list-inline{display:flex;flex-direction:column;gap:1px}
+.trace-row{display:flex;align-items:center;gap:8px;padding:3px 8px;font-size:11px;border-radius:4px}
+.trace-row:hover{background:var(--bg2)}
+.t-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--t3)}
 .t-dot.success{background:var(--success)}
 .t-dot.fail{background:var(--error)}
-.t-time{color:var(--t3);font-variant-numeric:tabular-nums;font-family:'SF Mono',ui-monospace,monospace;width:64px}
-.t-act{font-size:11px;color:var(--ac);font-family:'SF Mono',ui-monospace,monospace}
-.t-tgt{color:var(--t2)}
+.t-time{color:var(--t3);font-variant-numeric:tabular-nums;font-family:'SF Mono',ui-monospace,monospace;width:60px}
+.t-act{font-size:10px;color:var(--ac);font-family:'SF Mono',ui-monospace,monospace}
+.t-tgt{color:var(--t2);font-size:10px}
 .t-tgt span{color:var(--t3);font-family:'SF Mono',ui-monospace,monospace}
-.t-err{color:var(--error);margin-left:auto}
-.trace-empty{padding:20px;text-align:center;color:var(--t3);font-size:12px}
+.t-err{color:var(--error);margin-left:auto;font-size:10px}
+.trace-empty-inline{padding:10px;text-align:center;color:var(--t3);font-size:11px}
 
-/* 表格整体 */
 :deep(.el-table){font-size:12px}
 :deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:11px}
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}
-
-.fade-enter-active,.fade-leave-active{transition:opacity .2s}
-.fade-enter-from,.fade-leave-to{opacity:0}
+:deep(.el-table__expanded-cell){padding:4px 8px !important}
 </style>
