@@ -637,14 +637,16 @@ def _page_to_dict(p, db: Session = None) -> dict:
         pub_host = p.custom_domain.split("://", 1)[-1].split("/")[0]
     preview_url = (f"https://{pub_host}/?_pv={p.preview_token}"
                    if (p.preview_enabled and p.preview_token and pub_host) else "")
-    visit_count = click_count = 0
+    visit_count = click_count = block_count = 0
     if db is not None:
         try:
             from ..models.landing_event import LandingEvent
             visit_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type == "visit").count()
             click_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type.in_(["click", "submit"])).count()
+            block_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type == "block").count()
         except Exception:
             pass
+    pass_rate = round(click_count / visit_count * 100, 1) if visit_count else 0
     return {"id": p.id, "title": p.title, "status": p.status,
             "custom_domain": p.custom_domain, "custom_domains": cd_list,
             "target_urls": targets,
@@ -661,7 +663,8 @@ def _page_to_dict(p, db: Session = None) -> dict:
             "last_health_status": p.last_health_status,
             "last_health_summary": p.last_health_summary,
             "last_health_checked_at": str(p.last_health_checked_at or ""),
-            "visit_count": visit_count, "click_count": click_count}
+            "visit_count": visit_count, "click_count": click_count,
+            "block_count": block_count, "pass_rate": pass_rate}
 
 
 @router.get("/pages")

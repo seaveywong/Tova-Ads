@@ -520,7 +520,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
         </div>
         <div class="lp-body">
-          {{ p.subcode_count }} 子码 · {{ p.visit_count||0 }} 访问 · {{ p.click_count||0 }} 转化
+          {{ p.subcode_count }} 子码 · {{ p.visit_count||0 }} 访问 · {{ p.click_count||0 }} 转化 · <span :style="{ color: (p.pass_rate||0) < 10 && (p.visit_count||0) >= 10 ? 'var(--error)' : 'var(--t3)' }">通过 {{ p.pass_rate||0 }}%</span><span v-if="(p.block_count||0) > 0" style="color:var(--warning);margin-left:4px">屏蔽{{ p.block_count }}</span>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.custom_domain">
