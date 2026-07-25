@@ -75,6 +75,50 @@ async def tg_webhook(secret: str, request: Request):
             raise HTTPException(status_code=404, detail="Not found")
 
         update = await request.json()
+
+        # ── /start deep link 绑定（用户点 https://t.me/bot?start=<token> → 自动绑定 chat_id）──
+        msg = update.get("message") or {}
+        text = str(msg.get("text") or "")
+        if text.startswith("/start "):
+            bind_token = text[7:].strip()
+            tg_chat_id = str((msg.get("chat") or {}).get("id") or "")
+            tg_username = (msg.get("from") or {}).get("username") or ""
+            try:
+                from ..core.security import decode_token
+                from ..core.database import get_db as _get_db
+                from ..models.notify import UserTgBinding
+                payload = decode_token(bind_token)
+                user_id = int(payload.get("user_id") or 0)
+                tenant_id = payload.get("tenant_id")
+                if not user_id or not tenant_id:
+                    raise ValueError("invalid token")
+                db_session = next(_get_db())
+                try:
+                    existing = db_session.query(UserTgBinding).filter(
+                        UserTgBinding.tenant_id == tenant_id,
+                        UserTgBinding.user_id == user_id,
+                    ).first()
+                    if existing:
+                        existing.chat_id = tg_chat_id
+                        existing.bot_token_enc = b.bot_token_enc
+                        from datetime import datetime, timezone
+                        existing.verified_at = datetime.now(timezone.utc)
+                    else:
+                        from datetime import datetime, timezone
+                        db_session.add(UserTgBinding(
+                            tenant_id=tenant_id, user_id=user_id,
+                            bot_token_enc=b.bot_token_enc, chat_id=tg_chat_id,
+                            verified_at=datetime.now(timezone.utc),
+                        ))
+                    db_session.commit()
+                    _tg_reply(bot_token, tg_chat_id,
+                              f"✅ 绑定成功！你将收到 Tova Ads 的实时告警通知。\nTG 用户：@{tg_username or tg_chat_id}")
+                finally:
+                    db_session.close()
+            except Exception:
+                _tg_reply(bot_token, tg_chat_id, "❌ 绑定失败：令牌无效或已过期，请在系统重新获取绑定链接。")
+            return {"ok": True}
+
         callback = update.get("callback_query") or {}
         if not callback:
             return {"ok": True}

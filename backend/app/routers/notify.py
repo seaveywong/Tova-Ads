@@ -257,6 +257,34 @@ class TgOAuthIn(BaseModel):
     hash: str
 
 
+@router.get("/tg/bind-link")
+def tg_bind_link(user: CurrentUser = Depends(require_permission("ads.read")),
+                 db: Session = Depends(get_db)):
+    """生成 TG bot deep link（用户点开 → bot 自动收到 chat_id → webhook 绑定）。"""
+    from ..core.security import create_access_token
+    import httpx
+    tb = db.query(TenantTgBinding).filter(
+        TenantTgBinding.tenant_id == user.tenant_id).first()
+    if not tb:
+        raise HTTPException(400, "管理员未配置 TG Bot")
+    # 获取 bot username
+    try:
+        resp = httpx.get(f"https://api.telegram.org/bot{decrypt(tb.bot_token_enc)}/getMe", timeout=10)
+        bot_username = resp.json().get("result", {}).get("username", "")
+    except Exception:
+        raise HTTPException(500, "获取 Bot 信息失败")
+    if not bot_username:
+        raise HTTPException(500, "Bot username 为空")
+    # 生成绑定 token（10 分钟有效）
+    bind_token = create_access_token(
+        user_id=user.id, email=user.email,
+        tenant_id=user.tenant_id, role=user.role,
+        is_superadmin=bool(user.is_superadmin),
+    )
+    return {"url": f"https://t.me/{bot_username}?start={bind_token}",
+            "bot_username": bot_username}
+
+
 @router.post("/tg/oauth-callback")
 def tg_oauth_callback(body: TgOAuthIn,
                       user: CurrentUser = Depends(require_permission("ads.read")),

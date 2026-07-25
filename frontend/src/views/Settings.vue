@@ -27,6 +27,7 @@ const pick = async (z) => {
 
 // 调度（仅超管）
 const isSuper = ref(isSuperadminSync())
+const myPerms = ref([])
 const sched = ref({
   base_minutes: 5,
   sentinel_minutes: 3,
@@ -49,6 +50,7 @@ const loadSched = async () => {
   try {
     const me = await GET('/auth/me')
     isSuper.value = !!me.is_superadmin
+    myPerms.value = me.permissions || []
     localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0')
     setUserTz(me.timezone || 'Asia/Shanghai'); tz.value = me.timezone || 'Asia/Shanghai'
     acctEmail.value = me.email || ''
@@ -175,10 +177,14 @@ const tgBot = ref({ configured: false, bot_username: '' })
 const userTg = ref({ bound: false })
 const testTgLoading = ref(false)
 const tgManual = ref({ chat_id: '', saving: false })
+const tgBindLink = ref('')
 const loadTg = async () => {
   try {
     tgBot.value = await GET('/notifications/tg/bot-info')
     userTg.value = await GET('/notifications/tg/user-binding')
+    if (tgBot.value.configured && !userTg.value.bound) {
+      try { const r = await GET('/notifications/tg/bind-link'); tgBindLink.value = r.url } catch {}
+    }
     if (tgBot.value.configured && tgBot.value.bot_username && !userTg.value.bound) {
       nextTick(() => {
         const el = document.getElementById('tg-widget')
@@ -388,7 +394,7 @@ const runRetentionNow = async () => {
 
     <div class="card">
       <div class="t">Telegram 通知</div>
-      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。两种方式任选：TG 授权绑定（推荐）或手动填 chat_id。</div>
+      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
 
       <!-- 已绑定状态 -->
       <div v-if="userTg.bound" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -398,31 +404,34 @@ const runRetentionNow = async () => {
         <button class="btn" style="color:var(--error);border-color:var(--error)" @click="unbindTg">解绑</button>
       </div>
 
-      <!-- 未绑定：两种方式 -->
+      <!-- 未绑定 -->
       <div v-else style="margin-top:14px">
-        <!-- 方式 1：TG 授权（Widget）-->
-        <div v-if="tgBot.configured && tgBot.bot_username">
-          <div class="d" style="margin-bottom:8px">方式 1 · TG 授权绑定（推荐）</div>
-          <div id="tg-widget" style="min-height:50px;margin-bottom:12px"></div>
-          <div v-if="tgBot.bot_username" class="d" style="font-size:11px;margin-top:-4px">
-            Bot：<b>{{ tgBot.bot_username }}</b>（如按钮不显示，需在 BotFather 执行 <code>/setdomain</code> 设 tovaads.com）
-          </div>
+        <!-- 方式 1：Deep Link（推荐，一键绑定）-->
+        <div v-if="tgBindLink" style="margin-bottom:14px">
+          <a :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none">
+            <span style="font-size:16px">✈️</span> 点击绑定 Telegram
+          </a>
+          <div class="d" style="font-size:11px;margin-top:6px">打开 Telegram → 点 Start → 自动绑定完成</div>
         </div>
 
-        <!-- 方式 2：手动填 chat_id -->
+        <!-- 方式 2：Login Widget（BotFather domain 已设时显示）-->
+        <div v-if="tgBot.configured && tgBot.bot_username">
+          <div id="tg-widget" style="min-height:50px"></div>
+        </div>
+
+        <!-- 方式 3：手动填 chat_id（兜底）-->
         <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)">
-          <div class="d" style="margin-bottom:8px">方式 2 · 手动填写 chat_id</div>
+          <div class="d" style="margin-bottom:8px">或手动填写 chat_id</div>
           <div class="form-l">
             <label>chat_id</label>
-            <input v-model="tgManual.chat_id" class="input" placeholder="你的 Telegram chat_id（数字）" @keyup.enter="bindTgManual" />
-            <button class="btn primary" :disabled="tgManual.saving" @click="bindTgManual" style="margin-left:8px">{{ tgManual.saving ? '绑定中…' : '绑定' }}</button>
+            <input v-model="tgManual.chat_id" class="input" placeholder="Telegram chat_id（数字）" @keyup.enter="bindTgManual" />
+            <button class="btn" :disabled="tgManual.saving" @click="bindTgManual" style="margin-left:8px">{{ tgManual.saving ? '绑定中…' : '绑定' }}</button>
           </div>
-          <div class="d" style="font-size:11px;margin-top:4px">向 <b>{{ tgBot.bot_username || 'TG Bot' }}</b> 发任意消息，再填收到的 chat_id</div>
         </div>
       </div>
 
-      <!-- 租户级测试（owner 可见） -->
-      <div v-if="isSuper && tgBot.configured" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--bd)">
+      <!-- 租户级测试（owner/超管可见） -->
+      <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--bd)">
         <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '测试租户 TG' }}</button>
         <span class="d" style="margin-left:8px;font-size:11px">发到管理员配置的租户级 TG Bot</span>
       </div>

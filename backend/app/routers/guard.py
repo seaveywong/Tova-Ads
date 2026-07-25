@@ -251,7 +251,7 @@ def sentinel_disarm(body: SentinelArmIn, user: CurrentUser = Depends(require_per
 
 
 @router.get("/status")
-def guard_status(user: CurrentUser = Depends(require_permission("rules.read")),
+def guard_status(user: CurrentUser = Depends(require_permission("ads.pause")),
                  db: Session = Depends(get_db)):
     """当前守护状态：规则数 / 哨兵 / 加白。"""
     rules_count = db.query(GuardRule).filter(

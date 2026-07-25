@@ -141,7 +141,7 @@ onMounted(async () => {
     myPerms.value = me.permissions || []
     setUserPerms(me.permissions || [])
   } catch {}
-  loadGuard()
+  if (myPerms.value.includes('ads.pause') || isSuperadmin.value) loadGuard()
   const poll = async () => {
     if (document.hidden) return  // 标签页不可见时跳过（防空闲时死连接堆积→切回来卡死）
     try {
