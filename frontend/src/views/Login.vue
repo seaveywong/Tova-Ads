@@ -33,8 +33,8 @@ const login = async () => {
     <div class="login-card">
       <h1 class="login-title">Tova Ads</h1>
       <p class="login-sub">广告投放管理系统</p>
-      <el-input v-model="email" placeholder="邮箱" class="login-input" @keyup.enter="login" />
-      <el-input v-model="password" type="password" placeholder="密码" class="login-input" show-password @keyup.enter="login" />
+      <el-input v-model="email" placeholder="邮箱" class="login-input" autocomplete="username" @keyup.enter="login" />
+      <el-input v-model="password" type="password" placeholder="密码" class="login-input" autocomplete="current-password" show-password @keyup.enter="login" />
       <el-button type="primary" class="login-btn" :loading="loading" :disabled="!canLogin" @click="login">登录</el-button>
     </div>
   </div>

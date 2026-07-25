@@ -92,17 +92,20 @@ const toggleSentinel = async (val) => {
     loadGuard()
   } catch (e) { ElMessage.error(e.message || '操作失败') }
 }
-const emergencyPause = () => {
-  ElMessageBox.confirm('确定要全局紧急暂停所有 ACTIVE 广告？此操作不可撤销。', '⚠️ 紧急暂停', {
-    type: 'error', confirmButtonText: '确认暂停', cancelButtonText: '取消'
-  }).then(async () => {
-    try {
-      ElMessage.warning('正在暂停所有广告…')
-      const r = await POST('/guard/emergency-pause', {})
-      ElMessage.success(`已暂停 ${r.paused || 0} 条广告`)
-      loadGuard()
-    } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
-  }).catch(() => {})
+const emergencyLoading = ref(false)
+const emergencyPause = async () => {
+  try {
+    await ElMessageBox.confirm('确定要全局紧急暂停所有 ACTIVE 广告？此操作不可撤销。', '⚠️ 紧急暂停', {
+      type: 'error', confirmButtonText: '确认暂停', cancelButtonText: '取消'
+    })
+  } catch { return }
+  emergencyLoading.value = true
+  try {
+    const r = await POST('/guard/emergency-pause', {})
+    ElMessage.success(`已暂停 ${r.paused || 0} 条广告`)
+    loadGuard()
+  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  emergencyLoading.value = false
 }
 
 // 用户
@@ -192,7 +195,7 @@ const currentTitle = computed(() => route.meta.title || '')
           <span>规则 {{ guardStatus.rules_enabled }} 条</span>
           <span class="guard-dot" :class="{ on: guardStatus.rules_enabled > 0 }"></span>
         </div>
-        <button class="emergency-btn" @click="emergencyPause">全局紧急暂停</button>
+        <button class="emergency-btn" :disabled="emergencyLoading" @click="emergencyPause">{{ emergencyLoading ? '暂停中…' : '全局紧急暂停' }}</button>
       </div>
     </aside>
 

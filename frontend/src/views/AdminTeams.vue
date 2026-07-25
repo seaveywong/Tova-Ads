@@ -35,9 +35,9 @@ const submitCreate = async () => {
     if (r.owner_email && r.owner_existing) msg += `，已指定现有用户 ${r.owner_email} 为管理员`
     else if (r.owner_email) msg += `，管理员 ${r.owner_email} 初始密码：${r.owner_password}（请告知对方首次登录后修改）`
     else msg += '（空团队，稍后可加成员）'
-    ElMessage.success(msg)
     createOpen.value = false
     load()
+    await ElMessageBox.alert(msg, '团队已创建', { confirmButtonText: '知道了', type: 'success' })
   } catch (e) { ElMessage.error(e.message || '创建失败') }
   createSaving.value = false
 }
@@ -127,12 +127,13 @@ const submitMemberAdd = async () => {
       role: memberAdd.value.role,
       password: memberAdd.value.password.trim(),
     })
-    ElMessage.success(r.existing_user
+    const addMsg = r.existing_user
       ? `已把现有用户 ${r.email} 加入`
-      : `已创建 ${r.email}，初始密码：${r.password}（请告知对方首次登录后修改）`)
+      : `已创建 ${r.email}，初始密码：${r.password}（请告知对方首次登录后修改）`
     memberAdd.value = { email: '', role: 'operator', password: '' }
     await loadMembers()
     load()
+    await ElMessageBox.alert(addMsg, '添加成功', { confirmButtonText: '知道了', type: 'success' })
   } catch (e) { ElMessage.error(e.message || '添加失败') }
   memberAddSaving.value = false
 }
@@ -201,7 +202,7 @@ const submitMemberAdd = async () => {
       <div class="dlg-d">建团队同时创建 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。</div>
       <div class="form-l"><label>团队名</label><input v-model="createForm.name" class="input" placeholder="如：客户A 投放团队" /></div>
       <div class="form-l"><label>管理员邮箱</label><input v-model="createForm.owner_email" class="input" placeholder="选填，留空 = 先建空团队" /></div>
-      <div class="form-l"><label>管理员密码</label><input v-model="createForm.owner_password" class="input" type="password" placeholder="选填，留空 = 系统随机生成" /></div>
+      <div class="form-l"><label>管理员密码</label><input v-model="createForm.owner_password" class="input" type="password" autocomplete="new-password" placeholder="选填，留空 = 系统随机生成" /></div>
       <template #footer>
         <button class="btn" @click="createOpen = false">取消</button>
         <button class="btn primary" :disabled="createSaving" @click="submitCreate">{{ createSaving ? '创建中…' : '创建' }}</button>
@@ -233,7 +234,7 @@ const submitMemberAdd = async () => {
             <option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k">{{ zh }}</option>
           </select>
         </div>
-        <div class="form-l"><label>密码</label><input v-model="memberAdd.password" class="input" type="password" placeholder="留空 = 系统随机生成" /></div>
+        <div class="form-l"><label>密码</label><input v-model="memberAdd.password" class="input" type="password" autocomplete="new-password" placeholder="留空 = 系统随机生成" /></div>
         <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? '添加中…' : '添加成员' }}</button>
       </div>
     </el-dialog>

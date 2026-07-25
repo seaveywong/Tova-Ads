@@ -59,13 +59,9 @@ const loadSched = async () => {
   } catch {}
 }
 const saveSched = async () => {
-  // dirty 判断：比对 effective 里的实际间隔值（inspect 是基准×乘数的结果）
+  // P0 fix: 原 dirty 判断只看 inspect+sentinel，忽略 watchdog/account_sync/budget 等倍数变更 → 静默丢失
+  // 移除 buggy dirty check，直接 PUT（后端幂等，无变更也不影响）
   const e = sched.value?.effective || {}
-  const effInspect = e.inspect ?? 0
-  const curInspect = Math.round(Number(sched.value.base_minutes) * (sched.value.multipliers?.inspect || 1))
-  if (Number(sched.value.sentinel_minutes) === (e.sentinel ?? 0) && curInspect === effInspect) {
-    return ElMessage.info('无变更')
-  }
   if (Number(sched.value.sentinel_minutes) !== (e.sentinel ?? 0)) {
     try {
       await ElMessageBox.confirm(
@@ -266,7 +262,7 @@ const runRetentionNow = async () => {
       <div class="form-l"><label>用户名</label><input v-model="acctEmail" class="input" placeholder="登录邮箱" /></div>
       <button class="btn primary" :disabled="acctSaving" @click="saveEmail">保存用户名</button>
       <div class="acct-sep"></div>
-      <div class="form-l"><label>旧密码</label><el-input v-model="pwdForm.old" type="password" show-password class="ep-input" placeholder="当前密码" /></div>
+      <div class="form-l"><label>旧密码</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" placeholder="当前密码" /></div>
       <div class="form-l"><label>新密码</label><el-input v-model="pwdForm.new" type="password" show-password class="ep-input" placeholder="至少 8 位" /></div>
       <div class="form-l"><label>确认</label><el-input v-model="pwdForm.confirm" type="password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? '两次不一致' : '再次输入新密码'" /></div>
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">修改密码</button>

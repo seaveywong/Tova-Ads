@@ -80,15 +80,20 @@ const removeRole = async (r) => {
 }
 
 // 成员管理
+const inviteSaving = ref(false)
 const openInvite = () => { inviteForm.value = { email: '', password: '', role: 'operator' }; inviteOpen.value = true }
 const submitInvite = async () => {
   if (!inviteForm.value.email.trim()) return ElMessage.warning('填邮箱')
+  inviteSaving.value = true
   try {
     const r = await POST('/rbac/members/invite', inviteForm.value)
-    ElMessage.success(r.default_password ? `已邀请，默认密码：${r.default_password}` : '已邀请')
     inviteOpen.value = false
     await load()
+    await ElMessageBox.alert(
+      r.default_password ? `已邀请，默认密码：${r.default_password}（请告知对方首次登录后修改）` : '已邀请',
+      '邀请成功', { confirmButtonText: '知道了', type: 'success' })
   } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  inviteSaving.value = false
 }
 const changeRole = async (m, roleName) => {
   try {
@@ -214,7 +219,7 @@ const permLabel = (key) => {
             <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ r.permissions.length }}权限）</option>
           </select>
         </div>
-        <div class="m-foot"><button class="btn" @click="inviteOpen=false">取消</button><button class="btn primary" @click="submitInvite">邀请</button></div>
+        <div class="m-foot"><button class="btn" @click="inviteOpen=false">取消</button><button class="btn primary" :disabled="inviteSaving" @click="submitInvite">{{ inviteSaving ? '邀请中…' : '邀请' }}</button></div>
       </div>
     </div>
   </div>
