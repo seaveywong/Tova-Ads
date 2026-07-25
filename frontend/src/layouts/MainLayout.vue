@@ -161,7 +161,10 @@ onUnmounted(() => {
   document.removeEventListener('click', closeNotifsOnOutside)
 })
 const closeNotifsOnOutside = (e) => {
-  if (notifOpen.value && !e.target.closest('.notif-wrapper')) notifOpen.value = false
+  if (!notifOpen.value) return
+  if (e.target.closest('.notif-wrapper')) return
+  if (e.target.closest('.nav-item')) return  // 不拦截导航点击
+  notifOpen.value = false
 }
 
 const currentTitle = computed(() => route.meta.title || '')

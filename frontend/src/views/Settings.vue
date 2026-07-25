@@ -174,6 +174,7 @@ const saveCf = async () => {
 const tgBot = ref({ configured: false, bot_username: '' })
 const userTg = ref({ bound: false })
 const testTgLoading = ref(false)
+const tgManual = ref({ chat_id: '', saving: false })
 const loadTg = async () => {
   try {
     tgBot.value = await GET('/notifications/tg/bot-info')
@@ -203,9 +204,35 @@ const loadTg = async () => {
 }
 const testUserTg = async () => {
   testTgLoading.value = true
-  try { await POST('/notifications/tg/user-test'); ElMessage.success('测试消息已发送') }
+  try { await POST('/notifications/tg/user-test'); ElMessage.success('测试消息已发送到你的 TG') }
   catch (e) { ElMessage.error(e.message || '发送失败') }
   testTgLoading.value = false
+}
+const testTenantTg = async () => {
+  testTgLoading.value = true
+  try { await POST('/notifications/tg/test'); ElMessage.success('测试消息已发送到租户 TG') }
+  catch (e) { ElMessage.error(e.message || '发送失败（管理员未绑租户 TG）') }
+  testTgLoading.value = false
+}
+const bindTgManual = async () => {
+  if (!tgManual.value.chat_id.trim()) return ElMessage.warning('填 chat_id')
+  tgManual.value.saving = true
+  try {
+    await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: tgManual.value.chat_id.trim() })
+    ElMessage.success('已绑定')
+    tgManual.value.chat_id = ''
+    userTg.value = await GET('/notifications/tg/user-binding')
+  } catch (e) { ElMessage.error(e.message || '绑定失败') }
+  tgManual.value.saving = false
+}
+const unbindTg = async () => {
+  try {
+    await ElMessageBox.confirm('确定解绑 TG？解绑后不再收到 TG 告警通知。', '确认', { type: 'warning' })
+    // 用空 chat_id 触发后端删除/解绑（或直接 DELETE，但后端没有 DELETE 端点，用空值覆盖）
+    await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: '' })
+    ElMessage.success('已解绑')
+    userTg.value = await GET('/notifications/tg/user-binding')
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || '失败') }
 }
 onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadRetention(); await loadFx(); await loadTg() })
 
@@ -361,13 +388,44 @@ const runRetentionNow = async () => {
 
     <div class="card">
       <div class="t">Telegram 通知</div>
-      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮用 TG 授权，无需手填。</div>
-      <div v-if="userTg.bound" style="margin-top:12px;display:flex;align-items:center;gap:12px">
-        <span style="color:var(--success);font-size:13px">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
+      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。两种方式任选：TG 授权绑定（推荐）或手动填 chat_id。</div>
+
+      <!-- 已绑定状态 -->
+      <div v-if="userTg.bound" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:var(--success);font-size:13px;font-weight:500">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
+        <span v-if="userTg.verified" style="font-size:11px;color:var(--t3)">已验证</span>
         <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发测试消息' }}</button>
+        <button class="btn" style="color:var(--error);border-color:var(--error)" @click="unbindTg">解绑</button>
       </div>
-      <div v-else-if="tgBot.configured" id="tg-widget" style="margin-top:12px;min-height:50px"></div>
-      <div v-else class="d" style="color:var(--warning);margin-top:8px">管理员未配置 TG Bot（通知只进站内信，联系管理员先绑租户 TG）</div>
+
+      <!-- 未绑定：两种方式 -->
+      <div v-else style="margin-top:14px">
+        <!-- 方式 1：TG 授权（Widget）-->
+        <div v-if="tgBot.configured && tgBot.bot_username">
+          <div class="d" style="margin-bottom:8px">方式 1 · TG 授权绑定（推荐）</div>
+          <div id="tg-widget" style="min-height:50px;margin-bottom:12px"></div>
+          <div v-if="tgBot.bot_username" class="d" style="font-size:11px;margin-top:-4px">
+            Bot：<b>{{ tgBot.bot_username }}</b>（如按钮不显示，需在 BotFather 执行 <code>/setdomain</code> 设 tovaads.com）
+          </div>
+        </div>
+
+        <!-- 方式 2：手动填 chat_id -->
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd)">
+          <div class="d" style="margin-bottom:8px">方式 2 · 手动填写 chat_id</div>
+          <div class="form-l">
+            <label>chat_id</label>
+            <input v-model="tgManual.chat_id" class="input" placeholder="你的 Telegram chat_id（数字）" @keyup.enter="bindTgManual" />
+            <button class="btn primary" :disabled="tgManual.saving" @click="bindTgManual" style="margin-left:8px">{{ tgManual.saving ? '绑定中…' : '绑定' }}</button>
+          </div>
+          <div class="d" style="font-size:11px;margin-top:4px">向 <b>{{ tgBot.bot_username || 'TG Bot' }}</b> 发任意消息，再填收到的 chat_id</div>
+        </div>
+      </div>
+
+      <!-- 租户级测试（owner 可见） -->
+      <div v-if="isSuper && tgBot.configured" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--bd)">
+        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '测试租户 TG' }}</button>
+        <span class="d" style="margin-left:8px;font-size:11px">发到管理员配置的租户级 TG Bot</span>
+      </div>
     </div>
   </div>
 </template>
