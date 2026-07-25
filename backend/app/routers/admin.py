@@ -248,6 +248,64 @@ def add_tenant_member(tid: int, body: TenantMemberIn,
     return {"added": True, "email": email, "role": body.role, "password": pwd, "existing_user": False}
 
 
+@router.get("/tenants/{tid}/members")
+def list_tenant_members(tid: int, user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """超管列任意团队成员（跨租户，不切团队）。"""
+    from ..models.auth import User
+    mems = db.query(TenantMembership).filter(TenantMembership.tenant_id == tid).all()
+    user_ids = [m.user_id for m in mems]
+    users_map = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    return [{
+        "membership_id": m.id, "user_id": m.user_id,
+        "email": users_map[m.user_id].email if m.user_id in users_map else "?",
+        "status": users_map[m.user_id].status if m.user_id in users_map else "?",
+        "role": m.role, "is_you": m.user_id == user.id,
+    } for m in mems]
+
+
+class ChangeRoleIn(BaseModel):
+    role: str
+
+
+@router.put("/tenants/{tid}/members/{mid}/role")
+def change_tenant_member_role(tid: int, mid: int, body: ChangeRoleIn,
+                              user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """超管改任意团队成员角色（跨租户）。"""
+    from ..models.auth import Role
+    m = db.query(TenantMembership).filter(
+        TenantMembership.id == mid, TenantMembership.tenant_id == tid).first()
+    if not m:
+        raise HTTPException(404, "成员不存在")
+    if m.user_id == user.id and m.role == "owner" and body.role != "owner":
+        raise HTTPException(400, "不能取消自己的 owner 角色")
+    role = db.query(Role).filter(Role.tenant_id == tid, Role.name == body.role).first()
+    if not role:
+        raise HTTPException(400, f"角色 '{body.role}' 不存在于该团队")
+    m.role = body.role
+    db.commit()
+    return {"updated": True}
+
+
+@router.delete("/tenants/{tid}/members/{mid}")
+def remove_tenant_member(tid: int, mid: int,
+                         user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """超管移除任意团队成员（跨租户）。"""
+    m = db.query(TenantMembership).filter(
+        TenantMembership.id == mid, TenantMembership.tenant_id == tid).first()
+    if not m:
+        raise HTTPException(404, "成员不存在")
+    if m.user_id == user.id:
+        raise HTTPException(400, "不能移除自己")
+    if m.role == "owner":
+        owners = db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == tid, TenantMembership.role == "owner").count()
+        if owners <= 1:
+            raise HTTPException(400, "团队至少保留一个 owner")
+    db.delete(m)
+    db.commit()
+    return {"removed": True}
+
+
 class TenantStatusIn(BaseModel):
     status: str  # active / suspended / archived
 

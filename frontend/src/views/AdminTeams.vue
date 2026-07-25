@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { GET, POST, PUT, PATCH } from '../api'
+import { GET, POST, PUT, PATCH, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
@@ -55,7 +55,7 @@ const rename = async (t) => {
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
-// 状态变更（归档/恢复/停用/激活，统一入口）
+// 状态变更
 const setStatus = async (t, status) => {
   const word = STATUS_ZH[status]
   try {
@@ -66,42 +66,75 @@ const setStatus = async (t, status) => {
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
-// 操作下拉分发
 const handleOp = (cmd, t) => {
   const map = { suspend: 'suspended', activate: 'active', archive: 'archived', restore: 'active' }
   setStatus(t, map[cmd])
 }
-// 该行是否还有「更多」操作（主团队只有 active 且不可改状态 → 没更多）
 const hasMore = (row) => {
   if (row.id === 1) return false
-  if (row.status === 'active') return true   // 可停用/归档
-  if (row.status === 'suspended') return true // 可激活/归档
-  if (row.status === 'archived') return true  // 可恢复
+  if (row.status === 'active') return true
+  if (row.status === 'suspended') return true
+  if (row.status === 'archived') return true
   return false
 }
 
-// 加成员
+// 成员管理（列表/改角色/移除/加成员，超管跨租户）
 const memberOpen = ref(false)
-const memberForm = ref({ tid: 0, name: '', email: '', role: 'operator', password: '' })
-const memberSaving = ref(false)
-const openMember = (t) => { memberForm.value = { tid: t.id, name: t.name, email: '', role: 'operator', password: '' }; memberOpen.value = true }
-const submitMember = async () => {
-  if (!memberForm.value.email.trim()) return ElMessage.warning('填邮箱')
-  if (!memberForm.value.email.includes('@')) return ElMessage.warning('邮箱格式不对')
-  memberSaving.value = true
+const membersTid = ref(0)
+const membersName = ref('')
+const memberList = ref([])
+const memberLoading = ref(false)
+const memberAdd = ref({ email: '', role: 'operator', password: '' })
+const memberAddSaving = ref(false)
+const openMembers = async (t) => {
+  membersTid.value = t.id
+  membersName.value = t.name
+  memberAdd.value = { email: '', role: 'operator', password: '' }
+  memberOpen.value = true
+  await loadMembers()
+}
+const loadMembers = async () => {
+  memberLoading.value = true
+  try { memberList.value = await GET(`/admin/tenants/${membersTid.value}/members`) }
+  catch (e) { ElMessage.error(e.message || '加载成员失败') }
+  memberLoading.value = false
+}
+const changeMemberRole = async (m, role) => {
+  if (role === m.role) return
   try {
-    const r = await POST(`/admin/tenants/${memberForm.value.tid}/members`, {
-      email: memberForm.value.email.trim(),
-      role: memberForm.value.role,
-      password: memberForm.value.password.trim(),
+    await PUT(`/admin/tenants/${membersTid.value}/members/${m.membership_id}/role`, { role })
+    ElMessage.success(`${m.email} 角色改为${ROLE_ZH[role] || role}`)
+    m.role = role
+  } catch (e) { ElMessage.error(e.message || '改角色失败'); await loadMembers() }
+}
+const removeMemberRow = async (m) => {
+  try {
+    await ElMessageBox.confirm(`移除成员「${m.email}」？（用户账号保留，只移出本团队）`, '确认',
+      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' })
+    await DELETE(`/admin/tenants/${membersTid.value}/members/${m.membership_id}`)
+    ElMessage.success(`已移除 ${m.email}`)
+    memberList.value = memberList.value.filter(x => x.membership_id !== m.membership_id)
+    load()
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+}
+const submitMemberAdd = async () => {
+  if (!memberAdd.value.email.trim()) return ElMessage.warning('填邮箱')
+  if (!memberAdd.value.email.includes('@')) return ElMessage.warning('邮箱格式不对')
+  memberAddSaving.value = true
+  try {
+    const r = await POST(`/admin/tenants/${membersTid.value}/members`, {
+      email: memberAdd.value.email.trim(),
+      role: memberAdd.value.role,
+      password: memberAdd.value.password.trim(),
     })
     ElMessage.success(r.existing_user
-      ? `已把现有用户 ${r.email} 加入团队（角色：${ROLE_ZH[r.role] || r.role}）`
+      ? `已把现有用户 ${r.email} 加入`
       : `已创建 ${r.email}，初始密码：${r.password}（请告知对方首次登录后修改）`)
-    memberOpen.value = false
+    memberAdd.value = { email: '', role: 'operator', password: '' }
+    await loadMembers()
     load()
   } catch (e) { ElMessage.error(e.message || '添加失败') }
-  memberSaving.value = false
+  memberAddSaving.value = false
 }
 </script>
 
@@ -118,12 +151,9 @@ const submitMember = async () => {
 
       <el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队" row-key="id">
         <el-table-column prop="id" label="ID" width="56" align="center" />
-        <el-table-column label="团队名" min-width="200">
+        <el-table-column label="团队名" min-width="180">
           <template #default="{ row }">
-            <div class="name-cell">
-              <span class="name">{{ row.name }}</span>
-              <span v-if="row.id === 1" class="badge-main">主团队</span>
-            </div>
+            <span class="name">{{ row.name }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="96">
@@ -147,7 +177,7 @@ const submitMember = async () => {
         <el-table-column label="操作" width="172" fixed="right">
           <template #default="{ row }">
             <div class="ops">
-              <button class="op primary" @click="openMember(row)">加成员</button>
+              <button class="op primary" @click="openMembers(row)">成员</button>
               <button class="op" @click="rename(row)">改名</button>
               <el-dropdown v-if="hasMore(row)" trigger="click" @command="c => handleOp(c, row)">
                 <button class="op more" title="更多">⋯</button>
@@ -178,19 +208,34 @@ const submitMember = async () => {
       </template>
     </el-dialog>
 
-    <!-- 加成员弹窗 -->
-    <el-dialog v-model="memberOpen" :title="`加成员 · ${memberForm.name}`" width="460px">
-      <div class="form-l"><label>邮箱</label><input v-model="memberForm.email" class="input" placeholder="新成员邮箱（已存在则直接加入）" /></div>
-      <div class="form-l"><label>角色</label>
-        <el-select v-model="memberForm.role" style="flex:1">
-          <el-option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k" :label="zh" />
-        </el-select>
+    <!-- 成员管理弹窗 -->
+    <el-dialog v-model="memberOpen" :title="`成员管理 · ${membersName}`" width="560px">
+      <div v-loading="memberLoading">
+        <div class="mem-section-title">当前成员（{{ memberList.length }}）</div>
+        <div class="mem-list">
+          <div v-for="m in memberList" :key="m.membership_id" class="mem-row">
+            <span class="mem-email">{{ m.email }}<span v-if="m.is_you" class="mem-you">你</span></span>
+            <select class="mem-role-sel" :value="m.role" :disabled="m.is_you && m.role === 'owner'"
+                    @change="e => changeMemberRole(m, e.target.value)">
+              <option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k">{{ zh }}</option>
+            </select>
+            <button v-if="!m.is_you" class="mem-rm" @click="removeMemberRow(m)">移除</button>
+            <span v-else class="mem-self">—</span>
+          </div>
+          <div v-if="!memberList.length && !memberLoading" class="mem-empty">暂无成员</div>
+        </div>
+
+        <div class="mem-divider"></div>
+        <div class="mem-section-title">添加新成员</div>
+        <div class="form-l"><label>邮箱</label><input v-model="memberAdd.email" class="input" placeholder="新成员邮箱（已存在则直接加入）" /></div>
+        <div class="form-l"><label>角色</label>
+          <select v-model="memberAdd.role" class="input">
+            <option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k">{{ zh }}</option>
+          </select>
+        </div>
+        <div class="form-l"><label>密码</label><input v-model="memberAdd.password" class="input" type="password" placeholder="留空 = 系统随机生成" /></div>
+        <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? '添加中…' : '添加成员' }}</button>
       </div>
-      <div class="form-l"><label>密码</label><input v-model="memberForm.password" class="input" type="password" placeholder="选填，留空 = 系统随机生成" /></div>
-      <template #footer>
-        <button class="btn" @click="memberOpen = false">取消</button>
-        <button class="btn primary" :disabled="memberSaving" @click="submitMember">{{ memberSaving ? '添加中…' : '添加' }}</button>
-      </template>
     </el-dialog>
   </div>
 </template>
@@ -203,7 +248,6 @@ const submitMember = async () => {
 .t{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:5px}
 .d{font-size:12px;color:var(--t3);line-height:1.6}
 
-/* 按钮 */
 .btn{padding:8px 16px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:7px;font-size:13px;cursor:pointer;transition:all .15s;font-family:inherit}
 .btn:hover{border-color:var(--ac)}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -211,11 +255,7 @@ const submitMember = async () => {
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .plus{font-weight:600;margin-right:2px}
 
-/* 表格内 */
-.name-cell{display:flex;align-items:center;gap:8px}
 .name{color:var(--t1);font-weight:500}
-.badge-main{font-size:10px;padding:2px 7px;background:var(--acg);color:var(--ac);border-radius:10px;font-weight:600;letter-spacing:.02em}
-
 .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
 .status .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .status.active{color:var(--success)}
@@ -229,7 +269,6 @@ const submitMember = async () => {
 .num.zero{color:var(--t3);font-weight:400}
 .mute{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums}
 
-/* 操作列 */
 .ops{display:flex;align-items:center;gap:4px}
 .op{background:transparent;border:1px solid transparent;color:var(--t2);font-size:12px;cursor:pointer;padding:5px 10px;border-radius:6px;transition:all .15s;font-family:inherit;white-space:nowrap}
 .op:hover{background:var(--bg3);color:var(--t1)}
@@ -238,7 +277,6 @@ const submitMember = async () => {
 .op.more{padding:5px 9px;font-size:15px;line-height:1;letter-spacing:-1px}
 :deep(.danger){color:var(--error)}
 
-/* 弹窗 */
 .dlg-d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:16px;padding:10px 12px;background:var(--bg3);border-radius:7px}
 .form-l{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .form-l > label{font-size:12px;color:var(--t3);width:82px;text-align:right;flex-shrink:0}
@@ -246,7 +284,21 @@ const submitMember = async () => {
 .input:focus{border-color:var(--ac);outline:none}
 .input::placeholder{color:var(--t3);opacity:.7}
 
-/* 表格整体微调 */
+/* 成员管理 */
+.mem-section-title{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:10px}
+.mem-list{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.mem-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--bd);font-size:13px}
+.mem-row:last-child{border-bottom:none}
+.mem-email{flex:1;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mem-you{font-size:10px;padding:1px 6px;background:var(--acg);color:var(--ac);border-radius:4px;margin-left:6px}
+.mem-role-sel{padding:4px 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:5px;color:var(--t1);font-size:12px;cursor:pointer;font-family:inherit}
+.mem-rm{background:none;border:none;color:var(--error);font-size:12px;cursor:pointer;padding:2px 6px;white-space:nowrap}
+.mem-rm:hover{text-decoration:underline}
+.mem-self{color:var(--t3);font-size:12px;width:36px;text-align:center}
+.mem-empty{padding:20px;text-align:center;color:var(--t3);font-size:13px}
+.mem-divider{height:1px;background:var(--bd);margin:16px 0}
+.mem-add-btn{margin-top:4px}
+
 :deep(.el-table){font-size:13px}
 :deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:12px}
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}

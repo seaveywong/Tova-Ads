@@ -200,7 +200,7 @@ const currentTitle = computed(() => route.meta.title || '')
       <header class="topbar">
         <span class="page-title">{{ currentTitle }}</span>
         <div class="topbar-right">
-          <el-dropdown v-if="memberships.length" trigger="click" @command="switchTeam">
+          <el-dropdown v-if="memberships.length > 1" trigger="click" @command="switchTeam">
             <span class="team-switcher">
               <el-icon><OfficeBuilding /></el-icon>
               <span class="team-name">{{ currentTenantName || '未加入团队' }}</span>
