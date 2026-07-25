@@ -282,7 +282,7 @@ const onSubSearch = () => loadSubcodes(subPage.value.id)
 const archiveSub = async (s) => {
   try { await ElMessageBox.confirm(`归档子码 /a/${s.slug}？回收站可恢复。`, '确认归档', { type: 'warning' })
     await DELETE(`/subcodes/${s.id}`); ElMessage.success('已归档'); await loadSubcodes(subPage.value.id)
-  } catch(e) {}
+  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error('归档失败：' + e.message) }
 }
 const restoreSub = async (s) => {
   try { await POST(`/subcodes/${s.id}/restore`); ElMessage.success('已恢复'); await loadSubcodes(subPage.value.id) }
@@ -291,17 +291,20 @@ const restoreSub = async (s) => {
 const hardDeleteSub = async (s) => {
   try { await ElMessageBox.confirm(`永久删除 /a/${s.slug}？将清空其配置（恢复后回退页级跳转）。`, '永久删除', { type: 'warning', confirmButtonText: '永久删除', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/subcodes/${s.id}?hard=1`); ElMessage.success('已永久删除（回收站仍可恢复）'); await loadSubcodes(subPage.value.id)
-  } catch(e) {}
+  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error('删除失败：' + e.message) }
 }
+const subGenerating = ref(false)
 const genSubcode = async () => {
-  // act_id 可选（多账户页才填；空走页级像素）。autobind 绑广告时会自动回填真实账户。
+  if (subGenerating.value) return
   const count = Math.min(Math.max(Number(newSubCount.value) || 1, 1), 50)
+  subGenerating.value = true
   try {
     for (let i = 0; i < count; i++) {
       await POST('/subcodes/generate', { page_id: subPage.value.id })
     }
     ElMessage.success(`已生成 ${count} 条`); newSubCount.value = 1; await loadSubcodes(subPage.value.id)
   } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  subGenerating.value = false
 }
 const subTargetEdit = ref({})
 const startEditTarget = (s) => { subTargetEdit.value = { [s.id]: s.target_urls || '' } }
@@ -691,7 +694,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <span class="sub-gen-lab">生成</span>
         <input v-model.number="newSubCount" type="number" min="1" max="50" class="sub-gen-input" />
         <span class="sub-gen-lab">个子码</span>
-        <button class="btn primary" style="margin-left:auto" @click="genSubcode">批量生成</button>
+        <button class="btn primary" style="margin-left:auto" :disabled="subGenerating" @click="genSubcode">{{ subGenerating ? '生成中…' : '批量生成' }}</button>
       </div>
       <div class="sub-tabs">
         <div class="sub-tab-row">

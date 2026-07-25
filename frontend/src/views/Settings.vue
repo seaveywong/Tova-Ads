@@ -263,8 +263,8 @@ const runRetentionNow = async () => {
       <button class="btn primary" :disabled="acctSaving" @click="saveEmail">保存用户名</button>
       <div class="acct-sep"></div>
       <div class="form-l"><label>旧密码</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" placeholder="当前密码" /></div>
-      <div class="form-l"><label>新密码</label><el-input v-model="pwdForm.new" type="password" show-password class="ep-input" placeholder="至少 8 位" /></div>
-      <div class="form-l"><label>确认</label><el-input v-model="pwdForm.confirm" type="password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? '两次不一致' : '再次输入新密码'" /></div>
+      <div class="form-l"><label>新密码</label><el-input v-model="pwdForm.new" type="password" autocomplete="new-password" show-password class="ep-input" placeholder="至少 8 位" /></div>
+      <div class="form-l"><label>确认</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? '两次不一致' : '再次输入新密码'" /></div>
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">修改密码</button>
     </div>
 
