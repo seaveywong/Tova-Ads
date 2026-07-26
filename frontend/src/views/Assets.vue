@@ -13,6 +13,11 @@ const fSearch = ref('')
 const uploadOpen = ref(false)
 const uploadFiles = ref([])  // [{file, name, tags, progress, status}]
 const uploadSaving = ref(false)
+// 预览大图/视频
+const previewAsset = ref(null)
+const openPreview = (a) => { previewAsset.value = a }
+const closePreview = () => { previewAsset.value = null }
+
 // 重命名 inline
 const editingId = ref(0)
 const editingName = ref('')
@@ -166,7 +171,7 @@ const fmtDuration = (sec) => {
     <!-- 网格 -->
     <div class="grid" v-loading="loading">
       <div v-for="a in assets" :key="a.id" class="card">
-        <div class="thumb-wrap">
+        <div class="thumb-wrap" @click="openPreview(a)" style="cursor:pointer">
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
@@ -226,6 +231,20 @@ const fmtDuration = (sec) => {
         <button class="btn primary" :disabled="uploadSaving || !uploadFiles.length" @click="submitUpload">{{ uploadSaving ? '上传中…' : `上传 ${uploadFiles.length} 个` }}</button>
       </template>
     </el-drawer>
+
+    <!-- 预览弹窗 -->
+    <el-dialog v-model="previewAsset" :title="previewAsset?.name" width="800px" @close="closePreview" append-to-body>
+      <div v-if="previewAsset" style="text-align:center">
+        <img v-if="previewAsset.type === 'image'" :src="previewAsset.public_url" style="max-width:100%;max-height:70vh;border-radius:8px" />
+        <video v-else-if="previewAsset.type === 'video'" :src="previewAsset.public_url" controls style="max-width:100%;max-height:70vh;border-radius:8px" />
+        <div style="margin-top:10px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <span class="meta-info">{{ previewAsset.type === 'video' ? '视频' : '图片' }}</span>
+          <span v-if="previewAsset.file_size" class="meta-info">{{ fmtSize(previewAsset.file_size) }}</span>
+          <span v-if="previewAsset.width" class="meta-info">{{ previewAsset.width }}×{{ previewAsset.height }}</span>
+          <span class="meta-info">#{{ previewAsset.id }}</span>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -289,4 +308,5 @@ const fmtDuration = (sec) => {
 .upload-status.done { color: var(--success); }
 .upload-status.fail { color: var(--error); }
 .upload-status.uploading { color: var(--ac); }
+.meta-info { font-size: 12px; color: var(--t3); }
 </style>
