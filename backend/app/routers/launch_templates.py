@@ -302,6 +302,52 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
         return None
 
 
+def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) -> str:
+    """没选表单模板时，从素材 AI 文案自动生成 Instant Form + 建到 FB。返回 form_id。"""
+    from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
+    from ..core.ai_client import AiClient, AiError
+    ai = AiClient()
+    if not ai.is_configured():
+        return ""
+    ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+    headlines = ai_copy.get("headlines", [])
+    bodies = ai_copy.get("bodies", [])
+    sys_msg = "你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。严格只返回 JSON。"
+    prompt = (
+        f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n\n"
+        "生成 Instant Form 配置 JSON：\n"
+        '{"form_title":"表单标题","description":"表单说明",'
+        '"custom_questions":[{"key":"q1","label":"问题","placeholder":"提示"}],'
+        '"extra_contact_fields":["EMAIL"],"thank_you_title":"感谢标题","thank_you_body":"感谢正文"}\n'
+        "生成 2-3 个有意义的自定义问题。follow_up_url 不用填。"
+    )
+    data = ai.chat_json([{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+                        temperature=0.7, max_tokens=2048)
+    payload = build_lead_form_payload(
+        form_title=data.get("form_title", asset.name or "Lead Form"),
+        privacy_url="https://tovaads.com/privacy",
+        locale="en_US", target_countries=[], description=data.get("description", ""),
+        custom_questions=data.get("custom_questions", []),
+        extra_contact_fields=data.get("extra_contact_fields", ["EMAIL"]),
+        thank_you_title=data.get("thank_you_title", ""),
+        thank_you_body=data.get("thank_you_body", ""),
+        thank_you_button_text="Visit Website" if landing_url else "",
+        thank_you_website_url=landing_url,
+        follow_up_url=landing_url,
+        name_prefix="AI",
+    )
+    try:
+        result = fb.post(f"{page_id}/leadgen_forms", payload)
+        form_id = result.get("id")
+        if not form_id:
+            safe = lead_form_safe_payload(payload)
+            result = fb.post(f"{page_id}/leadgen_forms", safe)
+            form_id = result.get("id")
+        return form_id or ""
+    except Exception:
+        return ""
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -338,6 +384,23 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 page_id = item.page_id or tpl.page_id
                 pixel_id = item.pixel_id or tpl.pixel_id
                 daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+                # 没选表单模板 → AI 从素材自动生成表单 + 建到 FB（LEADS 目标）
+                lead_form_id = tpl.lead_form_id or ""
+                if not lead_form_id and tpl.objective == "OUTCOME_LEADS" and page_id and asset:
+                    try:
+                        lead_form_id = _ai_auto_create_form(fb, sdb, asset, page_id, tpl.landing_url or "")
+                    except Exception:
+                        pass  # AI 生成/建表单失败不阻断主流程（FB 会用默认表单或报错）
+                # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）
+                message_template = tpl.message_template or ""
+                if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT" and asset:
+                    try:
+                        ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                        bodies = ai_copy.get("bodies", [])
+                        if bodies:
+                            message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
+                    except Exception:
+                        pass
                 r = deploy_one_account(
                     fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
@@ -349,7 +412,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                     destination_type_override=tpl.destination_type or "",
                     advanced_config=advanced,
-                    lead_form_id=tpl.lead_form_id or "", message_template=tpl.message_template or "",
+                    lead_form_id=lead_form_id, message_template=message_template,
                 )
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.status = "success"; item.error = None
