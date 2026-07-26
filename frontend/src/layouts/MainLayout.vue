@@ -17,7 +17,7 @@ const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
 
 // 导航 → 所需权限（同 router/ROUTE_PERMS）
 const NAV_PERMS = {
-  dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'], 'launch-templates': ['ads.create'],
+  dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'], 'launch-templates': ['ads.create'], 'form-templates': ['ads.create'],
   landing: ['landing.manage'], guard: ['rules.read'],
   settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'], assets: ['assets.manage'],
 }
@@ -31,6 +31,7 @@ const allNavGroups = [
     { name: 'ads', label: '广告账户', icon: 'Promotion' },
     { name: 'ad-manager', label: '广告管理器', icon: 'Operation' },
     { name: 'launch-templates', label: '投放模板', icon: 'Aim' },
+    { name: 'form-templates', label: '表单模板', icon: 'Document' },
     { name: 'assets', label: '素材库', icon: 'Picture' },
   ]},
   { title: '自动化', items: [
