@@ -50,6 +50,21 @@ const OBJECTIVES = [
 const OPT_GOALS = ['LINK_CLICKS','LANDING_PAGE_VIEWS','REACH','IMPRESSIONS','OFFSITE_CONVERSIONS','LEAD_GENERATION','PAGE_LIKES','POST_ENGAGEMENT','CONVERSATIONS','THRUPLAY','AP_INSTALLS','VALUE']
 const BILLING_EVENTS = ['IMPRESSIONS','LINK_CLICKS','APP_INSTALLS','PAGE_LIKES','POST_ENGAGEMENT','THRUPLAY']
 const DEST_TYPES = ['WEBSITE','ON_AD','ON_PAGE','MESSENGER','APP','WHATSAPP','INSTAGRAM_DIRECT']
+// 转化目标（按 objective 联动）—— FB custom_event_type 枚举
+const CONV_GOALS = {
+  OUTCOME_SALES: ['Purchase','AddToCart','InitiateCheckout','AddPaymentInfo','CompleteRegistration','Lead','Subscribe','Contact','StartTrial','Search'],
+  OUTCOME_LEADS: ['Lead','CompleteRegistration','Contact','Subscribe','Search','StartTrial','Purchase'],
+  OUTCOME_TRAFFIC: [],  // 流量不需要转化目标
+  OUTCOME_ENGAGEMENT: [],  // 互动类看 optimization_goal
+  OUTCOME_AWARENESS: [],
+  OUTCOME_APP_PROMOTION: ['APP_INSTALLS','LEVEL_ACHIEVED','ACHIEVEMENT_UNLOCKED','SPENT_CREDITS'],
+}
+const convGoalsForObjective = computed(() => CONV_GOALS[form.value.objective] || [])
+// 版位选项
+const PLATFORMS = [
+  { v: 'facebook', l: 'Facebook' }, { v: 'instagram', l: 'Instagram' },
+  { v: 'messenger', l: 'Messenger' }, { v: 'audience_network', l: 'Audience Network' },
+]
 const BID_STRATEGIES = [
   { v: 'LOWEST_COST_WITHOUT_CAP', l: '最低成本（无上限）' },
   { v: 'LOWEST_COST_WITH_BID_CAP', l: '最低成本（出价上限）' },
@@ -150,6 +165,8 @@ const blankForm = () => ({
   asset_id: null, headline: '', body: '',
   page_id: '', pixel_id: '', landing_url: '', landing_page_id: null,
   cta_type: 'LEARN_MORE', subcode_slug: '', ad_language: '',
+  message_template: '', lead_form_id: '',
+  manual_placement: false, placement_platforms: [],
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
 const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
@@ -195,6 +212,12 @@ const addInterest = (it) => {
 const removeInterest = (i) => form.value.audience_interests.splice(i, 1)
 const clearInterestSearch = () => { interestResults.value = []; interestQ.value = '' }
 const isInterestAdded = (id) => form.value.audience_interests.some(x => x.id === String(id))
+const togglePlatform = (v) => {
+  const arr = form.value.placement_platforms || []
+  const i = arr.indexOf(v)
+  if (i >= 0) arr.splice(i, 1); else arr.push(v)
+  form.value.placement_platforms = [...arr]
+}
 const fmtSize = (n) => { if (!n) return ''; if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return Math.floor(n/1e3)+'K'; return String(n) }
 const importAiInterests = async () => {
   if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning('该素材无 AI 兴趣词')
@@ -230,8 +253,18 @@ const saveTpl = async () => {
       page_id: form.value.page_id, pixel_id: form.value.pixel_id,
       landing_url: form.value.landing_url, cta_type: form.value.cta_type,
       subcode_slug: form.value.subcode_slug, ad_language: form.value.ad_language,
+      message_template: form.value.message_template, lead_form_id: form.value.lead_form_id,
       beneficiary: form.value.beneficiary, payer: form.value.payer,
     }
+    // 版位设置合并进 advanced_config（targeting.publisher_platforms）
+    try {
+      let adv = body.advanced_config ? JSON.parse(body.advanced_config) : {}
+      if (form.value.manual_placement && (form.value.placement_platforms||[]).length) {
+        adv.targeting = adv.targeting || {}
+        adv.targeting.publisher_platforms = form.value.placement_platforms
+      }
+      body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
+    } catch {}
     if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success('已保存') }
     else { await POST('/launch-templates', body); ElMessage.success('已创建') }
     editOpen.value = false; await load(); snapshotForm()
@@ -354,7 +387,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       <div v-if="editLevel==='campaign'" class="form">
         <div class="row"><label>模板名</label><input v-model="form.name" class="inp" placeholder="如 US-shopping-夏季" /></div>
         <div class="row"><label>广告目标</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="o.l" /></el-select></div>
-        <div class="row"><label>转化目标 <span class="api-hint">conversion_goal</span></label><input v-model="form.conversion_goal" class="inp" placeholder="如 Purchase（购物/线索用）" /></div>
+        <div class="row" v-if="convGoalsForObjective.length"><label>转化目标 <span class="api-hint">conversion_goal</span></label>
+          <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable placeholder="选择转化事件">
+            <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="g" />
+          </el-select>
+        </div>
         <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">ABO 组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">CBO 系列预算</button></div></div>
         <div class="row"><label>每日预算（美元）</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">部署时按账户本币自动换算</span></div>
         <div class="row"><label>出价策略</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
@@ -406,6 +443,21 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </div>
         </div>
         <hr class="sep" />
+        <hr class="sep" />
+        <div class="sec-title">版位</div>
+        <div class="row"><label>投放版位</label>
+          <div class="seg">
+            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">Advantage+（自动）</button>
+            <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">手动选择</button>
+          </div>
+        </div>
+        <div v-if="form.manual_placement" class="row"><label>平台（不选=全选）</label>
+          <div class="platform-chips">
+            <label v-for="p in PLATFORMS" :key="p.v" class="platform-chip" :class="{on:(form.placement_platforms||[]).includes(p.v)}">
+              <input type="checkbox" :checked="(form.placement_platforms||[]).includes(p.v)" @change="togglePlatform(p.v)" /> {{ p.l }}
+            </label>
+          </div>
+        </div>
         <div class="sec-title">披露（部分国家强制）</div>
         <div class="row"><label>受益人 beneficiary</label><input v-model="form.beneficiary" class="inp" placeholder="EU/泰国/印度/巴西/台湾/澳洲/新加坡等必填" /></div>
         <div class="row"><label>付款人 payer</label><input v-model="form.payer" class="inp" /></div>
@@ -444,6 +496,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="row"><label>落地页 URL</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
         <div class="row"><label>子码 slug</label><input v-model="form.subcode_slug" class="inp" placeholder="留空=不绑子码" /></div>
+        <!-- 消息类（ENGAGEMENT + 消息目标） -->
+        <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
+          <hr class="sep" /><div class="sec-title">消息广告</div>
+          <div class="row"><label>Messenger 欢迎语</label><textarea v-model="form.message_template" class="inp ta" rows="2" placeholder='用户点广告后 Messenger 自动发的欢迎语（纯文本或 JSON）'></textarea></div>
+        </template>
+        <!-- 表单类（LEADS + Instant Forms） -->
+        <template v-if="form.objective === 'OUTCOME_LEADS'">
+          <hr class="sep" /><div class="sec-title">Instant Form（表单）</div>
+          <div class="row"><label>表单 ID</label><input v-model="form.lead_form_id" class="inp" placeholder="FB Instant Form ID（先去 launch/lead-form 创建）" /></div>
+          <div class="hint">在「广告管理器」或其他入口先创建 Instant Form，拿到 ID 填这里。AI 自动生成表单问题待后续。</div>
+        </template>
         <div class="row"><label>广告语言</label>
           <el-select v-model="form.ad_language" filterable clearable placeholder="自动（按素材语言）" style="width:100%" size="small">
             <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
@@ -710,6 +773,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
 /* 部署加载 */
 .config-loading{font-size:12px;color:var(--t3);padding:4px 8px}
+
+/* 版位选择 */
+.platform-chips{display:flex;gap:6px;flex-wrap:wrap}
+.platform-chip{font-size:12px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:4px}
+.platform-chip input{margin:0}
+.platform-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}
+
+/* 兴趣区域加宽 */
+.interest-search{display:flex;gap:6px;align-items:center}
+.interest-search .inp{flex:1}
+.interest-list{display:flex;gap:4px;flex-wrap:wrap;padding:4px 0}
 
 /* #8 summary strip */
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}

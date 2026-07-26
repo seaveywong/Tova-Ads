@@ -86,4 +86,15 @@ router.beforeEach((to, from, next) => {
   next()
 })
 
+// chunk 加载失败（部署后旧 hash 缓存）→ 自动刷新一次拿新 index.html
+router.onError((error) => {
+  if (error.message.includes('Failed to fetch dynamically imported module') ||
+      error.message.includes('Importing a module script failed')) {
+    if (!sessionStorage.getItem('_chunk_reload')) {
+      sessionStorage.setItem('_chunk_reload', '1')
+      window.location.reload()
+    }
+  }
+})
+
 export default router

@@ -43,6 +43,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "page_id": t.page_id or "", "pixel_id": t.pixel_id or "",
         "landing_url": t.landing_url or "", "cta_type": t.cta_type or "",
         "subcode_slug": t.subcode_slug or "", "ad_language": t.ad_language or "",
+        "message_template": t.message_template or "", "lead_form_id": t.lead_form_id or "",
         "beneficiary": t.beneficiary or "", "payer": t.payer or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
@@ -75,6 +76,8 @@ class TemplateIn(BaseModel):
     cta_type: str = ""
     subcode_slug: str = ""
     ad_language: str = ""
+    message_template: str = ""
+    lead_form_id: str = ""
     beneficiary: str = ""
     payer: str = ""
 
@@ -346,6 +349,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                     destination_type_override=tpl.destination_type or "",
                     advanced_config=advanced,
+                    lead_form_id=tpl.lead_form_id or "", message_template=tpl.message_template or "",
                 )
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.status = "success"; item.error = None
@@ -474,6 +478,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                 destination_type_override=tpl.destination_type or "",
                 advanced_config=advanced,
+                lead_form_id=tpl.lead_form_id or "", message_template=tpl.message_template or "",
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.status = "success"; it.error = None
