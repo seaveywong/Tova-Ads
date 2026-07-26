@@ -25,8 +25,34 @@ const closePreview = () => { previewAsset.value = null }
 const editingId = ref(0)
 const editingName = ref('')
 
-// AI 分析中集合（即时反馈，不等列表刷新）
+// AI 分析中集合（即时反馈，不等列表刷新）+ 计时（视频分析可能 30-90s，给用户进度感）
 const analyzingIds = ref(new Set())
+const analyzeElapsed = ref({})  // {id: 秒}
+let _analyzeTimer = null
+const _tickAnalyze = () => {
+  for (const id of analyzingIds.value) {
+    analyzeElapsed.value[id] = (analyzeElapsed.value[id] || 0) + 1
+  }
+}
+const analyzeStageText = (a) => {
+  if (!analyzingIds.value.has(a.id)) return ''
+  const s = analyzeElapsed.value[a.id] || 0
+  const stage = s < 6 ? '抽帧/读图' : s < 20 ? '识别内容' : s < 45 ? '生成文案' : '整理受众'
+  return `分析中 · ${stage} · ${s}s`
+}
+
+// 批量选择
+const selected = ref(new Set())
+const selCount = computed(() => selected.value.size)
+const toggleSel = (id) => {
+  const s = new Set(selected.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  selected.value = s
+}
+const selAll = () => {
+  selected.value = new Set(assets.value.filter(a => a.status === 'active').map(a => a.id))
+}
+const clearSel = () => { selected.value = new Set() }
 
 // AI 选项（用途/深度/风格，从后端拉）+ 当前选择
 const aiOpts = ref({ purposes: [], depths: [], styles: [] })
@@ -165,6 +191,8 @@ const editTags = async (a) => {
 // AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
 const analyze = async (a) => {
   analyzingIds.value.add(a.id)
+  analyzeElapsed.value[a.id] = 0
+  if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
   // 自定义用途（不在已知 13 里）→ 拼 custom:xxx
   const purp = aiPurpose.value && !PURPOSE_KEYS.has(aiPurpose.value)
     ? 'custom:' + aiPurpose.value
@@ -185,7 +213,62 @@ const analyze = async (a) => {
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
   } finally {
     analyzingIds.value.delete(a.id)
+    delete analyzeElapsed.value[a.id]
+    if (analyzingIds.value.size === 0 && _analyzeTimer) { clearInterval(_analyzeTimer); _analyzeTimer = null }
   }
+}
+
+// 批量操作
+const batchAnalyzing = ref(false)
+const batchAnalyze = async () => {
+  if (!selCount.value) return
+  if (analyzingIds.value.size > 0) return ElMessage.warning('有素材正在分析中')
+  batchAnalyzing.value = true
+  const ids = [...selected.value]
+  let ok = 0, fail = 0
+  for (const id of ids) {
+    const a = assets.value.find(x => x.id === id)
+    if (a) await analyze(a).then(() => { ok++ }).catch(() => { fail++ })
+  }
+  batchAnalyzing.value = false
+  if (fail) ElMessage.warning(`完成：成功 ${ok}，失败 ${fail}`)
+  else ElMessage.success(`已批量分析 ${ok} 个`)
+}
+const batchDelete = async () => {
+  if (!selCount.value) return
+  const ids = [...selected.value]
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 个素材？\n服务器文件 + 记录一起删（不可恢复）。`, '批量硬删',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' })
+    let ok = 0, fail = 0
+    for (const id of ids) {
+      try { await DELETE('/assets/' + id); ok++ } catch { fail++ }
+    }
+    ElMessage.success(`已删除 ${ok} 个` + (fail ? `，失败 ${fail}` : ''))
+    clearSel()
+    await load()
+  } catch (e) { if (e === 'cancel') return; ElMessage.error('删除失败') }
+}
+const batchTagOpen = ref(false)
+const batchTagStr = ref('')
+const batchTagSaving = ref(false)
+const openBatchTag = () => { if (!selCount.value) return; batchTagStr.value = ''; batchTagOpen.value = true }
+const saveBatchTag = async () => {
+  const add = batchTagStr.value.split(',').map(t => t.trim()).filter(Boolean)
+  if (!add.length) return ElMessage.warning('填标签')
+  batchTagSaving.value = true
+  let ok = 0, fail = 0
+  for (const id of [...selected.value]) {
+    try {
+      const a = assets.value.find(x => x.id === id)
+      const merged = [...new Set([...(a?.tags || []), ...add])]  // 合并去重
+      await PUT('/assets/' + id, { tags: merged }); ok++
+    } catch { fail++ }
+  }
+  batchTagSaving.value = false
+  ElMessage.success(`已给 ${ok} 个打标签` + (fail ? `，失败 ${fail}` : ''))
+  batchTagOpen.value = false
+  await load()
 }
 
 // 编辑弹窗：headlines/bodies 增删
@@ -326,15 +409,27 @@ const countryLabel = (code) => {
       </div>
     </div>
 
+    <!-- 批量操作栏（有选中时显示） -->
+    <div v-if="selCount" class="batch-bar">
+      <span class="batch-count">已选 {{ selCount }} 个</span>
+      <button class="btn" :disabled="analyzingIds.size > 0 || batchAnalyzing" @click="batchAnalyze">{{ batchAnalyzing ? '分析中…' : '批量AI分析' }}</button>
+      <button class="btn" @click="openBatchTag">批量打标签</button>
+      <button class="btn danger" @click="batchDelete">批量删除</button>
+      <button class="btn ghost" @click="clearSel">取消选择</button>
+    </div>
+
     <!-- 网格 -->
     <div class="grid" v-loading="loading">
-      <div v-for="a in assets" :key="a.id" class="card">
+      <div v-for="a in assets" :key="a.id" class="card" :class="{ selected: selected.has(a.id) }">
+        <!-- 选择 checkbox（左上，hover 或已选时显） -->
+        <label class="card-check" :class="{ on: selected.has(a.id) }" @click.stop title="选中">
+          <input type="checkbox" :checked="selected.has(a.id)" @change="toggleSel(a.id)" />
+        </label>
         <div class="thumb-wrap" @click="openPreview(a)" style="cursor:pointer">
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
           <span class="type-badge">{{ a.type === 'video' ? '视频' : '图片' }}</span>
-          <span v-if="a.country" class="country-badge" :title="'目标投放：' + countryLabel(a.country)">{{ a.country }}</span>
         </div>
         <div class="card-body">
           <!-- 名称（双击编辑） -->
@@ -342,6 +437,10 @@ const countryLabel = (code) => {
             <input v-model="editingName" class="name-input" @keyup.enter="saveRename(a)" @blur="saveRename(a)" />
           </div>
           <div v-else class="name" :title="a.name" @dblclick="startRename(a)">{{ a.name }}</div>
+          <!-- AI 文案预览（首条 headline） -->
+          <div v-if="a.ai_status === 'done' && (a.ai_copy?.headlines || [])[0]" class="copy-teaser" :title="(a.ai_copy.headlines || []).join(' / ')">{{ (a.ai_copy.headlines || [])[0] }}</div>
+          <!-- 分析失败原因 -->
+          <div v-if="a.ai_status === 'failed'" class="ai-failed" :title="a.ai_error">⚠ 分析失败 · {{ (a.ai_error || '点 AI分析 重试').slice(0, 30) }}</div>
           <!-- 标签 -->
           <div class="tag-row">
             <span v-for="t in (a.tags || []).slice(0,2)" :key="t" class="tag-chip">{{ t }}</span>
@@ -353,11 +452,15 @@ const countryLabel = (code) => {
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
             <span v-if="a.width" class="meta-dim">{{ a.width }}×{{ a.height }}</span>
             <span class="meta-id">#{{ a.id }}</span>
+            <select class="meta-country" :value="a.country || ''" @click.stop @change="changeCountry(a, $event.target.value)" :title="'目标投放国家（驱动 AI 文案语言）'">
+              <option value="">🌐 未指定</option>
+              <option v-for="c in COUNTRIES" :key="c.code" :value="c.code">{{ countryLabel(c.code) }}</option>
+            </select>
           </div>
         </div>
         <div class="card-ops">
           <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
-            {{ analyzingIds.has(a.id) ? '分析中…' : 'AI分析' }}
+            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : 'AI分析' }}
           </button>
           <button class="op" @click="openEdit(a)">文案/受众</button>
           <button class="op" @click="startRename(a)">重命名</button>
@@ -366,6 +469,16 @@ const countryLabel = (code) => {
       </div>
       <div v-if="!assets.length && !loading" class="empty">暂无素材，点「+ 上传素材」添加。</div>
     </div>
+
+    <!-- 批量打标签弹窗 -->
+    <el-dialog v-model="batchTagOpen" title="批量打标签" width="420px" append-to-body>
+      <div class="edit-tip">给选中的 {{ selCount }} 个素材加上以下标签（逗号分隔，会与已有标签合并去重）。</div>
+      <input v-model="batchTagStr" class="edit-input" placeholder="如 shopping, us, 测试" style="margin-top:8px" />
+      <template #footer>
+        <button class="btn" @click="batchTagOpen = false">取消</button>
+        <button class="btn primary" :disabled="batchTagSaving" @click="saveBatchTag">{{ batchTagSaving ? '保存中…' : '保存' }}</button>
+      </template>
+    </el-dialog>
 
     <!-- 上传抽屉 -->
     <el-drawer v-model="uploadOpen" title="上传素材" direction="rtl" size="520px" :destroy-on-close="true">
@@ -493,6 +606,29 @@ const countryLabel = (code) => {
 .btn { padding: 7px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t1); border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
 .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
 .btn:disabled { opacity: .5; }
+.btn.danger { color: var(--error); border-color: rgba(255,90,90,.4); }
+.btn.danger:hover { background: rgba(255,90,90,.12); }
+.btn.ghost { background: transparent; color: var(--t3); }
+
+/* 批量栏 */
+.batch-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(10,132,255,.08); border: 1px solid rgba(10,132,255,.3); border-radius: 8px; flex-wrap: wrap; }
+.batch-count { font-size: 13px; color: var(--ac); font-weight: 600; margin-right: 6px; }
+
+/* 卡片选择 checkbox */
+.card { position: relative; }
+.card.selected { border-color: var(--ac); box-shadow: 0 0 0 2px rgba(10,132,255,.25); }
+.card-check { position: absolute; top: 6px; left: 6px; z-index: 2; width: 18px; height: 18px; border-radius: 4px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s; cursor: pointer; }
+.card:hover .card-check, .card-check.on { opacity: 1; }
+.card-check.on { background: var(--ac); border-color: var(--ac); }
+.card-check input { appearance: none; width: 12px; height: 12px; margin: 0; cursor: pointer; }
+.card-check.on::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; position: absolute; }
+
+/* 卡片文案预览/失败 */
+.copy-teaser { font-size: 11px; color: var(--t3); line-height: 1.4; margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-failed { font-size: 11px; color: var(--error); margin-top: 3px; cursor: help; }
+
+/* 卡片国家快捷选 */
+.meta-country { font-size: 10px; color: var(--t3); background: transparent; border: 1px solid var(--bd); border-radius: 4px; padding: 1px 4px; cursor: pointer; font-family: inherit; max-width: 90px; }
 
 /* AI 参数条 */
 .ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; }
