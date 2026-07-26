@@ -263,10 +263,10 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
     filepath = os.path.join(ASSET_DIR, a.storage_key)
     if not os.path.exists(filepath):
         raise HTTPException(404, "素材文件丢失")
-    # 先置 analyzing（前端可即时反馈）；注意：失败时只在此处之后的 except 里回写 failed
+    # 置 analyzing（只设内存，不 commit）——同一事务内最后统一 commit。
+    # ⚠ 不能中途 db.commit()：SET LOCAL app.tenant_id 随事务结束清掉，后续 UPDATE 会被 RLS 过滤成 0 行。
     a.ai_status = "analyzing"
     a.ai_error = None
-    db.commit()
     try:
         if a.type == "image":
             b64 = file_as_b64(filepath)
