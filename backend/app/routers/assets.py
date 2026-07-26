@@ -16,21 +16,14 @@ from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.ai_client import chat_with_images_json, vision_client, AiError
 from ..core.media_util import image_dimensions, video_duration, extract_keyframes, file_as_b64, is_video
+from ..core.ai_purposes import (AI_PURPOSES, AI_LANGUAGE_NAMES, ANALYSIS_DEPTH_CONFIG,
+                                STYLE_GUIDES, build_analysis_prompt)
 from ..models.launch import Asset
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 ASSET_DIR = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
 PUBLIC_BASE = os.environ.get("PUBLIC_BASE_URL", "https://api.tovaads.com")
-
-# 地区→语言（与 ai.py REGION_LANG 一致；AI 文案命中目标投放地区）
-REGION_LANG = {
-    "TW": "繁體中文", "HK": "繁體中文", "MO": "繁體中文",
-    "CN": "简体中文", "SG": "简体中文",
-    "US": "English", "GB": "English", "AU": "English", "CA": "English", "PH": "English", "MY": "English", "IN": "English",
-    "VN": "Tiếng Việt", "TH": "ภาษาไทย", "ID": "Bahasa Indonesia", "JP": "日本語", "KR": "한국어",
-    "ES": "Español", "MX": "Español", "BR": "Português", "DE": "Deutsch", "FR": "Français", "RU": "Русский", "AE": "العربية", "SA": "العربية",
-}
 
 
 def _parse_json_field(raw, default):
@@ -79,8 +72,10 @@ def _asset_dict(a: Asset) -> dict:
         "country": a.country or "",
         "ai_status": a.ai_status or "none",
         "ai_error": a.ai_error or "",
-        "ai_copy": _parse_json_field(a.ai_copy_json, {"primary_text": "", "headline": "", "description": ""}),
-        "ai_audience": _parse_json_field(a.ai_audience_json, {"interests": [], "countries": []}),
+        "ai_purpose": a.ai_purpose or "",
+        "ai_language": a.ai_language or "",
+        "ai_copy": _parse_json_field(a.ai_copy_json, {"analysis": "", "headlines": [], "bodies": []}),
+        "ai_audience": _parse_json_field(a.ai_audience_json, {"interests": [], "audience_note": "", "countries": []}),
         "analyzed_at": str(a.analyzed_at) if a.analyzed_at else "",
         "created_at": str(a.created_at) if a.created_at else "",
     }
@@ -246,28 +241,55 @@ def fb_upload_image(aid: int, body: FbUploadIn,
     return {"id": aid, "fb_image_hash": result.get("hash"), "fb_url": result.get("url")}
 
 
+@router.get("/ai-purposes")
+def get_ai_purposes(user: CurrentUser = Depends(require_permission("assets.manage"))):
+    """返回 AI 分析的用途/深度/风格选项（前端下拉用）。"""
+    return {
+        "purposes": AI_PURPOSES,
+        "depths": [
+            {"value": k, "label": v["label"], "copy_count": v["copy_count"], "video_frames": v["video_frames"]}
+            for k, v in ANALYSIS_DEPTH_CONFIG.items()
+        ],
+        "styles": [
+            {"value": "conservative", "label": "保守", "hint": "温和安全，合规优先"},
+            {"value": "standard", "label": "标准", "hint": "自然有感染力，平衡"},
+            {"value": "aggressive", "label": "激进", "hint": "⚠ 放宽合规，封号风险"},
+        ],
+    }
+
+
+class AnalyzeIn(BaseModel):
+    purpose: str = "general"   # 13 之一 或 custom:xxx
+    depth: str = "standard"    # fast/standard/deep
+    style: str = "standard"    # conservative/standard/aggressive
+    language: str = ""         # 空 → 按 country 推导
+
+
 @router.post("/{aid}/analyze")
-def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("assets.manage")),
+def analyze_asset(aid: int, body: AnalyzeIn,
+                  user: CurrentUser = Depends(require_permission("assets.manage")),
                   db: Session = Depends(get_db)):
-    """AI 分析素材 → 生成广告文案 + 受众建议。
+    """AI 分析素材 → 用途驱动生成富文案 + 受众建议（analysis/headlines[]/bodies[]/interests[]/audience_note）。
 
     图片：读文件 base64 → 视觉模型看图。
-    视频：ffmpeg 抽 3 关键帧（10%/50%/90%）→ 视觉模型多图看。
-    country 驱动文案语言（REGION_LANG）；视觉用独立 ai_vision_* 配置（Gemini）。
+    视频：ffmpeg 抽关键帧（深度驱动帧数）→ 视觉模型多图看。
+    purpose 选 13 用途之一（或 custom:xxx），depth/style 控制条数与合规松紧。
     """
     a = db.query(Asset).filter(Asset.id == aid, Asset.tenant_id == user.tenant_id).first()
     if not a:
         raise HTTPException(404, "素材不存在")
     if not vision_client().is_configured():
-        raise HTTPException(400, "视觉 AI 未配置（缺 ai_vision_api_key）")
+        raise HTTPException(400, "视觉 AI 未配置（缺 ai_vision_api_key，去 设置→AI配置→视觉模型 配）")
     filepath = os.path.join(ASSET_DIR, a.storage_key)
     if not os.path.exists(filepath):
         raise HTTPException(404, "素材文件丢失")
+    depth_cfg = ANALYSIS_DEPTH_CONFIG.get(body.depth, ANALYSIS_DEPTH_CONFIG["standard"])
     # 置 analyzing（只设内存，不 commit）——同一事务内最后统一 commit。
     # ⚠ 不能中途 db.commit()：SET LOCAL app.tenant_id 随事务结束清掉，后续 UPDATE 会被 RLS 过滤成 0 行。
     a.ai_status = "analyzing"
     a.ai_error = None
     try:
+        frame_count = depth_cfg["video_frames"] if a.type == "video" else 1
         if a.type == "image":
             b64 = file_as_b64(filepath)
             if not b64:
@@ -276,25 +298,21 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
             images = [b64]
             medium = "图片"
         else:  # video
-            frames = extract_keyframes(filepath, 3)
+            frames = extract_keyframes(filepath, frame_count)
             if not frames:
                 raise AiError("视频抽帧失败（服务器未装 ffmpeg 或文件损坏）")
             images = [base64.b64encode(f).decode("ascii") for f in frames]
             mime = "image/jpeg"
             medium = f"视频（{len(frames)} 个关键帧）"
-        lang = REGION_LANG.get((a.country or "").upper(), "English")
-        sys_msg = ("你是 FB 广告素材分析专家。看图/视频关键帧 → 推断产品与卖点 → 生成 FB 广告文案 + 受众建议。"
-                   "符合 FB 合规（禁绝对化/医疗承诺词）。严格只返回 JSON，不要任何解释或 markdown。")
-        prompt = (
-            f"这是广告{medium}。目标投放国家：{a.country or '未指定'}，文案语言：{lang}。\n"
-            "分析素材内容，返回 JSON：\n"
-            '{"primary_text":"广告正文(80字内,吸引点击)","headline":"标题(30字内)",'
-            '"description":"描述(30字内)","interests":["兴趣标签1","兴趣标签2","兴趣标签3"],'
-            '"countries":["国家代码"]}。\n'
-            f"countries 用 ISO 国家代码（如 {a.country} 若已知），interests 给 3-6 个相关兴趣。"
+        prompt, lang_code = build_analysis_prompt(
+            purpose=body.purpose, depth=body.depth, style=body.style,
+            language=body.language, country=a.country or "",
+            video_frame_count=frame_count if a.type == "video" else 0,
         )
-        data = chat_with_images_json(prompt, images, mime=mime, system_prompt=sys_msg)
-        # 模型可能把空字段返成 "None"/"null" 字符串或单值，归一成干净的 list[str]
+        data = chat_with_images_json(prompt, images, mime=mime,
+                                     max_tokens=depth_cfg["max_tokens"],
+                                     temperature=depth_cfg["temperature"])
+        # 归一：模型可能把空字段返成 "None"/"null" 字符串或单值
         def _to_str_list(v):
             if isinstance(v, str):
                 v = [v]
@@ -302,19 +320,20 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
                 return []
             return [str(x).strip() for x in v if str(x).strip()
                     and str(x).strip().lower() not in ("none", "null", "n/a", "未指定")]
-        # 拆成 copy / audience 两组
         copy_obj = {
-            "primary_text": str(data.get("primary_text", "")).strip(),
-            "headline": str(data.get("headline", "")).strip(),
-            "description": str(data.get("description", "")).strip(),
+            "analysis": str(data.get("analysis", "")).strip(),
+            "headlines": _to_str_list(data.get("headlines")),
+            "bodies": _to_str_list(data.get("bodies")),
         }
-        countries = _to_str_list(data.get("countries")) or ([a.country] if a.country else [])
         aud_obj = {
             "interests": _to_str_list(data.get("interests")),
-            "countries": countries,
+            "audience_note": str(data.get("audience_note", "")).strip(),
+            "countries": [a.country] if a.country else [],
         }
         a.ai_copy_json = json.dumps(copy_obj, ensure_ascii=False)
         a.ai_audience_json = json.dumps(aud_obj, ensure_ascii=False)
+        a.ai_purpose = body.purpose
+        a.ai_language = lang_code
         a.ai_status = "done"
         a.ai_error = None
         a.analyzed_at = datetime.now(timezone.utc)
@@ -322,8 +341,9 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
         write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
                   actor_user_id=user.id, target_type="asset", target_id=str(aid),
                   action_type="ai_analyze", source="ai_vision", result="success",
-                  metadata={"medium": medium, "country": a.country})
-        out = _asset_dict(a)  # 先序列化（commit 后 ORM 对象仍可用，但提前取避免后续异常回退 done→failed）
+                  metadata={"medium": medium, "country": a.country,
+                            "purpose": body.purpose, "depth": body.depth, "style": body.style})
+        out = _asset_dict(a)  # 先序列化（避免后续异常回退 done→failed）
         db.commit()
         return out
     except AiError as e:
@@ -337,11 +357,12 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
 
 
 class AssetAiIn(BaseModel):
-    """手动编辑 AI 字段（AI 开关关时用户自己填文案/受众）。"""
-    primary_text: str = ""
-    headline: str = ""
-    description: str = ""
+    """手动编辑 AI 富文案（AI 开关关时用户自己填，或修改 AI 结果）。"""
+    analysis: str = ""
+    headlines: list = []
+    bodies: list = []
     interests: list = []
+    audience_note: str = ""
     countries: list = []
 
 
@@ -349,17 +370,18 @@ class AssetAiIn(BaseModel):
 def update_asset_ai(aid: int, body: AssetAiIn,
                     user: CurrentUser = Depends(require_permission("assets.manage")),
                     db: Session = Depends(get_db)):
-    """手动编辑素材的 AI 文案 + 受众（不走视觉模型；用户键入）。"""
+    """手动编辑素材的 AI 富文案 + 受众（不走视觉模型；用户键入）。"""
     a = db.query(Asset).filter(Asset.id == aid, Asset.tenant_id == user.tenant_id).first()
     if not a:
         raise HTTPException(404, "素材不存在")
     a.ai_copy_json = json.dumps({
-        "primary_text": body.primary_text.strip(),
-        "headline": body.headline.strip(),
-        "description": body.description.strip(),
+        "analysis": body.analysis.strip(),
+        "headlines": body.headlines or [],
+        "bodies": body.bodies or [],
     }, ensure_ascii=False)
     a.ai_audience_json = json.dumps({
         "interests": body.interests or [],
+        "audience_note": body.audience_note.strip(),
         "countries": body.countries or [],
     }, ensure_ascii=False)
     if a.ai_status != "done":

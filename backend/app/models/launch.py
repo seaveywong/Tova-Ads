@@ -28,6 +28,8 @@ class Asset(Base):
     ai_status = Column(Text, default="none")  # none/analyzing/done/failed
     ai_error = Column(Text)          # 失败原因（ai_status=failed 时）
     analyzed_at = Column(DateTime(timezone=True))
+    ai_purpose = Column(Text)        # 分析用的用途（13 之一 或 custom:xxx）
+    ai_language = Column(Text)       # 分析输出语言代码（en/zh/...）
     is_manual = Column(Boolean, default=False)
     manual_copy = Column(Text)
     category = Column(Text, default="常规")
