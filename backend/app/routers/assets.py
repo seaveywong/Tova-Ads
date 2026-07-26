@@ -294,15 +294,24 @@ def analyze_asset(aid: int, user: CurrentUser = Depends(require_permission("asse
             f"countries 用 ISO 国家代码（如 {a.country} 若已知），interests 给 3-6 个相关兴趣。"
         )
         data = chat_with_images_json(prompt, images, mime=mime, system_prompt=sys_msg)
+        # 模型可能把空字段返成 "None"/"null" 字符串或单值，归一成干净的 list[str]
+        def _to_str_list(v):
+            if isinstance(v, str):
+                v = [v]
+            if not isinstance(v, list):
+                return []
+            return [str(x).strip() for x in v if str(x).strip()
+                    and str(x).strip().lower() not in ("none", "null", "n/a", "未指定")]
         # 拆成 copy / audience 两组
         copy_obj = {
             "primary_text": str(data.get("primary_text", "")).strip(),
             "headline": str(data.get("headline", "")).strip(),
             "description": str(data.get("description", "")).strip(),
         }
+        countries = _to_str_list(data.get("countries")) or ([a.country] if a.country else [])
         aud_obj = {
-            "interests": data.get("interests") or [],
-            "countries": data.get("countries") or ([a.country] if a.country else []),
+            "interests": _to_str_list(data.get("interests")),
+            "countries": countries,
         }
         a.ai_copy_json = json.dumps(copy_obj, ensure_ascii=False)
         a.ai_audience_json = json.dumps(aud_obj, ensure_ascii=False)
