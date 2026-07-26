@@ -151,11 +151,12 @@ const searchInterests = async () => {
 }
 const addInterest = (it) => {
   if (!form.value.audience_interests.find(x => x.id === String(it.id))) form.value.audience_interests.push({ id: String(it.id), name: it.name })
-  interestResults.value = []  // 选完清结果
-  interestQ.value = ''
+  // 不清结果——用户可能要连续选多个相关兴趣
 }
 const removeInterest = (i) => form.value.audience_interests.splice(i, 1)
 const clearInterestSearch = () => { interestResults.value = []; interestQ.value = '' }
+const isInterestAdded = (id) => form.value.audience_interests.some(x => x.id === String(id))
+const fmtSize = (n) => { if (!n) return ''; if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return Math.floor(n/1e3)+'K'; return String(n) }
 const importAiInterests = async () => {
   if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning('该素材无 AI 兴趣词')
   let added = 0
@@ -299,7 +300,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       <div v-if="editLevel==='campaign'" class="form">
         <div class="row"><label>模板名</label><input v-model="form.name" class="inp" placeholder="如 US-shopping-夏季" /></div>
         <div class="row"><label>广告目标</label><select v-model="form.objective" class="inp"><option v-for="o in OBJECTIVES" :key="o.v" :value="o.v">{{ o.l }}</option></select></div>
-        <div class="row"><label>转化目标 conversion_goal</label><input v-model="form.conversion_goal" class="inp" placeholder="如 Purchase（购物/线索用）" /></div>
+        <div class="row"><label>转化目标 <span class="api-hint">conversion_goal</span></label><input v-model="form.conversion_goal" class="inp" placeholder="如 Purchase（购物/线索用）" /></div>
         <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">ABO 组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">CBO 系列预算</button></div></div>
         <div class="row"><label>每日预算（美元）</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">部署时按账户本币自动换算</span></div>
         <div class="row"><label>出价策略</label><select v-model="form.bid_strategy" class="inp"><option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v">{{ b.l }}</option></select></div>
@@ -309,9 +310,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
-        <div class="row"><label>优化目标 optimization_goal</label><select v-model="form.optimization_goal" class="inp"><option value="">自动（按目标推）</option><option v-for="g in OPT_GOALS" :key="g" :value="g">{{ g }}</option></select></div>
-        <div class="row"><label>计费事件 billing_event</label><select v-model="form.billing_event" class="inp"><option v-for="b in BILLING_EVENTS" :key="b" :value="b">{{ b }}</option></select></div>
-        <div class="row"><label>转化目的地 destination_type</label><select v-model="form.destination_type" class="inp"><option value="">自动</option><option v-for="d in DEST_TYPES" :key="d" :value="d">{{ d }}</option></select></div>
+        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><select v-model="form.optimization_goal" class="inp"><option value="">自动（按目标推）</option><option v-for="g in OPT_GOALS" :key="g" :value="g">{{ g }}</option></select></div>
+        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><select v-model="form.billing_event" class="inp"><option v-for="b in BILLING_EVENTS" :key="b" :value="b">{{ b }}</option></select></div>
+        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><select v-model="form.destination_type" class="inp"><option value="">自动</option><option v-for="d in DEST_TYPES" :key="d" :value="d">{{ d }}</option></select></div>
         <hr class="sep" />
         <div class="sec-title">受众定向</div>
         <div class="row"><label>国家/地区</label>
@@ -333,9 +334,15 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <button class="btn sm" :disabled="interestSearching" @click="searchInterests">{{ interestSearching ? '…' : '搜索' }}</button>
             <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">从素材AI导入</button>
           </div>
-          <div v-if="interestResults.length" class="search-results">
-            <div class="search-results-head"><span>搜索结果（点击添加）</span><button class="clear-btn" @click="clearInterestSearch">清空 ✕</button></div>
-            <div v-for="r in interestResults" :key="r.id" class="search-item" @click="addInterest(r)"><span>{{ r.name }}</span><span class="sz">{{ r.audience_size ? Math.floor(r.audience_size/1e6)+'M' : '' }}</span><span class="add">+</span></div>
+          <div v-if="interestSearching" class="search-results"><div class="search-loading">搜索中…</div></div>
+          <div v-else-if="interestResults.length" class="search-results">
+            <div class="search-results-head"><span>搜索结果（点击 + 添加，可连续选多个）</span><button class="clear-btn" @click="clearInterestSearch">清空 ✕</button></div>
+            <div v-for="r in interestResults" :key="r.id" :class="['search-item', { added: isInterestAdded(r.id) }]" @click="!isInterestAdded(r.id) && addInterest(r)">
+              <span>{{ r.name }}</span>
+              <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
+              <span class="add" v-if="!isInterestAdded(r.id)">+</span>
+              <span class="added-mark" v-else>✓</span>
+            </div>
           </div>
         </div>
         <div class="row"><label>已选兴趣（{{ form.audience_interests.length }}）</label>
@@ -350,7 +357,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>付款人 payer</label><input v-model="form.payer" class="inp" /></div>
         <hr class="sep" />
         <div class="sec-title">高级（JSON，可选）</div>
-        <div class="row"><label>advanced_config（bid_amount/attribution_spec/placements/dayparting…）</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500}'></textarea></div>
+        <div class="row"><label>高级设置 <span class="api-hint">advanced_config JSON</span></label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500, "attribution_spec":[{"event_type":"CLICK_THROUGH","window_days":7}]}'></textarea><span class="hint">进阶用户可直接填 FB API JSON（bid_amount / attribution_spec / publisher_platforms / dayparting 等），部署时深合并进 payload</span></div>
       </div>
 
       <!-- ③ 广告 -->
@@ -500,6 +507,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .form{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-direction:column;gap:4px}
 .row label{font-size:12px;color:var(--t3);font-weight:500}
+.api-hint{font-size:10px;color:var(--t3);opacity:.6;font-family:'SF Mono',ui-monospace,monospace;font-weight:400}
 .inp{padding:6px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit}
 .inp:focus{border-color:var(--ac);outline:none}
 .inp.ta{resize:vertical}
@@ -522,6 +530,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .search-item{display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:12px;color:var(--t2);cursor:pointer;border-bottom:1px solid var(--bd)}
 .search-item:last-child{border:none}
 .search-item:hover{background:var(--bg3)}
+.search-item.added{opacity:.5;cursor:default}
+.search-loading{padding:12px;text-align:center;color:var(--t3);font-size:12px}
+.added-mark{color:var(--success);font-weight:700}
 .search-item .sz{color:var(--t3);font-size:10px;margin-left:auto}
 .search-item .add{color:var(--ac);font-weight:700}
 .interest-list{display:flex;gap:4px;flex-wrap:wrap}

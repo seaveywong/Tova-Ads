@@ -413,6 +413,7 @@ const countryLabel = (code) => {
     <!-- 批量操作栏（有选中时显示） -->
     <div v-if="selCount" class="batch-bar">
       <span class="batch-count">已选 {{ selCount }} 个</span>
+      <button class="btn ghost" @click="selAll">全选</button>
       <button class="btn" :disabled="analyzingIds.size > 0 || batchAnalyzing" @click="batchAnalyze">{{ batchAnalyzing ? '分析中…' : '批量AI分析' }}</button>
       <button class="btn" @click="openBatchTag">批量打标签</button>
       <button class="btn danger" @click="batchDelete">批量删除</button>
@@ -453,10 +454,7 @@ const countryLabel = (code) => {
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
             <span v-if="a.width" class="meta-dim">{{ a.width }}×{{ a.height }}</span>
             <span class="meta-id">#{{ a.id }}</span>
-            <select class="meta-country" :value="a.country || ''" @click.stop @change="changeCountry(a, $event.target.value)" :title="'目标投放国家（驱动 AI 文案语言）'">
-              <option value="">🌐 未指定</option>
-              <option v-for="c in COUNTRIES" :key="c.code" :value="c.code">{{ countryLabel(c.code) }}</option>
-            </select>
+            <span v-if="a.country" class="meta-country-badge" @click.stop="openEdit(a)" :title="'国家：' + countryLabel(a.country) + '（点改）'">{{ a.country }}</span>
           </div>
         </div>
         <div class="card-ops">
@@ -670,6 +668,7 @@ const countryLabel = (code) => {
 .ai-mark { font-size: 9px; padding: 1px 5px; background: rgba(48,209,88,.15); color: var(--success); border-radius: 4px; font-weight: 600; }
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.meta-country-badge { font-size: 10px; padding: 1px 5px; background: var(--acg); color: var(--ac); border-radius: 3px; cursor: pointer; font-weight: 600; }
 .card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; }
 .op { background: none; border: none; color: var(--t3); font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .op:hover { background: var(--bg3); color: var(--t1); }
