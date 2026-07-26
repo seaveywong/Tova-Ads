@@ -23,25 +23,45 @@ const fAction = ref('')
 const fUser = ref(0)
 const fTrace = ref('')
 const expandedRowIds = ref([])
+const PAGE_SIZE = 50
+const page = ref(1)
+const total = ref(0)
+const dateRange = ref([])  // [YYYY-MM-DD, YYYY-MM-DD]
 
-const buildParams = () => {
+const buildParams = (forCount = false) => {
   const t = tabs.find(x => x.key === tab.value)
-  const p = { ...t.params, limit: 200 }
-  if (fTrace.value.trim()) return { trace_id: fTrace.value.trim(), limit: 200 }
+  const p = { ...t.params }
+  if (fTrace.value.trim()) {
+    p.trace_id = fTrace.value.trim()
+    if (!forCount) { p.limit = 200 }
+    return p
+  }
   if (fAction.value.trim()) p.action_type = fAction.value.trim()
   if (fUser.value) p.actor_user_id = fUser.value
+  if (dateRange.value && dateRange.value.length === 2) {
+    p.date_from = dateRange.value[0]; p.date_to = dateRange.value[1]
+  }
+  if (!forCount) { p.limit = PAGE_SIZE; p.offset = (page.value - 1) * PAGE_SIZE }
   return p
 }
+const totalPages = () => Math.max(1, Math.ceil(total.value / PAGE_SIZE))
 const load = async () => {
   loading.value = true
   expandedRowIds.value = []
-  try { logs.value = await GET('/logs?' + new URLSearchParams(buildParams()).toString()) }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  try {
+    const qs = new URLSearchParams(buildParams()).toString()
+    const qsCount = new URLSearchParams(buildParams(true)).toString()
+    const [rows, cnt] = await Promise.all([GET('/logs?' + qs), GET('/logs/count?' + qsCount)])
+    logs.value = rows
+    total.value = (cnt && cnt.count) || 0
+  } catch (e) { ElMessage.error(e.message || '加载失败') }
   loading.value = false
 }
 const loadActors = async () => { try { actors.value = await GET('/logs/actors') } catch {} }
 onMounted(() => { load(); loadActors() })
-const setTab = (k) => { tab.value = k; fTrace.value = ''; load() }
+const setTab = (k) => { tab.value = k; fTrace.value = ''; page.value = 1; load() }
+const goPage = (n) => { page.value = Math.min(Math.max(1, n), totalPages()); load() }
+const onDateChange = () => { page.value = 1; load() }
 
 // 行内展开 trace（el-table expand）
 const onExpandChange = async (row, expandedRows) => {
@@ -56,7 +76,7 @@ const onExpandChange = async (row, expandedRows) => {
 
 const TYPE_ZH = { user: '用户', system: '系统', sentinel: '哨兵', sync: '同步', warmup: '预热' }
 const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
-const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; load() }
+const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; dateRange.value = []; page.value = 1; load() }
 </script>
 
 <template>
@@ -85,7 +105,20 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
           <span class="flabel">链路</span>
           <input v-model="fTrace" class="input mono" placeholder="trace_id 拉全链路" @keyup.enter="load" />
         </div>
-        <button v-if="fAction || fUser || fTrace" class="clear" @click="resetFilters">清除</button>
+        <div class="filter-item">
+          <span class="flabel">日期</span>
+          <el-date-picker v-model="dateRange" type="daterange" size="small" value-format="YYYY-MM-DD"
+            start-placeholder="开始" end-placeholder="结束" style="width:240px" @change="onDateChange" />
+        </div>
+        <button v-if="fAction || fUser || fTrace || (dateRange && dateRange.length)" class="clear" @click="resetFilters">清除</button>
+      </div>
+
+      <div class="pager">
+        <span class="pager-info">共 {{ total }} 条 · 第 {{ page }} / {{ totalPages() }} 页</span>
+        <div class="pager-ops">
+          <button class="btn" :disabled="page <= 1 || loading" @click="goPage(page - 1)">上一页</button>
+          <button class="btn" :disabled="page >= totalPages() || loading" @click="goPage(page + 1)">下一页</button>
+        </div>
       </div>
 
       <el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
@@ -156,6 +189,9 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .btn{padding:6px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t2);border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit}
 .btn:hover{color:var(--t1);border-color:var(--ac)}
 .filters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.pager{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap}
+.pager-info{font-size:12px;color:var(--t3)}
+.pager-ops{display:flex;gap:6px}
 .filter-item{display:flex;align-items:center;gap:6px}
 .flabel{font-size:11px;color:var(--t3);font-weight:500}
 .input{padding:6px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:7px;color:var(--t1);font-size:12px;font-family:inherit;box-sizing:border-box;min-width:180px;transition:border-color .15s}

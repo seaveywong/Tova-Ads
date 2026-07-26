@@ -189,6 +189,50 @@ def protected_test(user: CurrentUser = Depends(require_permission("ads.read"))):
     }
 
 
+def _apply_log_filters(q, *, actor_type="", actor_user_id=0, action_type="",
+                       target_type="", result="", trace_id="",
+                       date_from="", date_to=""):
+    """日志筛选公共逻辑（/logs 和 /logs/count 共用）。"""
+    from .models.log import ActionLog
+    from datetime import datetime, timezone, timedelta
+    if actor_type:
+        _types = [t.strip() for t in actor_type.split(',') if t.strip()]
+        if _types:
+            q = q.filter(ActionLog.actor_type.in_(_types))
+    if actor_user_id > 0:
+        q = q.filter(ActionLog.actor_user_id == actor_user_id)
+    if action_type:
+        _types = [t.strip() for t in action_type.split(',') if t.strip()]
+        if _types:
+            q = q.filter(ActionLog.action_type.in_(_types))
+    if target_type:
+        q = q.filter(ActionLog.target_type == target_type)
+    if result:
+        q = q.filter(ActionLog.result == result)
+    if trace_id:
+        q = q.filter(ActionLog.trace_id == trace_id)
+    # 日期范围（用户传 YYYY-MM-DD，按 UTC 日处理；date_to 含当天 → +1天用 <）
+    try:
+        if date_from:
+            df = datetime.fromisoformat(date_from.strip())
+            if df.tzinfo is None:
+                df = df.replace(tzinfo=timezone.utc)
+            q = q.filter(ActionLog.created_at >= df)
+    except Exception:
+        pass
+    try:
+        if date_to:
+            dt = datetime.fromisoformat(date_to.strip())
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if "T" not in date_to:  # 纯日期 → 包含整天
+                dt = dt + timedelta(days=1)
+            q = q.filter(ActionLog.created_at < dt)
+    except Exception:
+        pass
+    return q
+
+
 @app.get("/logs")
 def list_logs(
     actor_type: str = "",       # user/system/sentinel/warmup/sync —— 三视图用
@@ -197,34 +241,26 @@ def list_logs(
     target_type: str = "",
     result: str = "",           # success/fail（只看失败用）
     trace_id: str = "",         # 按链路拉全Trace
+    date_from: str = "",        # YYYY-MM-DD（含）
+    date_to: str = "",          # YYYY-MM-DD（含当天）
     limit: int = 100,
+    offset: int = 0,
     user: CurrentUser = Depends(require_permission("audit.read")),
     db: Session = Depends(get_db),
 ):
     """查 action_logs。超管看全部团队（SuperSessionLocal bypass RLS）；普通用户受 RLS 只看本团队。
-    三视图（决策⑤）：操作=actor_type=user / 系统=system / 用户活动=actor_user_id。"""
+    三视图（决策⑤）：操作=actor_type=user / 系统=system / 用户活动=actor_user_id。
+    支持 offset 分页 + date_from/date_to 日期范围。"""
     from .models.log import ActionLog
     from .core.database import SuperSessionLocal
     sdb = SuperSessionLocal() if user.is_superadmin else db
     try:
-        q = sdb.query(ActionLog)
-        if actor_type:
-            _types = [t.strip() for t in actor_type.split(',') if t.strip()]
-            if _types:
-                q = q.filter(ActionLog.actor_type.in_(_types))
-        if actor_user_id > 0:
-            q = q.filter(ActionLog.actor_user_id == actor_user_id)
-        if action_type:
-            _types = [t.strip() for t in action_type.split(',') if t.strip()]
-            if _types:
-                q = q.filter(ActionLog.action_type.in_(_types))
-        if target_type:
-            q = q.filter(ActionLog.target_type == target_type)
-        if result:
-            q = q.filter(ActionLog.result == result)
-        if trace_id:
-            q = q.filter(ActionLog.trace_id == trace_id)
-        logs = q.order_by(ActionLog.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+        q = _apply_log_filters(sdb.query(ActionLog), actor_type=actor_type,
+                               actor_user_id=actor_user_id, action_type=action_type,
+                               target_type=target_type, result=result, trace_id=trace_id,
+                               date_from=date_from, date_to=date_to)
+        logs = q.order_by(ActionLog.created_at.desc()) \
+                .offset(max(offset, 0)).limit(min(max(limit, 1), 500)).all()
         return [
             {"id": l.id, "trace_id": l.trace_id, "actor_type": l.actor_type,
              "actor_user_id": l.actor_user_id, "action_type": l.action_type,
@@ -233,6 +269,30 @@ def list_logs(
              "tenant_id": l.tenant_id, "created_at": str(l.created_at)}
             for l in logs
         ]
+    finally:
+        if user.is_superadmin:
+            sdb.close()
+
+
+@app.get("/logs/count")
+def count_logs(
+    actor_type: str = "", actor_user_id: int = 0, action_type: str = "",
+    target_type: str = "", result: str = "", trace_id: str = "",
+    date_from: str = "", date_to: str = "",
+    user: CurrentUser = Depends(require_permission("audit.read")),
+    db: Session = Depends(get_db),
+):
+    """日志总数（同 /logs 筛选条件），给前端分页用。"""
+    from .models.log import ActionLog
+    from .core.database import SuperSessionLocal
+    from sqlalchemy import func as _func
+    sdb = SuperSessionLocal() if user.is_superadmin else db
+    try:
+        q = _apply_log_filters(sdb.query(_func.count(ActionLog.id)), actor_type=actor_type,
+                               actor_user_id=actor_user_id, action_type=action_type,
+                               target_type=target_type, result=result, trace_id=trace_id,
+                               date_from=date_from, date_to=date_to)
+        return {"count": int(q.scalar() or 0)}
     finally:
         if user.is_superadmin:
             sdb.close()
