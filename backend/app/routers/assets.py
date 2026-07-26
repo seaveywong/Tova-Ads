@@ -101,6 +101,26 @@ def list_assets(
     return [_asset_dict(a) for a in rows]
 
 
+@router.get("/ai-purposes")
+def get_ai_purposes(user: CurrentUser = Depends(require_permission("assets.manage"))):
+    """返回 AI 分析的用途/深度/风格选项（前端下拉用）。
+
+    ⚠ 必须注册在 GET /{aid} 之前，否则 /ai-purposes 被 {aid} 路由吃掉（int 解析失败 422）。
+    """
+    return {
+        "purposes": AI_PURPOSES,
+        "depths": [
+            {"value": k, "label": v["label"], "copy_count": v["copy_count"], "video_frames": v["video_frames"]}
+            for k, v in ANALYSIS_DEPTH_CONFIG.items()
+        ],
+        "styles": [
+            {"value": "conservative", "label": "保守", "hint": "温和安全，合规优先"},
+            {"value": "standard", "label": "标准", "hint": "自然有感染力，平衡"},
+            {"value": "aggressive", "label": "激进", "hint": "⚠ 放宽合规，封号风险"},
+        ],
+    }
+
+
 @router.get("/{aid}")
 def get_asset(aid: int, user: CurrentUser = Depends(require_permission("assets.manage")),
               db: Session = Depends(get_db)):
@@ -239,23 +259,6 @@ def fb_upload_image(aid: int, body: FbUploadIn,
               metadata={"act_id": body.act_id, "image_hash": result.get("hash")})
     db.commit()
     return {"id": aid, "fb_image_hash": result.get("hash"), "fb_url": result.get("url")}
-
-
-@router.get("/ai-purposes")
-def get_ai_purposes(user: CurrentUser = Depends(require_permission("assets.manage"))):
-    """返回 AI 分析的用途/深度/风格选项（前端下拉用）。"""
-    return {
-        "purposes": AI_PURPOSES,
-        "depths": [
-            {"value": k, "label": v["label"], "copy_count": v["copy_count"], "video_frames": v["video_frames"]}
-            for k, v in ANALYSIS_DEPTH_CONFIG.items()
-        ],
-        "styles": [
-            {"value": "conservative", "label": "保守", "hint": "温和安全，合规优先"},
-            {"value": "standard", "label": "标准", "hint": "自然有感染力，平衡"},
-            {"value": "aggressive", "label": "激进", "hint": "⚠ 放宽合规，封号风险"},
-        ],
-    }
 
 
 class AnalyzeIn(BaseModel):
