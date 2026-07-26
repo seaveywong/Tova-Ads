@@ -165,7 +165,8 @@ def build_adset(
         "billing_event": billing_event.strip() if billing_event and billing_event.strip() else "IMPRESSIONS",
         "optimization_goal": opt_goal,
         "bid_strategy": bid_strategy,
-        "targeting": targeting or {"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65},
+        # 深拷贝 targeting：build_adset 内会 mutate（MESSENGER 加 publisher_platforms），不能污染调用方的共享 dict（多账户部署循环）
+        "targeting": _deep_copy(targeting) if targeting else {"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65},
         "status": "ACTIVE",
     }
 
@@ -225,8 +226,6 @@ def build_adset(
                 raise ValueError("消息类目标需要 page_id")
             payload["promoted_object"] = {"page_id": page_id}
             payload["destination_type"] = "MESSENGER"
-            # FB 要求 MESSENGER 时 publisher_platforms 含 messenger
-            payload["targeting"]["publisher_platforms"] = ["messenger"]
         elif opt_goal in ("LINK_CLICKS", "LANDING_PAGE_VIEWS"):
             payload["destination_type"] = "WEBSITE"
 
@@ -240,6 +239,10 @@ def build_adset(
     # 用户显式覆盖 destination_type（高级设置 / 模板指定）
     if destination_type_override and destination_type_override.strip():
         payload["destination_type"] = destination_type_override.strip()
+
+    # MESSENGER 目标需 publisher_platforms 含 messenger（在 destination_type 最终确定后再判断）
+    if payload.get("destination_type") == "MESSENGER":
+        payload["targeting"]["publisher_platforms"] = ["messenger"]
 
     # 高级字段深合并（advanced_config：bid_amount/attribution_spec/placements/dayparting/...）
     if extra:
@@ -255,6 +258,12 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             base[k] = v
     return base
+
+
+def _deep_copy(d):
+    """JSON 往返深拷贝（避免共享引用 mutation）。"""
+    import json as _j
+    return _j.loads(_j.dumps(d)) if d else d
 
 
 # ── Ad creative ──

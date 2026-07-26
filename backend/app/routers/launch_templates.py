@@ -183,7 +183,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
     if not t:
         raise HTTPException(404, "模板不存在")
     targeting = _resolve_targeting(db, t.audience_id, t.audience_json or "")
-    daily_budget_fb = _resolve_budget_fb(db, body.act_id, t)
+    daily_budget_fb = _resolve_budget_fb(db, body.act_id, t, user.tenant_id)
     advanced = _parse_advanced(t)
     page_id = body.page_id or t.page_id
     pixel_id = body.pixel_id or t.pixel_id
@@ -237,7 +237,10 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
             a = json.loads(audience_json)
             countries = a.get("countries") or []
             interests = a.get("interests") or []
-            # 兴趣可能是 [{id,name}] 或 ["词"]（AI 生成的词未 resolve）——只取已 resolve 的 {id,name}
+            if isinstance(interests, dict):
+                interests = [interests]
+            if not isinstance(interests, list):
+                interests = []
             resolved = [i for i in interests if isinstance(i, dict) and i.get("id")]
             if not countries and not resolved:
                 return None  # 内联受众空 → 走 FB 默认
@@ -268,17 +271,21 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
     )
 
 
-def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate) -> int:
+def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0) -> int:
     """模板预算 → 该账户本币最小单位（FB daily_budget）。
     优先 budget_usd（美元，按账户 currency + 汇率转）；无则回退 legacy daily_budget。"""
     if tpl.budget_usd and tpl.budget_usd > 0:
-        acc = sdb.query(Account).filter(Account.act_id == act_id).first()
+        q = sdb.query(Account).filter(Account.act_id == act_id)
+        if tenant_id:
+            q = q.filter(Account.tenant_id == tenant_id)
+        acc = q.first()
         currency = (acc.currency if acc else "USD") or "USD"
         cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+        if not cr and currency.upper() != "USD":
+            raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
         rate = cr.rate if cr else 1.0
         return usd_to_fb_amount(tpl.budget_usd, currency, rate)
-    # legacy：直接用 daily_budget（已是账户本币最小单位）
-    return tpl.daily_budget or 200000
+    return tpl.daily_budget if tpl.daily_budget and tpl.daily_budget > 0 else 200000
 
 
 def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
@@ -327,7 +334,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     sdb.commit()  # 持久化 hash 缓存
                 page_id = item.page_id or tpl.page_id
                 pixel_id = item.pixel_id or tpl.pixel_id
-                daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl)
+                daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
                 r = deploy_one_account(
                     fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
@@ -459,7 +466,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=it.page_id or tpl.page_id, pixel_id=it.pixel_id or tpl.pixel_id,
-                landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl),
+                landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
                 subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
