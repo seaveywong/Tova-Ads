@@ -152,6 +152,12 @@ const remove = async (r) => {
   catch {}
 }
 const doInspect = async (force = false) => {
+  if (force) {
+    try {
+      await ElMessageBox.confirm('强制重检跳过冷却直接调 Facebook API 评估全部广告，频繁触发可能被 FB 限流。继续？', '强制重检',
+        { type: 'warning', confirmButtonText: '继续重检', cancelButtonText: '取消' })
+    } catch { return }
+  }
   inspecting.value = true
   try {
     const r = await POST(`/guard/inspect${force ? '?force=true' : ''}`, {})
@@ -173,8 +179,8 @@ const doInspect = async (force = false) => {
     <div class="bar">
       <div class="bar-l"></div>
       <div class="bar-r">
-        <button class="btn" :disabled="inspecting" @click="doInspect(false)">立即巡检</button>
-        <button class="btn" :disabled="inspecting" @click="doInspect(true)">强制重检</button>
+        <button class="btn" :disabled="inspecting" @click="doInspect(false)" title="读最新缓存评估（不调 FB）">立即巡检</button>
+        <button class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" title="⚠ 跳过冷却直接调 FB 评估全部广告，频繁触发会限流">强制重检</button>
         <button class="btn primary" @click="openCreate">+ 新建规则</button>
       </div>
     </div>
@@ -263,6 +269,8 @@ const doInspect = async (force = false) => {
 .btn{padding:6px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;transition:.15s}
 .btn:hover{background:var(--bg3)}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
+.btn.btn-warn{color:var(--warning);border-color:rgba(255,159,10,.5);background:transparent}
+.btn.btn-warn:hover{background:rgba(255,159,10,.12);border-color:var(--warning)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer}
 .mb:hover{color:var(--ac);border-color:var(--ac)}

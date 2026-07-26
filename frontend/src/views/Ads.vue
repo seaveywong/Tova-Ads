@@ -55,15 +55,22 @@ const batchRemove = async () => {
     ElMessage.success('已移除 ' + selectedAccs.value.size + ' 个账户'); selectedAccs.value.clear(); await load()
   } catch(e) {} finally { accLoading.value = false }
 }
+const batchSyncLabel = ref('批量同步')
 const batchSync = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning('先勾选账户')
   accLoading.value = true
-  let ok = 0
-  for (const a of accounts.value) {
-    if (!selectedAccs.value.has(a.act_id) || !a.fb_credential_id) continue
-    try { await POST('/fb/credentials/' + a.fb_credential_id + '/refresh-accounts'); ok++ } catch (e) {}
+  const targets = accounts.value.filter(a => selectedAccs.value.has(a.act_id) && a.fb_credential_id)
+  const total = targets.length
+  let ok = 0, fail = 0, done = 0
+  for (const a of targets) {
+    batchSyncLabel.value = `同步 ${done}/${total}…`
+    try { await POST('/fb/credentials/' + a.fb_credential_id + '/refresh-accounts'); ok++ } catch (e) { fail++ }
+    done++
   }
-  ElMessage.success(`已刷新 ${ok} 个账户`); selectedAccs.value.clear(); await load()
+  batchSyncLabel.value = '批量同步'
+  const msg = `已刷新 ${ok} 个账户` + (fail ? `，失败 ${fail} 个` : '')
+  fail ? ElMessage.warning(msg) : ElMessage.success(msg)
+  selectedAccs.value.clear(); await load()
   accLoading.value = false
 }
 const balKindLabel = (k) => k === 'limited' ? '有限' : (k === 'unlimited' ? '不限' : '高限')
@@ -133,7 +140,7 @@ onMounted(async () => {
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">已选 {{ selectedAccs.size }}</span>
-      <button class="batch-btn" @click="batchSync" :disabled="accLoading">批量同步</button>
+      <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel }}</button>
       <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">批量移除</button>
       <button class="batch-btn" @click="selectedAccs.clear()">取消</button>
     </div>
@@ -172,7 +179,11 @@ onMounted(async () => {
           </el-dropdown>
         </div>
       </div>
-      <div v-if="!accounts.length && !loading" class="empty">暂无广告账户，点「载入账户」导入</div>
+      <div v-if="!accounts.length && !loading" class="empty empty-cta">
+        <div class="empty-title">还没有纳管的广告账户</div>
+        <div class="empty-step">① 先去 <router-link to="/tokens" class="empty-link">Facebook 授权</router-link> 绑定令牌</div>
+        <div class="empty-step">② 回到本页点「载入账户」导入</div>
+      </div>
     </div>
 
     <div v-if="loadOpen" class="overlay" @click.self="loadOpen = false">
@@ -223,6 +234,11 @@ onMounted(async () => {
 .more-btn { width: 26px; height: 24px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); font-size: 13px; cursor: pointer; border-radius: 4px; padding: 0; line-height: 22px; text-align: center }
 .more-btn:hover { background: var(--ac); color: #fff; border-color: var(--ac) }
 .empty { padding: 40px; text-align: center; color: var(--t3) }
+.empty-cta { padding: 50px 30px; }
+.empty-title { font-size: 15px; color: var(--t2); font-weight: 600; margin-bottom: 14px; }
+.empty-step { font-size: 13px; color: var(--t3); line-height: 1.8; }
+.empty-link { color: var(--ac); text-decoration: none; }
+.empty-link:hover { text-decoration: underline; }
 .batch-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; padding: 6px 12px; background: var(--bg2); border: 1px solid var(--ac); border-radius: var(--rs) }
 .batch-count { font-size: 12px; color: var(--ac); font-weight: 600; margin-right: 4px }
 .batch-btn { font-size: 12px; padding: 4px 12px; height: 28px; border-radius: var(--rs); border: 1px solid var(--ac); background: rgba(10,132,255,.1); color: var(--ac); cursor: pointer; box-sizing: border-box }

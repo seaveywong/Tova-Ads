@@ -76,6 +76,15 @@ const saveSched = async () => {
       )
     } catch { return }
   }
+  // base_minutes 是所有任务频率的主基数（巡检/预算/看门狗/令牌都 = base × multiplier），改它影响全局
+  if (Number(sched.value.base_minutes) !== Number(e.base ?? sched.value.base_minutes) && Number(e.base) > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `基础间隔改为 ${sched.value.base_minutes} 分钟？这是所有定时任务（巡检/预算/看门狗等）的频率基数，会全局影响止损/告警的响应速度。`,
+        '基础间隔变更', { type: 'warning', confirmButtonText: '确认变更', cancelButtonText: '取消' }
+      )
+    } catch { return }
+  }
   schedSaving.value = true
   try {
     const r = await PUT('/settings/schedule', {
@@ -287,16 +296,34 @@ const fxFetched = computed(() => fxRates.value[0]?.fetched_at?.slice(0,16).repla
 const retention = ref({ tables: [], last_run: '' })
 const retentionSaving = ref(false)
 const retentionRunning = ref(false)
+const origDays = ref({})  // 原始保留天数快照，用于检测"缩小=删数据"
 const loadRetention = async () => {
   if (!isSuper.value) return
-  try { retention.value = await GET('/settings/retention') } catch {}
+  try {
+    retention.value = await GET('/settings/retention')
+    origDays.value = {}; (retention.value.tables || []).forEach(t => { origDays.value[t.key] = t.days })
+  } catch {}
 }
 const saveRetention = async () => {
+  // 检测"缩小保留天数"——下次清理会删掉超龄数据（破坏性）
+  const shrunk = (retention.value.tables || []).filter(t => {
+    const o = origDays.value[t.key]; return o !== undefined && Number(t.days) < Number(o) && Number(o) > 0
+  })
+  if (shrunk.length) {
+    const detail = shrunk.map(t => `${t.label} ${origDays.value[t.key]}→${t.days}天`).join('、')
+    try {
+      await ElMessageBox.confirm(
+        `以下数据保留天数被调小，下次清理（每日 4:33）将删除超龄记录：\n${detail}\n\n确定？`,
+        '保留策略收紧 · 将删数据', { type: 'warning', confirmButtonText: '确认收紧', cancelButtonText: '取消' }
+      )
+    } catch { return }
+  }
   retentionSaving.value = true
   try {
     const days = {}
     retention.value.tables.forEach(t => { days[t.key] = t.days })
     retention.value = await PUT('/settings/retention', { days })
+    origDays.value = {}; (retention.value.tables || []).forEach(t => { origDays.value[t.key] = t.days })
     ElMessage.success('保留策略已保存（每日 4:33 自动清理）')
   } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
   retentionSaving.value = false

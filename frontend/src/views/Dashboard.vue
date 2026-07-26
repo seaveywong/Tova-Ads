@@ -330,8 +330,19 @@ const filteredKpiAccs = computed(() => {
 })
 
 // 强制刷新（采集最新 FB 数据 + 巡检，跳过冷却）
+const lastForceTs = ref(0)
 const forceRefresh = async () => {
+  const now = Math.floor(Date.now() / 1000)
+  const left = 60 - (now - lastForceTs.value)
+  if (lastForceTs.value && left > 0) {
+    return ElMessage.warning(`刚采集过，${left}s 后再强采（防 FB 限流）`)
+  }
+  try {
+    await ElMessageBox.confirm('立即采集会直接调 Facebook API 拉最新数据（跳过冷却），频繁触发可能被 FB 限流。继续？', '强制采集',
+      { type: 'warning', confirmButtonText: '继续采集', cancelButtonText: '取消' })
+  } catch { return }
   refreshing.value = true
+  lastForceTs.value = now
   try {
     await POST('/guard/inspect?force=true')
     ElMessage.success('数据已刷新')
@@ -720,8 +731,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <span v-if="lastUpdated" class="sync-time">数据更新 {{ fmtAgo(lastUpdated) }}</span>
           <span v-if="lastInspectedDisplay" class="sync-time">上次巡检 {{ lastInspectedDisplay }}</span>
           <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
-          <button class="refresh-btn" :disabled="loading" @click="refreshData">{{ loading ? '刷新中' : '刷新' }}</button>
-          <button class="refresh-btn primary" :disabled="refreshing" @click="forceRefresh">{{ refreshing ? '采集中…' : '立即采集' }}</button>
+          <button class="refresh-btn" :disabled="loading" @click="refreshData" title="只读库（最新缓存），不调 FB">{{ loading ? '刷新中' : '刷新' }}</button>
+          <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" title="⚠ 直接调 Facebook API 强采，频繁会触发限流">{{ refreshing ? '采集中…' : '立即采集' }}</button>
         </div>
       </div>
     <div class="anchor-strip">
@@ -1053,6 +1064,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .refresh-btn:disabled { opacity: 0.6; cursor: wait; }
 .refresh-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
 .refresh-btn.primary:hover { filter: brightness(1.08); background: var(--ac); }
+.refresh-btn.force { color: var(--warning); border-color: rgba(255,159,10,.5); background: transparent; }
+.refresh-btn.force:hover { background: rgba(255,159,10,.12); border-color: var(--warning); }
+.refresh-btn.force:disabled { opacity: .6; }
 /* 顶部加载进度条（数据加载/采集时显示，仿 1.0）*/
 .top-loader { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.25s; }
 .top-loader.active { opacity: 1; }

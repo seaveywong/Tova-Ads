@@ -96,6 +96,14 @@ const submitInvite = async () => {
   inviteSaving.value = false
 }
 const changeRole = async (m, roleName) => {
+  if (roleName === m.role) return
+  const fromOwner = m.role === 'owner'
+  try {
+    const msg = fromOwner
+      ? `将 ${m.email} 从【管理员】改为【${roleName}】？\n\n管理员降级会立即收回其管理权限（含改规则/改配置/邀人）。`
+      : `将 ${m.email} 的角色改为【${roleName}】？`
+    await ElMessageBox.confirm(msg, '角色变更', { type: fromOwner ? 'warning' : 'info', confirmButtonText: '确认', cancelButtonText: '取消' })
+  } catch { return }  // 取消则 select 自动回弹到 m.role（受控）
   try {
     await PUT(`/rbac/members/${m.membership_id}/role`, { role: roleName })
     ElMessage.success('角色已更新')

@@ -163,16 +163,20 @@ const drawerPages = computed(() => {
   return [...list].sort((a, b) => (b.fan_count || 0) - (a.fan_count || 0))
 })
 
+const refreshAllLabel = ref('刷新全部')
 const refreshAll = async () => {
-  let ok = 0, fail = 0
-  ElMessage.info('检测全部令牌中…')
+  let ok = 0, fail = 0, done = 0
+  const total = tokens.value.length
   for (const t of tokens.value) {
+    refreshAllLabel.value = `检测 ${done}/${total}…`
     try { const r = await POST(`/fb/credentials/${t.id}/check`, {}); r.now_valid ? ok++ : fail++ }
     catch { fail++ }
+    done++
   }
+  refreshAllLabel.value = '刷新全部'
   await load()
   await loadAtRisk()
-  ElMessage.success(`完成：${ok} 个正常，${fail} 个异常`)
+  ElMessage[fail ? 'warning' : 'success'](`完成：${ok} 个正常，${fail} 个异常` + (fail ? '（异常已标红，点详情查看）' : ''))
 }
 const refreshAccounts = async (t) => {
   try { ElMessage.info('刷新中…'); const r = await POST(`/fb/credentials/${t.id}/refresh-accounts`, {}); delete assetCache.value[t.id]; await loadDrawerAssets(t); ElMessage.success(`已刷新 ${r.updated||0} 个账户`) }
@@ -319,7 +323,7 @@ const deleteToken = async (t) => {
         <button class="btn primary" @click="importOpen = true">连接 Facebook</button>
         <button class="btn" @click="openLoad">导入账户</button>
         <button class="btn" @click="openAppConfig">配置 App</button>
-        <button class="btn" @click="refreshAll">刷新全部</button>
+        <button class="btn" @click="refreshAll">{{ refreshAllLabel }}</button>
       </div>
     </div>
 
@@ -369,7 +373,10 @@ const deleteToken = async (t) => {
           </el-dropdown>
         </span>
       </div>
-      <div v-if="!tokens.length && !loading" class="empty">暂无令牌</div>
+      <div v-if="!tokens.length && !loading" class="empty empty-cta">
+        <div class="empty-title">还没有绑定 Facebook 令牌</div>
+        <div class="empty-step">点上方「添加令牌」或「连接 Facebook」开始 —— 绑定后才能载入广告账户、跑巡检止损。</div>
+      </div>
     </div>
 
     <el-drawer v-model="drawerOpen" :title="drawerTitle" direction="rtl" size="480px" :destroy-on-close="true">
@@ -717,4 +724,7 @@ const deleteToken = async (t) => {
 .af-btns{display:flex;gap:8px;margin-top:14px}
 
 .empty{text-align:center;color:var(--t3);padding:24px;font-size:14px}
+.empty-cta{padding:50px 30px}
+.empty-title{font-size:15px;color:var(--t2);font-weight:600;margin-bottom:10px}
+.empty-step{font-size:13px;color:var(--t3);line-height:1.7}
 </style>
