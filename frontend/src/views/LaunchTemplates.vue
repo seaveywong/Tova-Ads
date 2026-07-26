@@ -106,7 +106,7 @@ const load = async () => {
   loading.value = false
 }
 const loadLandingPages = async () => { try { landingPages.value = await GET('/landing/pages') } catch {} }
-onMounted(() => { load(); loadLandingPages() })
+onMounted(() => { load(); loadLandingPages(); loadFormMsgTemplates() })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 // #2 dirty-check：编辑抽屉关闭前确认
@@ -148,6 +148,30 @@ const preflightResult = ref(null)
 const preflightVisible = ref(false)
 // #4 per-account page/pixel loading
 const accLoadingConfig = ref(new Set())
+// 表单/消息模板
+const formTemplates = ref([])
+const msgTemplates = ref([])
+const selectedFormTpl = ref(null)
+const selectedMsgTpl = ref(null)
+const formPreviewOpen = ref(false)
+const msgPreviewOpen = ref(false)
+const loadFormMsgTemplates = async () => {
+  try { formTemplates.value = await GET('/form-templates/forms') } catch {}
+  try { msgTemplates.value = await GET('/form-templates/messages') } catch {}
+}
+const onFormTplChange = (id) => {
+  if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; return }
+  const t = formTemplates.value.find(f => f.id === id)
+  selectedFormTpl.value = t || null
+  form.value.lead_form_id = t?.fb_form_id || ''  // 有fb_form_id的直接用，没有的部署时建
+}
+const onMsgTplChange = (id) => {
+  if (!id) { selectedMsgTpl.value = null; form.value.message_template = ''; return }
+  const t = msgTemplates.value.find(m => m.id === id)
+  selectedMsgTpl.value = t || null
+  // 存成 JSON（parse_message_template 兼容 JSON 串/纯文本/dict）
+  form.value.message_template = t ? JSON.stringify({ text: t.welcome_text, ice_breakers: t.ice_breakers||[] }) : ''
+}
 
 const blankForm = () => ({
   name: '', description: '',
@@ -166,6 +190,7 @@ const blankForm = () => ({
   page_id: '', pixel_id: '', landing_url: '', landing_page_id: null,
   cta_type: 'LEARN_MORE', subcode_slug: '', ad_language: '',
   message_template: '', lead_form_id: '',
+  message_template_id: null, lead_form_template_id: null,
   manual_placement: false, placement_platforms: [],
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
@@ -498,14 +523,33 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>子码 slug</label><input v-model="form.subcode_slug" class="inp" placeholder="留空=不绑子码" /></div>
         <!-- 消息类（ENGAGEMENT + 消息目标） -->
         <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
-          <hr class="sep" /><div class="sec-title">消息广告</div>
-          <div class="row"><label>Messenger 欢迎语</label><textarea v-model="form.message_template" class="inp ta" rows="2" placeholder='用户点广告后 Messenger 自动发的欢迎语（纯文本或 JSON）'></textarea></div>
+          <hr class="sep" /><div class="sec-title-row"><span class="sec-title">消息广告</span>
+            <router-link to="/form-templates" class="new-link">管理消息模板 →</router-link>
+          </div>
+          <div class="row"><label>Messenger 欢迎语模板</label>
+            <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable placeholder="选消息模板（留空=不设）" @change="onMsgTplChange">
+              <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
+            </el-select>
+          </div>
+          <div v-if="selectedMsgTpl" class="tpl-preview-bar" @click="msgPreviewOpen = true">
+            <span>{{ (selectedMsgTpl.welcome_text||'').slice(0,50) }}…</span>
+            <span class="preview-link">预览</span>
+          </div>
         </template>
         <!-- 表单类（LEADS + Instant Forms） -->
         <template v-if="form.objective === 'OUTCOME_LEADS'">
-          <hr class="sep" /><div class="sec-title">Instant Form（表单）</div>
-          <div class="row"><label>表单 ID</label><input v-model="form.lead_form_id" class="inp" placeholder="FB Instant Form ID（先去 launch/lead-form 创建）" /></div>
-          <div class="hint">在「广告管理器」或其他入口先创建 Instant Form，拿到 ID 填这里。AI 自动生成表单问题待后续。</div>
+          <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
+            <router-link to="/form-templates" class="new-link">管理表单模板 →</router-link>
+          </div>
+          <div class="row"><label>表单模板</label>
+            <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable placeholder="选表单模板" @change="onFormTplChange">
+              <el-option v-for="f in formTemplates" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
+            </el-select>
+          </div>
+          <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
+            <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
+            <span class="preview-link">预览</span>
+          </div>
         </template>
         <div class="row"><label>广告语言</label>
           <el-select v-model="form.ad_language" filterable clearable placeholder="自动（按素材语言）" style="width:100%" size="small">
@@ -633,6 +677,29 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ (j.created_at||'').slice(0,16) }}</div>
         </div>
         <div v-if="!jobs.length" class="empty-sm">暂无部署记录</div>
+      </div>
+    </el-dialog>
+    <!-- 表单预览 -->
+    <el-dialog v-model="formPreviewOpen" title="表单预览" width="400px" append-to-body>
+      <div v-if="selectedFormTpl" class="phone-mockup">
+        <div class="pm-screen">
+          <div class="pm-header">{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</div>
+          <div v-if="(selectedFormTpl.config||{}).description" class="pm-desc">{{ selectedFormTpl.config.description }}</div>
+          <div v-for="(q,i) in ((selectedFormTpl.config||{}).custom_questions||[])" :key="i" class="pm-field">
+            <span class="pm-label">{{ q.label }}</span>
+            <div v-if="q.options&&q.options.length" class="pm-options"><span v-for="(o,oi) in q.options" :key="oi" class="pm-option">{{ o.value }}</span></div>
+            <div v-else class="pm-input-mock">—</div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+    <!-- 消息预览 -->
+    <el-dialog v-model="msgPreviewOpen" title="消息预览" width="380px" append-to-body>
+      <div v-if="selectedMsgTpl" class="messenger-mockup">
+        <div class="mm-bubble">{{ selectedMsgTpl.welcome_text }}</div>
+        <div v-if="(selectedMsgTpl.ice_breakers||[]).length" class="mm-quick-replies">
+          <span v-for="(ib,i) in selectedMsgTpl.ice_breakers" :key="i" class="mm-qr">{{ ib.title }}</span>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -789,6 +856,26 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
 .ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
 .ss-chip:hover{color:var(--ac)}
+
+/* 表单/消息模板选择 */
+.new-link{font-size:11px;color:var(--ac);text-decoration:none;margin-left:auto}
+.new-link:hover{text-decoration:underline}
+.tpl-preview-bar{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--t2);cursor:pointer;margin-top:4px}
+.tpl-preview-bar:hover{background:var(--bg2)}
+.preview-link{color:var(--ac);font-size:11px}
+.phone-mockup{max-width:320px;margin:0 auto;border:3px solid var(--bd);border-radius:20px;overflow:hidden;background:var(--bg2)}
+.pm-screen{padding:14px;display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto}
+.pm-header{font-size:15px;font-weight:700;color:var(--t1);text-align:center}
+.pm-desc{font-size:11px;color:var(--t3);text-align:center}
+.pm-field{display:flex;flex-direction:column;gap:2px}
+.pm-label{font-size:11px;color:var(--t2)}
+.pm-input-mock{background:var(--bg3);border:1px solid var(--bd);border-radius:4px;height:24px}
+.pm-options{display:flex;gap:4px;flex-wrap:wrap}
+.pm-option{font-size:10px;padding:2px 6px;background:var(--acg);color:var(--ac);border-radius:8px;border:1px solid var(--ac)}
+.messenger-mockup{background:var(--bg3);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.mm-bubble{background:var(--ac);color:#fff;padding:8px 12px;border-radius:12px;font-size:13px;align-self:flex-start;max-width:85%;line-height:1.5}
+.mm-quick-replies{display:flex;gap:4px;flex-wrap:wrap}
+.mm-qr{font-size:11px;padding:4px 10px;background:var(--bg2);border:1px solid var(--ac);color:var(--ac);border-radius:14px}
 
 /* #23 移动端适配 */
 @media (max-width: 768px) {
