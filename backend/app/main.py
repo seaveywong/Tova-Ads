@@ -104,6 +104,13 @@ app.include_router(fb_oauth_router)
 app.include_router(ads_router)
 app.include_router(settings_router)
 
+# ── 静态文件服务（素材库图片/视频，api.tovaads.com/static-assets/{filename}）──
+import os as _os
+from fastapi.staticfiles import StaticFiles as _StaticFiles
+_ASSET_DIR = _os.environ.get("ASSET_DIR", "/opt/toveads/assets")
+_os.makedirs(_ASSET_DIR, exist_ok=True)
+app.mount("/static-assets", _StaticFiles(directory=_ASSET_DIR), name="static-assets")
+
 # ── APScheduler（定时巡检）──
 from apscheduler.schedulers.background import BackgroundScheduler
 _scheduler = BackgroundScheduler()

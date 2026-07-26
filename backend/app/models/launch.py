@@ -11,6 +11,15 @@ class Asset(Base):
     type = Column(Text, nullable=False)
     storage_key = Column(Text, nullable=False)
     filename = Column(Text)
+    name = Column(Text)  # 用户取名（可改，如 "YR_us_shopping_v1"）
+    tags = Column(Text)  # JSON 数组字符串
+    public_url = Column(Text)  # https://api.tovaads.com/static-assets/{storage_key}
+    file_size = Column(BigInteger, default=0)
+    mime_type = Column(Text)
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    duration_sec = Column(Integer, default=0)
+    usage_count = Column(Integer, default=0)
     ai_copy = Column(Text)
     is_manual = Column(Boolean, default=False)
     manual_copy = Column(Text)

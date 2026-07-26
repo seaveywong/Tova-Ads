@@ -19,7 +19,7 @@ const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
 const NAV_PERMS = {
   dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'],
   landing: ['landing.manage'], guard: ['rules.read'],
-  settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'],
+  settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'], assets: ['assets.manage'],
 }
 
 // 导航
@@ -30,6 +30,7 @@ const allNavGroups = [
   { title: '广告管理', items: [
     { name: 'ads', label: '广告账户', icon: 'Promotion' },
     { name: 'ad-manager', label: '广告管理器', icon: 'Operation' },
+    { name: 'assets', label: '素材库', icon: 'Picture' },
   ]},
   { title: '自动化', items: [
     { name: 'landing', label: '落地页', icon: 'Link' },
