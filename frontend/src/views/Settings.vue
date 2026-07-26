@@ -184,31 +184,35 @@ const tgManual = ref({ chat_id: '', saving: false })
 const tgBindLink = ref('')
 const loadTg = async () => {
   try {
-    tgBot.value = await GET('/notifications/tg/bot-info')
-    userTg.value = await GET('/notifications/tg/user-binding')
-    if (tgBot.value.configured && !userTg.value.bound) {
+    const [botInfo, userBinding] = await Promise.all([
+      GET('/notifications/tg/bot-info'),
+      GET('/notifications/tg/user-binding'),
+    ])
+    tgBot.value = botInfo
+    userTg.value = userBinding
+    if (botInfo.configured && !userBinding.bound) {
       try { const r = await GET('/notifications/tg/bind-link'); tgBindLink.value = r.url } catch {}
-    }
-    if (tgBot.value.configured && tgBot.value.bot_username && !userTg.value.bound) {
-      nextTick(() => {
-        const el = document.getElementById('tg-widget')
-        if (!el || el.firstChild) return
-        const s = document.createElement('script')
-        s.async = true
-        s.src = 'https://telegram.org/js/telegram-widget.js?22'
-        s.setAttribute('data-telegram-login', tgBot.value.bot_username)
-        s.setAttribute('data-size', 'large')
-        s.setAttribute('data-onauth', 'onTelegramAuth(user)')
-        s.setAttribute('data-request-access', 'write')
-        el.appendChild(s)
-        window.onTelegramAuth = async (u) => {
-          try {
-            await POST('/notifications/tg/oauth-callback', u)
-            ElMessage.success(`TG 绑定成功：${u.username || u.id}`)
-            userTg.value = await GET('/notifications/tg/user-binding')
-          } catch (e) { ElMessage.error(e.message || 'TG 绑定失败') }
-        }
-      })
+      if (botInfo.bot_username) {
+        nextTick(() => {
+          const el = document.getElementById('tg-widget')
+          if (!el || el.firstChild) return
+          const s = document.createElement('script')
+          s.async = true
+          s.src = 'https://telegram.org/js/telegram-widget.js?22'
+          s.setAttribute('data-telegram-login', botInfo.bot_username)
+          s.setAttribute('data-size', 'large')
+          s.setAttribute('data-onauth', 'onTelegramAuth(user)')
+          s.setAttribute('data-request-access', 'write')
+          el.appendChild(s)
+          window.onTelegramAuth = async (u) => {
+            try {
+              await POST('/notifications/tg/oauth-callback', u)
+              ElMessage.success(`TG 绑定成功：${u.username || u.id}`)
+              userTg.value = await GET('/notifications/tg/user-binding')
+            } catch (e) { ElMessage.error(e.message || 'TG 绑定失败') }
+          }
+        })
+      }
     }
   } catch {}
 }
@@ -400,35 +404,25 @@ const runRetentionNow = async () => {
       <div class="t">Telegram 通知</div>
       <div class="d" style="margin-bottom:10px">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
 
-      <!-- 已绑定状态 -->
-      <div v-if="userTg.bound" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <!-- 已绑定 -->
+      <div v-if="userTg.bound" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="color:var(--success);font-size:13px;font-weight:500">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
-        <span v-if="userTg.verified" style="font-size:11px;color:var(--t3)">已验证</span>
-        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发测试消息' }}</button>
+        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发送测试消息' }}</button>
         <button class="btn" style="color:var(--error);border-color:var(--error)" @click="unbindTg">解绑</button>
       </div>
 
       <!-- 未绑定 -->
-      <div v-else style="margin-top:8px">
-        <!-- Deep Link（一键绑定）-->
-        <div v-if="tgBindLink" style="margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <a :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
-            <button class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
-          </div>
-          <div class="d" style="font-size:11px;margin-top:6px">打开 Telegram → 点 Start → 自动绑定完成</div>
-        </div>
-
-        <!-- Login Widget（BotFather domain 已设时显示）-->
-        <div v-if="tgBot.configured && tgBot.bot_username" style="margin-top:6px">
-          <div id="tg-widget" style="min-height:36px"></div>
-        </div>
+      <div v-else style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
+        <button v-if="tgBindLink" class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
+        <div v-if="tgBot.configured && tgBot.bot_username" id="tg-widget" style="min-height:36px"></div>
+        <span v-if="!tgBot.configured" class="d" style="color:var(--warning)">管理员未配置 TG Bot</span>
       </div>
 
-      <!-- 租户级测试（owner/超管可见） -->
+      <!-- 发送测试消息（owner/超管，和绑定按钮并排） -->
       <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
-        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '测试租户 TG' }}</button>
-        <span class="d" style="margin-left:8px;font-size:11px">发到管理员配置的租户级 TG Bot</span>
+        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '发送测试消息' }}</button>
+        <span class="d" style="margin-left:8px;font-size:11px">发到团队 TG Bot</span>
       </div>
     </div>
   </div>
