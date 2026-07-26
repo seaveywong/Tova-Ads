@@ -44,9 +44,11 @@ class AiClient:
     """OpenAI 兼容的 chat completion 客户端。"""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None):
-        self.base_url = (base_url or settings.ai_base_url).rstrip("/")
-        self.api_key = api_key or settings.ai_api_key
-        self.model = model or settings.ai_model
+        # 注意：用 `is None` 判定"未传"，不能用 `or`——否则显式传空串(视觉 key 未配)会回退到 ai_api_key，
+        # 导致视觉客户端静默用 DeepSeek key 请求 Gemini（被拒 400）。None=用默认，显式值(含"")=用它。
+        self.base_url = (settings.ai_base_url if base_url is None else base_url).rstrip("/")
+        self.api_key = settings.ai_api_key if api_key is None else api_key
+        self.model = settings.ai_model if model is None else model
 
     def is_configured(self) -> bool:
         return bool(self.api_key)
