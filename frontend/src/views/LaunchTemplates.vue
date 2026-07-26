@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
@@ -77,6 +77,32 @@ const CONV_GOALS = {
   OUTCOME_APP_PROMOTION: ['APP_INSTALLS','LEVEL_ACHIEVED','ACHIEVEMENT_UNLOCKED','SPENT_CREDITS'],
 }
 const convGoalsForObjective = computed(() => CONV_GOALS[form.value.objective] || [])
+
+// 广告目标 → 推荐的优化目标/计费事件/目的地/转化事件 默认值（FB Ads Manager 的默认选择）
+const OBJ_DEFAULTS = {
+  OUTCOME_SALES:    { opt: 'OFFSITE_CONVERSIONS', bill: 'IMPRESSIONS', dest: 'WEBSITE', conv: 'Purchase' },
+  OUTCOME_LEADS:    { opt: 'LEAD_GENERATION',     bill: 'IMPRESSIONS', dest: 'ON_AD',   conv: 'Lead' },
+  OUTCOME_TRAFFIC:  { opt: 'LINK_CLICKS',          bill: 'IMPRESSIONS', dest: 'WEBSITE', conv: '' },
+  OUTCOME_ENGAGEMENT:{ opt: 'PAGE_LIKES',          bill: 'IMPRESSIONS', dest: 'ON_PAGE', conv: '' },
+  OUTCOME_AWARENESS:{ opt: 'REACH',                bill: 'IMPRESSIONS', dest: '',        conv: '' },
+  OUTCOME_APP_PROMOTION:{ opt: 'APP_INSTALLS',     bill: 'IMPRESSIONS', dest: 'APP',     conv: '' },
+}
+// 选广告目标 → 自动填广告组推荐默认值（仅当用户没手动改过时）
+watch(() => form.value.objective, (newObj, oldObj) => {
+  if (!newObj || newObj === oldObj) return
+  const d = OBJ_DEFAULTS[newObj]
+  if (!d) return
+  // 只在空值或旧默认时自动填（不覆盖用户手选）
+  const oldD = oldObj ? OBJ_DEFAULTS[oldObj] : null
+  if (!form.value.optimization_goal || form.value.optimization_goal === oldD?.opt)
+    form.value.optimization_goal = d.opt
+  if (!form.value.billing_event || form.value.billing_event === 'IMPRESSIONS')
+    form.value.billing_event = d.bill
+  if (!form.value.destination_type || form.value.destination_type === oldD?.dest)
+    form.value.destination_type = d.dest
+  if (!form.value.conversion_goal || form.value.conversion_goal === oldD?.conv)
+    form.value.conversion_goal = d.conv
+})
 // 版位选项
 const PLATFORMS = [
   { v: 'facebook', l: 'Facebook', positions: [
@@ -167,6 +193,17 @@ const COUNTRIES = [
   {v:'BE',l:'比利时'},{v:'CH',l:'瑞士'},{v:'AT',l:'奥地利'},{v:'SE',l:'瑞典'},{v:'NO',l:'挪威'},
   {v:'DK',l:'丹麦'},{v:'FI',l:'芬兰'},{v:'PT',l:'葡萄牙'},{v:'GR',l:'希腊'},{v:'CZ',l:'捷克'},
   {v:'RO',l:'罗马尼亚'},{v:'HU',l:'匈牙利'},{v:'IL',l:'以色列'},{v:'IE',l:'爱尔兰'},{v:'RU',l:'俄罗斯'},
+  {v:'UA',l:'乌克兰'},{v:'BY',l:'白俄罗斯'},{v:'KZ',l:'哈萨克斯坦'},{v:'UZ',l:'乌兹别克斯坦'},
+  {v:'GH',l:'加纳'},{v:'TZ',l:'坦桑尼亚'},{v:'UG',l:'乌干达'},{v:'ET',l:'埃塞俄比亚'},{v:'MA',l:'摩洛哥'},
+  {v:'DZ',l:'阿尔及利亚'},{v:'TN',l:'突尼斯'},{v:'IQ',l:'伊拉克'},{v:'JO',l:'约旦'},{v:'LB',l:'黎巴嫩'},
+  {v:'BH',l:'巴林'},{v:'OM',l:'阿曼'},{v:'PS',l:'巴勒斯坦'},{v:'LK',l:'斯里兰卡'},{v:'NP',l:'尼泊尔'},
+  {v:'MM',l:'缅甸'},{v:'KH',l:'柬埔寨'},{v:'LA',l:'老挝'},{v:'BN',l:'文莱'},{v:'MO',l:'澳门'},
+  {v:'PY',l:'巴拉圭'},{v:'UY',l:'乌拉圭'},{v:'BO',l:'玻利维亚'},{v:'VE',l:'委内瑞拉'},{v:'EC',l:'厄瓜多尔'},
+  {v:'PA',l:'巴拿马'},{v:'GT',l:'危地马拉'},{v:'DO',l:'多米尼加'},{v:'CR',l:'哥斯达黎加'},{v:'SV',l:'萨尔瓦多'},
+  {v:'HN',l:'洪都拉斯'},{v:'JM',l:'牙买加'},{v:'TT',l:'特立尼达和多巴哥'},{v:'PR',l:'波多黎各'},
+  {v:'IS',l:'冰岛'},{v:'LU',l:'卢森堡'},{v:'MT',l:'马耳他'},{v:'CY',l:'塞浦路斯'},{v:'HR',l:'克罗地亚'},
+  {v:'SK',l:'斯洛伐克'},{v:'SI',l:'斯洛文尼亚'},{v:'BG',l:'保加利亚'},{v:'RS',l:'塞尔维亚'},{v:'LT',l:'立陶宛'},
+  {v:'LV',l:'拉脱维亚'},{v:'EE',l:'爱沙尼亚'},{v:'AL',l:'阿尔巴尼亚'},{v:'BA',l:'波黑'},{v:'MD',l:'摩尔多瓦'},
 ]
 const LANGS = [
   { v: '', l: '不限' },{ v: 'en', l: '英语' },{ v: 'zh', l: '中文(简)' },{ v: 'zh-tw', l: '中文(繁)' },
@@ -265,7 +302,9 @@ const blankForm = () => ({
   cta_type: 'LEARN_MORE', subcode_slug: '', ad_language: '',
   message_template: '', lead_form_id: '',
   message_template_id: null, lead_form_template_id: null,
-  manual_placement: false, placement_platforms: [],
+  manual_placement: false, placement_platforms: [], placement_devices: ['desktop','mobile'],
+  facebook_positions: [], instagram_positions: [], messenger_positions: [], audience_network_positions: [],
+  frequency_cap: 0,
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
 const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
@@ -458,7 +497,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <button class="btn primary" @click="openNew">+ 新建模板</button>
       </div>
     </div>
-    <div class="d">模板按 FB Ads Manager 三级结构（系列→组→广告）组织。选模板+选账户→一键批量部署。</div>
+    <div class="d">选模板 + 选账户 → 一键批量部署到多账户。</div>
 
     <div class="grid" v-loading="loading">
       <div v-for="t in list" :key="t.id" class="card">
@@ -493,7 +532,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       <div v-if="editLevel==='campaign'" class="form">
         <div class="row"><label>模板名</label><input v-model="form.name" class="inp" placeholder="如 US-shopping-夏季" /></div>
         <div class="row"><label>广告目标</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="o.l" /></el-select></div>
-        <div class="row" v-if="convGoalsForObjective.length"><label>转化目标 <span class="api-hint">conversion_goal</span></label>
+        <div class="row" v-if="convGoalsForObjective.length"><label>转化目标</label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable placeholder="选择转化事件">
             <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
           </el-select>
@@ -507,9 +546,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
-        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="g.l" /></el-select></div>
-        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
-        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
+        <div class="row"><label>优化目标</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="g.l" /></el-select></div>
+        <div class="row"><label>计费事件</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
+        <div class="row"><label>转化目的地</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
         <hr class="sep" />
         <div class="sec-title">受众定向</div>
         <div class="row"><label>国家/地区</label>
@@ -585,10 +624,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="sec-title">披露（部分国家强制）</div>
         <div class="row"><label>受益人 beneficiary</label><input v-model="form.beneficiary" class="inp" placeholder="EU/泰国/印度/巴西/台湾/澳洲/新加坡等必填" /></div>
-        <div class="row"><label>付款人 payer</label><input v-model="form.payer" class="inp" /></div>
+        <div class="row"><label>付款人</label><input v-model="form.payer" class="inp" /></div>
+        <hr class="sep" />
+        <div class="sec-title">频次控制</div>
+        <div class="row"><label>频次上限（次 / 天，0=不限）</label><input v-model.number="form.frequency_cap" type="number" min="0" class="inp" placeholder="0" /></div>
         <hr class="sep" />
         <div class="sec-title">高级（JSON，可选）</div>
-        <div class="row"><label>高级设置 <span class="api-hint">advanced_config JSON</span></label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500, "attribution_spec":[{"event_type":"CLICK_THROUGH","window_days":7}]}'></textarea><span class="hint">进阶用户可直接填 FB API JSON（bid_amount / attribution_spec / publisher_platforms / dayparting 等），部署时深合并进 payload</span></div>
+        <div class="row"><label>高级设置</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500}'></textarea><span class="hint">可选，进阶 FB API 字段（JSON），部署时合并</span></div>
       </div>
 
       <!-- ③ 广告 -->
