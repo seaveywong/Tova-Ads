@@ -96,16 +96,23 @@ const AI_PRESETS = {
   'https://generativelanguage.googleapis.com/v1beta/openai': { label: 'Gemini（OpenAI 兼容）', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'] },
 }
 const aiBaseOptions = Object.entries(AI_PRESETS).map(([url, p]) => ({ url, label: p.label }))
-const aiCfg = ref({ ai_base_url: '', ai_api_key_masked: '', ai_api_key_set: false, ai_model: '' })
-const aiForm = ref({ ai_base_url: '', ai_api_key: '', ai_model: '' })
+const aiCfg = ref({ ai_base_url: '', ai_api_key_masked: '', ai_api_key_set: false, ai_model: '',
+                    ai_vision_base_url: '', ai_vision_api_key_masked: '', ai_vision_api_key_set: false, ai_vision_model: '' })
+const aiForm = ref({ ai_base_url: '', ai_api_key: '', ai_model: '',
+                     ai_vision_base_url: '', ai_vision_api_key: '', ai_vision_model: '' })
 const aiModelOptions = computed(() => AI_PRESETS[aiForm.value.ai_base_url]?.models || [])
+const aiVisionModelOptions = computed(() => AI_PRESETS[aiForm.value.ai_vision_base_url]?.models || [])
 const aiSaving = ref(false)
 const aiTesting = ref(false)
+const aiVisionTesting = ref(false)
 const loadAi = async () => {
   if (!isSuper.value) return
   try {
     aiCfg.value = await GET('/settings/ai')
-    aiForm.value = { ai_base_url: aiCfg.value.ai_base_url, ai_api_key: '', ai_model: aiCfg.value.ai_model }
+    aiForm.value = {
+      ai_base_url: aiCfg.value.ai_base_url, ai_api_key: '', ai_model: aiCfg.value.ai_model,
+      ai_vision_base_url: aiCfg.value.ai_vision_base_url, ai_vision_api_key: '', ai_vision_model: aiCfg.value.ai_vision_model,
+    }
   } catch {}
 }
 const saveAi = async () => {
@@ -115,6 +122,9 @@ const saveAi = async () => {
     if (aiForm.value.ai_base_url && aiForm.value.ai_base_url !== aiCfg.value.ai_base_url) body.ai_base_url = aiForm.value.ai_base_url
     if (aiForm.value.ai_api_key) body.ai_api_key = aiForm.value.ai_api_key
     if (aiForm.value.ai_model && aiForm.value.ai_model !== aiCfg.value.ai_model) body.ai_model = aiForm.value.ai_model
+    if (aiForm.value.ai_vision_base_url && aiForm.value.ai_vision_base_url !== aiCfg.value.ai_vision_base_url) body.ai_vision_base_url = aiForm.value.ai_vision_base_url
+    if (aiForm.value.ai_vision_api_key) body.ai_vision_api_key = aiForm.value.ai_vision_api_key
+    if (aiForm.value.ai_vision_model && aiForm.value.ai_vision_model !== aiCfg.value.ai_vision_model) body.ai_vision_model = aiForm.value.ai_vision_model
     if (!Object.keys(body).length) { ElMessage.info('无变更'); aiSaving.value = false; return }
     await PUT('/settings/ai', body)
     ElMessage.success('已保存')
@@ -126,9 +136,17 @@ const testAi = async () => {
   aiTesting.value = true
   try {
     const r = await POST('/settings/ai/test', {})
-    r.ok ? ElMessage.success('连接正常：' + r.detail) : ElMessage.error('连接失败：' + r.detail)
+    r.ok ? ElMessage.success('文案模型：' + r.detail) : ElMessage.error('文案模型失败：' + r.detail)
   } catch (e) { ElMessage.error('测试失败') }
   aiTesting.value = false
+}
+const testVisionAi = async () => {
+  aiVisionTesting.value = true
+  try {
+    const r = await POST('/settings/ai/test?vision=true', {})
+    r.ok ? ElMessage.success('视觉模型：' + r.detail) : ElMessage.error('视觉模型失败：' + r.detail)
+  } catch (e) { ElMessage.error('测试失败') }
+  aiVisionTesting.value = false
 }
 
 // 账户（用户名 + 改密码）
@@ -343,23 +361,40 @@ const runRetentionNow = async () => {
 
     <div v-if="isSuper" class="card">
       <div class="t">AI 配置</div>
-      <div class="d">系统 AI 服务（KPI 纠偏、文案生成等）。OpenAI 兼容接口，支持 DeepSeek / OpenAI / Gemini。</div>
+      <div class="d">系统 AI 服务。OpenAI 兼容接口。文案模型管 KPI/文案生成；视觉模型管素材 AI 识别（看图生成文案/受众）。</div>
+      <div class="sub-t">文案模型（KPI / 文案生成）</div>
       <div class="form-l"><label>服务商</label>
         <el-select v-model="aiForm.ai_base_url" filterable allow-create default-first-option
           placeholder="选服务商或填 Base URL" style="flex:1">
           <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="`${o.label}（${o.url}）`" />
         </el-select>
       </div>
-      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_api_key" class="input" type="password" :placeholder="aiCfg.ai_api_key_set ? aiCfg.ai_api_key_masked : '填新 key 覆盖'" /></div>
+      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_api_key_set ? aiCfg.ai_api_key_masked : '填新 key 覆盖'" /></div>
       <div class="form-l"><label>Model</label>
         <el-select v-model="aiForm.ai_model" filterable allow-create default-first-option
           placeholder="选模型或填模型名" style="flex:1">
           <el-option v-for="m in aiModelOptions" :key="m" :value="m" :label="m" />
         </el-select>
       </div>
+      <div class="sub-t" style="margin-top:18px">视觉模型（素材 AI 识别，看图）</div>
+      <div class="d" style="margin-bottom:6px">用 Gemini 等视觉模型。DeepSeek 纯文本看不了图，所以素材识别单独配这里。</div>
+      <div class="form-l"><label>服务商</label>
+        <el-select v-model="aiForm.ai_vision_base_url" filterable allow-create default-first-option
+          placeholder="选服务商或填 Base URL" style="flex:1">
+          <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="`${o.label}（${o.url}）`" />
+        </el-select>
+      </div>
+      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_vision_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_vision_api_key_set ? aiCfg.ai_vision_api_key_masked : '填新 key 覆盖'" /></div>
+      <div class="form-l"><label>Model</label>
+        <el-select v-model="aiForm.ai_vision_model" filterable allow-create default-first-option
+          placeholder="选模型或填模型名" style="flex:1">
+          <el-option v-for="m in aiVisionModelOptions" :key="m" :value="m" :label="m" />
+        </el-select>
+      </div>
       <div style="display:flex;gap:8px;margin-top:14px">
         <button class="btn primary" :disabled="aiSaving" @click="saveAi">保存</button>
-        <button class="btn" :disabled="aiTesting" @click="testAi">测试连接</button>
+        <button class="btn" :disabled="aiTesting" @click="testAi">测试文案</button>
+        <button class="btn" :disabled="aiVisionTesting" @click="testVisionAi">测试视觉</button>
       </div>
     </div>
 
@@ -435,6 +470,7 @@ const runRetentionNow = async () => {
 .t{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:6px}
 .d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:14px}
 .d b{color:var(--t2)}
+.sub-t{font-size:13px;font-weight:600;color:var(--t2);margin-bottom:8px;padding-left:8px;border-left:2px solid var(--ac)}
 .btn{margin-top:14px;padding:8px 16px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
 .btn:disabled{opacity:.5}

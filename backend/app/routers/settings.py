@@ -10,6 +10,7 @@ from ..core.schedule_config import (get_schedule_config, save_schedule_config,
 from ..core.retention import (get_retention_config, save_retention_config,
                               run_data_retention, get_last_run, DEFAULT_RETENTION)
 from ..core.config import settings
+from ..core.log_utils import write_log, new_trace_id
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -52,78 +53,109 @@ def set_schedule(body: ScheduleIn, user: CurrentUser = Depends(require_superadmi
 
 
 # ── AI 配置（超管）──
-class AiConfigIn(BaseModel):
-    ai_base_url: str = ""
-    ai_api_key: str = ""
-    ai_model: str = ""
+# 文案/KPI 走 ai_*（DeepSeek），素材看图走 ai_vision_*（Gemini）。两组都在此 UI 配。
+# ENV 变量名 → settings 属性名（写 .env + 运行时热重载用）
+_AI_ENV_ATTR = {
+    "AI_BASE_URL": "ai_base_url", "AI_API_KEY": "ai_api_key", "AI_MODEL": "ai_model",
+    "AI_VISION_BASE_URL": "ai_vision_base_url",
+    "AI_VISION_API_KEY": "ai_vision_api_key",
+    "AI_VISION_MODEL": "ai_vision_model",
+}
 
 
-@router.get("/ai")
-def get_ai_config(user: CurrentUser = Depends(require_superadmin)):
-    """返回当前 AI 配置（key 脱敏）。"""
-    key = settings.ai_api_key or ""
-    masked = key[:6] + "***" + key[-4:] if len(key) > 10 else ("***" if key else "")
-    return {
-        "ai_base_url": settings.ai_base_url or "",
-        "ai_api_key_masked": masked,
-        "ai_api_key_set": bool(key),
-        "ai_model": settings.ai_model or "",
-    }
-
-
-@router.put("/ai")
-def set_ai_config(body: AiConfigIn, user: CurrentUser = Depends(require_superadmin)):
-    """更新 AI 配置 → 写 .env + 更新运行时 settings。"""
+def _write_env_and_reload(updates: dict):
+    """写 .env（更新已有行或追加）+ 运行时 settings 热重载。updates = {ENV_KEY: value}。"""
     from pathlib import Path
     env_path = Path("/opt/toveads/backend/.env")
     lines = env_path.read_text().splitlines() if env_path.exists() else []
-    updates = {}
-    if body.ai_base_url:
-        updates["AI_BASE_URL"] = body.ai_base_url
-    if body.ai_api_key:
-        updates["AI_API_KEY"] = body.ai_api_key
-    if body.ai_model:
-        updates["AI_MODEL"] = body.ai_model
-    if not updates:
-        return {"saved": False, "detail": "无变更"}
-    # 更新 .env 文件
-    updated_lines = []
-    found_keys = set()
+    updated_lines, found = [], set()
     for line in lines:
         stripped = line.strip()
         if "=" in stripped:
             k = stripped.split("=", 1)[0]
             if k in updates:
                 updated_lines.append(f"{k}={updates[k]}")
-                found_keys.add(k)
+                found.add(k)
                 continue
         updated_lines.append(line)
     for k, v in updates.items():
-        if k not in found_keys:
+        if k not in found:
             updated_lines.append(f"{k}={v}")
     env_path.write_text("\n".join(updated_lines) + "\n")
-    # 更新运行时
-    if "AI_BASE_URL" in updates:
-        settings.ai_base_url = updates["AI_BASE_URL"]
-    if "AI_API_KEY" in updates:
-        settings.ai_api_key = updates["AI_API_KEY"]
-    if "AI_MODEL" in updates:
-        settings.ai_model = updates["AI_MODEL"]
+    for env_key, val in updates.items():
+        attr = _AI_ENV_ATTR.get(env_key)
+        if attr:
+            setattr(settings, attr, val)
+
+
+def _mask(s: str) -> str:
+    s = s or ""
+    return s[:6] + "***" + s[-4:] if len(s) > 10 else ("***" if s else "")
+
+
+class AiConfigIn(BaseModel):
+    ai_base_url: str = ""
+    ai_api_key: str = ""
+    ai_model: str = ""
+    ai_vision_base_url: str = ""
+    ai_vision_api_key: str = ""
+    ai_vision_model: str = ""
+
+
+@router.get("/ai")
+def get_ai_config(user: CurrentUser = Depends(require_superadmin)):
+    """返回当前 AI 配置（文案 + 视觉，key 脱敏）。"""
+    return {
+        "ai_base_url": settings.ai_base_url or "",
+        "ai_api_key_masked": _mask(settings.ai_api_key),
+        "ai_api_key_set": bool(settings.ai_api_key),
+        "ai_model": settings.ai_model or "",
+        "ai_vision_base_url": settings.ai_vision_base_url or "",
+        "ai_vision_api_key_masked": _mask(settings.ai_vision_api_key),
+        "ai_vision_api_key_set": bool(settings.ai_vision_api_key),
+        "ai_vision_model": settings.ai_vision_model or "",
+    }
+
+
+@router.put("/ai")
+def set_ai_config(body: AiConfigIn, user: CurrentUser = Depends(require_superadmin),
+                  db: Session = Depends(get_db)):
+    """更新 AI 配置（文案/视觉）→ 写 .env + 热重载 settings。空字段=不改。"""
+    field_to_env = {
+        "ai_base_url": "AI_BASE_URL", "ai_api_key": "AI_API_KEY", "ai_model": "AI_MODEL",
+        "ai_vision_base_url": "AI_VISION_BASE_URL",
+        "ai_vision_api_key": "AI_VISION_API_KEY",
+        "ai_vision_model": "AI_VISION_MODEL",
+    }
+    updates = {}
+    for field, env_key in field_to_env.items():
+        val = getattr(body, field)
+        if val:
+            updates[env_key] = val
+    if not updates:
+        return {"saved": False, "detail": "无变更"}
+    _write_env_and_reload(updates)
+    changed = sorted(k for k in updates if "KEY" in k)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="ai_config",
+              action_type="update", source="user", result="success",
+              metadata={"changed_fields": sorted(updates.keys()), "key_fields_changed": changed})
     return {"saved": True}
 
 
 @router.post("/ai/test")
-def test_ai(user: CurrentUser = Depends(require_superadmin)):
-    """测试 AI 连接。"""
-    from ..core.ai_client import AiClient
-    client = AiClient()
+def test_ai(vision: bool = False, user: CurrentUser = Depends(require_superadmin)):
+    """测试 AI 连接。vision=False 测文案(DeepSeek)，vision=True 测视觉(Gemini 看图)。"""
+    from ..core.ai_client import AiClient, vision_client
+    client = vision_client() if vision else AiClient()
+    label = "视觉" if vision else "文案"
     if not client.is_configured():
-        return {"ok": False, "detail": "AI 未配置（key 为空）"}
+        return {"ok": False, "detail": f"{label} AI 未配置（key 为空）"}
     try:
         resp = client.chat([{"role": "user", "content": "回复 OK"}], temperature=0, max_tokens=10)
         return {"ok": True, "detail": resp[:50]}
     except Exception as e:
-        return {"ok": False, "detail": str(e)[:100]}
+        return {"ok": False, "detail": str(e)[:120]}
 
 
 # ── CF 配置（超管）──

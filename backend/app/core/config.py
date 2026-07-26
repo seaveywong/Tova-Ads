@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # 与文案配置独立：文案/KPI 走 ai_*（DeepSeek），素材看图走 ai_vision_*（Gemini）
     ai_vision_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     ai_vision_api_key: str = ""
-    ai_vision_model: str = "gemini-2.0-flash"
+    ai_vision_model: str = "gemini-2.5-flash"  # 2.0-flash 已下线(404)，用 2.5-flash
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
