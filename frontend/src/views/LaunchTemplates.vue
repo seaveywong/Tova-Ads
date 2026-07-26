@@ -343,24 +343,30 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② 广告组 Ad Set</button>
         <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ 广告 Ad</button>
       </div>
+      <!-- #8 summary strip：跨级概览 -->
+      <div class="summary-strip">
+        <span class="ss-chip" @click="editLevel='campaign'" title="点击跳到系列">目标：{{ OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective }}</span>
+        <span class="ss-chip" @click="editLevel='adset'" title="点击跳到广告组">受众：{{ (form.audience_countries||[]).join(',') || '默认' }} · {{ (form.audience_interests||[]).length }}兴趣</span>
+        <span class="ss-chip" @click="editLevel='ad'" title="点击跳到广告">素材：{{ editingAsset?.name || '未选' }}</span>
+      </div>
 
       <!-- ① 系列 -->
       <div v-if="editLevel==='campaign'" class="form">
         <div class="row"><label>模板名</label><input v-model="form.name" class="inp" placeholder="如 US-shopping-夏季" /></div>
-        <div class="row"><label>广告目标</label><select v-model="form.objective" class="inp"><option v-for="o in OBJECTIVES" :key="o.v" :value="o.v">{{ o.l }}</option></select></div>
+        <div class="row"><label>广告目标</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="o.l" /></el-select></div>
         <div class="row"><label>转化目标 <span class="api-hint">conversion_goal</span></label><input v-model="form.conversion_goal" class="inp" placeholder="如 Purchase（购物/线索用）" /></div>
         <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">ABO 组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">CBO 系列预算</button></div></div>
         <div class="row"><label>每日预算（美元）</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">部署时按账户本币自动换算</span></div>
-        <div class="row"><label>出价策略</label><select v-model="form.bid_strategy" class="inp"><option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v">{{ b.l }}</option></select></div>
-        <div class="row"><label>特殊广告类别</label><select v-model="form.special_ad_category" class="inp"><option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v">{{ s.l }}</option></select></div>
+        <div class="row"><label>出价策略</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
+        <div class="row"><label>特殊广告类别</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="s.l" /></el-select></div>
         <div class="row"><label>广告命名前缀</label><input v-model="form.name_prefix" class="inp" /></div>
       </div>
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
-        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><select v-model="form.optimization_goal" class="inp"><option value="">自动（按目标推）</option><option v-for="g in OPT_GOALS" :key="g" :value="g">{{ g }}</option></select></div>
-        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><select v-model="form.billing_event" class="inp"><option v-for="b in BILLING_EVENTS" :key="b" :value="b">{{ b }}</option></select></div>
-        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><select v-model="form.destination_type" class="inp"><option value="">自动</option><option v-for="d in DEST_TYPES" :key="d" :value="d">{{ d }}</option></select></div>
+        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g" :value="g" :label="g" /></el-select></div>
+        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b" :value="b" :label="b" /></el-select></div>
+        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d" :value="d" :label="d" /></el-select></div>
         <hr class="sep" />
         <div class="sec-title">受众定向</div>
         <div class="row"><label>国家/地区</label>
@@ -427,7 +433,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="row"><label>标题 headline</label><input v-model="form.headline" class="inp" /></div>
         <div class="row"><label>正文 body</label><textarea v-model="form.body" class="inp ta" rows="3"></textarea></div>
-        <div class="row"><label>行动号召 CTA</label><select v-model="form.cta_type" class="inp"><option v-for="c in CTAS" :key="c.v" :value="c.v">{{ c.l }}（{{ c.v }}）</option></select></div>
+        <div class="row"><label>行动号召 CTA</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="c.l + '（' + c.v + '）'" /></el-select></div>
         <div class="row"><label>主页 page_id</label><input v-model="form.page_id" class="inp" placeholder="默认值（部署时每账户下拉选）" /></div>
         <div class="row"><label>像素 pixel_id</label><input v-model="form.pixel_id" class="inp" placeholder="购物/线索目标必填" /></div>
         <div class="row"><label>落地页</label>
@@ -471,7 +477,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     </el-dialog>
 
     <!-- 部署抽屉 -->
-    <el-drawer v-model="deployOpen" :title="`部署 · ${deployTpl?.name||''}`" direction="rtl" size="600px">
+    <el-drawer v-model="deployOpen" :title="`部署 · ${deployTpl?.name||''}`" direction="rtl" size="680px">
       <div class="d">勾选账户。每账户的主页/像素从下拉选（默认填模板值）。</div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in accounts" :key="a.act_id" class="acc-block">
@@ -704,4 +710,18 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
 /* 部署加载 */
 .config-loading{font-size:12px;color:var(--t3);padding:4px 8px}
+
+/* #8 summary strip */
+.summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
+.ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
+.ss-chip:hover{color:var(--ac)}
+
+/* #23 移动端适配 */
+@media (max-width: 768px) {
+  .grid{grid-template-columns:1fr !important}
+  .picker-grid{grid-template-columns:1fr !important}
+  .acc-config{grid-template-columns:1fr !important}
+  .level-tabs{flex-direction:column}
+  .summary-strip{flex-direction:column}
+}
 </style>
