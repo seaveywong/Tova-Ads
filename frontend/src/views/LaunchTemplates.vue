@@ -66,7 +66,19 @@ const SPECIAL_CATS = [
   { v: '', l: '无' },{ v: 'HOUSING', l: '住房' },{ v: 'EMPLOYMENT', l: '就业' },
   { v: 'CREDIT', l: '信贷' },{ v: 'ISSUES_ELECTIONS_POLITICS', l: '政治/选举' },
 ]
-const COUNTRIES = ['US','VN','TH','ID','PH','MY','TW','HK','SG','CN','BR','MX','IN','JP','KR','GB','DE','FR','AE','SA','EG','KW','QA','TR','ES','IT','CA','AU','NZ']
+const COUNTRIES = [
+  {v:'US',l:'美国'},{v:'VN',l:'越南'},{v:'TH',l:'泰国'},{v:'ID',l:'印尼'},{v:'PH',l:'菲律宾'},
+  {v:'MY',l:'马来西亚'},{v:'TW',l:'台湾'},{v:'HK',l:'香港'},{v:'SG',l:'新加坡'},{v:'CN',l:'中国大陆'},
+  {v:'BR',l:'巴西'},{v:'MX',l:'墨西哥'},{v:'IN',l:'印度'},{v:'JP',l:'日本'},{v:'KR',l:'韩国'},
+  {v:'GB',l:'英国'},{v:'DE',l:'德国'},{v:'FR',l:'法国'},{v:'AE',l:'阿联酋'},{v:'SA',l:'沙特'},
+  {v:'EG',l:'埃及'},{v:'KW',l:'科威特'},{v:'QA',l:'卡塔尔'},{v:'TR',l:'土耳其'},{v:'ES',l:'西班牙'},
+  {v:'IT',l:'意大利'},{v:'CA',l:'加拿大'},{v:'AU',l:'澳洲'},{v:'NZ',l:'新西兰'},{v:'CL',l:'智利'},
+  {v:'CO',l:'哥伦比亚'},{v:'PE',l:'秘鲁'},{v:'AR',l:'阿根廷'},{v:'ZA',l:'南非'},{v:'NG',l:'尼日利亚'},
+  {v:'KE',l:'肯尼亚'},{v:'BD',l:'孟加拉'},{v:'PK',l:'巴基斯坦'},{v:'PL',l:'波兰'},{v:'NL',l:'荷兰'},
+  {v:'BE',l:'比利时'},{v:'CH',l:'瑞士'},{v:'AT',l:'奥地利'},{v:'SE',l:'瑞典'},{v:'NO',l:'挪威'},
+  {v:'DK',l:'丹麦'},{v:'FI',l:'芬兰'},{v:'PT',l:'葡萄牙'},{v:'GR',l:'希腊'},{v:'CZ',l:'捷克'},
+  {v:'RO',l:'罗马尼亚'},{v:'HU',l:'匈牙利'},{v:'IL',l:'以色列'},{v:'IE',l:'爱尔兰'},{v:'RU',l:'俄罗斯'},
+]
 const LANGS = [
   { v: '', l: '不限' },{ v: 'en', l: '英语' },{ v: 'zh', l: '中文(简)' },{ v: 'zh-tw', l: '中文(繁)' },
   { v: 'vi', l: '越南语' },{ v: 'th', l: '泰语' },{ v: 'id', l: '印尼语' },{ v: 'ja', l: '日语' },
@@ -138,9 +150,12 @@ const searchInterests = async () => {
   interestSearching.value = false
 }
 const addInterest = (it) => {
-  if (!form.value.audience_interests.find(x => x.id === it.id)) form.value.audience_interests.push({ id: String(it.id), name: it.name })
+  if (!form.value.audience_interests.find(x => x.id === String(it.id))) form.value.audience_interests.push({ id: String(it.id), name: it.name })
+  interestResults.value = []  // 选完清结果
+  interestQ.value = ''
 }
 const removeInterest = (i) => form.value.audience_interests.splice(i, 1)
+const clearInterestSearch = () => { interestResults.value = []; interestQ.value = '' }
 const importAiInterests = async () => {
   if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning('该素材无 AI 兴趣词')
   let added = 0
@@ -300,15 +315,18 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <hr class="sep" />
         <div class="sec-title">受众定向</div>
         <div class="row"><label>国家/地区</label>
-          <div class="chips-input">
-            <select v-model="form.audience_countries" multiple class="inp multi">
-              <option v-for="c in COUNTRIES" :key="c" :value="c">{{ c }}</option>
-            </select>
-          </div>
+          <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
+            placeholder="搜索选择国家/地区（可多选）" style="width:100%" size="small">
+            <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="c.l + ' (' + c.v + ')'" />
+          </el-select>
         </div>
         <div class="row"><label>年龄</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
         <div class="row"><label>性别</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">全部</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">男</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">女</button></div></div>
-        <div class="row"><label>语言（定向说此语言的人）</label><select v-model="form.audience_language" class="inp"><option v-for="l in LANGS" :key="l.v" :value="l.v">{{ l.l }}</option></select></div>
+        <div class="row"><label>语言（定向说此语言的人）</label>
+          <el-select v-model="form.audience_language" filterable clearable placeholder="不限语言" style="width:100%" size="small">
+            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
+          </el-select>
+        </div>
         <div class="row"><label>兴趣关键词（FB adinterest 搜索）</label>
           <div class="interest-search">
             <input v-model="interestQ" class="inp" placeholder="如 Shopping / 美妆 / 投资" @keyup.enter="searchInterests" />
@@ -316,6 +334,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">从素材AI导入</button>
           </div>
           <div v-if="interestResults.length" class="search-results">
+            <div class="search-results-head"><span>搜索结果（点击添加）</span><button class="clear-btn" @click="clearInterestSearch">清空 ✕</button></div>
             <div v-for="r in interestResults" :key="r.id" class="search-item" @click="addInterest(r)"><span>{{ r.name }}</span><span class="sz">{{ r.audience_size ? Math.floor(r.audience_size/1e6)+'M' : '' }}</span><span class="add">+</span></div>
           </div>
         </div>
@@ -364,7 +383,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="row"><label>落地页 URL</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
         <div class="row"><label>子码 slug</label><input v-model="form.subcode_slug" class="inp" placeholder="留空=不绑子码" /></div>
-        <div class="row"><label>广告语言</label><select v-model="form.ad_language" class="inp"><option value="">自动</option><option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v">{{ l.l }}</option></select></div>
+        <div class="row"><label>广告语言</label>
+          <el-select v-model="form.ad_language" filterable clearable placeholder="自动（按素材语言）" style="width:100%" size="small">
+            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
+          </el-select>
+        </div>
       </div>
 
       <template #footer>
@@ -492,8 +515,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .sec-title{font-size:12px;color:var(--ac);font-weight:600;margin:-2px 0 2px}
 
 .interest-search{display:flex;gap:6px}
-.search-results{margin-top:4px;max-height:160px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px}
-.search-item{display:flex;align-items:center;gap:6px;padding:5px 8px;font-size:12px;color:var(--t2);cursor:pointer;border-bottom:1px solid var(--bd)}
+.search-results{margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px}
+.search-results-head{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;font-size:10px;color:var(--t3);background:var(--bg3);border-bottom:1px solid var(--bd)}
+.clear-btn{background:none;border:none;color:var(--t3);font-size:10px;cursor:pointer;padding:2px 6px}
+.clear-btn:hover{color:var(--error)}
+.search-item{display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:12px;color:var(--t2);cursor:pointer;border-bottom:1px solid var(--bd)}
 .search-item:last-child{border:none}
 .search-item:hover{background:var(--bg3)}
 .search-item .sz{color:var(--t3);font-size:10px;margin-left:auto}
