@@ -136,11 +136,11 @@ COUNTRY_LANGUAGE_MAP: dict[str, str] = {
     "CN": "zh", "SG": "zh", "TW": "zh-tw", "HK": "zh-tw",
 }
 
-# ── 精度档位（移植自 1.0 ANALYSIS_DEPTH_CONFIG :1056-1081）──
+# ── 精度档位（移植自 1.0 ANALYSIS_DEPTH_CONFIG :1056-1081；max_tokens 已上调——gemini-2.5-flash 是 thinking 模型，原 1.0 的 2048 不够 aggressive 风格 + 推理消耗，会截断 JSON）──
 ANALYSIS_DEPTH_CONFIG: dict[str, dict] = {
-    "fast":     {"label": "快速", "temperature": 0.7, "video_frames": 1, "max_tokens": 2048, "copy_count": 3},
+    "fast":     {"label": "快速", "temperature": 0.7, "video_frames": 1, "max_tokens": 3072, "copy_count": 3},
     "standard": {"label": "标准", "temperature": 0.85, "video_frames": 4, "max_tokens": 4096, "copy_count": 3},
-    "deep":     {"label": "深度", "temperature": 0.9, "video_frames": 6, "max_tokens": 4096, "copy_count": 5},
+    "deep":     {"label": "深度", "temperature": 0.9, "video_frames": 6, "max_tokens": 5120, "copy_count": 5},
 }
 
 # ── 风格轴（移植自 1.0 style_guide :1199-1229）──
