@@ -28,10 +28,23 @@ const editingName = ref('')
 // AI 分析中集合（即时反馈，不等列表刷新）
 const analyzingIds = ref(new Set())
 
-// AI 文案/受众编辑弹窗
+// AI 选项（用途/深度/风格，从后端拉）+ 当前选择
+const aiOpts = ref({ purposes: [], depths: [], styles: [] })
+const aiPurpose = ref('general')
+const aiDepth = ref('standard')
+const aiStyle = ref('standard')
+const PURPOSE_KEYS = new Set(['general','attract_male','attract_female','attract_investors','promote_clothing','promote_beauty','promote_health','promote_app','promote_course','promote_finance','ecommerce','lead_gen','brand_awareness'])
+const purposeLabel = (v) => {
+  if (!v) return ''
+  if (String(v).startsWith('custom:')) return '自定义：' + v.slice(7)
+  const p = aiOpts.value.purposes.find(x => x.value === v)
+  return p ? p.label : v
+}
+
+// AI 富文案编辑弹窗（多 variant）
 const editOpen = ref(false)
 const editAsset = ref(null)
-const editForm = ref({ primary_text: '', headline: '', description: '', interestsStr: '', countriesStr: '' })
+const editForm = ref({ analysis: '', headlines: [''], bodies: [''], interestsStr: '', audienceNote: '', countriesStr: '' })
 const editSaving = ref(false)
 
 const BASE = 'https://api.tovaads.com'
@@ -56,7 +69,10 @@ const load = async () => {
   } catch (e) { ElMessage.error(e.message || '加载失败') }
   loading.value = false
 }
-onMounted(load)
+onMounted(async () => {
+  load()
+  try { aiOpts.value = await GET('/assets/ai-purposes') } catch {}
+})
 
 const typeChips = [
   { key: '', label: '全部' },
@@ -149,10 +165,15 @@ const editTags = async (a) => {
 // AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
 const analyze = async (a) => {
   analyzingIds.value.add(a.id)
+  // 自定义用途（不在已知 13 里）→ 拼 custom:xxx
+  const purp = aiPurpose.value && !PURPOSE_KEYS.has(aiPurpose.value)
+    ? 'custom:' + aiPurpose.value
+    : aiPurpose.value
   try {
     const r = await fetch(BASE + '/assets/' + a.id + '/analyze', {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') },
+      headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purpose: purp, depth: aiDepth.value, style: aiStyle.value }),
     })
     const text = await r.text()
     const data = JSON.parse(text)
@@ -161,23 +182,29 @@ const analyze = async (a) => {
     ElMessage.success('AI 分析完成')
   } catch (e) {
     ElMessage.error(e.message || 'AI 分析失败')
-    // 失败也刷新拿 ai_status=failed + ai_error
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
   } finally {
     analyzingIds.value.delete(a.id)
   }
 }
 
-// 打开 AI 文案/受众编辑（AI 结果可改，或手动键入）
+// 编辑弹窗：headlines/bodies 增删
+const addH = () => editForm.value.headlines.push('')
+const delH = (i) => editForm.value.headlines.splice(i, 1)
+const addB = () => editForm.value.bodies.push('')
+const delB = (i) => editForm.value.bodies.splice(i, 1)
+
+// 打开 AI 富文案编辑（AI 结果可改，或手动键入）
 const openEdit = (a) => {
   editAsset.value = a
   const copy = a.ai_copy || {}
   const aud = a.ai_audience || {}
   editForm.value = {
-    primary_text: copy.primary_text || '',
-    headline: copy.headline || '',
-    description: copy.description || '',
+    analysis: copy.analysis || '',
+    headlines: (copy.headlines && copy.headlines.length) ? [...copy.headlines] : [''],
+    bodies: (copy.bodies && copy.bodies.length) ? [...copy.bodies] : [''],
     interestsStr: (aud.interests || []).join(', '),
+    audienceNote: aud.audience_note || '',
     countriesStr: (aud.countries || []).join(', '),
   }
   editOpen.value = true
@@ -187,10 +214,11 @@ const saveEdit = async () => {
   editSaving.value = true
   try {
     const body = {
-      primary_text: editForm.value.primary_text,
-      headline: editForm.value.headline,
-      description: editForm.value.description,
+      analysis: editForm.value.analysis,
+      headlines: (editForm.value.headlines || []).map(t => t.trim()).filter(Boolean),
+      bodies: (editForm.value.bodies || []).map(t => t.trim()).filter(Boolean),
       interests: editForm.value.interestsStr.split(',').map(t => t.trim()).filter(Boolean),
+      audience_note: editForm.value.audienceNote,
       countries: editForm.value.countriesStr.split(',').map(t => t.trim().toUpperCase()).filter(Boolean),
     }
     const r = await PUT('/assets/' + editAsset.value.id + '/ai', body)
@@ -273,6 +301,31 @@ const countryLabel = (code) => {
       </div>
     </div>
 
+    <!-- AI 分析参数（aiOn 时显示，作用于卡片 AI分析 按钮） -->
+    <div v-if="aiOn" class="ai-bar">
+      <div class="ai-field">
+        <span class="ai-field-label">用途</span>
+        <el-select v-model="aiPurpose" filterable allow-create default-first-option size="small" style="width:220px">
+          <el-option v-for="p in aiOpts.purposes" :key="p.value" :value="p.value" :label="p.label" />
+        </el-select>
+      </div>
+      <div class="ai-field">
+        <span class="ai-field-label">深度</span>
+        <div class="seg-grp">
+          <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg2', { on: aiDepth === d.value }]"
+                  :title="`${d.copy_count} 条文案${d.video_frames > 1 ? ' / ' + d.video_frames + ' 帧' : ''}`"
+                  @click="aiDepth = d.value">{{ d.label }}</button>
+        </div>
+      </div>
+      <div class="ai-field">
+        <span class="ai-field-label">风格</span>
+        <div class="seg-grp">
+          <button v-for="s in aiOpts.styles" :key="s.value" :class="['seg2', { on: aiStyle === s.value, warn: s.value === 'aggressive' }]"
+                  :title="s.hint" @click="aiStyle = s.value">{{ s.label }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 网格 -->
     <div class="grid" v-loading="loading">
       <div v-for="a in assets" :key="a.id" class="card">
@@ -294,7 +347,7 @@ const countryLabel = (code) => {
             <span v-for="t in (a.tags || []).slice(0,2)" :key="t" class="tag-chip">{{ t }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
             <span v-if="a.fb_image_hash" class="fb-mark" title="已上传到 FB">FB</span>
-            <span v-if="a.ai_status === 'done'" class="ai-mark" title="AI 已分析">AI</span>
+            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="'AI 已分析 · ' + purposeLabel(a.ai_purpose)">AI{{ a.ai_purpose && a.ai_purpose !== 'general' ? '·' + purposeLabel(a.ai_purpose) : '' }}</span>
           </div>
           <div class="card-meta">
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
@@ -358,26 +411,36 @@ const countryLabel = (code) => {
           <span class="edit-hint">驱动 AI 文案语言</span>
         </div>
         <div class="edit-row">
-          <label>标题 headline</label>
-          <input v-model="editForm.headline" class="edit-input" placeholder="广告标题（30字内）" maxlength="40" />
+          <label>画面分析 analysis</label>
+          <textarea v-model="editForm.analysis" class="edit-textarea" rows="2" placeholder="画面/视频内容和广告意图"></textarea>
         </div>
         <div class="edit-row">
-          <label>正文 primary text</label>
-          <textarea v-model="editForm.primary_text" class="edit-textarea" rows="3" placeholder="广告正文（80字内）" maxlength="200"></textarea>
+          <label>标题 headlines <button class="add-btn" @click="addH">+ 加一条</button></label>
+          <div v-for="(h, i) in editForm.headlines" :key="'h'+i" class="variant-row">
+            <input v-model="editForm.headlines[i]" class="edit-input" placeholder="标题（40字内）" maxlength="60" />
+            <button v-if="editForm.headlines.length > 1" class="del-btn" @click="delH(i)">✕</button>
+          </div>
         </div>
         <div class="edit-row">
-          <label>描述 description</label>
-          <input v-model="editForm.description" class="edit-input" placeholder="描述（30字内）" maxlength="40" />
+          <label>正文 bodies <button class="add-btn" @click="addB">+ 加一条</button></label>
+          <div v-for="(b, i) in editForm.bodies" :key="'b'+i" class="variant-row">
+            <textarea v-model="editForm.bodies[i]" class="edit-textarea" rows="2" placeholder="文案（125字内，含 CTA）" maxlength="200"></textarea>
+            <button v-if="editForm.bodies.length > 1" class="del-btn" @click="delB(i)">✕</button>
+          </div>
         </div>
         <div class="edit-row">
-          <label>兴趣 interests</label>
-          <input v-model="editForm.interestsStr" class="edit-input" placeholder="兴趣标签（逗号分隔）" />
+          <label>兴趣词 interests（FB 受众定向，英文）</label>
+          <input v-model="editForm.interestsStr" class="edit-input" placeholder="英文兴趣词（逗号分隔，如 Cable management, Home office）" />
+        </div>
+        <div class="edit-row">
+          <label>受众描述 audience note</label>
+          <input v-model="editForm.audienceNote" class="edit-input" placeholder="目标受众特征简述" />
         </div>
         <div class="edit-row">
           <label>国家 countries</label>
           <input v-model="editForm.countriesStr" class="edit-input" placeholder="投放国家代码（逗号分隔，如 US,VN）" />
         </div>
-        <div v-if="aiOn" class="edit-tip">点「AI分析」可自动填充以上字段（基于素材视觉内容）。</div>
+        <div v-if="aiOn" class="edit-tip">点卡片「AI分析」可按当前用途/深度/风格自动填充以上字段。</div>
         <div v-else class="edit-tip">AI 识别已关，请手动键入。打开右上「AI 识别」开关可自动生成。</div>
       </div>
       <template #footer>
@@ -399,9 +462,12 @@ const countryLabel = (code) => {
           <span class="meta-info">#{{ previewAsset.id }}</span>
         </div>
         <div v-if="previewAsset.ai_status === 'done'" class="preview-ai">
-          <div class="preview-ai-title">AI 文案</div>
-          <div v-if="previewAsset.ai_copy?.headline" class="preview-ai-line"><b>标题：</b>{{ previewAsset.ai_copy.headline }}</div>
-          <div v-if="previewAsset.ai_copy?.primary_text" class="preview-ai-line"><b>正文：</b>{{ previewAsset.ai_copy.primary_text }}</div>
+          <div class="preview-ai-title">AI 文案 · {{ purposeLabel(previewAsset.ai_purpose) }}</div>
+          <div v-if="previewAsset.ai_copy?.analysis" class="preview-ai-line preview-ai-analysis">{{ previewAsset.ai_copy.analysis }}</div>
+          <div v-for="(h, i) in (previewAsset.ai_copy?.headlines || [])" :key="'ph'+i" class="preview-ai-line"><b>H{{ i+1 }}：</b>{{ h }}</div>
+          <div v-for="(b, i) in (previewAsset.ai_copy?.bodies || [])" :key="'pb'+i" class="preview-ai-line"><b>B{{ i+1 }}：</b>{{ b }}</div>
+          <div v-if="(previewAsset.ai_audience?.interests || []).length" class="preview-ai-line"><b>兴趣：</b>{{ (previewAsset.ai_audience.interests || []).join(' · ') }}</div>
+          <div v-if="previewAsset.ai_audience?.audience_note" class="preview-ai-line"><b>受众：</b>{{ previewAsset.ai_audience.audience_note }}</div>
         </div>
       </div>
     </el-dialog>
@@ -427,6 +493,25 @@ const countryLabel = (code) => {
 .btn { padding: 7px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t1); border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
 .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
 .btn:disabled { opacity: .5; }
+
+/* AI 参数条 */
+.ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; }
+.ai-field { display: flex; align-items: center; gap: 6px; }
+.ai-field-label { font-size: 12px; color: var(--t3); }
+.seg-grp { display: flex; gap: 2px; background: var(--bg3); border-radius: 6px; padding: 2px; }
+.seg2 { padding: 4px 10px; border: none; background: transparent; color: var(--t3); font-size: 12px; border-radius: 4px; cursor: pointer; font-family: inherit; }
+.seg2.on { background: var(--bg2); color: var(--t1); }
+.seg2.warn.on { background: rgba(255,159,10,.18); color: var(--warning); }
+.seg2:hover { color: var(--t1); }
+
+/* 编辑弹窗 variant 行 */
+.variant-row { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; }
+.variant-row .edit-input, .variant-row .edit-textarea { flex: 1; }
+.add-btn { background: none; border: 1px dashed var(--bd); color: var(--ac); font-size: 11px; padding: 1px 8px; border-radius: 4px; cursor: pointer; margin-left: 8px; }
+.add-btn:hover { border-color: var(--ac); }
+.del-btn { background: none; border: none; color: var(--t3); cursor: pointer; padding: 4px 6px; font-size: 13px; }
+.del-btn:hover { color: var(--error); }
+.preview-ai-analysis { color: var(--t3); font-size: 12px; font-style: italic; }
 
 /* 网格 */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; min-height: 200px; }
