@@ -190,25 +190,29 @@ def preflight_deploy(tid: int, body: PreflightIn,
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
-    campaign_payload = build_campaign(
-        name=t.name_prefix, objective=t.objective,
-        daily_budget=daily_budget_fb if t.budget_mode.upper() == "CBO" else None,
-        budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
-    )
-    adset_payload = build_adset(
-        name=f"{t.name_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
-        daily_budget=daily_budget_fb, objective=t.objective,
-        conversion_goal=t.conversion_goal, page_id=page_id, pixel_id=pixel_id,
-        landing_url=t.landing_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
-        targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
-        optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
-        destination_type_override=t.destination_type or "", extra=advanced,
-    )
-    creative_payload = build_creative(
-        page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-        landing_url=t.landing_url, headline=t.headline, body=t.body,
-        cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
-    )
+    try:
+        campaign_payload = build_campaign(
+            name=t.name_prefix, objective=t.objective,
+            daily_budget=daily_budget_fb if t.budget_mode.upper() == "CBO" else None,
+            budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
+        )
+        adset_payload = build_adset(
+            name=f"{t.name_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
+            daily_budget=daily_budget_fb, objective=t.objective,
+            conversion_goal=t.conversion_goal, page_id=page_id, pixel_id=pixel_id,
+            landing_url=t.landing_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
+            targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
+            optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
+            destination_type_override=t.destination_type or "", extra=advanced,
+        )
+        creative_payload = build_creative(
+            page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
+            landing_url=t.landing_url, headline=t.headline, body=t.body,
+            cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
+        )
+    except ValueError as e:
+        # build_adset 对缺 pixel/page 等抛 ValueError —— 预检就该把这个告诉用户
+        raise HTTPException(400, f"参数校验失败：{e}")
     return {
         "act_id": body.act_id, "currency": currency,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
@@ -242,13 +246,10 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
                 age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
                 gender=a.get("gender") or 0, strategy=a.get("strategy") or "broad_interest",
             )
-            # 用户指定语言（targeting.languages）
+            # 用户指定语言（FB targeting.languages：[{id,name}] 或 [id] 透传）
             langs = a.get("languages") or []
-            if langs:
-                t["languages"] = [{"id": str(x) if str(x).isdigit() else x, "name": str(x)} for x in langs][:5] \
-                    if all(isinstance(x, (int, str)) for x in langs) else []
-                # 注：languages 实际应为 [{id,name}]，前端传 id 列表
-                t["languages"] = [{"id": str(x)} for x in langs] if langs and not isinstance(langs[0], dict) else langs
+            if langs and isinstance(langs, list):
+                t["languages"] = langs
             return t
         except Exception:
             pass
