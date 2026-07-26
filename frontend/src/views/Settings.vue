@@ -419,10 +419,10 @@ const runRetentionNow = async () => {
         <span v-if="!tgBot.configured" class="d" style="color:var(--warning)">管理员未配置 TG Bot</span>
       </div>
 
-      <!-- 发送测试消息（owner/超管，和绑定按钮并排） -->
+      <!-- 验证 Bot 配置（owner/超管，验证 bot_token 是否配对） -->
       <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
-        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '发送测试消息' }}</button>
-        <span class="d" style="margin-left:8px;font-size:11px">发到团队 TG Bot</span>
+        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '验证 Bot 配置' }}</button>
+        <span class="d" style="margin-left:8px;font-size:11px">发送一条测试消息到管理员配置的 Bot，验证 Bot 是否正常工作</span>
       </div>
     </div>
   </div>
