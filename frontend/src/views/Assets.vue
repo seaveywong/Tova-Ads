@@ -650,7 +650,7 @@ const countryLabel = (code) => {
 
 /* 网格 */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; min-height: 200px; }
-.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s; display: flex; flex-direction: column; }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s; display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: 320px; }
 .card:hover { border-color: var(--ac); }
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
 .thumb { max-width: 100%; max-height: 100%; object-fit: cover; width: 100%; height: 100%; }
