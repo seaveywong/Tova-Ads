@@ -6,6 +6,7 @@ const ROUTE_PERMS = {
   dashboard:   ['ads.read'],
   ads:         ['ads.read'],
   'ad-manager':['ads.read'],
+  'launch-templates':['ads.create'],
   landing:     ['landing.manage'],
   guard:       ['rules.read'],
   'kpi-mapping':['__superadmin__'],  // 仅超管可见（前端 isSuperadmin 控制，不走权限矩阵）
@@ -27,6 +28,7 @@ const routes = [
       { path: 'dashboard', name: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '数据看板', icon: 'DataAnalysis' } },
       { path: 'ads', name: 'ads', component: () => import('../views/Ads.vue'), meta: { title: '广告账户', icon: 'Promotion' } },
       { path: 'ad-manager', name: 'ad-manager', component: () => import('../views/AdManager.vue'), meta: { title: '广告管理器', icon: 'Operation' } },
+      { path: 'launch-templates', name: 'launch-templates', component: () => import('../views/LaunchTemplates.vue'), meta: { title: '投放模板', icon: 'Promotion' } },
       { path: 'assets', name: 'assets', component: () => import('../views/Assets.vue'), meta: { title: '素材库', icon: 'Picture' } },
       { path: 'landing', name: 'landing', component: () => import('../views/Landing.vue'), meta: { title: '落地页', icon: 'Link' } },
       { path: 'guard', name: 'guard', component: () => import('../views/Guard.vue'), meta: { title: '规则引擎', icon: 'SetUp' } },
