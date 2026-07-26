@@ -398,10 +398,10 @@ const runRetentionNow = async () => {
 
     <div class="card">
       <div class="t">Telegram 通知</div>
-      <div class="d">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
+      <div class="d" style="margin-bottom:10px">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
 
       <!-- 已绑定状态 -->
-      <div v-if="userTg.bound" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div v-if="userTg.bound" style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="color:var(--success);font-size:13px;font-weight:500">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
         <span v-if="userTg.verified" style="font-size:11px;color:var(--t3)">已验证</span>
         <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发测试消息' }}</button>
@@ -409,9 +409,9 @@ const runRetentionNow = async () => {
       </div>
 
       <!-- 未绑定 -->
-      <div v-else style="margin-top:14px">
+      <div v-else style="margin-top:8px">
         <!-- Deep Link（一键绑定）-->
-        <div v-if="tgBindLink" style="margin-bottom:14px">
+        <div v-if="tgBindLink" style="margin-bottom:8px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <a :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
             <button class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
@@ -420,13 +420,13 @@ const runRetentionNow = async () => {
         </div>
 
         <!-- Login Widget（BotFather domain 已设时显示）-->
-        <div v-if="tgBot.configured && tgBot.bot_username">
-          <div id="tg-widget" style="min-height:50px"></div>
+        <div v-if="tgBot.configured && tgBot.bot_username" style="margin-top:6px">
+          <div id="tg-widget" style="min-height:36px"></div>
         </div>
       </div>
 
       <!-- 租户级测试（owner/超管可见） -->
-      <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--bd)">
+      <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
         <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '测试租户 TG' }}</button>
         <span class="d" style="margin-left:8px;font-size:11px">发到管理员配置的租户级 TG Bot</span>
       </div>
