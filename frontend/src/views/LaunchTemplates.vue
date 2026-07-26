@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fmtTime } from '../composables/useTz'
+import { showError } from '../composables/useError'
 
 const list = ref([])
 const loading = ref(false)
@@ -92,7 +93,7 @@ const saveTpl = async () => {
       await POST('/launch-templates', body); ElMessage.success('已创建')
     }
     editOpen.value = false; await load()
-  } catch (e) { ElMessage.error(e.message || '保存失败') }
+  } catch (e) { showError(e, '保存模板失败') }
   saving.value = false
 }
 const removeTpl = async (t) => {
@@ -113,7 +114,7 @@ const openAssetPicker = async () => {
 const openDeploy = async (t) => {
   deployTpl.value = t; deployOpen.value = true; selectedAccs.value = new Set()
   accLoading.value = true
-  try { accounts.value = await GET('/fb/accounts') } catch (e) { ElMessage.error(e.message || '加载账户失败') }
+  try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, '加载账户失败') }
   accLoading.value = false
 }
 const toggleAcc = (id) => { const s = new Set(selectedAccs.value); s.has(id) ? s.delete(id) : s.add(id); selectedAccs.value = s }
@@ -131,7 +132,7 @@ const startDeploy = async () => {
     ElMessage.success(`已提交部署：${r.total} 个账户`)
     openProgress(r.job_id)
     await load()
-  } catch (e) { ElMessage.error(e.message || '部署失败') }
+  } catch (e) { showError(e, '部署提交失败') }
   deploying.value = false
 }
 
@@ -156,7 +157,7 @@ const retryItem = async (it) => {
     ElMessage.success('已提交重试')
     if (!pollTimer) pollJob(activeJob.value.id)  // 重新轮询
     if (!pollTimer) pollTimer = setInterval(() => pollJob(activeJob.value.id), 2500)
-  } catch (e) { ElMessage.error(e.message || '重试失败') }
+  } catch (e) { showError(e, '重试提交失败') }
 }
 const statusColor = (s) => s === 'success' ? 'var(--success)' : s === 'fail' ? 'var(--error)' : s === 'creating' ? 'var(--ac)' : 'var(--t3)'
 const statusText = (s) => ({ success: '✓ 成功', fail: '✗ 失败', creating: '创建中', pending: '等待' }[s] || s)

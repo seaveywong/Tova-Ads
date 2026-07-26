@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError } from '../composables/useError'
 
 const assets = ref([])
 const loading = ref(false)
@@ -209,7 +210,7 @@ const analyze = async (a) => {
     Object.assign(a, data)
     ElMessage.success('AI 分析完成')
   } catch (e) {
-    ElMessage.error(e.message || 'AI 分析失败')
+    showError(e, 'AI 分析失败')
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
   } finally {
     analyzingIds.value.delete(a.id)

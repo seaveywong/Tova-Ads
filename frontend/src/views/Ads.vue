@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showError } from '../composables/useError'
 
 const router = useRouter()
 const accounts = ref([])
@@ -62,14 +63,19 @@ const batchSync = async () => {
   const targets = accounts.value.filter(a => selectedAccs.value.has(a.act_id) && a.fb_credential_id)
   const total = targets.length
   let ok = 0, fail = 0, done = 0
+  const errs = []
   for (const a of targets) {
     batchSyncLabel.value = `同步 ${done}/${total}…`
-    try { await POST('/fb/credentials/' + a.fb_credential_id + '/refresh-accounts'); ok++ } catch (e) { fail++ }
+    try { await POST('/fb/credentials/' + a.fb_credential_id + '/refresh-accounts'); ok++ }
+    catch (e) { fail++; errs.push(`${a.act_id} (${a.name || ''}): ${e.message || e}`) }
     done++
   }
   batchSyncLabel.value = '批量同步'
-  const msg = `已刷新 ${ok} 个账户` + (fail ? `，失败 ${fail} 个` : '')
-  fail ? ElMessage.warning(msg) : ElMessage.success(msg)
+  if (fail) {
+    showError(`成功 ${ok} / 失败 ${fail}：\n\n${errs.join('\n')}`, '批量同步失败明细')
+  } else {
+    ElMessage.success(`已刷新 ${ok} 个账户`)
+  }
   selectedAccs.value.clear(); await load()
   accLoading.value = false
 }
