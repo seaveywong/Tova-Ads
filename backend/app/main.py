@@ -32,6 +32,7 @@ from .routers.fb_oauth import router as fb_oauth_router
 from .routers.ads import router as ads_router
 from .routers.settings import router as settings_router
 from .routers.rbac import router as rbac_router
+from .routers.launch_templates import router as launch_templates_router
 
 app = FastAPI(title="Tove Ads API", version="1.3.5")
 
@@ -103,6 +104,7 @@ app.include_router(fb_apps_router)
 app.include_router(fb_oauth_router)
 app.include_router(ads_router)
 app.include_router(settings_router)
+app.include_router(launch_templates_router)
 
 # ── 静态文件服务（素材库图片/视频，api.tovaads.com/static-assets/{filename}）──
 import os as _os

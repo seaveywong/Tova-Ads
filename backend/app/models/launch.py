@@ -30,6 +30,7 @@ class Asset(Base):
     analyzed_at = Column(DateTime(timezone=True))
     ai_purpose = Column(Text)        # 分析用的用途（13 之一 或 custom:xxx）
     ai_language = Column(Text)       # 分析输出语言代码（en/zh/...）
+    fb_image_hashes = Column(Text)   # JSON {act_id: hash} 每账户缓存（FB image_hash 按账户，不能跨账户复用）
     is_manual = Column(Boolean, default=False)
     manual_copy = Column(Text)
     category = Column(Text, default="常规")
