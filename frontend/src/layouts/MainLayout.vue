@@ -168,6 +168,11 @@ const closeNotifsOnOutside = (e) => {
 }
 
 const currentTitle = computed(() => route.meta.title || '')
+// 导航点击：先关所有弹窗再跳（防 el-dropdown click-outside 吞第一次点击）
+const navTo = (name) => {
+  notifOpen.value = false
+  router.push({ name })
+}
 </script>
 
 <template>
@@ -181,7 +186,7 @@ const currentTitle = computed(() => route.meta.title || '')
           <div class="nav-sec-title">{{ group.title }}</div>
           <div v-for="item in group.items" :key="item.name"
                class="nav-item" :class="{ active: route.name === item.name }"
-               @click="router.push({ name: item.name })">
+               @click="navTo(item.name)">
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.label }}</span>
           </div>
