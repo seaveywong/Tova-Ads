@@ -149,6 +149,8 @@ def build_adset(
     target_cpa: float | None = None,
     budget_mode: str = "ABO",
     targeting: dict | None = None,
+    dsa_beneficiary: str = "",
+    dsa_payor: str = "",
 ) -> dict:
     obj = normalize_objective(objective)
     opt_goal = get_optimization_goal(obj, conversion_goal)
@@ -162,6 +164,12 @@ def build_adset(
         "targeting": targeting or {"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65},
         "status": "ACTIVE",
     }
+
+    # 受益人/付款人披露（EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制；不填 FB 会拒）
+    if dsa_beneficiary:
+        payload["dsa_beneficiary"] = dsa_beneficiary
+    if dsa_payor:
+        payload["dsa_payor"] = dsa_payor
 
     # ABO: 广告组级预算
     if budget_mode.upper() != "CBO":

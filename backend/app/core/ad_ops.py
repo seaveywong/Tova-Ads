@@ -46,7 +46,8 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        image_hash: str = "", video_id: str = "",
                        subcode_slug: str = "", subcode_link=None,
                        targeting=None, ad_language: str = "",
-                       lead_form_id: str = "", message_template: str = "") -> dict:
+                       lead_form_id: str = "", message_template: str = "",
+                       dsa_beneficiary: str = "", dsa_payor: str = "") -> dict:
     """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
@@ -71,6 +72,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         pixel_id=pixel_id, landing_url=landing_url,
         bid_strategy=bid_strategy, budget_mode=budget_mode,
         targeting=targeting,
+        dsa_beneficiary=dsa_beneficiary, dsa_payor=dsa_payor,
     )
     adset = fb.post(f"{act}/adsets", adset_payload)
     adset_id = adset["id"]

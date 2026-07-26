@@ -57,6 +57,7 @@ const blankForm = () => ({
   name_prefix: 'Tova Ads', audience_id: 0, asset_id: null,
   headline: '', body: '', page_id: '', pixel_id: '', landing_url: '',
   cta_type: 'SHOP_NOW', subcode_slug: '', ad_language: '',
+  beneficiary: '', payer: '',
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
 const audLabel = (id) => { const a = audiences.value.find(x => x.id === id); return a ? a.name : '默认定向' }
@@ -229,6 +230,9 @@ const fmtBudget = (cents) => '$' + (cents / 100).toFixed(0)
           <select v-model="form.cta_type" class="inp"><option v-for="c in CTAS" :key="c" :value="c">{{ c }}</option></select>
         </div>
         <div class="row"><label>广告名前缀</label><input v-model="form.name_prefix" class="inp" /></div>
+        <div class="row"><label>受益人 beneficiary</label><input v-model="form.beneficiary" class="inp" placeholder="如：公司主体名（EU/泰国/印度/巴西/台湾/澳洲/新加坡等地区必填）" /></div>
+        <div class="row"><label>付款人 payer</label><input v-model="form.payer" class="inp" placeholder="同上，付款主体名（部分国家强制披露）" /></div>
+        <div class="d" style="margin-top:-4px">⚠ 投到 EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制披露地区时，FB 要求填受益人+付款人，不填会被拒。账户若已设默认可不填。</div>
       </div>
       <!-- 素材 Tab -->
       <div v-if="editTab === 'asset'" class="form">

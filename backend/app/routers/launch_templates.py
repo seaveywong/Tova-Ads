@@ -37,6 +37,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "page_id": t.page_id or "", "pixel_id": t.pixel_id or "",
         "landing_url": t.landing_url or "", "cta_type": t.cta_type or "",
         "subcode_slug": t.subcode_slug or "", "ad_language": t.ad_language or "",
+        "beneficiary": t.beneficiary or "", "payer": t.payer or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -62,6 +63,8 @@ class TemplateIn(BaseModel):
     cta_type: str = ""
     subcode_slug: str = ""
     ad_language: str = ""
+    beneficiary: str = ""
+    payer: str = ""
 
 
 @router.get("")
@@ -206,6 +209,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     name_prefix=tpl.name_prefix, headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type,
                     image_hash=image_hash, subcode_slug=tpl.subcode_slug, subcode_link=link,
                     targeting=targeting, ad_language=tpl.ad_language,
+                    dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                 )
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.status = "success"; item.error = None
@@ -329,6 +333,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix, headline=tpl.headline,
                 body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
                 subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
+                dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.status = "success"; it.error = None
