@@ -14,7 +14,7 @@ from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account
 from ..core.fb_client import FbApiError
-from ..core.ad_builder import build_targeting
+from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
 from ..core.ad_ops import deploy_one_account, ensure_image_hash_for_account, usd_to_fb_amount
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink
@@ -162,6 +162,67 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     db.commit()
     bg.add_task(_run_deploy_job, job.id, user.tenant_id, t.id)
     return {"job_id": job.id, "total": len(body.items)}
+
+
+class PreflightIn(BaseModel):
+    act_id: str
+    page_id: str = ""
+    pixel_id: str = ""
+
+
+@router.post("/{tid}/preflight")
+def preflight_deploy(tid: int, body: PreflightIn,
+                     user: CurrentUser = Depends(require_permission("ads.create")),
+                     db: Session = Depends(get_db)):
+    """预检：构建（不发送）即将发给 FB 的完整 payload，供核对参数对应。
+
+    返回 campaign/adset/creative 三个 dict + 预算本币换算明细 + 解析后的 targeting。
+    不调 FB、不花钱、不建广告。用于真部署前核对每个字段是否和 FB 期望对得上。
+    """
+    t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not t:
+        raise HTTPException(404, "模板不存在")
+    targeting = _resolve_targeting(db, t.audience_id, t.audience_json or "")
+    daily_budget_fb = _resolve_budget_fb(db, body.act_id, t)
+    advanced = _parse_advanced(t)
+    page_id = body.page_id or t.page_id
+    pixel_id = body.pixel_id or t.pixel_id
+    acc = db.query(Account).filter(Account.act_id == body.act_id).first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    campaign_payload = build_campaign(
+        name=t.name_prefix, objective=t.objective,
+        daily_budget=daily_budget_fb if t.budget_mode.upper() == "CBO" else None,
+        budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
+    )
+    adset_payload = build_adset(
+        name=f"{t.name_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
+        daily_budget=daily_budget_fb, objective=t.objective,
+        conversion_goal=t.conversion_goal, page_id=page_id, pixel_id=pixel_id,
+        landing_url=t.landing_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
+        targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
+        optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
+        destination_type_override=t.destination_type or "", extra=advanced,
+    )
+    creative_payload = build_creative(
+        page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
+        landing_url=t.landing_url, headline=t.headline, body=t.body,
+        cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
+    )
+    return {
+        "act_id": body.act_id, "currency": currency,
+        "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
+        "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
+        "objective": t.objective, "optimization_goal": adset_payload.get("optimization_goal"),
+        "billing_event": adset_payload.get("billing_event"),
+        "targeting_resolved": targeting,
+        "campaign": campaign_payload, "adset": adset_payload, "creative": creative_payload,
+        "notes": [
+            "image_hash/video_id 部署时按目标账户上传并缓存",
+            "campaign_id / adset_id 部署时由 FB 返回填入",
+            "成功判定：FB 返回 id→success；抛错或无 id→fail（item 记 campaign_id）",
+        ],
+    }
 
 
 def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):

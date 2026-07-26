@@ -83,7 +83,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         budget_mode=budget_mode, bid_strategy=bid_strategy,
     )
     camp = fb.post(f"{act}/campaigns", camp_payload)
-    campaign_id = camp["id"]
+    campaign_id = camp.get("id")
+    if not campaign_id:
+        raise FbApiError(f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）", 0)
 
     # 2. AdSet（目标感知 + 受众）
     adset_payload = build_adset(
@@ -99,7 +101,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         extra=advanced_config,
     )
     adset = fb.post(f"{act}/adsets", adset_payload)
-    adset_id = adset["id"]
+    adset_id = adset.get("id")
+    if not adset_id:
+        raise FbApiError(f"FB 创建 adset 未返回 id（响应：{str(adset)[:200]}）", 0)
 
     # 3. 创意链接（子码集成）
     effective_url = landing_url
@@ -134,7 +138,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     ad = fb.post(f"{act}/ads", {
         "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "ACTIVE", "creative": creative,
     })
-    ad_id = ad["id"]
+    ad_id = ad.get("id")
+    if not ad_id:
+        raise FbApiError(f"FB 创建 ad 未返回 id（响应：{str(ad)[:200]}）", 0)
 
     # 子码标注广告名（可追溯）+ 回绑 ad_id
     if subcode_slug and subcode_link is not None:
