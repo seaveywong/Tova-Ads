@@ -94,6 +94,46 @@ const loadLandingPages = async () => { try { landingPages.value = await GET('/la
 onMounted(() => { load(); loadLandingPages() })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
+// #2 dirty-check：编辑抽屉关闭前确认
+let _formSnapshot = ''
+const snapshotForm = () => { _formSnapshot = JSON.stringify(form.value) }
+const isDirty = computed(() => _formSnapshot && JSON.stringify(form.value) !== _formSnapshot)
+const onEditBeforeClose = (done) => {
+  if (isDirty.value) {
+    ElMessageBox.confirm('有未保存的修改，确认丢弃？', '关闭确认', { type: 'warning', confirmButtonText: '丢弃', cancelButtonText: '继续编辑' })
+      .then(() => done()).catch(() => {})
+  } else { done() }
+}
+
+// #1 保存前校验
+const validationErrors = ref([])
+const validateTemplate = () => {
+  const errs = []
+  if (!form.value.name?.trim()) errs.push('模板名不能为空')
+  if (!form.value.asset_id) errs.push('广告层级需选素材')
+  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push('每日预算必须 > 0')
+  if (['OUTCOME_SALES', 'OUTCOME_LEADS'].includes(form.value.objective) && !form.value.pixel_id && !form.value.page_id)
+    errs.push('购物/线索目标建议填像素ID（或在部署时每账户选）')
+  if (form.value.objective === 'OUTCOME_ENGAGEMENT' && !form.value.page_id)
+    errs.push('互动目标需要主页ID')
+  if (!form.value.landing_url && !['OUTCOME_AWARENESS'].includes(form.value.objective))
+    errs.push('建议填落地页URL')
+  return errs
+}
+
+// #5 部署历史
+const historyOpen = ref(false)
+const jobs = ref([])
+const loadJobs = async () => { try { jobs.value = await GET('/launch-templates/jobs?limit=20') } catch {} }
+const openHistory = async () => { historyOpen.value = true; await loadJobs() }
+const openJob = async (jobId) => { historyOpen.value = false; openProgress(jobId) }
+
+// #3 预检结构化展示
+const preflightResult = ref(null)
+const preflightVisible = ref(false)
+// #4 per-account page/pixel loading
+const accLoadingConfig = ref(new Set())
+
 const blankForm = () => ({
   name: '', description: '',
   // 系列 Campaign
@@ -115,17 +155,16 @@ const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
 const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
 
 // 编辑
-const openNew = () => { editing.value = null; form.value = blankForm(); editingAsset.value = null; editLevel.value = 'campaign'; editOpen.value = true }
+const openNew = () => { editing.value = null; form.value = blankForm(); editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
 const openEdit = async (t) => {
   editing.value = t
   const f = blankForm()
   Object.assign(f, t)
-  // 解析 audience_json
-  if (t.audience_json) { try { const a = JSON.parse(t.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages||'' } catch {} }
+  if (t.audience_json) { try { const a = JSON.parse(t.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
   form.value = f
   editingAsset.value = null
   if (t.asset_id) { try { editingAsset.value = await GET('/assets/' + t.asset_id) } catch {} }
-  editLevel.value = 'campaign'; editOpen.value = true
+  editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
   form.value.asset_id = a.id
@@ -175,8 +214,8 @@ const buildAudienceJson = () => {
   return JSON.stringify(a)
 }
 const saveTpl = async () => {
-  if (!form.value.name.trim()) return ElMessage.warning('填模板名')
-  if (!form.value.asset_id) return ElMessage.warning('广告层级需选素材')
+  validationErrors.value = validateTemplate()
+  if (validationErrors.value.length) return ElMessage.warning('请先修复以下问题：\n' + validationErrors.value.join('\n'))
   saving.value = true
   try {
     const body = {
@@ -195,7 +234,7 @@ const saveTpl = async () => {
     }
     if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success('已保存') }
     else { await POST('/launch-templates', body); ElMessage.success('已创建') }
-    editOpen.value = false; await load()
+    editOpen.value = false; await load(); snapshotForm()
   } catch (e) { showError(e, '保存模板失败') }
   saving.value = false
 }
@@ -209,8 +248,7 @@ const preflight = async (t) => {
   preflighting.value = true
   try {
     const r = await POST('/launch-templates/' + t.id + '/preflight', { act_id: accounts.value[0]?.act_id || '' })
-    const summary = `币种:${r.currency} 预算:$${r.budget_usd}→${r.daily_budget_fb}(本币最小单位)\n目标:${r.objective} 优化:${r.optimization_goal} 计费:${r.billing_event}\n\nCampaign: ${JSON.stringify(r.campaign)}\n\nAdSet: ${JSON.stringify(r.adset)}\n\nCreative: ${JSON.stringify(r.creative)}`
-    ElMessageBox.alert(summary, '预检 · 即将发给 FB 的参数', { customClass: 'preflight-modal', confirmButtonText: '关闭' })
+    preflightResult.value = r; preflightVisible.value = true
   } catch (e) { showError(e, '预检失败') }
   preflighting.value = false
 }
@@ -226,11 +264,18 @@ const toggleAcc = async (id) => {
   if (s.has(id) && !accPages.value[id]) {
     const acc = accounts.value.find(a => a.act_id === id)
     const credId = acc?.fb_credential_id
-    if (credId) {
-      try { accPages.value[id] = await GET('/fb/credentials/' + credId + '/pages') } catch {}
-      try { accPixels.value[id] = await GET('/fb/credentials/' + credId + '/pixels') } catch {}
-    }
     deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
+    if (credId) {
+      accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
+      try {
+        const [pages, pixels] = await Promise.all([
+          GET('/fb/credentials/' + credId + '/pages').catch(() => []),
+          GET('/fb/credentials/' + credId + '/pixels').catch(() => []),
+        ])
+        accPages.value[id] = pages; accPixels.value[id] = pixels
+      } catch {}
+      accLoadingConfig.value.delete(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
+    }
   }
 }
 const startDeploy = async () => {
@@ -269,7 +314,10 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
   <div class="page">
     <div class="bar">
       <div class="t">投放模板</div>
-      <button class="btn primary" @click="openNew">+ 新建模板</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" @click="openHistory">部署历史</button>
+        <button class="btn primary" @click="openNew">+ 新建模板</button>
+      </div>
     </div>
     <div class="d">模板按 FB Ads Manager 三级结构（系列→组→广告）组织。选模板+选账户→一键批量部署。</div>
 
@@ -289,7 +337,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     </div>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
-    <el-drawer v-model="editOpen" :title="editing ? '编辑模板' : '新建模板'" direction="rtl" size="680px" :destroy-on-close="true">
+    <el-drawer v-model="editOpen" :title="editing ? '编辑模板' : '新建模板'" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="level-tabs">
         <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① 系列 Campaign</button>
         <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② 广告组 Ad Set</button>
@@ -433,16 +481,21 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
           </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
-            <label>主页</label>
-            <select v-model="deployItems[a.act_id].page_id" class="inp sm">
-              <option value="">默认({{ deployTpl?.page_id || '无' }})</option>
-              <option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
-            </select>
-            <label>像素</label>
-            <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
-              <option value="">默认({{ deployTpl?.pixel_id || '无' }})</option>
-              <option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
-            </select>
+            <template v-if="accLoadingConfig.has(a.act_id)">
+              <span class="config-loading">加载主页/像素…</span>
+            </template>
+            <template v-else>
+              <label>主页</label>
+              <select v-model="deployItems[a.act_id].page_id" class="inp sm">
+                <option value="">默认({{ deployTpl?.page_id || '无' }})</option>
+                <option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
+              </select>
+              <label>像素</label>
+              <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
+                <option value="">默认({{ deployTpl?.pixel_id || '无' }})</option>
+                <option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
+              </select>
+            </template>
           </div>
         </div>
       </div>
@@ -471,6 +524,46 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">重试</button>
           </div>
         </div>
+      </div>
+    </el-dialog>
+    <!-- 预检结果（结构化展示） -->
+    <el-dialog v-model="preflightVisible" title="预检 · 即将发给 FB 的参数" width="700px" append-to-body>
+      <div v-if="preflightResult" class="preflight">
+        <div class="pf-summary">
+          <span>账户币种：<b>{{ preflightResult.currency }}</b></span>
+          <span>预算：$${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（本币最小单位）</span>
+          <span>汇率：{{ preflightResult.fx_rate || '无' }}</span>
+          <span>模式：{{ preflightResult.budget_mode }}</span>
+        </div>
+        <div class="pf-section">
+          <div class="pf-title">系列 Campaign</div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+        </div>
+        <div class="pf-section">
+          <div class="pf-title">广告组 Ad Set</div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+        </div>
+        <div class="pf-section">
+          <div class="pf-title">广告创意 Creative</div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.creative" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+        </div>
+        <div v-if="preflightResult.notes" class="pf-notes">
+          <div v-for="n in preflightResult.notes" :key="n" class="pf-note">· {{ n }}</div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 部署历史 -->
+    <el-dialog v-model="historyOpen" title="部署历史" width="600px" append-to-body>
+      <div class="history-list">
+        <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
+          <div class="hi-main">
+            <span class="hi-name">{{ j.template_name }}</span>
+            <span :class="['hi-status', j.status]">{{ j.status }}</span>
+          </div>
+          <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ (j.created_at||'').slice(0,16) }}</div>
+        </div>
+        <div v-if="!jobs.length" class="empty-sm">暂无部署记录</div>
       </div>
     </el-dialog>
   </div>
@@ -581,4 +674,34 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .pi-status.fail{color:var(--error)}
 .pi-link{color:var(--ac);text-decoration:none;font-size:11px}
 .pi-err{color:var(--error);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 预检结构化 */
+.preflight{display:flex;flex-direction:column;gap:12px}
+.pf-summary{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--t2);padding:10px;background:var(--bg3);border-radius:8px}
+.pf-section{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.pf-title{font-size:12px;font-weight:600;color:var(--ac);padding:6px 10px;background:var(--bg3)}
+.pf-fields{padding:4px 0}
+.pf-field{display:flex;gap:8px;padding:3px 10px;font-size:11px;border-bottom:1px solid var(--bd)}
+.pf-field:last-child{border:none}
+.pf-k{color:var(--t3);min-width:160px;font-family:'SF Mono',ui-monospace,monospace;flex-shrink:0}
+.pf-v{color:var(--t1);word-break:break-all}
+.pf-notes{font-size:11px;color:var(--t3);padding:6px 0}
+.pf-note{line-height:1.6}
+
+/* 部署历史 */
+.history-list{display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow-y:auto}
+.history-item{padding:10px;background:var(--bg3);border-radius:8px;cursor:pointer;border:1px solid transparent}
+.history-item:hover{border-color:var(--ac)}
+.hi-main{display:flex;justify-content:space-between;align-items:center}
+.hi-name{font-size:13px;color:var(--t1);font-weight:500}
+.hi-status{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:600}
+.hi-status.completed{color:var(--success);background:rgba(52,199,89,.13)}
+.hi-status.partial_failed{color:var(--warning);background:rgba(255,159,10,.13)}
+.hi-status.running{color:var(--ac);background:rgba(10,132,255,.13)}
+.hi-status.failed{color:var(--error);background:rgba(255,69,58,.13)}
+.hi-meta{font-size:11px;color:var(--t3);margin-top:3px}
+.empty-sm{padding:30px;text-align:center;color:var(--t3);font-size:13px}
+
+/* 部署加载 */
+.config-loading{font-size:12px;color:var(--t3);padding:4px 8px}
 </style>
