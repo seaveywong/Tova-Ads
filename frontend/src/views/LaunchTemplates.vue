@@ -47,24 +47,98 @@ const OBJECTIVES = [
   { v: 'OUTCOME_AWARENESS', l: '品牌认知' },
   { v: 'OUTCOME_APP_PROMOTION', l: '应用推广' },
 ]
-const OPT_GOALS = ['LINK_CLICKS','LANDING_PAGE_VIEWS','REACH','IMPRESSIONS','OFFSITE_CONVERSIONS','LEAD_GENERATION','PAGE_LIKES','POST_ENGAGEMENT','CONVERSATIONS','THRUPLAY','AP_INSTALLS','VALUE']
-const BILLING_EVENTS = ['IMPRESSIONS','LINK_CLICKS','APP_INSTALLS','PAGE_LIKES','POST_ENGAGEMENT','THRUPLAY']
-const DEST_TYPES = ['WEBSITE','ON_AD','ON_PAGE','MESSENGER','APP','WHATSAPP','INSTAGRAM_DIRECT']
+const OPT_GOALS = [
+  {v:'LINK_CLICKS',l:'链接点击'},{v:'LANDING_PAGE_VIEWS',l:'落地页浏览'},{v:'REACH',l:'覆盖人数'},
+  {v:'IMPRESSIONS',l:'展示次数'},{v:'OFFSITE_CONVERSIONS',l:'网站转化'},{v:'LEAD_GENERATION',l:'潜在客户'},
+  {v:'PAGE_LIKES',l:'主页赞'},{v:'POST_ENGAGEMENT',l:'帖子互动'},{v:'CONVERSATIONS',l:'消息会话'},
+  {v:'THRUPLAY',l:'视频播放'},{v:'APP_INSTALLS',l:'应用安装'},{v:'VALUE',l:'价值'},
+]
+const BILLING_EVENTS = [
+  {v:'IMPRESSIONS',l:'展示'},{v:'LINK_CLICKS',l:'链接点击'},{v:'APP_INSTALLS',l:'应用安装'},
+  {v:'PAGE_LIKES',l:'主页赞'},{v:'POST_ENGAGEMENT',l:'帖子互动'},{v:'THRUPLAY',l:'视频播放'},
+]
+const DEST_TYPES = [
+  {v:'WEBSITE',l:'网站'},{v:'ON_AD',l:'应用内'},{v:'ON_PAGE',l:'主页'},{v:'MESSENGER',l:'Messenger'},
+  {v:'APP',l:'应用'},{v:'WHATSAPP',l:'WhatsApp'},{v:'INSTAGRAM_DIRECT',l:'Instagram 私信'},
+]
 // 转化目标（按 objective 联动）—— FB custom_event_type 枚举
+const CONV_GOAL_LABELS = {
+  Purchase:'购买', AddToCart:'加入购物车', InitiateCheckout:'发起结账', AddPaymentInfo:'填写支付信息',
+  CompleteRegistration:'完成注册', Lead:'潜在客户', Subscribe:'订阅', Contact:'联系',
+  StartTrial:'开始试用', Search:'搜索', APP_INSTALLS:'应用安装', LEVEL_ACHIEVED:'达成关卡',
+  ACHIEVEMENT_UNLOCKED:'解锁成就', SPENT_CREDITS:'消费积分',
+}
 const CONV_GOALS = {
   OUTCOME_SALES: ['Purchase','AddToCart','InitiateCheckout','AddPaymentInfo','CompleteRegistration','Lead','Subscribe','Contact','StartTrial','Search'],
   OUTCOME_LEADS: ['Lead','CompleteRegistration','Contact','Subscribe','Search','StartTrial','Purchase'],
-  OUTCOME_TRAFFIC: [],  // 流量不需要转化目标
-  OUTCOME_ENGAGEMENT: [],  // 互动类看 optimization_goal
+  OUTCOME_TRAFFIC: [],
+  OUTCOME_ENGAGEMENT: [],
   OUTCOME_AWARENESS: [],
   OUTCOME_APP_PROMOTION: ['APP_INSTALLS','LEVEL_ACHIEVED','ACHIEVEMENT_UNLOCKED','SPENT_CREDITS'],
 }
 const convGoalsForObjective = computed(() => CONV_GOALS[form.value.objective] || [])
 // 版位选项
 const PLATFORMS = [
-  { v: 'facebook', l: 'Facebook' }, { v: 'instagram', l: 'Instagram' },
-  { v: 'messenger', l: 'Messenger' }, { v: 'audience_network', l: 'Audience Network' },
+  { v: 'facebook', l: 'Facebook', positions: [
+    {v:'feed',l:'动态消息'},{v:'video_feeds',l:'视频动态'},{v:'instream_video',l:'视频插播'},
+    {v:'story',l:'快拍'},{v:'reels',l:'Reels'},{v:'marketplace',l:'市场'},
+    {v:'right_hand_column',l:'右侧栏'},{v:'search',l:'搜索结果'},
+  ]},
+  { v: 'instagram', l: 'Instagram', positions: [
+    {v:'stream',l:'动态'},{v:'story',l:'快拍'},{v:'explore',l:'探索'},
+    {v:'reels',l:'Reels'},{v:'profile',l:'个人主页'},
+  ]},
+  { v: 'messenger', l: 'Messenger', positions: [
+    {v:'messenger_home',l:'首页'},{v:'story',l:'快拍'},{v:'sponsored_messages',l:'推广消息'},
+  ]},
+  { v: 'audience_network', l: 'Audience Network', positions: [
+    {v:'classic',l:'横幅/插屏'},{v:'instream_video',l:'视频插播'},{v:'rewarded_video',l:'激励视频'},
+  ]},
 ]
+const DEVICES = [{v:'desktop',l:'桌面'}, {v:'mobile',l:'移动'}]
+// 展开的平台
+const expandedPlatforms = ref(new Set(['facebook']))
+const togglePlatformExpand = (v) => {
+  const s = new Set(expandedPlatforms.value)
+  s.has(v) ? s.delete(v) : s.add(v)
+  expandedPlatforms.value = s
+}
+// 平台选中（全选/取消整平台）
+const isPlatformOn = (pv) => (form.value.placement_platforms||[]).includes(pv)
+const togglePlatformSel = (pv) => {
+  const arr = form.value.placement_platforms || []
+  const i = arr.indexOf(pv)
+  if (i >= 0) {
+    arr.splice(i, 1)
+    // 移除该平台的所有 positions
+    const key = pv + '_positions'
+    form.value[key] = []
+  } else {
+    arr.push(pv)
+    expandedPlatforms.value.add(pv); expandedPlatforms.value = new Set(expandedPlatforms.value)
+  }
+  form.value.placement_platforms = [...arr]
+}
+// 版位选中
+const posKey = (pv) => pv + '_positions'
+const isPosOn = (pv, posv) => {
+  const arr = form.value[posKey(pv)] || []
+  return arr.includes(posv)
+}
+const togglePos = (pv, posv) => {
+  const key = posKey(pv)
+  const arr = form.value[key] || []
+  const i = arr.indexOf(posv)
+  if (i >= 0) arr.splice(i, 1); else arr.push(posv)
+  form.value[key] = [...arr]
+}
+// 设备
+const toggleDevice = (dv) => {
+  const arr = form.value.placement_devices || []
+  const i = arr.indexOf(dv)
+  if (i >= 0) arr.splice(i, 1); else arr.push(dv)
+  form.value.placement_devices = [...arr]
+}
 const BID_STRATEGIES = [
   { v: 'LOWEST_COST_WITHOUT_CAP', l: '最低成本（无上限）' },
   { v: 'LOWEST_COST_WITH_BID_CAP', l: '最低成本（出价上限）' },
@@ -281,12 +355,19 @@ const saveTpl = async () => {
       message_template: form.value.message_template, lead_form_id: form.value.lead_form_id,
       beneficiary: form.value.beneficiary, payer: form.value.payer,
     }
-    // 版位设置合并进 advanced_config（targeting.publisher_platforms）
+    // 版位设置合并进 advanced_config（targeting 内）
     try {
       let adv = body.advanced_config ? JSON.parse(body.advanced_config) : {}
-      if (form.value.manual_placement && (form.value.placement_platforms||[]).length) {
+      if (form.value.manual_placement) {
         adv.targeting = adv.targeting || {}
-        adv.targeting.publisher_platforms = form.value.placement_platforms
+        const plats = form.value.placement_platforms || []
+        if (plats.length) adv.targeting.publisher_platforms = plats
+        if ((form.value.placement_devices||[]).length) adv.targeting.device_platforms = form.value.placement_devices
+        // 各平台的具体版位
+        for (const p of PLATFORMS) {
+          const positions = form.value[p.v + '_positions']
+          if (positions && positions.length) adv.targeting[p.v + '_positions'] = positions
+        }
       }
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
@@ -414,7 +495,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>广告目标</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="o.l" /></el-select></div>
         <div class="row" v-if="convGoalsForObjective.length"><label>转化目标 <span class="api-hint">conversion_goal</span></label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable placeholder="选择转化事件">
-            <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="g" />
+            <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
           </el-select>
         </div>
         <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">ABO 组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">CBO 系列预算</button></div></div>
@@ -426,9 +507,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
-        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g" :value="g" :label="g" /></el-select></div>
-        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b" :value="b" :label="b" /></el-select></div>
-        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d" :value="d" :label="d" /></el-select></div>
+        <div class="row"><label>优化目标 <span class="api-hint">optimization_goal</span></label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="g.l" /></el-select></div>
+        <div class="row"><label>计费事件 <span class="api-hint">billing_event</span></label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
+        <div class="row"><label>转化目的地 <span class="api-hint">destination_type</span></label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
         <hr class="sep" />
         <div class="sec-title">受众定向</div>
         <div class="row"><label>国家/地区</label>
@@ -472,15 +553,34 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="sec-title">版位</div>
         <div class="row"><label>投放版位</label>
           <div class="seg">
-            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">Advantage+（自动）</button>
+            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">Advantage+（自动推荐）</button>
             <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">手动选择</button>
           </div>
         </div>
-        <div v-if="form.manual_placement" class="row"><label>平台（不选=全选）</label>
-          <div class="platform-chips">
-            <label v-for="p in PLATFORMS" :key="p.v" class="platform-chip" :class="{on:(form.placement_platforms||[]).includes(p.v)}">
-              <input type="checkbox" :checked="(form.placement_platforms||[]).includes(p.v)" @change="togglePlatform(p.v)" /> {{ p.l }}
-            </label>
+        <div v-if="form.manual_placement">
+          <div class="row"><label>设备</label>
+            <div class="placement-chips">
+              <label v-for="d in DEVICES" :key="d.v" class="placement-chip" :class="{on:(form.placement_devices||[]).includes(d.v)}">
+                <input type="checkbox" :checked="(form.placement_devices||[]).includes(d.v)" @change="toggleDevice(d.v)" /> {{ d.l }}
+              </label>
+            </div>
+          </div>
+          <div class="row"><label>平台和版位</label>
+            <div class="placement-tree">
+              <div v-for="p in PLATFORMS" :key="p.v" class="pt-node">
+                <div class="pt-head" @click="togglePlatformExpand(p.v)">
+                  <span class="pt-arrow" :class="{open:expandedPlatforms.has(p.v)}">▶</span>
+                  <label class="pt-label" :class="{on:isPlatformOn(p.v)}" @click.stop="togglePlatformSel(p.v)">
+                    <input type="checkbox" :checked="isPlatformOn(p.v)" @change="togglePlatformSel(p.v)" /> {{ p.l }}
+                  </label>
+                </div>
+                <div v-if="expandedPlatforms.has(p.v) && isPlatformOn(p.v)" class="pt-positions">
+                  <label v-for="pos in p.positions" :key="pos.v" class="pos-chip" :class="{on:isPosOn(p.v,pos.v)}">
+                    <input type="checkbox" :checked="isPosOn(p.v,pos.v)" @change="togglePos(p.v,pos.v)" /> {{ pos.l }}
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="sec-title">披露（部分国家强制）</div>
@@ -856,6 +956,25 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
 .ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
 .ss-chip:hover{color:var(--ac)}
+
+/* 版位树 */
+.placement-chips{display:flex;gap:6px;flex-wrap:wrap}
+.placement-chip{font-size:12px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:4px}
+.placement-chip input{margin:0}
+.placement-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}
+.placement-tree{display:flex;flex-direction:column;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:4px}
+.pt-node{border-radius:4px}
+.pt-head{display:flex;align-items:center;gap:4px;padding:4px 6px;cursor:pointer}
+.pt-head:hover{background:var(--bg3)}
+.pt-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block}
+.pt-arrow.open{transform:rotate(90deg)}
+.pt-label{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:500}
+.pt-label input{margin:0}
+.pt-label.on{color:var(--ac)}
+.pt-positions{padding:4px 8px 6px 22px;display:flex;gap:4px;flex-wrap:wrap}
+.pos-chip{font-size:11px;padding:2px 8px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:3px}
+.pos-chip input{margin:0;width:12px;height:12px}
+.pos-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.08)}
 
 /* 表单/消息模板选择 */
 .new-link{font-size:11px;color:var(--ac);text-decoration:none;margin-left:auto}
