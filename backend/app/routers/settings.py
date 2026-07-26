@@ -152,7 +152,8 @@ def test_ai(vision: bool = False, user: CurrentUser = Depends(require_superadmin
     if not client.is_configured():
         return {"ok": False, "detail": f"{label} AI 未配置（key 为空）"}
     try:
-        resp = client.chat([{"role": "user", "content": "回复 OK"}], temperature=0, max_tokens=10)
+        # max_tokens 留够：gemini-2.5-flash 是 thinking 模型，10 token 会被推理吃光→空 content
+        resp = client.chat([{"role": "user", "content": "回复 OK"}], temperature=0, max_tokens=64)
         return {"ok": True, "detail": resp[:50]}
     except Exception as e:
         return {"ok": False, "detail": str(e)[:120]}
