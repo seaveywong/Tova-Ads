@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "deepseek-chat"
 
+    # AI 视觉模型（素材识别看图用；DeepSeek 纯文本不能看图，单独配 Gemini 等视觉模型）
+    # 与文案配置独立：文案/KPI 走 ai_*（DeepSeek），素材看图走 ai_vision_*（Gemini）
+    ai_vision_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    ai_vision_api_key: str = ""
+    ai_vision_model: str = "gemini-2.0-flash"
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 

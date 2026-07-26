@@ -9,9 +9,12 @@ const loading = ref(false)
 const fType = ref('')
 const fTag = ref('')
 const fSearch = ref('')
+// AI 识别开关（per-user；关=只手填，开=显示 AI分析按钮）
+const aiOn = ref(localStorage.getItem('tova_ai_on') === '1')
+const toggleAi = (v) => { aiOn.value = v; localStorage.setItem('tova_ai_on', v ? '1' : '0') }
 // 上传
 const uploadOpen = ref(false)
-const uploadFiles = ref([])  // [{file, name, tags, progress, status}]
+const uploadFiles = ref([])  // [{file, name, tags, country, uploadTagsStr, countryStr, status}]
 const uploadSaving = ref(false)
 // 预览大图/视频
 const previewAsset = ref(null)
@@ -22,7 +25,25 @@ const closePreview = () => { previewAsset.value = null }
 const editingId = ref(0)
 const editingName = ref('')
 
+// AI 分析中集合（即时反馈，不等列表刷新）
+const analyzingIds = ref(new Set())
+
+// AI 文案/受众编辑弹窗
+const editOpen = ref(false)
+const editAsset = ref(null)
+const editForm = ref({ primary_text: '', headline: '', description: '', interestsStr: '', countriesStr: '' })
+const editSaving = ref(false)
+
 const BASE = 'https://api.tovaads.com'
+
+const COUNTRIES = [
+  { code: 'US', label: '美国' }, { code: 'VN', label: '越南' }, { code: 'TH', label: '泰国' },
+  { code: 'ID', label: '印尼' }, { code: 'PH', label: '菲律宾' }, { code: 'MY', label: '马来西亚' },
+  { code: 'TW', label: '台湾' }, { code: 'HK', label: '香港' }, { code: 'SG', label: '新加坡' },
+  { code: 'CN', label: '中国大陆' }, { code: 'BR', label: '巴西' }, { code: 'MX', label: '墨西哥' },
+  { code: 'IN', label: '印度' }, { code: 'JP', label: '日本' }, { code: 'KR', label: '韩国' },
+  { code: 'GB', label: '英国' }, { code: 'DE', label: '德国' }, { code: 'FR', label: '法国' },
+]
 
 const load = async () => {
   loading.value = true
@@ -55,12 +76,12 @@ const allTags = computed(() => {
 const openUpload = () => { uploadFiles.value = []; uploadOpen.value = true }
 const onFileChange = (e) => {
   const files = Array.from(e.target.files || [])
-  files.forEach(f => uploadFiles.value.push({ file: f, name: f.name, tags: [], progress: 0, status: 'pending' }))
+  files.forEach(f => uploadFiles.value.push({ file: f, name: f.name, uploadTagsStr: '', countryStr: '', status: 'pending' }))
 }
 const onDrop = (e) => {
   e.preventDefault()
   const files = Array.from(e.dataTransfer.files || [])
-  files.forEach(f => uploadFiles.value.push({ file: f, name: f.name, tags: [], progress: 0, status: 'pending' }))
+  files.forEach(f => uploadFiles.value.push({ file: f, name: f.name, uploadTagsStr: '', countryStr: '', status: 'pending' }))
 }
 const removeUploadItem = (i) => uploadFiles.value.splice(i, 1)
 
@@ -74,7 +95,9 @@ const submitUpload = async () => {
       const fd = new FormData()
       fd.append('file', item.file)
       fd.append('name', item.name || item.file.name)
-      fd.append('tags', JSON.stringify(item.tags || []))
+      const tags = (item.uploadTagsStr || '').split(',').map(t => t.trim()).filter(Boolean)
+      fd.append('tags', JSON.stringify(tags))
+      fd.append('country', item.countryStr || '')
       const r = await fetch(BASE + '/assets/upload', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') },
@@ -123,6 +146,69 @@ const editTags = async (a) => {
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
+// AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
+const analyze = async (a) => {
+  analyzingIds.value.add(a.id)
+  try {
+    const r = await fetch(BASE + '/assets/' + a.id + '/analyze', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') },
+    })
+    const text = await r.text()
+    const data = JSON.parse(text)
+    if (!r.ok) throw new Error(data.detail || '分析失败')
+    Object.assign(a, data)
+    ElMessage.success('AI 分析完成')
+  } catch (e) {
+    ElMessage.error(e.message || 'AI 分析失败')
+    // 失败也刷新拿 ai_status=failed + ai_error
+    try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
+  } finally {
+    analyzingIds.value.delete(a.id)
+  }
+}
+
+// 打开 AI 文案/受众编辑（AI 结果可改，或手动键入）
+const openEdit = (a) => {
+  editAsset.value = a
+  const copy = a.ai_copy || {}
+  const aud = a.ai_audience || {}
+  editForm.value = {
+    primary_text: copy.primary_text || '',
+    headline: copy.headline || '',
+    description: copy.description || '',
+    interestsStr: (aud.interests || []).join(', '),
+    countriesStr: (aud.countries || []).join(', '),
+  }
+  editOpen.value = true
+}
+const saveEdit = async () => {
+  if (!editAsset.value) return
+  editSaving.value = true
+  try {
+    const body = {
+      primary_text: editForm.value.primary_text,
+      headline: editForm.value.headline,
+      description: editForm.value.description,
+      interests: editForm.value.interestsStr.split(',').map(t => t.trim()).filter(Boolean),
+      countries: editForm.value.countriesStr.split(',').map(t => t.trim().toUpperCase()).filter(Boolean),
+    }
+    const r = await PUT('/assets/' + editAsset.value.id + '/ai', body)
+    Object.assign(editAsset.value, r)
+    ElMessage.success('已保存')
+    editOpen.value = false
+  } catch (e) { ElMessage.error(e.message || '保存失败') }
+  editSaving.value = false
+}
+
+// 改国家（影响 AI 文案语言）
+const changeCountry = async (a, code) => {
+  try {
+    const r = await PUT('/assets/' + a.id, { country: code })
+    Object.assign(a, r)
+  } catch (e) { ElMessage.error(e.message || '改国家失败') }
+}
+
 // 删除（硬删）
 const remove = async (a) => {
   try {
@@ -138,6 +224,15 @@ const remove = async (a) => {
   }
 }
 
+const aiStatusText = (a) => {
+  if (analyzingIds.value.has(a.id)) return '分析中'
+  const s = a.ai_status
+  if (s === 'done') return '✓ 已分析'
+  if (s === 'failed') return '✗ 失败'
+  if (s === 'analyzing') return '分析中'
+  return '未分析'
+}
+
 const fmtSize = (bytes) => {
   if (!bytes) return ''
   if (bytes < 1024) return bytes + 'B'
@@ -149,6 +244,10 @@ const fmtDuration = (sec) => {
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`
+}
+const countryLabel = (code) => {
+  const c = COUNTRIES.find(x => x.code === code)
+  return c ? c.label : code
 }
 </script>
 
@@ -165,7 +264,13 @@ const fmtDuration = (sec) => {
         </el-select>
         <input v-model="fSearch" class="search-input" placeholder="搜索名称" @keyup.enter="load" />
       </div>
-      <button class="btn primary" @click="openUpload">+ 上传素材</button>
+      <div class="bar-r">
+        <div class="ai-toggle" :title="aiOn ? 'AI 识别开：点 AI分析 自动生成文案/受众' : 'AI 识别关：手动键入文案/受众'">
+          <span class="ai-toggle-label">AI 识别</span>
+          <el-switch :model-value="aiOn" @change="toggleAi" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+        </div>
+        <button class="btn primary" @click="openUpload">+ 上传素材</button>
+      </div>
     </div>
 
     <!-- 网格 -->
@@ -176,11 +281,12 @@ const fmtDuration = (sec) => {
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
           <span class="type-badge">{{ a.type === 'video' ? '视频' : '图片' }}</span>
+          <span v-if="a.country" class="country-badge" :title="'目标投放：' + countryLabel(a.country)">{{ a.country }}</span>
         </div>
         <div class="card-body">
           <!-- 名称（双击编辑） -->
           <div v-if="editingId === a.id" class="name-edit">
-            <input v-model="editingName" class="name-input" @keyup.enter="saveRename(a)" @blur="saveRename(a)" ref="renameInput" />
+            <input v-model="editingName" class="name-input" @keyup.enter="saveRename(a)" @blur="saveRename(a)" />
           </div>
           <div v-else class="name" :title="a.name" @dblclick="startRename(a)">{{ a.name }}</div>
           <!-- 标签 -->
@@ -188,6 +294,7 @@ const fmtDuration = (sec) => {
             <span v-for="t in (a.tags || []).slice(0,2)" :key="t" class="tag-chip">{{ t }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
             <span v-if="a.fb_image_hash" class="fb-mark" title="已上传到 FB">FB</span>
+            <span v-if="a.ai_status === 'done'" class="ai-mark" title="AI 已分析">AI</span>
           </div>
           <div class="card-meta">
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
@@ -196,8 +303,11 @@ const fmtDuration = (sec) => {
           </div>
         </div>
         <div class="card-ops">
+          <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
+            {{ analyzingIds.has(a.id) ? '分析中…' : 'AI分析' }}
+          </button>
+          <button class="op" @click="openEdit(a)">文案/受众</button>
           <button class="op" @click="startRename(a)">重命名</button>
-          <button class="op" @click="editTags(a)">标签</button>
           <button class="op danger" @click="remove(a)">删除</button>
         </div>
       </div>
@@ -220,7 +330,11 @@ const fmtDuration = (sec) => {
             <button class="upload-remove" @click="removeUploadItem(i)">✕</button>
           </div>
           <input v-model="item.name" class="upload-name-input" placeholder="素材名称（默认文件名）" />
-          <input v-model="item.uploadTagsStr" class="upload-tags-input" placeholder="标签（逗号分隔，选填）" @change="item.tags = (item.uploadTagsStr || '').split(',').map(t=>t.trim()).filter(Boolean)" />
+          <select v-model="item.countryStr" class="upload-country-select">
+            <option value="">投放国家（选填，驱动 AI 文案语言）</option>
+            <option v-for="c in COUNTRIES" :key="c.code" :value="c.code">{{ c.label }} ({{ c.code }})</option>
+          </select>
+          <input v-model="item.uploadTagsStr" class="upload-tags-input" placeholder="标签（逗号分隔，选填）" />
           <span v-if="item.status === 'done'" class="upload-status done">✓ 完成</span>
           <span v-if="item.status === 'fail'" class="upload-status fail">✗ 失败</span>
           <span v-if="item.status === 'uploading'" class="upload-status uploading">上传中…</span>
@@ -232,6 +346,46 @@ const fmtDuration = (sec) => {
       </template>
     </el-drawer>
 
+    <!-- AI 文案/受众编辑弹窗 -->
+    <el-dialog v-model="editOpen" :title="`文案 / 受众 · ${editAsset?.name || ''}`" width="560px" append-to-body :close-on-click-modal="false">
+      <div v-if="editAsset" class="edit-form">
+        <div class="edit-row">
+          <label>目标国家</label>
+          <select :value="editAsset.country || ''" class="edit-country" @change="changeCountry(editAsset, $event.target.value)">
+            <option value="">未指定（英文）</option>
+            <option v-for="c in COUNTRIES" :key="c.code" :value="c.code" :selected="editAsset.country === c.code">{{ c.label }} ({{ c.code }})</option>
+          </select>
+          <span class="edit-hint">驱动 AI 文案语言</span>
+        </div>
+        <div class="edit-row">
+          <label>标题 headline</label>
+          <input v-model="editForm.headline" class="edit-input" placeholder="广告标题（30字内）" maxlength="40" />
+        </div>
+        <div class="edit-row">
+          <label>正文 primary text</label>
+          <textarea v-model="editForm.primary_text" class="edit-textarea" rows="3" placeholder="广告正文（80字内）" maxlength="200"></textarea>
+        </div>
+        <div class="edit-row">
+          <label>描述 description</label>
+          <input v-model="editForm.description" class="edit-input" placeholder="描述（30字内）" maxlength="40" />
+        </div>
+        <div class="edit-row">
+          <label>兴趣 interests</label>
+          <input v-model="editForm.interestsStr" class="edit-input" placeholder="兴趣标签（逗号分隔）" />
+        </div>
+        <div class="edit-row">
+          <label>国家 countries</label>
+          <input v-model="editForm.countriesStr" class="edit-input" placeholder="投放国家代码（逗号分隔，如 US,VN）" />
+        </div>
+        <div v-if="aiOn" class="edit-tip">点「AI分析」可自动填充以上字段（基于素材视觉内容）。</div>
+        <div v-else class="edit-tip">AI 识别已关，请手动键入。打开右上「AI 识别」开关可自动生成。</div>
+      </div>
+      <template #footer>
+        <button class="btn" @click="editOpen = false">取消</button>
+        <button class="btn primary" :disabled="editSaving" @click="saveEdit">{{ editSaving ? '保存中…' : '保存' }}</button>
+      </template>
+    </el-dialog>
+
     <!-- 预览弹窗 -->
     <el-dialog v-model="previewAsset" :title="previewAsset?.name" width="800px" @close="closePreview" append-to-body>
       <div v-if="previewAsset" style="text-align:center">
@@ -241,7 +395,13 @@ const fmtDuration = (sec) => {
           <span class="meta-info">{{ previewAsset.type === 'video' ? '视频' : '图片' }}</span>
           <span v-if="previewAsset.file_size" class="meta-info">{{ fmtSize(previewAsset.file_size) }}</span>
           <span v-if="previewAsset.width" class="meta-info">{{ previewAsset.width }}×{{ previewAsset.height }}</span>
+          <span v-if="previewAsset.country" class="meta-info">{{ countryLabel(previewAsset.country) }}</span>
           <span class="meta-info">#{{ previewAsset.id }}</span>
+        </div>
+        <div v-if="previewAsset.ai_status === 'done'" class="preview-ai">
+          <div class="preview-ai-title">AI 文案</div>
+          <div v-if="previewAsset.ai_copy?.headline" class="preview-ai-line"><b>标题：</b>{{ previewAsset.ai_copy.headline }}</div>
+          <div v-if="previewAsset.ai_copy?.primary_text" class="preview-ai-line"><b>正文：</b>{{ previewAsset.ai_copy.primary_text }}</div>
         </div>
       </div>
     </el-dialog>
@@ -254,6 +414,9 @@ const fmtDuration = (sec) => {
 /* 工具栏 */
 .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .bar-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bar-r { display: flex; align-items: center; gap: 12px; }
+.ai-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--bg3); border-radius: var(--rs); }
+.ai-toggle-label { font-size: 12px; color: var(--t2); }
 .type-segs { display: flex; gap: 2px; background: var(--bg3); border-radius: 7px; padding: 2px; }
 .seg { padding: 5px 12px; border: none; background: transparent; color: var(--t3); font-size: 12px; border-radius: 5px; cursor: pointer; font-family: inherit; }
 .seg.on { background: var(--bg2); color: var(--t1); }
@@ -266,27 +429,32 @@ const fmtDuration = (sec) => {
 .btn:disabled { opacity: .5; }
 
 /* 网格 */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; min-height: 200px; }
-.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; min-height: 200px; }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s; display: flex; flex-direction: column; }
 .card:hover { border-color: var(--ac); }
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
 .thumb { max-width: 100%; max-height: 100%; object-fit: cover; width: 100%; height: 100%; }
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
 .type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; }
-.card-body { padding: 8px 10px; }
+.country-badge { position: absolute; top: 4px; right: 4px; background: rgba(10,132,255,.85); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+.card-body { padding: 8px 10px; flex: 1; }
 .name { font-size: 13px; color: var(--t1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .name-edit { display: flex; }
 .name-input { width: 100%; padding: 3px 6px; background: var(--bg3); border: 1px solid var(--ac); border-radius: 4px; color: var(--t1); font-size: 13px; }
-.tag-row { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
+.tag-row { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
 .tag-chip { font-size: 10px; padding: 1px 6px; background: var(--bg3); color: var(--t2); border-radius: 8px; }
 .tag-more { font-size: 10px; padding: 1px 5px; color: var(--t3); }
 .fb-mark { font-size: 9px; padding: 1px 5px; background: rgba(10,132,255,.15); color: var(--ac); border-radius: 4px; font-weight: 600; }
+.ai-mark { font-size: 9px; padding: 1px 5px; background: rgba(48,209,88,.15); color: var(--success); border-radius: 4px; font-weight: 600; }
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
-.card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; }
+.card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; }
 .op { background: none; border: none; color: var(--t3); font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .op:hover { background: var(--bg3); color: var(--t1); }
 .op.danger:hover { color: var(--error); }
+.op.primary-op { color: var(--ac); }
+.op.primary-op:hover { background: rgba(10,132,255,.12); }
+.op:disabled { opacity: .5; cursor: wait; }
 .empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--t3); font-size: 14px; }
 
 /* 上传抽屉 */
@@ -302,11 +470,24 @@ const fmtDuration = (sec) => {
 .upload-name { font-size: 12px; color: var(--t1); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .upload-size { font-size: 10px; color: var(--t3); }
 .upload-remove { background: none; border: none; color: var(--t3); cursor: pointer; font-size: 14px; }
-.upload-name-input, .upload-tags-input { width: 100%; margin-top: 4px; padding: 4px 8px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 5px; color: var(--t1); font-size: 12px; box-sizing: border-box; }
-.upload-name-input:focus, .upload-tags-input:focus { border-color: var(--ac); outline: none; }
+.upload-name-input, .upload-tags-input, .upload-country-select { width: 100%; margin-top: 4px; padding: 4px 8px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 5px; color: var(--t1); font-size: 12px; box-sizing: border-box; }
+.upload-name-input:focus, .upload-tags-input:focus, .upload-country-select:focus { border-color: var(--ac); outline: none; }
 .upload-status { font-size: 11px; }
 .upload-status.done { color: var(--success); }
 .upload-status.fail { color: var(--error); }
 .upload-status.uploading { color: var(--ac); }
 .meta-info { font-size: 12px; color: var(--t3); }
+
+/* AI 编辑弹窗 */
+.edit-form { display: flex; flex-direction: column; gap: 12px; }
+.edit-row { display: flex; flex-direction: column; gap: 4px; }
+.edit-row label { font-size: 12px; color: var(--t3); font-weight: 500; }
+.edit-row .edit-hint { font-size: 11px; color: var(--t3); }
+.edit-input, .edit-country, .edit-textarea { width: 100%; padding: 6px 10px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 6px; color: var(--t1); font-size: 13px; font-family: inherit; box-sizing: border-box; }
+.edit-input:focus, .edit-country:focus, .edit-textarea:focus { border-color: var(--ac); outline: none; }
+.edit-textarea { resize: vertical; }
+.edit-tip { font-size: 11px; color: var(--t3); padding: 8px 10px; background: var(--bg3); border-radius: 6px; }
+.preview-ai { margin-top: 14px; padding: 10px; background: var(--bg3); border-radius: 8px; text-align: left; }
+.preview-ai-title { font-size: 12px; color: var(--t3); margin-bottom: 6px; }
+.preview-ai-line { font-size: 13px; color: var(--t1); margin-top: 4px; line-height: 1.5; }
 </style>

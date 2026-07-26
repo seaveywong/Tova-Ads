@@ -21,6 +21,13 @@ class Asset(Base):
     duration_sec = Column(Integer, default=0)
     usage_count = Column(Integer, default=0)
     ai_copy = Column(Text)
+    country = Column(Text)  # 目标投放国家（US/VN/TW...，AI 文案语言 + 受众用）
+    # AI 识别结果（视觉模型看图生成）
+    ai_copy_json = Column(Text)     # {"primary_text":"","headline":"","description":""}
+    ai_audience_json = Column(Text)  # {"interests":[...],"countries":[...],"age_min":..,"age_max":..}
+    ai_status = Column(Text, default="none")  # none/analyzing/done/failed
+    ai_error = Column(Text)          # 失败原因（ai_status=failed 时）
+    analyzed_at = Column(DateTime(timezone=True))
     is_manual = Column(Boolean, default=False)
     manual_copy = Column(Text)
     category = Column(Text, default="常规")
