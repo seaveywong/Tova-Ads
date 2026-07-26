@@ -15,10 +15,12 @@ from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_targeting
-from ..core.ad_ops import deploy_one_account, ensure_image_hash_for_account
+from ..core.ad_ops import deploy_one_account, ensure_image_hash_for_account, usd_to_fb_amount
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink
 from ..models.audience import SavedAudience
+from ..models.fb import Account
+from ..models.perf import CurrencyRate
 import os
 
 router = APIRouter(prefix="/launch-templates", tags=["launch-templates"])
@@ -31,8 +33,12 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "id": t.id, "name": t.name, "description": t.description or "",
         "objective": t.objective, "conversion_goal": t.conversion_goal or "",
         "budget_mode": t.budget_mode, "bid_strategy": t.bid_strategy,
-        "daily_budget": t.daily_budget, "name_prefix": t.name_prefix,
-        "audience_id": t.audience_id or 0, "asset_id": t.asset_id,
+        "daily_budget": t.daily_budget, "budget_usd": t.budget_usd, "name_prefix": t.name_prefix,
+        "optimization_goal": t.optimization_goal or "", "billing_event": t.billing_event or "",
+        "destination_type": t.destination_type or "",
+        "audience_id": t.audience_id or 0, "audience_json": t.audience_json or "",
+        "advanced_config": t.advanced_config or "",
+        "asset_id": t.asset_id,
         "headline": t.headline or "", "body": t.body or "",
         "page_id": t.page_id or "", "pixel_id": t.pixel_id or "",
         "landing_url": t.landing_url or "", "cta_type": t.cta_type or "",
@@ -51,9 +57,15 @@ class TemplateIn(BaseModel):
     conversion_goal: str = ""
     budget_mode: str = "ABO"
     bid_strategy: str = "LOWEST_COST_WITHOUT_CAP"
-    daily_budget: int = 200000
+    daily_budget: int = 0
+    budget_usd: Optional[float] = None
     name_prefix: str = "Tova Ads"
+    optimization_goal: str = ""
+    billing_event: str = ""
+    destination_type: str = ""
     audience_id: int = 0
+    audience_json: str = ""
+    advanced_config: str = ""
     asset_id: Optional[int] = None
     headline: str = ""
     body: str = ""
@@ -152,8 +164,34 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     return {"job_id": job.id, "total": len(body.items)}
 
 
-def _resolve_targeting(sdb, audience_id: int, fallback_countries: list = None):
-    """从 SavedAudience 解析 targeting；audience_id=0 → None（FB 默认）或国家兜底。"""
+def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
+    """解析受众 → targeting dict。优先 audience_json（内联编辑），其次 SavedAudience，None=FB 默认。"""
+    # 1. 内联 audience_json（投放模板编辑器直接编辑的受众）
+    if audience_json and audience_json.strip():
+        try:
+            a = json.loads(audience_json)
+            countries = a.get("countries") or []
+            interests = a.get("interests") or []
+            # 兴趣可能是 [{id,name}] 或 ["词"]（AI 生成的词未 resolve）——只取已 resolve 的 {id,name}
+            resolved = [i for i in interests if isinstance(i, dict) and i.get("id")]
+            if not countries and not resolved:
+                return None  # 内联受众空 → 走 FB 默认
+            t = build_targeting(
+                countries=countries, interests=resolved,
+                age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
+                gender=a.get("gender") or 0, strategy=a.get("strategy") or "broad_interest",
+            )
+            # 用户指定语言（targeting.languages）
+            langs = a.get("languages") or []
+            if langs:
+                t["languages"] = [{"id": str(x) if str(x).isdigit() else x, "name": str(x)} for x in langs][:5] \
+                    if all(isinstance(x, (int, str)) for x in langs) else []
+                # 注：languages 实际应为 [{id,name}]，前端传 id 列表
+                t["languages"] = [{"id": str(x)} for x in langs] if langs and not isinstance(langs[0], dict) else langs
+            return t
+        except Exception:
+            pass
+    # 2. SavedAudience
     if not audience_id:
         return None
     aud = sdb.query(SavedAudience).filter(
@@ -168,6 +206,30 @@ def _resolve_targeting(sdb, audience_id: int, fallback_countries: list = None):
     )
 
 
+def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate) -> int:
+    """模板预算 → 该账户本币最小单位（FB daily_budget）。
+    优先 budget_usd（美元，按账户 currency + 汇率转）；无则回退 legacy daily_budget。"""
+    if tpl.budget_usd and tpl.budget_usd > 0:
+        acc = sdb.query(Account).filter(Account.act_id == act_id).first()
+        currency = (acc.currency if acc else "USD") or "USD"
+        cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+        rate = cr.rate if cr else 1.0
+        return usd_to_fb_amount(tpl.budget_usd, currency, rate)
+    # legacy：直接用 daily_budget（已是账户本币最小单位）
+    return tpl.daily_budget or 200000
+
+
+def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
+    """解析模板的 advanced_config JSON（高级 FB 字段）。"""
+    if not tpl.advanced_config or not tpl.advanced_config.strip():
+        return None
+    try:
+        cfg = json.loads(tpl.advanced_config)
+        return cfg if isinstance(cfg, dict) else None
+    except Exception:
+        return None
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -180,7 +242,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
             job.status = "failed"; job.finished_at = datetime.now(timezone.utc); sdb.commit(); return
         job.status = "running"; sdb.commit()
         asset = sdb.query(Asset).filter(Asset.id == tpl.asset_id).first() if tpl.asset_id else None
-        targeting = _resolve_targeting(sdb, tpl.audience_id)
+        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "")
+        advanced = _parse_advanced(tpl)
         # 子码链接（一个 slug 共享多广告，{{ad.id}} 宏区分）
         link = None
         if tpl.subcode_slug:
@@ -202,14 +265,18 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     sdb.commit()  # 持久化 hash 缓存
                 page_id = item.page_id or tpl.page_id
                 pixel_id = item.pixel_id or tpl.pixel_id
+                daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl)
                 r = deploy_one_account(
                     fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
-                    daily_budget=tpl.daily_budget, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
+                    daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
                     name_prefix=tpl.name_prefix, headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type,
                     image_hash=image_hash, subcode_slug=tpl.subcode_slug, subcode_link=link,
                     targeting=targeting, ad_language=tpl.ad_language,
                     dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
+                    optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
+                    destination_type_override=tpl.destination_type or "",
+                    advanced_config=advanced,
                 )
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.status = "success"; item.error = None
@@ -313,7 +380,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             return
         # 借用 _run_deploy_job 的单账户逻辑：把 job 的 total 固定，succeeded/failed 增量
         asset = sdb.query(Asset).filter(Asset.id == tpl.asset_id).first() if tpl.asset_id else None
-        targeting = _resolve_targeting(sdb, tpl.audience_id)
+        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "")
+        advanced = _parse_advanced(tpl)
         link = sdb.query(LandingAdLink).filter(LandingAdLink.slug == tpl.subcode_slug).first() if tpl.subcode_slug else None
         job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
         try:
@@ -329,11 +397,14 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=it.page_id or tpl.page_id, pixel_id=it.pixel_id or tpl.pixel_id,
-                landing_url=tpl.landing_url, daily_budget=tpl.daily_budget, budget_mode=tpl.budget_mode,
-                bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix, headline=tpl.headline,
-                body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
+                landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl),
+                budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
+                headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
                 subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
+                optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
+                destination_type_override=tpl.destination_type or "",
+                advanced_config=advanced,
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.status = "success"; it.error = None

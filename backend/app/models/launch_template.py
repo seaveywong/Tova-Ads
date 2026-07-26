@@ -3,7 +3,7 @@
 模板 = Campaign/AdSet/Ad 配置（结构 + 素材引用 + 文案）。
 job = 一次批量部署（选模板 + 选 N 账户 → 逐账户建广告，per-item 状态）。
 """
-from sqlalchemy import Column, BigInteger, Integer, Text, DateTime, ForeignKey, func
+from sqlalchemy import Column, BigInteger, Integer, Float, Text, DateTime, ForeignKey, func
 from ..core.database import Base
 
 
@@ -20,10 +20,16 @@ class LaunchTemplate(Base):
     conversion_goal = Column(Text, default="")
     budget_mode = Column(Text, default="ABO")          # ABO / CBO
     bid_strategy = Column(Text, default="LOWEST_COST_WITHOUT_CAP")
-    daily_budget = Column(Integer, default=200000)     # 分（VND 200000 ≈ $8）
+    daily_budget = Column(Integer, default=200000)     # legacy（账户本币最小单位）；新数据用 budget_usd
+    budget_usd = Column(Float)                         # 每日预算（美元）——部署时按目标账户本币+汇率转
     name_prefix = Column(Text, default="Tova Ads")
     # AdSet 层
+    optimization_goal = Column(Text, default="")       # LINK_CLICKS/OFFSITE_CONVERSIONS/REACH/...（空=按 objective 推）
+    billing_event = Column(Text, default="IMPRESSIONS")
+    destination_type = Column(Text, default="")        # WEBSITE/ON_AD/ON_PAGE/MESSENGER/...（空=按 objective 推）
     audience_id = Column(Integer, default=0)           # FK saved_audiences.id；0=默认定向
+    audience_json = Column(Text)                       # 内联受众 {countries,interests[{id,name}],age_min/max,gender,languages}（⑦）
+    advanced_config = Column(Text)                     # JSON：高级 FB 字段（bid_amount/attribution/placements/dayparting/custom_audiences...），部署时合并进 payload
     # Ad 层（素材引用 + 文案）
     asset_id = Column(BigInteger, ForeignKey("assets.id"))
     headline = Column(Text)

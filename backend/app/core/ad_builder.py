@@ -151,14 +151,18 @@ def build_adset(
     targeting: dict | None = None,
     dsa_beneficiary: str = "",
     dsa_payor: str = "",
+    optimization_goal: str = "",            # 显式覆盖（空=按 objective+conversion_goal 推）
+    billing_event: str = "",                # 显式覆盖（空=IMPRESSIONS）
+    destination_type_override: str = "",    # 显式覆盖 destination_type
+    extra: dict | None = None,              # 高级字段（advanced_config JSON），深合并进 payload
 ) -> dict:
     obj = normalize_objective(objective)
-    opt_goal = get_optimization_goal(obj, conversion_goal)
+    opt_goal = optimization_goal.strip() if optimization_goal and optimization_goal.strip() else get_optimization_goal(obj, conversion_goal)
 
     payload: dict[str, Any] = {
         "name": name,
         "campaign_id": campaign_id,
-        "billing_event": "IMPRESSIONS",
+        "billing_event": billing_event.strip() if billing_event and billing_event.strip() else "IMPRESSIONS",
         "optimization_goal": opt_goal,
         "bid_strategy": bid_strategy,
         "targeting": targeting or {"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65},
@@ -233,7 +237,24 @@ def build_adset(
     elif obj == "OUTCOME_AWARENESS":
         pass  # REACH/IMPRESSIONS 不需要 promoted_object
 
+    # 用户显式覆盖 destination_type（高级设置 / 模板指定）
+    if destination_type_override and destination_type_override.strip():
+        payload["destination_type"] = destination_type_override.strip()
+
+    # 高级字段深合并（advanced_config：bid_amount/attribution_spec/placements/dayparting/...）
+    if extra:
+        _deep_merge(payload, extra)
     return payload
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """递归合并 override 进 base（override 覆盖同 key；dict 深合并）。"""
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
 
 
 # ── Ad creative ──

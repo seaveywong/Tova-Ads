@@ -8,6 +8,24 @@ import json
 from .fb_client import FbClient, FbApiError
 from .ad_builder import build_campaign, build_adset, build_creative
 
+# ISO 4217 零小数位币种（FB amount 单位 = 整本币，其余 ×100 进分）
+_ZERO_DECIMAL_CURRENCIES = {
+    "VND", "JPY", "KRW", "CLP", "ISK", "PYG", "UGX", "VUV",
+    "XAF", "XOF", "XPF", "BIF", "DJF", "GNF", "KMF", "KPW", "RWF", "CLF",
+}
+
+
+def usd_to_fb_amount(usd: float, currency: str, fx_rate: float) -> int:
+    """美元 → FB daily_budget（账户本币的最小货币单位）。
+
+    fx_rate = CurrencyRate.rate（约定 1 USD = rate × 本币，如 VND≈25400）。
+    零小数位币种（VND/JPY/KRW…）单位=整本币；其余（USD/EUR/THB/IDR…）×100=分。
+    """
+    rate = fx_rate if fx_rate and fx_rate > 0 else 1.0  # 兜底（USD 账户或汇率缺失）
+    amount_local = float(usd or 0) * rate
+    factor = 1 if (currency or "").upper() in _ZERO_DECIMAL_CURRENCIES else 100
+    return max(1, int(round(amount_local * factor)))
+
 
 def ensure_image_hash_for_account(fb: FbClient, db, asset, act_id: str, filepath: str) -> str:
     """取该账户的 image_hash（FB hash 按账户，不能跨账户复用）。
@@ -47,7 +65,10 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        subcode_slug: str = "", subcode_link=None,
                        targeting=None, ad_language: str = "",
                        lead_form_id: str = "", message_template: str = "",
-                       dsa_beneficiary: str = "", dsa_payor: str = "") -> dict:
+                       dsa_beneficiary: str = "", dsa_payor: str = "",
+                       optimization_goal: str = "", billing_event: str = "",
+                       destination_type_override: str = "",
+                       advanced_config: dict | None = None) -> dict:
     """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
@@ -73,6 +94,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         bid_strategy=bid_strategy, budget_mode=budget_mode,
         targeting=targeting,
         dsa_beneficiary=dsa_beneficiary, dsa_payor=dsa_payor,
+        optimization_goal=optimization_goal, billing_event=billing_event,
+        destination_type_override=destination_type_override,
+        extra=advanced_config,
     )
     adset = fb.post(f"{act}/adsets", adset_payload)
     adset_id = adset["id"]

@@ -70,6 +70,7 @@ def _asset_dict(a: Asset) -> dict:
         "duration_sec": a.duration_sec or 0, "usage_count": a.usage_count or 0,
         "fb_image_hash": a.fb_image_hash, "category": a.category, "status": a.status,
         "country": a.country or "",
+        "language": a.language or "",
         "ai_status": a.ai_status or "none",
         "ai_error": a.ai_error or "",
         "ai_purpose": a.ai_purpose or "",
@@ -137,6 +138,7 @@ async def upload_asset(
     name: str = Form(""),
     tags: str = Form("[]"),
     country: str = Form(""),
+    language: str = Form(""),
     user: CurrentUser = Depends(require_permission("assets.manage")),
     db: Session = Depends(get_db),
 ):
@@ -178,6 +180,7 @@ async def upload_asset(
         public_url=public_url, file_size=len(content), mime_type=mime,
         width=width, height=height, duration_sec=duration,
         country=country.strip().upper() or None,
+        language=language.strip().lower() or None,
         category="常规", status="active",
     )
     db.add(asset)
@@ -195,6 +198,7 @@ class AssetUpdateIn(BaseModel):
     name: Optional[str] = None
     tags: Optional[list] = None
     country: Optional[str] = None
+    language: Optional[str] = None
 
 
 @router.put("/{aid}")
@@ -214,6 +218,8 @@ def update_asset(aid: int, body: AssetUpdateIn,
         a.tags = json.dumps(body.tags) if body.tags else None
     if body.country is not None:
         a.country = body.country.strip().upper() or None
+    if body.language is not None:
+        a.language = body.language.strip().lower() or None
     tid = new_trace_id()
     write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
               actor_user_id=user.id, target_type="asset", target_id=str(aid),
@@ -309,7 +315,8 @@ def analyze_asset(aid: int, body: AnalyzeIn,
             medium = f"视频（{len(frames)} 个关键帧）"
         prompt, lang_code = build_analysis_prompt(
             purpose=body.purpose, depth=body.depth, style=body.style,
-            language=body.language, country=a.country or "",
+            language=body.language or a.language or "",
+            country=a.country or "",
             video_frame_count=frame_count if a.type == "video" else 0,
         )
         data = chat_with_images_json(prompt, images, mime=mime,
