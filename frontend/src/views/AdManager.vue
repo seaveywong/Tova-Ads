@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { fbAdStatus } from '../composables/useStatus'
+import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,25 +24,14 @@ const sortKey = ref('spend')
 const sortDir = ref('desc')
 const searchQ = ref('')
 
-const dateOptions = [
-  { label: '今天', value: 'today' },
-  { label: '昨天', value: 'yesterday' },
-  { label: '近2天', value: 'last_2d' },
-  { label: '近7天', value: 'last_7d' },
-]
-const _fmt = (d) => d.toISOString().slice(0, 10)
 const curRange = computed(() => {
   if (showCustom.value && customFrom.value) return { date_from: customFrom.value, date_to: customTo.value || customFrom.value }
-  const today = new Date()
-  if (datePreset.value === 'today') return { date_from: _fmt(today), date_to: _fmt(today) }
-  if (datePreset.value === 'yesterday') { const y = new Date(Date.now() - 86400000); return { date_from: _fmt(y), date_to: _fmt(y) } }
-  const days = { last_2d: 2, last_7d: 7 }[datePreset.value] || 2
-  return { date_from: _fmt(new Date(Date.now() - days * 86400000)), date_to: _fmt(today) }
+  const r = presetRange(datePreset.value)
+  return r ? { date_from: r[0], date_to: r[1] } : { date_from: '', date_to: '' }
 })
 
-const STATUS_MAP = { ACTIVE: '投放中', PAUSED: '已暂停', CAMPAIGN_PAUSED: '系列暂停', ADSET_PAUSED: '组暂停', ARCHIVED: '已归档', DELETED: '已删除', DISAPPROVED: '被拒', PENDING_REVIEW: '审核中', PREVIEW: '预览', IN_PROCESS: '处理中', WITH_ISSUES: '有问题', REVIEW_IN_PROGRESS: '审核中' }
-const statusLabel = (s) => STATUS_MAP[s] || s || '-'
-const statusDot = (s) => s === 'ACTIVE' ? 'ok' : (['DISAPPROVED', 'DELETED', 'WITH_ISSUES'].includes(s) ? 'err' : (s && s.includes('PAUSED') ? 'warn' : (s === 'ARCHIVED' ? 'off' : 'warn')))
+const statusLabel = (s) => fbAdStatus(s).label
+const statusDot = (s) => fbAdStatus(s).cls
 const OBJ_MAP = { OUTCOME_SALES: '销量', OUTCOME_TRAFFIC: '流量', OUTCOME_ENGAGEMENT: '互动', OUTCOME_AWARENESS: '品牌认知', OUTCOME_LEAD_GENERATION: '线索', LINK_CLICKS: '流量', CONVERSIONS: '销量', MESSAGES: '消息', PAGE_LIKES: '主页赞', POST_ENGAGEMENT: '互动', VIDEO_VIEWS: '视频观看', BRAND_AWARENESS: '品牌认知', REACH: '覆盖' }
 const objLabel = (o) => OBJ_MAP[o] || o || '-'
 const OPT_MAP = { OFFSITE_CONVERSIONS: '转化', LINK_CLICKS: '链接点击', LANDING_PAGE_VIEWS: '落地页浏览', POST_ENGAGEMENT: '互动', REACH: '覆盖', IMPRESSIONS: '展示', VIDEO_VIEWS: '视频观看', APP_INSTALLS: '应用安装', LEAD_GENERATION: '潜在客户', MESSAGING_CONVERSATIONS: '消息对话', VALUE: '价值' }
@@ -207,7 +198,7 @@ const isSelected = (id) => selected.value.has(id)
 <template>
   <div class="page">
     <div class="ctrl-bar">
-      <button v-for="opt in dateOptions" :key="opt.value" class="ctrl-btn" :class="{ active: datePreset === opt.value && !showCustom }" @click="showCustom = false; datePreset = opt.value; load()">{{ opt.label }}</button>
+      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn" :class="{ active: datePreset === opt.key && !showCustom }" @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
       <button class="ctrl-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">自定义</button>
       <div v-if="showCustom" class="custom-range"><input type="date" v-model="customFrom" class="date-input" /><span class="sep">—</span><input type="date" v-model="customTo" class="date-input" /><button class="ctrl-btn apply" @click="load">查询</button></div>
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable placeholder="全部账户" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
@@ -313,7 +304,7 @@ const isSelected = (id) => selected.value.has(id)
               <div><span class="dl">账户</span><span class="dv">{{ diagData.account_name }}</span></div>
               <div><span class="dl">广告ID</span><span class="dv">{{ diagData.ad_id }}</span></div>
               <div><span class="dl">子码</span><span class="dv">{{ diagData.subcode || '未绑' }}</span></div>
-              <div><span class="dl">FB状态</span><span class="dv">{{ diagData.fb_status || '—' }}</span></div>
+              <div><span class="dl">FB状态</span><span class="dv">{{ statusLabel(diagData.fb_status) }}</span></div>
             </div>
           </div>
           <div class="diag-sec">

@@ -103,3 +103,12 @@ a { color: var(--ac); text-decoration: none; }
 .el-drawer__title { white-space: normal !important; line-height: 1.4; font-size: 15px; }
 .el-drawer__close-btn { color: var(--t3) !important; }
 .el-drawer__body { color: var(--t1); }
+
+/* ── 移动端响应式（全局）── 一处规则修好所有页的水平表单行 + el-drawer 撑满 */
+@media (max-width: 768px) {
+  /* 水平 label+input 表单行 → 堆叠（Landing/Guard/Settings/AdminTeams/Members/Tokens/AuditLog 共用 .form-l） */
+  .form-l { flex-direction: column !important; align-items: stretch !important; gap: 4px !important; }
+  .form-l > label { width: auto !important; text-align: left !important; }
+  /* el-drawer 在手机上撑满宽度（无论 size 写多少 px） */
+  .el-drawer.rtl { width: 100% !important; max-width: 100% !important; }
+}

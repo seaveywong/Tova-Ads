@@ -2,9 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { GET, POST, PUT, PATCH, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { tenantStatus } from '../composables/useStatus'
 
 const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
-const STATUS_ZH = { active: '正常', suspended: '已停用', archived: '已归档' }
+const statusLabel = (s) => tenantStatus(s).label
 
 const teams = ref([])
 const loading = ref(false)
@@ -57,7 +58,7 @@ const rename = async (t) => {
 
 // 状态变更
 const setStatus = async (t, status) => {
-  const word = STATUS_ZH[status]
+  const word = statusLabel(status)
   try {
     await ElMessageBox.confirm(`确定将「${t.name}」设为${word}？`, '确认',
       { type: status === 'archived' ? 'warning' : 'info', confirmButtonText: '确认', cancelButtonText: '取消' })
@@ -150,7 +151,7 @@ const submitMemberAdd = async () => {
         <button class="btn primary" @click="openCreate"><span class="plus">+</span> 建团队</button>
       </div>
 
-      <el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队" row-key="id">
+      <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队" row-key="id">
         <el-table-column prop="id" label="ID" width="56" align="center" />
         <el-table-column label="团队名" min-width="180">
           <template #default="{ row }">
@@ -159,7 +160,7 @@ const submitMemberAdd = async () => {
         </el-table-column>
         <el-table-column label="状态" width="96">
           <template #default="{ row }">
-            <span :class="['status', row.status]"><i class="sdot"></i>{{ STATUS_ZH[row.status] || row.status }}</span>
+            <span :class="['status', row.status]"><i class="sdot"></i>{{ statusLabel(row.status) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="成员" width="68" align="center">
@@ -194,7 +195,7 @@ const submitMemberAdd = async () => {
             </div>
           </template>
         </el-table-column>
-      </el-table>
+      </el-table></div>
     </div>
 
     <!-- 建团队弹窗 -->
@@ -303,4 +304,5 @@ const submitMemberAdd = async () => {
 :deep(.el-table){font-size:13px}
 :deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:12px}
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}
+.tbl-wrap{overflow-x:auto}
 </style>

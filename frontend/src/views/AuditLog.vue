@@ -4,6 +4,8 @@ import { GET } from '../api'
 import { isSuperadminSync } from '../router'
 import { ElMessage } from 'element-plus'
 import { fmtTime } from '../composables/useTz'
+import { dateShortcuts, presetRange } from '../composables/useDateRange'
+const pickerShortcuts = dateShortcuts()
 
 const isSuper = ref(isSuperadminSync())
 
@@ -26,7 +28,7 @@ const expandedRowIds = ref([])
 const PAGE_SIZE = 50
 const page = ref(1)
 const total = ref(0)
-const dateRange = ref([])  // [YYYY-MM-DD, YYYY-MM-DD]
+const dateRange = ref(presetRange('last_7d') || [])  // 默认近7天；清空=全部
 
 const buildParams = (forCount = false) => {
   const t = tabs.find(x => x.key === tab.value)
@@ -108,7 +110,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         <div class="filter-item">
           <span class="flabel">日期</span>
           <el-date-picker v-model="dateRange" type="daterange" size="small" value-format="YYYY-MM-DD"
-            start-placeholder="开始" end-placeholder="结束" style="width:240px" @change="onDateChange" />
+            start-placeholder="开始" end-placeholder="结束" style="width:240px" :shortcuts="pickerShortcuts" @change="onDateChange" />
         </div>
         <button v-if="fAction || fUser || fTrace || (dateRange && dateRange.length)" class="clear" @click="resetFilters">清除</button>
       </div>
@@ -121,7 +123,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         </div>
       </div>
 
-      <el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
+      <div class="tbl-wrap"><el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
                 @expand-change="onExpandChange">
         <el-table-column type="expand">
           <template #default="{ row }">
@@ -173,7 +175,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
             <span v-else class="dash">—</span>
           </template>
         </el-table-column>
-      </el-table>
+      </el-table></div>
     </div>
   </div>
 </template>
@@ -242,4 +244,5 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 :deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:11px}
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}
 :deep(.el-table__expanded-cell){padding:4px 8px !important}
+.tbl-wrap{overflow-x:auto}
 </style>

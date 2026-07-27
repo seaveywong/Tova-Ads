@@ -3,6 +3,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
+import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 
 const route = useRoute()
 
@@ -190,11 +191,9 @@ const reset = () => {
 }
 // 日期快捷（按北京业务日，和后端查询基准对齐）
 const preset = ref('')
-const bjDate = (off = 0) => new Date(Date.now() + off * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
 const setPreset = (k) => {
-  if (k === 'today') { fFrom.value = bjDate(0); fTo.value = bjDate(0) }
-  else if (k === 'yesterday') { fFrom.value = bjDate(-1); fTo.value = bjDate(-1) }
-  else if (k === 'last2') { fFrom.value = bjDate(-1); fTo.value = bjDate(0) }
+  const r = presetRange(k)
+  if (r) { fFrom.value = r[0]; fTo.value = r[1] }
   preset.value = k; offset.value = 0; load()
 }
 const onDateManual = () => { preset.value = '' }  // 手动改日期 → 取消快捷高亮
@@ -237,7 +236,7 @@ onMounted(async () => {
   await loadPages()
   await loadAccounts()
   await loadRedirectMap()
-  await load()
+  setPreset('today')  // 默认今日（与其他看板一致；之前无默认=加载全量）
 })
 watch(() => route.query, (q) => {
   // 进日志 tab：有 slug/page_id 就预筛，没有就清空（避免残留上次子码过滤）
@@ -253,9 +252,7 @@ watch(() => route.query, (q) => {
   <div class="page">
     <div class="ctrl-bar">
       <h2 class="title">落地页日志 <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
-      <button class="ctrl-btn sm" :class="{ on: preset === 'today' }" @click="setPreset('today')">今日</button>
-      <button class="ctrl-btn sm" :class="{ on: preset === 'yesterday' }" @click="setPreset('yesterday')">昨日</button>
-      <button class="ctrl-btn sm" :class="{ on: preset === 'last2' }" @click="setPreset('last2')">近2天</button>
+      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn sm" :class="{ on: preset === opt.key }" @click="setPreset(opt.key)">{{ opt.label }}</button>
       <input type="date" v-model="fFrom" class="date-input" @change="onDateManual" />
       <span class="sep">—</span>
       <input type="date" v-model="fTo" class="date-input" @change="onDateManual" />

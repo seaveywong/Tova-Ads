@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
+import { accountStatus } from '../composables/useStatus'
 const { nextZIndex } = useZIndex()
 const route = useRoute()
 // 自定义 overlay 用 EP 的 nextZIndex 取 z-index，保证在 el-drawer(2000+) 之上，
@@ -105,15 +106,7 @@ const fmtTime = (s) => {
 }
 const permCount = (p) => (!p || !p.scopes) ? 0 : p.scopes.length
 
-const accountStatusMeta = (s) => {
-  const n = Number(s)
-  if (n === 1) return { label: '可用', cls: 'ok' }
-  if (n === 2) return { label: '已禁用', cls: 'off' }
-  if (n === 3) return { label: '未结算', cls: 'warn' }
-  if (n === 7) return { label: '被封', cls: 'err' }
-  if (n === 9) return { label: '待关闭', cls: 'warn' }
-  return { label: '—', cls: 'off' }
-}
+const accountStatusMeta = (s) => accountStatus(s)
 const SCOPE_LABELS = {
   ads_management: '广告管理', ads_read: '广告读取',
   pages_show_list: '主页展示', pages_messaging: '主页消息',

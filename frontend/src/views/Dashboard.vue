@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { GET, POST, DELETE } from '../api'
 import { fmtTime, userTz } from '../composables/useTz'
+import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
 import Fuse from 'fuse.js'
 import { ElMessage } from 'element-plus'
@@ -582,13 +583,7 @@ const applyCustom = () => {
   loadDashboard()  // showCustom=true，rangeQuery 自动用 custom 范围
 }
 
-const dateOptions = [
-  { label: '今日', value: 'today' },
-  { label: '昨日', value: 'yesterday' },
-  { label: '近2天', value: 'last_2d' },
-  { label: '近7天', value: 'last_7d' },
-  { label: '近30天', value: 'last_30d' },
-]
+const dateOptions = DATE_PRESETS.map(p => ({ label: p.label, value: p.key }))
 
 // ── 下次巡检倒计时（前端三态机，随时间自动切换）──
 // 巡检状态：用后端 inspection_heartbeat（action_logs）判断是否在跑。
@@ -859,7 +854,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <el-drawer v-model="notifDrawerOpen" :title="notifTitle" direction="rtl" size="480px" :destroy-on-close="true">
       <div v-if="activeNotif" class="notif-drawer">
         <div class="nd-head">
-          <span class="nd-level" :class="activeNotif.level">{{ ({critical:'严重',warning:'警告',info:'信息'})[activeNotif.level] || activeNotif.level }}</span>
+          <span class="nd-level" :class="activeNotif.level">{{ ({critical:'严重',warning:'警告',info:'信息'})[activeNotif.level] || '通知' }}</span>
           <span v-if="activeNotif.event_type" class="nd-event">{{ ({rule_pause:'自动止损',account_permission_error:'权限不足',token_expired:'令牌失效',token_rate_limited:'令牌限流',orphan_account:'账户失联',inspection_stalled:'巡检停滞',coverage_lost:'覆盖丢失',budget_progress_50:'预算进度',budget_progress_75:'预算进度',budget_progress_90:'预算进度',budget_progress_98:'预算进度',account_status_change:'账户状态变更',sentinel_pause:'哨兵暂停'})[activeNotif.event_type] || activeNotif.event_type }}</span>
           <span class="nd-time">{{ fmtTime(activeNotif.created_at) }}</span>
         </div>

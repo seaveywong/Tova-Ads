@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
+import { jobStatus, itemStatus } from '../composables/useStatus'
 
 const list = ref([])
 const loading = ref(false)
@@ -699,8 +700,9 @@ const retryItem = async (it) => {
   try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success('已提交重试')
     if (!pollTimer) pollTimer = setInterval(() => pollJob(activeJob.value.id), 2500) } catch (e) { showError(e, '重试失败') }
 }
-const statusText = (s) => ({ success:'✓ 成功', fail:'✗ 失败', creating:'创建中', pending:'等待' }[s] || s)
-const statusColor = (s) => s === 'success' ? 'var(--success)' : s === 'fail' ? 'var(--error)' : s === 'creating' ? 'var(--ac)' : 'var(--t3)'
+const statusText = (s) => itemStatus(s).label
+const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
+const jobText = (s) => jobStatus(s).label
 const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/campaigns?act=${actId}&selected_campaign_ids=${campId}`
 </script>
 
@@ -1062,7 +1064,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="prog-head">
           <span>{{ activeJob.template_name }}</span>
           <span class="prog-stat">{{ activeJob.succeeded }}✓ / {{ activeJob.failed }}✗ / {{ activeJob.total }}</span>
-          <span :class="['prog-status',activeJob.status]">{{ activeJob.status }}</span>
+          <span :class="['prog-status',activeJob.status]">{{ jobText(activeJob.status) }}</span>
         </div>
         <div class="prog-items">
           <div v-for="it in activeJob.items" :key="it.id" class="prog-item">
@@ -1109,7 +1111,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
           <div class="hi-main">
             <span class="hi-name">{{ j.template_name }}</span>
-            <span :class="['hi-status', j.status]">{{ j.status }}</span>
+            <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
           </div>
           <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ (j.created_at||'').slice(0,16) }}</div>
         </div>

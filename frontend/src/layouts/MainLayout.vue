@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { GET, POST, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
@@ -10,6 +10,13 @@ import { getUserPerms, setUserPerms, isSuperadminSync } from '../router'
 const router = useRouter()
 const route = useRoute()
 const { theme, toggle: toggleTheme } = useTheme()
+
+// 移动端侧边栏抽屉态
+const isMobile = ref(false)
+const sidebarOpen = ref(false)
+const _mq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 768px)') : null
+const _onMq = (e) => { isMobile.value = e.matches; if (!e.matches) sidebarOpen.value = false }
+if (_mq) { isMobile.value = _mq.matches; _mq.addEventListener?.('change', _onMq) }
 
 // 当前用户权限
 const myPerms = ref([])
@@ -161,6 +168,7 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   if (poll) document.removeEventListener('visibilitychange', poll)
   document.removeEventListener('click', closeNotifsOnOutside)
+  if (_mq) _mq.removeEventListener?.('change', _onMq)
 })
 const closeNotifsOnOutside = (e) => {
   if (!notifOpen.value) return
@@ -173,13 +181,18 @@ const currentTitle = computed(() => route.meta.title || '')
 // 导航点击：先关所有弹窗再跳（防 el-dropdown click-outside 吞第一次点击）
 const navTo = (name) => {
   notifOpen.value = false
+  sidebarOpen.value = false  // 移动端：点导航后收起抽屉
   router.push({ name })
 }
+// 路由切换后收起移动端抽屉（浏览器后退等场景）
+watch(() => route.path, () => { sidebarOpen.value = false })
 </script>
 
 <template>
   <div class="layout">
-    <aside class="sidebar">
+    <!-- 移动端遮罩（侧边栏打开时） -->
+    <div v-if="isMobile" class="sidebar-backdrop" :class="{ show: sidebarOpen }" @click="sidebarOpen = false"></div>
+    <aside class="sidebar" :class="{ open: isMobile && sidebarOpen }">
       <div class="logo" @click="router.push('/dashboard')">
         <span class="logo-text">Tova Ads</span>
       </div>
@@ -211,7 +224,12 @@ const navTo = (name) => {
 
     <div class="main-area">
       <header class="topbar">
-        <span class="page-title">{{ currentTitle }}</span>
+        <div class="topbar-left">
+          <button v-if="isMobile" class="hamburger" @click="sidebarOpen = !sidebarOpen" aria-label="菜单">
+            <el-icon><Fold v-if="sidebarOpen" /><Expand v-else /></el-icon>
+          </button>
+          <span class="page-title">{{ currentTitle }}</span>
+        </div>
         <div class="topbar-right">
           <el-dropdown v-if="memberships.length > 1" trigger="click" @command="switchTeam">
             <span class="team-switcher">
@@ -408,4 +426,28 @@ const navTo = (name) => {
 
 /* 内容（min-height:0 是 flex+overflow 必需，否则被子内容撑高导致整 main-area 滚、sticky 失效）*/
 .content { flex: 1; overflow-y: auto; padding: 24px; min-height: 0; }
+
+/* topbar-left（汉堡+标题） */
+.topbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hamburger { display: none; background: none; border: none; color: var(--t1); cursor: pointer; padding: 4px; font-size: 20px; }
+
+/* 移动端：侧边栏改抽屉 + 顶栏自适应 */
+.sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2000; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
+@media (max-width: 768px) {
+  .hamburger { display: inline-flex; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; z-index: 2001;
+    transform: translateX(-100%); transition: transform .22s ease;
+    box-shadow: 2px 0 12px rgba(0,0,0,.3);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-right { gap: 10px; }
+  .team-name, .user-email { display: none; }  /* 手机只留图标，省空间 */
+  .role-badge { display: none; }
+  .page-title { font-size: 15px; }
+  .content { padding: 12px; }
+  .notif-dropdown { width: 88vw !important; max-width: 340px; }
+}
 </style>

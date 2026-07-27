@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
+import { aiStatus } from '../composables/useStatus'
 
 const assets = ref([])
 const loading = ref(false)
@@ -337,12 +338,8 @@ const remove = async (a) => {
 }
 
 const aiStatusText = (a) => {
-  if (analyzingIds.value.has(a.id)) return '分析中'
-  const s = a.ai_status
-  if (s === 'done') return '✓ 已分析'
-  if (s === 'failed') return '✗ 失败'
-  if (s === 'analyzing') return '分析中'
-  return '未分析'
+  if (analyzingIds.value.has(a.id)) return aiStatus('analyzing').label
+  return aiStatus(a.ai_status).label
 }
 
 const fmtSize = (bytes) => {

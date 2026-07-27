@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
+import { accountStatus } from '../composables/useStatus'
+import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 
@@ -15,24 +17,14 @@ const datePreset = ref('today')
 const showCustom = ref(false)
 const customFrom = ref('')
 const customTo = ref('')
-const dateOptions = [
-  { label: '今天', value: 'today' },
-  { label: '昨天', value: 'yesterday' },
-  { label: '近2天', value: 'last_2d' },
-  { label: '近7天', value: 'last_7d' },
-]
-const _fmtD = (d) => d.toISOString().slice(0, 10)
 const rangeLabel = computed(() => {
   if (showCustom.value && customFrom.value) return `${customFrom.value.slice(5)}~${(customTo.value || customFrom.value).slice(5)}`
-  return dateOptions.find(o => o.value === datePreset.value)?.label || '近2天'
+  return DATE_PRESETS.find(o => o.key === datePreset.value)?.label || '今日'
 })
 const curRange = computed(() => {
   if (showCustom.value && customFrom.value) return { date_from: customFrom.value, date_to: customTo.value || customFrom.value }
-  const today = new Date()
-  if (datePreset.value === 'today') return { date_from: _fmtD(today), date_to: _fmtD(today) }
-  if (datePreset.value === 'yesterday') { const y = new Date(Date.now() - 86400000); return { date_from: _fmtD(y), date_to: _fmtD(y) } }
-  const days = { last_2d: 2, last_7d: 7 }[datePreset.value] || 2
-  return { date_from: _fmtD(new Date(Date.now() - days * 86400000)), date_to: _fmtD(today) }
+  const r = presetRange(datePreset.value)
+  return r ? { date_from: r[0], date_to: r[1] } : { date_from: '', date_to: '' }
 })
 
 const loadOpen = ref(false)
@@ -40,8 +32,8 @@ const loadables = ref([])
 const loadLoading = ref(false)
 const importing = ref(false)
 
-const STATUS_LABEL = { 1: '正常', 2: '禁用', 3: '支付失败', 7: '政策违规', 9: '宽限期', 100: '待关闭', 101: '已关闭' }
-const statusDot = (s) => s === 1 ? 'ok' : ([2, 101].includes(s) ? 'off' : ([3, 7, 9].includes(s) ? 'err' : 'warn'))
+const statusLabel = (s) => accountStatus(s).label
+const statusDot = (s) => accountStatus(s).cls
 const selectedAccs = ref(new Set())
 const accLoading = ref(false)
 const toggleAcc = (id) => { selectedAccs.value.has(id) ? selectedAccs.value.delete(id) : selectedAccs.value.add(id); selectedAccs.value = new Set(selectedAccs.value) }
@@ -133,9 +125,9 @@ onMounted(async () => {
   <div class="page">
     <div class="date-bar">
       <h2 class="title">广告账户 <span class="cnt">{{ accounts.length }}</span></h2>
-      <button v-for="opt in dateOptions" :key="opt.value" class="date-btn"
-        :class="{ active: datePreset === opt.value && !showCustom }"
-        @click="showCustom = false; datePreset = opt.value; load()">{{ opt.label }}</button>
+      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="date-btn"
+        :class="{ active: datePreset === opt.key && !showCustom }"
+        @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
       <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">自定义</button>
       <div v-if="showCustom" class="custom-range">
         <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
@@ -158,7 +150,7 @@ onMounted(async () => {
       </div>
       <div v-for="a in accounts" :key="a.act_id" class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
-        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ STATUS_LABEL[a.account_status] || a.account_status }}</div>
+        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}</div>
         <div class="acc">
           <div class="acc-name">{{ a.name }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
@@ -253,7 +245,7 @@ onMounted(async () => {
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: 2500 }
-.modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-height: 80vh; overflow: auto }
+.modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }
 .load-list { max-height: 360px; overflow: auto }
 .load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px }

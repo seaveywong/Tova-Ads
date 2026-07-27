@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { tenantStatus } from '../composables/useStatus'
+const memberStatus = (s) => tenantStatus(s)
 
 const tab = ref('members')
 const roles = ref([])
@@ -150,7 +152,7 @@ const permLabel = (key) => {
               <option v-for="r in roles" :key="r.id" :value="r.name">{{ roleLabel(r.name) }}（{{ r.permissions.length }}权限）</option>
             </select>
           </div>
-          <div><span class="st" :class="m.status === 'active' ? 'ok' : 'warn'">{{ m.status === 'active' ? '正常' : m.status }}</span></div>
+          <div><span class="st" :class="memberStatus(m.status).cls">{{ memberStatus(m.status).label }}</span></div>
           <div class="ops">
             <button v-if="!m.is_you" class="mb danger" @click="removeMember(m)">移除</button>
             <span v-else class="muted">—</span>

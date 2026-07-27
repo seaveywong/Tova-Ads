@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
+import { lpStatus, subcodeStatus } from '../composables/useStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 
@@ -516,7 +517,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     <div class="list" v-loading="loading">
       <div v-for="p in pages" :key="p.id" class="lp-card">
         <div class="lp-head">
-          <span class="st-tag" :class="p.status === 'published' ? 'ok' : 'off'">{{ p.status === 'published' ? '已发布' : (p.status === 'draft' ? '草稿' : p.status) }}</span>
+          <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-title">{{ p.title }}</span>
           <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} 域名</span>
           <span class="tag">{{ (p.pixel_ids||[]).length }} 像素</span>
@@ -718,7 +719,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <code class="sub-slug">/a/{{ s.slug }}</code>
             <span class="sub-ad">{{ s.ad_count > 0 ? (s.ad_count + ' 广告' + (s.act_count > 1 ? ' · ' + s.act_count + ' 账户' : '')) : '未绑广告' }}</span>
             <span class="sub-pass" v-if="s.click_count > 0">{{ s.click_count }} 通过</span>
-            <span class="st-tag" :class="s.status==='active'?'ok':(s.status==='reserved'?'off':(s.status==='deleted'?'err':'warn'))">{{ s.status }}</span>
+            <span class="st-tag" :class="subcodeStatus(s.status).cls">{{ subcodeStatus(s.status).label }}</span>
             <span class="sub-stat">{{ s.visit_count||0 }}访/{{ s.click_count||0 }}转</span>
             <span v-if="subFbStatus[s.slug] && !subFbStatus[s.slug].loading" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? 'FB正常' : (subFbStatus[s.slug].status === 'fail' ? 'FB封禁' : 'FB未知') }}</span>
             <template v-if="subStatus !== 'trash'">
@@ -801,7 +802,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="z in filteredZones" :key="z.name" class="sub-row">
           <input type="checkbox" v-model="z._checked" :disabled="z.imported" style="margin-right:6px" />
           <code>{{ z.name }}</code>
-          <span class="st-tag" :class="z.imported?'off':'ok'">{{ z.imported ? '已导入' : z.status }}</span>
+          <span class="st-tag" :class="z.imported?'off':'ok'">{{ z.imported ? '已导入' : ({available:'可注册', taken:'已被占', error:'查询失败'})[z.status] || '—' }}</span>
         </div>
         <div v-if="!cfZones.length && !zonesLoading" class="empty">无可导入域名</div>
       </div>
