@@ -10,7 +10,11 @@ const editOpen = ref(false)
 const editing = ref(null)
 const form = ref({})
 const saving = ref(false)
-const editLevel = ref('campaign')  // campaign / adset / ad
+const editLevel = ref('campaign')  // 3 Tab: campaign / adset / ad
+// Advantage+ 开关（对齐 FB Ads Manager 2025）
+const advantage_audience = ref(true)   // Advantage+ 受众（开=只设国家+AI扩展；关=手动定向）
+const advantage_creative = ref(true)   // Advantage+ 创意（开=FB自动生成文案变体/裁切；关=固定1套）
+const performance_goal_cpa = ref(0)    // 性能目标 CPA（0=不限）
 const editingAsset = ref(null)
 const previewOpen = ref(false)
 const previewAsset = ref(null)
@@ -394,19 +398,35 @@ const saveTpl = async () => {
       message_template: form.value.message_template, lead_form_id: form.value.lead_form_id,
       beneficiary: form.value.beneficiary, payer: form.value.payer,
     }
-    // 版位设置合并进 advanced_config（targeting 内）
+    // Advantage+ 设置 + 性能目标 + 版位 + 频次 合并进 advanced_config
     try {
       let adv = body.advanced_config ? JSON.parse(body.advanced_config) : {}
+      // 性能目标 CPA（COST_CAP 时生效）
+      if (performance_goal_cpa.value > 0) {
+        body.bid_strategy = 'COST_CAP'
+        adv.bid_amount = Math.round(performance_goal_cpa.value * 100) // 美元→分
+      }
+      // Advantage+ 受众（FB 默认开；关时用手动定向，不加 extra）
+      // Advantage+ 创意（FB 默认开；传入 is_dynamic_creative 标志）
+      if (advantage_creative.value) {
+        adv.is_dynamic_creative = true
+      }
+      // 版位
       if (form.value.manual_placement) {
         adv.targeting = adv.targeting || {}
         const plats = form.value.placement_platforms || []
         if (plats.length) adv.targeting.publisher_platforms = plats
         if ((form.value.placement_devices||[]).length) adv.targeting.device_platforms = form.value.placement_devices
-        // 各平台的具体版位
         for (const p of PLATFORMS) {
           const positions = form.value[p.v + '_positions']
           if (positions && positions.length) adv.targeting[p.v + '_positions'] = positions
         }
+      }
+      // 频次控制
+      if (form.value.frequency_cap && form.value.frequency_cap > 0) {
+        adv.frequency_control_specs = [{
+          event: 'IMPRESSIONS', interval_days: 1, max_frequency: form.value.frequency_cap, type: 'CAP'
+        }]
       }
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
@@ -537,7 +557,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
           </el-select>
         </div>
-        <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">ABO 组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">CBO 系列预算</button></div></div>
+        <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">广告组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">Advantage+ 系列预算</button></div>
+          <span v-if="form.budget_mode==='CBO'" class="hint">FB AI 自动在各广告组间分配预算，最大化整体效果</span>
+        </div>
         <div class="row"><label>每日预算（美元）</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">部署时按账户本币自动换算</span></div>
         <div class="row"><label>出价策略</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
         <div class="row"><label>特殊广告类别</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="s.l" /></el-select></div>
@@ -550,13 +572,30 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>计费事件</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
         <div class="row"><label>转化目的地</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
         <hr class="sep" />
+        <div class="sec-title">性能目标（可选）</div>
+        <div class="row"><label>单次转化成本目标（美元，0=不限）</label>
+          <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" placeholder="如 5.0（留空=最低成本）" />
+          <span class="hint">设了目标后出价策略自动切"成本上限"，FB 按此 CPA 优化</span>
+        </div>
+        <hr class="sep" />
         <div class="sec-title">受众定向</div>
+        <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为） -->
+        <div class="advantage-box">
+          <div class="adv-row">
+            <div class="adv-info">
+              <span class="adv-title">Advantage+ 受众</span>
+              <span class="adv-desc">开启后，FB AI 会根据你的素材和转化数据自动扩展受众，覆盖更多潜在客户</span>
+            </div>
+            <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+          </div>
+        </div>
         <div class="row"><label>国家/地区</label>
           <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
             placeholder="搜索选择国家/地区（可多选）" style="width:100%" size="small">
             <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="c.l + ' (' + c.v + ')'" />
           </el-select>
         </div>
+        <template v-if="!advantage_audience">
         <div class="row"><label>年龄</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
         <div class="row"><label>性别</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">全部</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">男</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">女</button></div></div>
         <div class="row"><label>语言（定向说此语言的人）</label>
@@ -587,7 +626,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span v-if="!form.audience_interests.length" class="hint">点上方搜索添加</span>
           </div>
         </div>
-        <hr class="sep" />
+        </template>
         <hr class="sep" />
         <div class="sec-title">版位</div>
         <div class="row"><label>投放版位</label>
@@ -643,6 +682,16 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
               <span class="asset-name">{{ editingAsset.name }}（点击预览）</span>
             </div>
             <button class="btn sm" @click="openAssetPicker">{{ editingAsset ? '换' : '选择素材' }}</button>
+          </div>
+        </div>
+        <!-- Advantage+ 创意（对齐 FB Ads Manager） -->
+        <div class="advantage-box">
+          <div class="adv-row">
+            <div class="adv-info">
+              <span class="adv-title">Advantage+ 创意</span>
+              <span class="adv-desc">开启后，FB 将自动为你的素材生成文案变体、裁切比例、添加音乐，提升表现</span>
+            </div>
+            <el-switch v-model="advantage_creative" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           </div>
         </div>
         <div v-if="editingAsset && (editingAsset.ai_copy?.headlines||[]).length" class="ai-copy">
@@ -998,6 +1047,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
 .ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
 .ss-chip:hover{color:var(--ac)}
+
+/* Advantage+ 盒子 */
+.advantage-box{border:1px solid var(--ac);border-radius:10px;padding:10px 14px;margin:4px 0;background:rgba(10,132,255,.05)}
+.adv-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.adv-info{display:flex;flex-direction:column;gap:2px;flex:1}
+.adv-title{font-size:13px;font-weight:600;color:var(--ac)}
+.adv-desc{font-size:11px;color:var(--t3);line-height:1.5}
 
 /* 版位树 */
 .placement-chips{display:flex;gap:6px;flex-wrap:wrap}
