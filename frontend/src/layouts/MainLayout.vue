@@ -47,6 +47,7 @@ const allNavGroups = [
   ]},
   { title: '授权', items: [
     { name: 'tokens', label: 'Facebook', icon: 'Connection' },
+    { name: 'fb-apps', label: 'FB App', icon: 'Key' },
   ]},
   { title: '系统', items: [
     { name: 'settings', label: '设置', icon: 'Setting' },
