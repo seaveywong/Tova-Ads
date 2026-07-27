@@ -595,7 +595,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>转化目的地</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
         <hr class="sep" />
         <div class="sec-title">性能目标（可选）</div>
-        <div class="row"><label>单次转化成本目标（美元，0=不限）</label>
+        <div class="row"><label>每次结果成本目标（美元，0=不限）</label>
           <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" placeholder="如 5.0（留空=最低成本）" />
           <span class="hint">设了目标后出价策略自动切"成本上限"，FB 按此 CPA 优化</span>
         </div>

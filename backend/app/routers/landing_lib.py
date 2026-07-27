@@ -101,14 +101,29 @@ class PixelUpdate(BaseModel):
 @router.get("/pixels")
 def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
                 db: Session = Depends(get_db)):
-    rows = db.query(LandingPixel).filter(
+    """列像素——按 pixel_id 去重（一个像素绑多账户只显示一行）。"""
+    from sqlalchemy import func as _f
+    # 按 pixel_id 取每组最新一行（去重）
+    subq = db.query(
+        _f.max(LandingPixel.id).label("max_id")
+    ).filter(
         LandingPixel.tenant_id == user.tenant_id,
+        LandingPixel.status != "archived",
+    ).group_by(LandingPixel.pixel_id).subquery()
+    rows = db.query(LandingPixel).filter(
+        LandingPixel.id.in_(db.query(subq.c.max_id))
     ).order_by(LandingPixel.id.desc()).all()
     out = []
     for p in rows:
         u = _pixel_usage(db, user.tenant_id, p.pixel_id)
+        # 统计该像素绑了几个账户
+        act_count = db.query(_f.count(LandingPixel.id)).filter(
+            LandingPixel.tenant_id == user.tenant_id,
+            LandingPixel.pixel_id == p.pixel_id,
+            LandingPixel.status != "archived",
+        ).scalar() or 0
         out.append({"id": p.id, "pixel_id": p.pixel_id, "pixel_name": p.pixel_name,
-                    "note": p.note, "status": p.status, **u})
+                    "note": p.note, "status": p.status, "act_count": act_count, **u})
     return out
 
 
