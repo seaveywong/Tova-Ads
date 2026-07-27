@@ -185,6 +185,7 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
     active_ids = {c.id for c in creds}
     orphans = db.query(Account).filter(
         Account.tenant_id == tenant_id,
+        Account.is_managed == True,  # 只重绑在管账户；is_managed=false（已软删/移出BM）不再当孤儿告警
         (Account.fb_credential_id.is_(None)) | (Account.fb_credential_id.notin_(active_ids)),
     ).all()
     rebound = 0
