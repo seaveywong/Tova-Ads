@@ -4,6 +4,7 @@ from ..models.system import SystemSetting
 from sqlalchemy.orm import Session
 
 DEFAULT_KEEPALIVE = {
+    "enabled": False,              # 全局开关：true=所有 managed 账户自动纳入保活（不用逐个开 warming）
     "budget_usd": 5,              # 每条保活广告总预算（lifetime，花完自动停）
     "idle_days": 3,                # 连续 N 天无消耗 → 触发保活
     "asset_prefix": "YR",          # 素材库保活素材名前缀

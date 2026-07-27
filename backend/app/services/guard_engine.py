@@ -1309,12 +1309,16 @@ def run_keepalive():
         budget = int(float(cfg["budget_usd"]) * 100)  # USD → cents (lifetime)
         asset_prefix = cfg["asset_prefix"]
         asset_dir = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
+        global_enabled = cfg.get("enabled", False)
 
-        warming = db.query(Account).filter(
+        # 保活目标账户：全局开关开→所有 managed 账户；关→仅 warmup_state=warming 的
+        q = db.query(Account).filter(
             Account.is_managed == True,  # noqa: E712
-            Account.warmup_state == "warming",
             Account.account_status == 1,
-        ).all()
+        )
+        if not global_enabled:
+            q = q.filter(Account.warmup_state == "warming")
+        warming = q.all()
 
         cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
         created = skipped = failed = 0
