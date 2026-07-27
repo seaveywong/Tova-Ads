@@ -16,7 +16,6 @@ const ROUTE_PERMS = {
   members:     ['members.manage'],
   logs:        ['audit.read'],  // 操作日志（owner 可见）
   tokens:      ['ads.read'],
-  'fb-apps':   ['ads.read'],
   assets:      ['assets.manage'],  // 素材库（owner+operator）
 }
 
@@ -41,7 +40,6 @@ const routes = [
       { path: 'settings', name: 'settings', component: () => import('../views/Settings.vue'), meta: { title: '设置', icon: 'Setting' } },
       { path: 'members', name: 'members', component: () => import('../views/Members.vue'), meta: { title: '成员权限', icon: 'User' } },
       { path: 'tokens', name: 'tokens', component: () => import('../views/Tokens.vue'), meta: { title: 'Facebook 授权' } },
-      { path: 'fb-apps', name: 'fb-apps', component: () => import('../views/FbApps.vue'), meta: { title: 'FB App 管理' } },
     ],
   },
 ]
