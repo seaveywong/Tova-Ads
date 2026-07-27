@@ -522,12 +522,27 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.status = "success"; item.error = None
                 job.succeeded = (job.succeeded or 0) + 1
+                write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                          target_type="ad", target_id=str(r.get("ad_id","")),
+                          action_type="deploy", source="launch", result="success",
+                          metadata={"act_id": item.act_id, "campaign_id": r.get("campaign_id"),
+                                    "adset_id": r.get("adset_id"), "template_id": template_id})
             except FbApiError as e:
                 item.status = "fail"; item.error = (e.friendly or str(e))[:300]
                 job.failed = (job.failed or 0) + 1
+                write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                          target_type="ad", target_id="",
+                          action_type="deploy", source="launch", result="fail",
+                          friendly_error=(e.friendly or str(e))[:200],
+                          metadata={"act_id": item.act_id, "template_id": template_id})
             except Exception as e:
                 item.status = "fail"; item.error = str(e)[:300]
                 job.failed = (job.failed or 0) + 1
+                write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                          target_type="ad", target_id="",
+                          action_type="deploy", source="launch", result="fail",
+                          friendly_error=str(e)[:200],
+                          metadata={"act_id": item.act_id, "template_id": template_id})
             sdb.commit()
         tpl.deploy_count = (tpl.deploy_count or 0) + len(items)
         job.status = "partial_failed" if job.failed else "completed"

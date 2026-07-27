@@ -604,7 +604,8 @@ def run_inspection():
                                   metadata={"campaign_id": campaign_id, "adset_id": adset_id,
                                             "ad_id": ad_id, "act_id": acc.act_id,
                                             "currency": acc.currency, "rule_action": ra,
-                                            "action": action_text})
+                                            "action": action_text,
+                                            "cred_id": _rid, "cred_alias": _alias})
 
                         # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
                         if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):

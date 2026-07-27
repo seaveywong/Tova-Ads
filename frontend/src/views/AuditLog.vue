@@ -168,11 +168,19 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         <el-table-column label="结果" width="68">
           <template #default="{ row }"><span :class="['res', row.result]">{{ row.result === 'success' ? '✓ 成功' : '✗ 失败' }}</span></template>
         </el-table-column>
-        <el-table-column label="详情" min-width="170">
+        <el-table-column label="详情" min-width="200">
           <template #default="{ row }">
-            <span v-if="row.friendly_error" class="err">{{ row.friendly_error }}</span>
-            <span v-else-if="row.trigger_type" class="trig">{{ row.trigger_type }}<span v-if="row.trigger_detail"> · {{ row.trigger_detail }}</span></span>
-            <span v-else class="dash">—</span>
+            <div class="detail-cell">
+              <span v-if="row.source" class="src-tag">{{ row.source }}</span>
+              <span v-if="row.friendly_error" class="err">{{ row.friendly_error }}</span>
+              <span v-if="row.trigger_detail" class="trig">{{ row.trigger_detail }}</span>
+              <span v-if="row.metadata" class="meta">
+                <template v-for="(v, k) in row.metadata" :key="k">
+                  <span v-if="v !== null && v !== '' && k !== 'campaign_id' && k !== 'adset_id'" class="meta-kv">{{ k }}={{ v }} </span>
+                </template>
+              </span>
+              <span v-if="!row.friendly_error && !row.trigger_detail && !row.metadata" class="dash">—</span>
+            </div>
           </template>
         </el-table-column>
       </el-table></div>
@@ -210,6 +218,10 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .dash{color:var(--t3);opacity:.5}
 .err{font-size:11px;color:var(--error)}
 .trig{font-size:11px;color:var(--t3)}
+.detail-cell{display:flex;flex-direction:column;gap:2px}
+.src-tag{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--bg3);color:var(--t2);display:inline-block;width:fit-content}
+.meta{font-size:10px;color:var(--t3);line-height:1.5}
+.meta-kv{font-family:monospace;margin-right:4px}
 .tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;line-height:1.5}
 .tag.sm{font-size:9px;padding:1px 6px}
 .tag.user{color:var(--ac);background:var(--acg)}

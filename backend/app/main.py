@@ -272,6 +272,9 @@ def list_logs(
              "actor_user_id": l.actor_user_id, "action_type": l.action_type,
              "target_type": l.target_type, "target_id": l.target_id, "result": l.result,
              "trigger_type": l.trigger_type, "friendly_error": l.friendly_error,
+             "trigger_detail": l.trigger_detail, "source": l.source,
+             "raw_error": l.raw_error,
+             "metadata": json.loads(l.metadata_) if l.metadata_ else None,
              "tenant_id": l.tenant_id, "created_at": str(l.created_at)}
             for l in logs
         ]

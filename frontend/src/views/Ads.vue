@@ -146,7 +146,7 @@ onMounted(async () => {
       <div class="row head">
         <div><input type="checkbox" :checked="selectedAccs.size === accounts.length && accounts.length > 0" @click="selectAllAccs" /></div>
         <div>状态</div><div>账户</div><div>余额</div><div>可用额度</div>
-        <div>消耗 <span class="rng">{{ rangeLabel }}</span></div><div>转化</div><div>CPA</div><div>绑令牌</div><div></div>
+        <div>消耗 <span class="rng">{{ rangeLabel }}</span></div><div>转化</div><div>CPA</div><div>生效令牌</div><div></div>
       </div>
       <div v-for="a in accounts" :key="a.act_id" class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
@@ -164,7 +164,10 @@ onMounted(async () => {
         <div>{{ a.recent_conversions || 0 }}</div>
         <div>{{ cpa(a) }}</div>
         <div>
-          <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')">{{ a.bound_alias || '未绑' }}</span>
+          <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')"
+                :title="`${a.bound_alias || '未绑'} · ${a.bound_available ? '可用' : '异常'}${(a.pool_count||0) > 1 ? ' · 候选池 ' + a.pool_count + ' 令牌轮换' : ''}`">
+            {{ a.bound_alias || '未绑' }}
+          </span>
           <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="`候选池 ${a.pool_count} 个令牌轮换`">+{{ (a.pool_count||0) - 1 }}</span>
         </div>
         <div class="ops">
