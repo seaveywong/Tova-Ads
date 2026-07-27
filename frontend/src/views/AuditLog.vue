@@ -89,6 +89,11 @@ const TARGET_ZH = {
   landing_page: '落地页', launch_template: '投放模板', launch_job: '部署任务',
   form_template: '表单模板', user: '用户', team: '团队', subcode: '子码', rule: '规则',
 }
+const SOURCE_ZH = {
+  scheduled: '定时任务', rule_engine: '规则引擎', fb_api: 'FB接口', guard: '止损引擎',
+  landing: '落地页', launch: '广告部署', sentinel: '哨兵', watchdog: '看门狗',
+  user: '用户操作', warmup: '预热', sync: '数据同步',
+}
 const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
 const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; dateRange.value = []; page.value = 1; load() }
 </script>
@@ -183,7 +188,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         <el-table-column label="详情" min-width="200">
           <template #default="{ row }">
             <div class="detail-cell">
-              <span v-if="row.source" class="src-tag">{{ row.source }}</span>
+              <span v-if="row.source" class="src-tag">{{ SOURCE_ZH[row.source] || row.source }}</span>
               <span v-if="row.friendly_error" class="err">{{ row.friendly_error }}</span>
               <span v-if="row.trigger_detail" class="trig">{{ row.trigger_detail }}</span>
               <span v-if="row.metadata" class="meta">
