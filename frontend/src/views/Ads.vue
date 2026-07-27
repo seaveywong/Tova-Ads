@@ -106,6 +106,8 @@ const onCmd = async (cmd, a) => {
     if (!a.fb_credential_id) return ElMessage.warning('该账户未绑定令牌')
     try { await POST(`/fb/credentials/${a.fb_credential_id}/refresh-accounts`); ElMessage.success('已刷新'); await load() }
     catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } else if (cmd === 'warmup') {
+    await toggleWarmup([a.act_id], a.warmup_state !== 'warming')
   } else if (cmd === 'remove') {
     try {
       await ElMessageBox.confirm(`移除「${a.name}」纳管？（历史数据保留）`, '确认', { type: 'warning' })
@@ -114,6 +116,21 @@ const onCmd = async (cmd, a) => {
   }
 }
 const fmtMoney = (v, cur) => (v == null) ? '-' : `${(cur || '').replace('USD', '$')} ${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+const toggleWarmup = async (actIds, arm) => {
+  accLoading.value = true
+  let ok = 0
+  for (const actId of actIds) {
+    try { await POST(`/guard/warmup/${arm ? 'arm' : 'disarm'}`, { act_ids: [actId] }); ok++ }
+    catch (e) { ElMessage.error(`${actId}: ${e.message || '失败'}`) }
+  }
+  if (ok) ElMessage.success(`${arm ? '预热保护' : '取消预热'} ${ok} 个账户`)
+  accLoading.value = false; await load()
+}
+const batchWarmup = async (arm) => {
+  if (!selectedAccs.value.size) return ElMessage.warning('先勾选账户')
+  await toggleWarmup([...selectedAccs.value], arm)
+  selectedAccs.value.clear()
+}
 
 onMounted(async () => {
   await load()
@@ -139,6 +156,8 @@ onMounted(async () => {
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">已选 {{ selectedAccs.size }}</span>
       <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel }}</button>
+      <button class="batch-btn" @click="batchWarmup(true)" :disabled="accLoading">预热保护</button>
+      <button class="batch-btn" @click="batchWarmup(false)" :disabled="accLoading">取消预热</button>
       <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">批量移除</button>
       <button class="batch-btn" @click="selectedAccs.clear()">取消</button>
     </div>
@@ -150,7 +169,7 @@ onMounted(async () => {
       </div>
       <div v-for="a in accounts" :key="a.act_id" class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
-        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}</div>
+        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" title="预热保护中：巡检/哨兵跳过该账户">预热</span></div>
         <div class="acc">
           <div class="acc-name">{{ a.name }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
@@ -177,7 +196,8 @@ onMounted(async () => {
               <el-dropdown-menu>
                 <el-dropdown-item command="manager">在广告管理器查看</el-dropdown-item>
                 <el-dropdown-item command="sync">同步状态/余额</el-dropdown-item>
-                <el-dropdown-item command="remove" divided>移除纳管</el-dropdown-item>
+                <el-dropdown-item command="warmup" divided>{{ a.warmup_state === 'warming' ? '取消预热' : '预热保护' }}</el-dropdown-item>
+                <el-dropdown-item command="remove">移除纳管</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -251,6 +271,7 @@ onMounted(async () => {
 .batch-btn.danger { border-color: var(--error); color: var(--error); background: rgba(239,68,68,.1) }
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
+.warmup-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle }
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: 2500 }
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }

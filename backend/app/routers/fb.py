@@ -710,6 +710,7 @@ def list_accounts(
             "id": a.id, "act_id": a.act_id, "name": a.name, "currency": cur,
             "timezone": a.timezone_name, "account_status": a.account_status,
             "is_managed": a.is_managed if a.is_managed is not None else True,
+            "warmup_state": a.warmup_state or "none",
             "balance": bal, "balance_usd": round(to_usd(bal, cur), 2) if bal is not None else None,
             "spend_cap": from_minor_units(a.spend_cap, cur),
             "amount_spent": from_minor_units(a.amount_spent, cur),
