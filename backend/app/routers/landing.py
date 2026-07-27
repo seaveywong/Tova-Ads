@@ -648,6 +648,7 @@ def _page_to_dict(p, db: Session = None) -> dict:
             pass
     pass_rate = round(click_count / visit_count * 100, 1) if visit_count else 0
     return {"id": p.id, "title": p.title, "status": p.status,
+            "public_url": p.custom_domain or "",
             "custom_domain": p.custom_domain, "custom_domains": cd_list,
             "target_urls": targets,
             "rotation_mode": p.rotation_mode, "pixel_ids": ids,
