@@ -664,6 +664,8 @@ def _page_to_dict(p, db: Session = None) -> dict:
             "last_health_status": p.last_health_status,
             "last_health_summary": p.last_health_summary,
             "last_health_checked_at": str(p.last_health_checked_at or ""),
+            "last_fb_status": p.last_fb_status,          # FB屏蔽探测 pass/fail/warn（fail=被屏，看板红标）
+            "last_fb_checked_at": str(p.last_fb_checked_at or ""),
             "visit_count": visit_count, "click_count": click_count,
             "block_count": block_count, "pass_rate": pass_rate}
 

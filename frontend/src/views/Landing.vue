@@ -17,6 +17,16 @@ watch(() => route.query.tab, (t) => { if (t === 'logs' || t === 'manage') tab.va
 // ── 落地页列表 ──
 const pages = ref([])
 const loading = ref(true)
+// 异常置顶：FB屏蔽 > 通过率低(有量) > 屏蔽数多 > 其余（需关注的在上）
+const sortedPages = computed(() => {
+  return [...pages.value].sort((a, b) => {
+    const fb = (x) => (x.last_fb_status === 'fail' ? 0 : x.last_fb_status === 'warn' ? 1 : 2)
+    if (fb(a) !== fb(b)) return fb(a) - fb(b)
+    const rate = (x) => ((x.visit_count||0) >= 10 ? (x.pass_rate||0) : 999)  // 有量才看通过率，没量排后
+    if (rate(a) !== rate(b)) return rate(a) - rate(b)
+    return (b.block_count||0) - (a.block_count||0)
+  })
+})
 const loadPages = async () => {
   loading.value = true
   try { pages.value = await GET('/landing/pages') }
@@ -515,10 +525,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     </div>
 
     <div class="list" v-loading="loading">
-      <div v-for="p in pages" :key="p.id" class="lp-card">
+      <div v-for="p in sortedPages" :key="p.id" class="lp-card">
         <div class="lp-head">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-title">{{ p.title }}</span>
+          <span v-if="p.last_fb_status==='fail'" class="tag" style="background:var(--error);color:#fff" :title="'被 Facebook 屏蔽（自动探测）· ' + (p.last_health_summary||'')">FB屏蔽</span>
+          <span v-else-if="p.last_fb_status==='warn'" class="tag" style="background:var(--warning);color:#fff" :title="p.last_health_summary||'FB探测异常，需复查'">FB待查</span>
           <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} 域名</span>
           <span class="tag">{{ (p.pixel_ids||[]).length }} 像素</span>
           <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
