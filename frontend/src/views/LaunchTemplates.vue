@@ -31,6 +31,14 @@ const deployOpen = ref(false)
 const deployTpl = ref(null)
 const accounts = ref([])
 const accLoading = ref(false)
+const deploySearch = ref('')
+const filteredDeployAccounts = computed(() => {
+  const q = deploySearch.value.trim().toLowerCase()
+  if (!q) return accounts.value
+  return accounts.value.filter(a =>
+    (a.name || '').toLowerCase().includes(q) || (a.act_id || '').includes(q)
+  )
+})
 const selectedAccs = ref(new Set())
 const accPages = ref({})  // {act_id: [pages]}
 const accPixels = ref({}) // {act_id: [pixels]}
@@ -825,12 +833,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="`部署 · ${deployTpl?.name||''}`" direction="rtl" size="680px">
       <div class="d">勾选账户。每账户的主页/像素从下拉选（默认填模板值）。</div>
+      <div class="deploy-search-row">
+        <input v-model="deploySearch" class="inp" placeholder="搜索账户名/ID（模糊）" />
+        <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} 个账户</span>
+      </div>
       <div class="acc-list" v-loading="accLoading">
-        <div v-for="a in accounts" :key="a.act_id" class="acc-block">
+        <div v-for="a in filteredDeployAccounts" :key="a.act_id" class="acc-block">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
             <input type="checkbox" :checked="selectedAccs.has(a.act_id)" @change="toggleAcc(a.act_id)" />
             <span class="acc-name">{{ a.name || a.act_id }}</span>
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
+            <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? '正常' : '异常'">{{ a.account_status === 1 ? '正常' : '异常' }}</span>
           </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
@@ -1033,6 +1046,12 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .acc-row.on{background:rgba(10,132,255,.08)}
 .acc-name{font-size:13px;color:var(--t1);flex:1}
 .acc-id{font-size:11px;color:var(--t3);font-family:monospace}
+.acc-status{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;white-space:nowrap}
+.acc-status.ok{color:var(--success);background:rgba(52,199,89,.13)}
+.acc-status.warn{color:var(--warning);background:rgba(255,159,10,.13)}
+.acc-count-hint{font-size:11px;color:var(--t3);white-space:nowrap}
+.deploy-search-row{display:flex;gap:8px;align-items:center;margin-bottom:8px }
+.deploy-search-row .inp{flex:1}
 .acc-config{padding:8px 10px;background:var(--bg3);display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px;align-items:center}
 .acc-config label{font-size:11px;color:var(--t3)}
 .sel-count{font-size:12px;color:var(--t3);margin-right:auto}
