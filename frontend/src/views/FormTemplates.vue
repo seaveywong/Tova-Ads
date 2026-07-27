@@ -59,6 +59,7 @@ const blankForm = () => ({
   custom_questions: [], thank_you_title: '', thank_you_body: '',
   thank_you_button_text: '', thank_you_website_url: '', follow_up_url: '', context_card_title: '',
   is_optimized_for_quality: true,
+  welcome_message: '', block_display_for_non_targeted: false,
 })
 const openFormNew = () => { editingForm.value = null; fMeta.value = { name: '', description: '', locale: 'en_US' }; fCfg.value = blankForm(); formOpen.value = true }
 const openFormEdit = (t) => { editingForm.value = t; fMeta.value = { name: t.name, description: t.description, locale: t.locale }; fCfg.value = { ...blankForm(), ...(t.config||{}) }; formOpen.value = true }
@@ -192,6 +193,11 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
             <el-option :value="true" label="限制提交（过滤低质量线索，FB 会评估用户行为）" />
             <el-option :value="false" label="公开（任何人都能提交）" />
           </el-select>
+        </div>
+        <div class="row"><label>表单欢迎语（用户打开表单前看到）</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" placeholder="如：感谢您的兴趣！请花 1 分钟填写以下信息，我们将尽快联系您。"></textarea></div>
+        <div class="row"><label>仅目标国家可见</label>
+          <el-switch v-model="fCfg.block_display_for_non_targeted" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+          <span class="hint">开启后，非目标国家用户看不到此表单</span>
         </div>
         <hr class="sep" />
         <div class="sec-title">联系字段（用户需填写的信息）</div>
