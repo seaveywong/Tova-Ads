@@ -170,15 +170,16 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
     ).all()
     if not creds:
         return {"checked": 0, "rebound": 0}
-    # 建 account_id(裸数字) -> cred_id 覆盖图
-    act_to_cred: dict[str, int] = {}
+    # 建 account_id(裸数字) -> [覆盖它的 cred_id 列表]（多 token 共管：一个账户可被多个 cred 覆盖，
+    # 必须收全部覆盖 cred，否则第二个起令牌会被先到的挤掉 → 候选池永远只有 1 个）
+    act_to_creds: dict[str, list[int]] = {}
     for c in creds:
         try:
             fb = FbClient(decrypt(c.access_token_enc))
             for a in fb.get_ad_accounts():
                 aid = a.get("account_id")
-                if aid and aid not in act_to_cred:
-                    act_to_cred[aid] = c.id
+                if aid and c.id not in act_to_creds.setdefault(aid, []):
+                    act_to_creds[aid].append(c.id)
         except Exception:
             continue  # 单 cred 读失败不阻断
     active_ids = {c.id for c in creds}
@@ -189,7 +190,8 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
     rebound = 0
     still_orphan: list[dict] = []
     for acc in orphans:
-        cid = act_to_cred.get(acc.act_id)  # accounts.act_id 存裸数字
+        cids = act_to_creds.get(acc.act_id) or []  # accounts.act_id 存裸数字
+        cid = cids[0] if cids else None  # 主令牌取覆盖列表第一个
         if cid and cid != acc.fb_credential_id:
             acc.fb_credential_id = cid
             rebound += 1
@@ -204,40 +206,43 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
         Account.tenant_id == tenant_id).all()}
     new_count = 0
     new_links = 0
-    for aid, cid in act_to_cred.items():
+    for aid, cids in act_to_creds.items():
         if aid in existing_acts:
-            # 已有账户：补 account_fb_credentials 关联（多 token 共管）
+            # 已有账户：为每个覆盖 cred 补 account_fb_credentials 链接（多 token 共管）
             acc = db.query(Account).filter(
                 Account.tenant_id == tenant_id, Account.act_id == aid).first()
             if acc:
-                has_link = db.query(AccountFbCredential).filter(
-                    AccountFbCredential.account_id == acc.id,
-                    AccountFbCredential.fb_credential_id == cid,
-                ).first()
-                if not has_link:
-                    db.add(AccountFbCredential(
-                        tenant_id=tenant_id, account_id=acc.id,
-                        fb_credential_id=cid, priority=0, status="active",
-                    ))
-                    new_links += 1
+                for cid in cids:
+                    has_link = db.query(AccountFbCredential).filter(
+                        AccountFbCredential.account_id == acc.id,
+                        AccountFbCredential.fb_credential_id == cid,
+                    ).first()
+                    if not has_link:
+                        db.add(AccountFbCredential(
+                            tenant_id=tenant_id, account_id=acc.id,
+                            fb_credential_id=cid, priority=0, status="active",
+                        ))
+                        new_links += 1
         else:
-            # 新账户：建 Account + account_fb_credentials
+            # 新账户：第一个 cred 作主令牌，全部覆盖 cred 都建链接
+            primary = cids[0]
             new_acc = Account(
-                tenant_id=tenant_id, fb_credential_id=cid,
+                tenant_id=tenant_id, fb_credential_id=primary,
                 act_id=aid, name=aid, currency="USD", timezone_name="UTC",
                 is_managed=True,
             )
             db.add(new_acc)
             db.flush()
-            db.add(AccountFbCredential(
-                tenant_id=tenant_id, account_id=new_acc.id,
-                fb_credential_id=cid, priority=0, status="active",
-            ))
+            for cid in cids:
+                db.add(AccountFbCredential(
+                    tenant_id=tenant_id, account_id=new_acc.id,
+                    fb_credential_id=cid, priority=0, status="active",
+                ))
             new_count += 1
     if new_count or new_links:
         db.commit()
     return {"checked": len(orphans), "rebound": rebound,
-            "active_creds": len(creds), "covered_acts": len(act_to_cred),
+            "active_creds": len(creds), "covered_acts": len(act_to_creds),
             "still_orphan": still_orphan,
             "new_discovered": new_count, "new_links": new_links}
 
