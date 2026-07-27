@@ -240,17 +240,19 @@ const onEditBeforeClose = (done) => {
 const validationErrors = ref([])
 const validateTemplate = () => {
   const errs = []
-  if (!form.value.name?.trim()) errs.push('模板名不能为空')
-  if (!form.value.asset_id) errs.push('广告层级需选素材')
-  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push('每日预算必须 > 0')
-  if (['OUTCOME_SALES', 'OUTCOME_LEADS'].includes(form.value.objective) && !form.value.pixel_id && !form.value.page_id)
-    errs.push('购物/线索目标建议填像素ID（或在部署时每账户选）')
-  if (form.value.objective === 'OUTCOME_ENGAGEMENT' && !form.value.page_id)
-    errs.push('互动目标需要主页ID')
-  if (!form.value.landing_url && !['OUTCOME_AWARENESS'].includes(form.value.objective))
-    errs.push('建议填落地页URL')
+  if (!form.value.name?.trim()) errs.push('模板名')
+  if (!form.value.asset_id) errs.push('素材（广告 Tab）')
+  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push('每日预算')
+  if (!form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
+    errs.push('落地页（选已有或填URL）')
   return errs
 }
+// 完整性状态（UI 显示用）
+const completionStatus = computed(() => {
+  const errs = validateTemplate()
+  if (!errs.length) return { ready: true, label: '就绪', missing: [] }
+  return { ready: false, label: '待完善', missing: errs }
+})
 
 // #5 部署历史
 const historyOpen = ref(false)
@@ -381,7 +383,9 @@ const buildAudienceJson = () => {
 }
 const saveTpl = async () => {
   validationErrors.value = validateTemplate()
-  if (validationErrors.value.length) return ElMessage.warning('请先修复以下问题：\n' + validationErrors.value.join('\n'))
+  if (validationErrors.value.length) {
+    return ElMessage.warning('待完善：缺 ' + validationErrors.value.join('、'))
+  }
   saving.value = true
   try {
     const body = {
@@ -547,6 +551,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <span class="ss-chip" @click="editLevel='campaign'" title="点击跳到系列">目标：{{ OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective }}</span>
         <span class="ss-chip" @click="editLevel='adset'" title="点击跳到广告组">受众：{{ (form.audience_countries||[]).join(',') || '默认' }} · {{ (form.audience_interests||[]).length }}兴趣</span>
         <span class="ss-chip" @click="editLevel='ad'" title="点击跳到广告">素材：{{ editingAsset?.name || '未选' }}</span>
+        <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
+          {{ completionStatus.ready ? '✓ 就绪' : '待完善：' + completionStatus.missing.join('、') }}
+        </span>
       </div>
 
       <!-- ① 系列 -->
@@ -1047,6 +1054,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
 .ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
 .ss-chip:hover{color:var(--ac)}
+.ss-status{font-size:11px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:auto}
+.ss-status.ready{color:var(--success);background:rgba(52,199,89,.13)}
+.ss-status.pending{color:var(--warning);background:rgba(255,159,10,.13)}
 
 /* Advantage+ 盒子 */
 .advantage-box{border:1px solid var(--ac);border-radius:10px;padding:10px 14px;margin:4px 0;background:rgba(10,132,255,.05)}
