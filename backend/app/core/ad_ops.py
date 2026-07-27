@@ -126,7 +126,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
             raise
         except Exception:
             pass
-        allow_cjk = not ad_language or ad_language.lower() in ("zh", "ja", "ko", "zh-cn", "zh-tw")
+        allow_cjk = True  # FB 接受 Messenger 消息里的中日韩字符；原 ad_language code 不匹配 bug 已移除
         welcome_msg = parse_message_template(message_template, allow_cjk=allow_cjk)
 
     creative = build_creative(

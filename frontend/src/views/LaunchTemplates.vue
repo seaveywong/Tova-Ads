@@ -985,11 +985,6 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="preview-link">预览</span>
           </div>
         </template>
-        <div class="row"><label>广告语言</label>
-          <el-select v-model="form.ad_language" filterable clearable placeholder="自动（按素材语言）" style="width:100%" size="small">
-            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
-          </el-select>
-        </div>
       </div>
 
       <template #footer>

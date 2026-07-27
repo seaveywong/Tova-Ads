@@ -366,7 +366,10 @@ const deleteToken = async (t) => {
         <span class="c-num" :class="{err:summaryError(t)}" :title="summaryError(t)||'已导入账户数'">{{ summaryError(t) ? '!' : countOf(t,'accounts') }}</span>
         <span class="c-num">{{ countOf(t,'pages') }}</span>
         <span class="c-num">{{ countOf(t,'businesses') }}</span>
-        <span class="c-ty"><span class="tag" :class="t.token_type" :title="typeMeta(t.token_type).title">{{ typeMeta(t.token_type).label }}</span></span>
+        <span class="c-ty">
+          <span class="tag" :class="t.token_type" :title="typeMeta(t.token_type).title">{{ typeMeta(t.token_type).label }}</span>
+          <span v-if="(t.account_count||0) > 0" class="tag rotate" title="参与多令牌轮换候选池">↻</span>
+        </span>
         <span class="c-op" @click.stop>
           <el-dropdown trigger="click" @command="cmd => handleAction(cmd, t)">
             <button class="dots-btn" @click.stop>⋯</button>
@@ -571,12 +574,12 @@ const deleteToken = async (t) => {
           <div class="af-row"><label>名称</label><input v-model="appForm.name" class="input" placeholder="可选（备注名）" /></div>
           <div class="af-row"><label>App ID</label><input v-model="appForm.app_id" class="input" placeholder="必填" /></div>
           <div class="af-row"><label>Secret</label><input v-model="appForm.app_secret" class="input" type="password" placeholder="必填" /></div>
-          <div class="af-btns">
-            <button class="btn primary" @click="saveApp">{{ appEditing ? '更新' : '添加' }}</button>
-            <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">取消</button>
-          </div>
         </div>
-        <div class="m-foot"><button class="btn" @click="appConfigOpen=false">关闭</button></div>
+        <div class="m-foot">
+          <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">取消</button>
+          <button class="btn primary" @click="saveApp">{{ appEditing ? '更新' : '添加' }}</button>
+          <button class="btn" @click="appConfigOpen=false">关闭</button>
+        </div>
       </div>
     </div>
   </div>
@@ -630,6 +633,7 @@ const deleteToken = async (t) => {
 .c-ty{display:flex;align-items:center;justify-content:center}
 .tag{font-size:10px;padding:1px 7px;border-radius:9px;white-space:nowrap;line-height:1.5}
 .tag.operate{background:rgba(10,132,255,.12);color:var(--ac)}.tag.manage{background:rgba(48,209,88,.1);color:var(--success)}.tag.user{background:var(--bg3);color:var(--t3)}
+.tag.rotate{background:rgba(48,209,88,.1);color:var(--success);font-size:11px;padding:1px 5px}
 
 .c-op{display:flex;justify-content:center;align-items:center}
 .dots-btn{border:none;background:transparent;color:var(--t3);font-size:16px;cursor:pointer;padding:0 6px;border-radius:4px;line-height:1;transition:.15s}
@@ -711,14 +715,15 @@ const deleteToken = async (t) => {
 
 .app-list{margin-bottom:12px;max-height:220px;overflow-y:auto}
 .app-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
-.app-n{font-size:13px;color:var(--t1);min-width:80px}
-.app-id{font-size:10px;color:var(--t3);font-family:'SF Mono',monospace}
+.app-row:last-child{border-bottom:none}
+.app-n{font-size:13px;color:var(--t1);min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-id{font-size:10px;color:var(--t3);font-family:'SF Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}
 .app-ops{margin-left:auto;display:flex;gap:3px}
 .app-form{border-top:1px solid var(--bd);padding-top:12px}
 .form-h{font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between}
 .sys-toggle{font-size:11px;text-transform:none;letter-spacing:0;color:var(--ac);cursor:pointer;text-decoration:underline}
 .af-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.af-row label{font-size:12px;color:var(--t3);width:60px;text-align:right;flex-shrink:0}
+.af-row label{font-size:12px;color:var(--t3);width:70px;text-align:right;flex-shrink:0}
 .af-row .input{flex:1;min-width:0}
 .af-ck{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);margin:12px 0 4px;padding-left:70px;cursor:pointer}
 .af-ck input{width:14px;height:14px;cursor:pointer}

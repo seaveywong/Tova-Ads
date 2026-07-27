@@ -18,12 +18,14 @@ router = APIRouter(prefix="/fb", tags=["fb"])
 
 
 def _cred_to_dict(c: FbCredential, db: Session = None) -> dict:
-    """令牌 → 前端展示 dict（完整字段 + 关联账户数）。"""
+    """令牌 → 前端展示 dict（完整字段 + 关联账户数）。
+    account_count = 候选池覆盖数（account_fb_credentials，含多令牌轮换场景），不是旧的主令牌数。"""
     account_count = 0
     if db:
-        account_count = db.query(Account).filter(
-            Account.tenant_id == c.tenant_id,
-            Account.fb_credential_id == c.id,
+        from ..models.fb import AccountFbCredential
+        account_count = db.query(AccountFbCredential).filter(
+            AccountFbCredential.fb_credential_id == c.id,
+            AccountFbCredential.status == "active",
         ).count()
     perm = None
     if c.permission_snapshot:

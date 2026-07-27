@@ -176,7 +176,7 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
             except Exception:
                 pass  # 读取失败不阻断（容错），FB 创建时会再校验
             # 解析 message_template（JSON 串 / 纯文本 / 空）
-            allow_cjk = not body.ad_language or body.ad_language.lower() in ("zh", "ja", "ko", "zh-cn", "zh-tw")
+            allow_cjk = True  # FB 接受 Messenger 消息里的中日韩字符
             try:
                 welcome_msg = parse_message_template(body.message_template, allow_cjk=allow_cjk)
             except ValueError as e:
