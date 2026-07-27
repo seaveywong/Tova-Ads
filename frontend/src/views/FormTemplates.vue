@@ -58,6 +58,7 @@ const blankForm = () => ({
   target_countries: [], extra_contact_fields: ['EMAIL'],
   custom_questions: [], thank_you_title: '', thank_you_body: '',
   thank_you_button_text: '', thank_you_website_url: '', follow_up_url: '', context_card_title: '',
+  is_optimized_for_quality: true,
 })
 const openFormNew = () => { editingForm.value = null; fMeta.value = { name: '', description: '', locale: 'en_US' }; fCfg.value = blankForm(); formOpen.value = true }
 const openFormEdit = (t) => { editingForm.value = t; fMeta.value = { name: t.name, description: t.description, locale: t.locale }; fCfg.value = { ...blankForm(), ...(t.config||{}) }; formOpen.value = true }
@@ -186,6 +187,12 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         <div class="row"><label>语言</label><el-select v-model="fMeta.locale" style="width:100%" size="small"><el-option v-for="l in LOCALES" :key="l.v" :value="l.v" :label="l.l" /></el-select></div>
         <div class="row"><label>隐私政策 URL</label><input v-model="fCfg.privacy_url" class="inp" placeholder="https://...（必填）" /></div>
         <div class="row"><label>隐私链接文字</label><input v-model="fCfg.privacy_link_text" class="inp" /></div>
+        <div class="row"><label>表单可见性</label>
+          <el-select v-model="fCfg.is_optimized_for_quality" style="width:100%" size="small">
+            <el-option :value="true" label="限制提交（过滤低质量线索，FB 会评估用户行为）" />
+            <el-option :value="false" label="公开（任何人都能提交）" />
+          </el-select>
+        </div>
         <hr class="sep" />
         <div class="sec-title">联系字段（用户需填写的信息）</div>
         <div class="chips">

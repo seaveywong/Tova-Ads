@@ -210,9 +210,10 @@ const COUNTRIES = [
   {v:'LV',l:'拉脱维亚'},{v:'EE',l:'爱沙尼亚'},{v:'AL',l:'阿尔巴尼亚'},{v:'BA',l:'波黑'},{v:'MD',l:'摩尔多瓦'},
 ]
 const LANGS = [
-  { v: '', l: '不限' },{ v: 'en', l: '英语' },{ v: 'zh', l: '中文(简)' },{ v: 'zh-tw', l: '中文(繁)' },
-  { v: 'vi', l: '越南语' },{ v: 'th', l: '泰语' },{ v: 'id', l: '印尼语' },{ v: 'ja', l: '日语' },
-  { v: 'ko', l: '韩语' },{ v: 'es', l: '西语' },{ v: 'pt', l: '葡语' },{ v: 'ar', l: '阿语' },
+  { v: '', l: '不限' },{ v: '24', l: '英语（美国）' },{ v: '6', l: '英语（英国）' },{ v: '37', l: '英语（所有）' },
+  { v: '5', l: '中文（简体）' },{ v: '2', l: '中文（繁体）' },{ v: '1', l: '中文（所有）' },
+  { v: '31', l: '越南语' },{ v: '34', l: '泰语' },{ v: '32', l: '印尼语' },{ v: '27', l: '日语' },
+  { v: '28', l: '韩语' },{ v: '12', l: '西班牙语' },{ v: '14', l: '葡萄牙语' },{ v: '14', l: '阿拉伯语' },
 ]
 
 const load = async () => {
@@ -702,8 +703,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>标题 headline</label><input v-model="form.headline" class="inp" /></div>
         <div class="row"><label>正文 body</label><textarea v-model="form.body" class="inp ta" rows="3"></textarea></div>
         <div class="row"><label>行动号召 CTA</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="c.l + '（' + c.v + '）'" /></el-select></div>
-        <div class="row"><label>主页 page_id</label><input v-model="form.page_id" class="inp" placeholder="默认值（部署时每账户下拉选）" /></div>
-        <div class="row"><label>像素 pixel_id</label><input v-model="form.pixel_id" class="inp" placeholder="购物/线索目标必填" /></div>
+        <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">主页和像素在部署时按账户选择（不同账户的主页/像素不同）</div>
         <div class="row"><label>落地页</label>
           <select v-model="form.landing_page_id" class="inp" @change="form.landing_url = (landingPages.find(p=>p.id==form.landing_page_id)?.public_url || form.landing_url)">
             <option :value="null">手动填 URL</option>
@@ -1064,7 +1064,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .pt-node{border-radius:4px}
 .pt-head{display:flex;align-items:center;gap:4px;padding:4px 6px;cursor:pointer}
 .pt-head:hover{background:var(--bg3)}
-.pt-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block}
+.pt-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block;transform:rotate(0deg)}
 .pt-arrow.open{transform:rotate(90deg)}
 .pt-label{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:500}
 .pt-label input{margin:0}

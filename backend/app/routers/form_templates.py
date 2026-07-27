@@ -257,10 +257,13 @@ def ai_generate_form(body: AiGenerateFormIn,
         f"{lang_note}\n产品描述：{body.product_desc or '（从广告素材推断）'}\n\n"
         "生成 Instant Form 配置 JSON：\n"
         '{"form_title":"表单标题(简洁,吸引提交)","description":"表单说明(1句话)",'
-        '"custom_questions":[{"key":"question_1","label":"问题文本","placeholder":"输入提示"},'
-        '{"key":"question_2","label":"选择题","options":[{"key":"a","value":"选项A"},{"key":"b","value":"选项B"}]}],'
-        '"extra_contact_fields":["EMAIL"],"thank_you_title":"感谢页标题","thank_you_body":"感谢页正文"}\n'
-        "生成 2-4 个有意义的自定义问题（结合产品/服务），不要只问姓名。"
+        '"custom_questions":[{"key":"contact_preference","label":"您希望通过哪种方式联系我们？","options":[{"key":"whatsapp","value":"WhatsApp"},{"key":"phone","value":"电话"},{"key":"email","value":"邮件"}]},'
+        '{"key":"budget_range","label":"您的预算范围？","options":[{"key":"low","value":"100以下"},{"key":"mid","value":"100-500"},{"key":"high","value":"500以上"}]},'
+        '{"key":"urgency","label":"您何时需要服务？","placeholder":"如：一周内"}],'
+        '"extra_contact_fields":["EMAIL","PHONE"],"thank_you_title":"感谢页标题","thank_you_body":"感谢页正文"}\n'
+        "生成 2-4 个通用且有商业价值的问题（联系方式偏好/预算/紧迫度/需求描述），"
+        "不要生成和具体产品细节绑定的问题（如'有几根线缆'这种）。"
+        "问题应该适用于大多数行业的潜在客户收集。"
     )
     try:
         data = ai.chat_json(
