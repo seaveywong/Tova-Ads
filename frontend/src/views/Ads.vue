@@ -163,7 +163,10 @@ onMounted(async () => {
         <div>{{ fmtMoney(a.recent_spend, a.currency) }}</div>
         <div>{{ a.recent_conversions || 0 }}</div>
         <div>{{ cpa(a) }}</div>
-        <div><span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')">{{ a.bound_alias || '未绑' }}</span></div>
+        <div>
+          <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')">{{ a.bound_alias || '未绑' }}</span>
+          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="`候选池 ${a.pool_count} 个令牌轮换`">+{{ (a.pool_count||0) - 1 }}</span>
+        </div>
         <div class="ops">
           <el-dropdown trigger="click" @command="cmd => onCmd(cmd, a)" placement="bottom-end">
             <button class="more-btn">⚙</button>
@@ -228,6 +231,7 @@ onMounted(async () => {
 .dot.ok { background: var(--success) } .dot.warn { background: var(--warning) } .dot.err { background: var(--error) } .dot.off { background: var(--t3); opacity: .5 }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg3); color: var(--t2) }
 .tag.ok { color: var(--success) } .tag.warn { color: var(--warning) } .tag.off { color: var(--t3) }
+.pool-n { font-size: 10px; color: var(--success); margin-left: 2px; font-weight: 600 }
 .ops { display: flex; justify-content: flex-end }
 .more-btn { width: 26px; height: 24px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); font-size: 13px; cursor: pointer; border-radius: 4px; padding: 0; line-height: 22px; text-align: center }
 .more-btn:hover { background: var(--ac); color: #fff; border-color: var(--ac) }

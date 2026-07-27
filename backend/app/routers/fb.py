@@ -665,6 +665,16 @@ def list_accounts(
     accs = query.order_by(Account.account_status.asc()).all()
     cred_ids = {a.fb_credential_id for a in accs if a.fb_credential_id}
     creds = {c.id: c for c in db.query(FbCredential).filter(FbCredential.id.in_(cred_ids)).all()} if cred_ids else {}
+    # 候选池令牌数（多令牌轮换：每账户绑了几个令牌）
+    acc_pks = [a.id for a in accs]
+    pool_map = {}
+    if acc_pks:
+        from ..models.fb import AccountFbCredential
+        _pr = db.query(AccountFbCredential.account_id, func.count()).filter(
+            AccountFbCredential.account_id.in_(acc_pks),
+            AccountFbCredential.status == "active",
+        ).group_by(AccountFbCredential.account_id).all()
+        pool_map = {r[0]: r[1] for r in _pr}
     act_ids = [a.act_id for a in accs]
     spend_map = {}
     if act_ids:
@@ -697,6 +707,7 @@ def list_accounts(
             "bound_alias": (cred.alias or cred.fb_user_name) if cred else None,
             "bound_status": cred.status if cred else "unbound",
             "bound_available": _is_cred_available(cred) if cred else False,
+            "pool_count": pool_map.get(a.id, 0),
             "recent_spend": perf.get("spend", 0.0), "recent_conversions": perf.get("conversions", 0),
         })
     return out
