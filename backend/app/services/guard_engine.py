@@ -706,7 +706,7 @@ def run_inspection():
         write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                   target_type="scheduler", action_type="inspection_heartbeat",
                   source="scheduled", result="success",
-                  trigger_detail=f"eval={total_evaluated} hits={total_hits} skipped_spend={total_skipped_spend}")
+                  trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条止损 · 跳过{total_skipped_spend}条有消耗广告")
         # 覆盖丢失告警：有消耗的广告被 active_ids 过滤掉（止损盲区）→ 告警（6h dedup 避免每轮 spam）
         if total_skipped_spend > 0:
             if not dedup_recent(db, tenant_id, "coverage_lost", "*", 360):

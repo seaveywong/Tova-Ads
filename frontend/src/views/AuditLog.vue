@@ -77,6 +77,18 @@ const onExpandChange = async (row, expandedRows) => {
 }
 
 const TYPE_ZH = { user: '用户', system: '系统', sentinel: '哨兵', sync: '同步', warmup: '预热' }
+const ACTION_ZH = {
+  inspection_heartbeat: '巡检心跳', pause: '止损暂停', deploy: '广告部署', login: '登录',
+  switch_tenant: '切换团队', account_permission_error: '令牌权限不足', token_rate_limited: '令牌限流',
+  landing_health_alert: '落地页告警', coverage_lost: '覆盖丢失', create: '创建', update: '更新',
+  delete: '删除', archive: '归档', rule_pause: '规则止损', sentinel_pause: '哨兵暂停',
+  emergency_pause: '紧急暂停', token_expired: '令牌过期', token_invalid: '令牌失效',
+}
+const TARGET_ZH = {
+  scheduler: '调度器', ad: '广告', account: '账户', fb_credential: '令牌',
+  landing_page: '落地页', launch_template: '投放模板', launch_job: '部署任务',
+  form_template: '表单模板', user: '用户', team: '团队', subcode: '子码', rule: '规则',
+}
 const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
 const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; dateRange.value = []; page.value = 1; load() }
 </script>
@@ -137,8 +149,8 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
                   <span :class="['t-dot', l.result]"></span>
                   <span class="t-time">{{ (l.created_at || '').slice(11,19) }}</span>
                   <span :class="['tag sm', l.actor_type]">{{ TYPE_ZH[l.actor_type] || l.actor_type }}</span>
-                  <code class="t-act">{{ l.action_type }}</code>
-                  <span v-if="l.target_type" class="t-tgt">{{ l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
+                  <code class="t-act">{{ ACTION_ZH[l.action_type] || l.action_type }}</code>
+                  <span v-if="l.target_type" class="t-tgt">{{ TARGET_ZH[l.target_type] || l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
                   <span :style="{color:rowColor(l)}">{{ l.result === 'success' ? '✓' : '✗' }}</span>
                   <span v-if="l.friendly_error" class="t-err">{{ l.friendly_error }}</span>
                 </div>
@@ -154,11 +166,11 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
           <template #default="{ row }"><span :class="['tag', row.actor_type]">{{ TYPE_ZH[row.actor_type] || row.actor_type }}</span></template>
         </el-table-column>
         <el-table-column label="动作" width="120">
-          <template #default="{ row }"><code class="act">{{ row.action_type }}</code></template>
+          <template #default="{ row }"><code class="act">{{ ACTION_ZH[row.action_type] || row.action_type }}</code></template>
         </el-table-column>
         <el-table-column label="对象" min-width="150">
           <template #default="{ row }">
-            <span v-if="row.target_type" class="tgt">{{ row.target_type }}<span v-if="row.target_id" class="tid">#{{ row.target_id }}</span></span>
+            <span v-if="row.target_type" class="tgt">{{ TARGET_ZH[row.target_type] || row.target_type }}<span v-if="row.target_id" class="tid">#{{ row.target_id }}</span></span>
             <span v-else class="dash">—</span>
           </template>
         </el-table-column>
