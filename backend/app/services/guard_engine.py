@@ -289,6 +289,8 @@ def run_inspection():
                 cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
                 if not cred:
                     continue
+                _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
+                _alias = cred.alias or ""
                 fb = FbClient(decrypt(cred.access_token_enc))
                 acc_today = _account_local_today(acc)  # 账户本地日（time_range 拉 insights + 写 snapshot_date，统一账户本地基准，避免跨时区累积）
                 # 拿 ACTIVE 广告 ID 集（排除已停/被拒/删除的；含学习中的——学习中但 ACTIVE = 在花钱）
