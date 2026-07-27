@@ -165,10 +165,10 @@ onMounted(async () => {
         <div>{{ cpa(a) }}</div>
         <div>
           <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')"
-                :title="`${a.bound_alias || '未绑'} · ${a.bound_available ? '可用' : '异常'}${(a.pool_count||0) > 1 ? ' · 候选池 ' + a.pool_count + ' 令牌轮换' : ''}`">
+                :title="`${a.bound_alias || '未绑'} · ${a.bound_available ? '可用' : '异常'}${a.pool_aliases ? ' · 轮换令牌：' + a.pool_aliases : ''}`">
             {{ a.bound_alias || '未绑' }}
           </span>
-          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="`候选池 ${a.pool_count} 个令牌轮换`">+{{ (a.pool_count||0) - 1 }}</span>
+          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="a.pool_aliases || `候选池 ${a.pool_count} 个令牌`">+{{ (a.pool_count||0) - 1 }}</span>
         </div>
         <div class="ops">
           <el-dropdown trigger="click" @command="cmd => onCmd(cmd, a)" placement="bottom-end">
