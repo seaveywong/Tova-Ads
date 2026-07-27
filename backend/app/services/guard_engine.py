@@ -282,8 +282,8 @@ def run_inspection():
 
             for acc in accounts:
                 acc.last_inspected_at = datetime.now(timezone.utc)
-                # 预热中账户跳过巡检（doc 03 §6 warmup 豁免——新账户保护期不停）
-                if (acc.warmup_state or "none") == "warming":
+                # 哨兵 armed → 巡检跳过（哨兵全停，巡检再跑多余 → 省 FB API）
+                if acc.sentinel_armed or acc.sentinel_auto_armed:
                     continue
                 # 按账户选 token（查 cooldown + op_kind=read + RR 兜底）；全灭 → 跳过
                 cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
@@ -434,6 +434,9 @@ def run_inspection():
                         except Exception:
                             pass
                         continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
+                    # 保活广告永不停（巡检跳过 [Tova-保活] 系列）
+                    if "[Tova-保活]" in (ad.get("campaign_name") or ""):
+                        continue
                     ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
                     ad_name = ad.get("ad_name", ad_id)[:50]
                     total_evaluated += 1
@@ -1086,9 +1089,7 @@ def run_sentinel_patrol():
             # 恢复正常(status→1)后哨兵自然恢复生效：armed 仍在，account_sync 把状态刷回 1 后下轮就停。
             if acc.account_status is not None and acc.account_status != 1:
                 continue
-            # 预热中账户跳过哨兵（doc 03 §6）
-            if (acc.warmup_state or "none") == "warming":
-                continue
+            # 预热账户哨兵也跑（只跳过保活系列）
             fb = client_for_account(db, acc.tenant_id, acc.act_id, "pause")
             if not fb:
                 continue
@@ -1105,6 +1106,9 @@ def run_sentinel_patrol():
             for camp in (camps.get("data") or []):
                 camp_id = camp.get("id")
                 if not camp_id:
+                    continue
+                # 保活系列永不停（哨兵跳过 [Tova-保活]）
+                if "[Tova-保活]" in (camp.get("name") or ""):
                     continue
                 # dedup：1h 内已停过跳过
                 since = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -1280,3 +1284,152 @@ def run_subcode_cleanup():
     finally:
         db.close()
         release_run_lock(lock, 108)
+
+
+def run_keepalive():
+    """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $5 lifetime Page Like。
+    保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
+    """
+    import os, random
+    from ..core.keepalive_config import get_keepalive_config
+    from ..core.fb_tokens import client_for_account
+    from ..core.ad_ops import ensure_image_hash_for_account
+    from ..models.launch import Asset
+    from ..models.perf import PerfSnapshot
+    from sqlalchemy import func as _f
+
+    lock = acquire_run_lock(109)
+    if not lock:
+        return {"skipped": "lock_busy"}
+    db = SuperSessionLocal()
+    try:
+        cfg = get_keepalive_config(db)
+        prefix = cfg["campaign_prefix"]
+        idle_days = cfg["idle_days"]
+        budget = int(float(cfg["budget_usd"]) * 100)  # USD → cents (lifetime)
+        asset_prefix = cfg["asset_prefix"]
+        asset_dir = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
+
+        warming = db.query(Account).filter(
+            Account.is_managed == True,  # noqa: E712
+            Account.warmup_state == "warming",
+            Account.account_status == 1,
+        ).all()
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
+        created = skipped = failed = 0
+        for acc in warming:
+            try:
+                # 1. 近 idle_days 天消耗
+                spend = db.query(_f.sum(PerfSnapshot.spend)).filter(
+                    PerfSnapshot.tenant_id == acc.tenant_id,
+                    PerfSnapshot.act_id == acc.act_id,
+                    PerfSnapshot.snapshot_date >= cutoff,
+                ).scalar() or 0
+                if float(spend) > 0:
+                    continue  # 有消耗，不需保活
+
+                # 2. 写令牌
+                fb = client_for_account(db, acc.tenant_id, acc.act_id, "write")
+                if not fb:
+                    logger.warning(f"[Keepalive] 账户 {acc.act_id} 无写令牌，跳过")
+                    continue
+
+                # 3. 已有保活系列？(ACTIVE/PAUSED/PENDING 都算=建过了)
+                camps = fb.get(f"act_{acc.act_id}/campaigns", {
+                    "fields": "id,name,effective_status", "limit": 200,
+                })
+                has_keepalive = any(
+                    prefix in (c.get("name") or "")
+                    and (c.get("effective_status") in ("ACTIVE", "PAUSED", "PENDING_REVIEW", "IN_PROCESS", "WITH_ISSUES"))
+                    for c in (camps.get("data") or [])
+                )
+                if has_keepalive:
+                    skipped += 1
+                    continue
+
+                # 4. 获取主页
+                pages = fb.get_pages()
+                if not pages:
+                    logger.warning(f"[Keepalive] 账户 {acc.act_id} 无可用主页")
+                    failed += 1
+                    continue
+                page_id = pages[0].get("id")
+
+                # 5. 选素材（YR 前缀随机）
+                assets_q = db.query(Asset).filter(
+                    Asset.name.like(f"{asset_prefix}%"), Asset.type == "image",
+                ).all()
+                if not assets_q:
+                    logger.warning(f"[Keepalive] 无 {asset_prefix} 前缀保活素材")
+                    failed += 1
+                    continue
+                asset = random.choice(assets_q)
+                filepath = os.path.join(asset_dir, asset.storage_key)
+                if not os.path.exists(filepath):
+                    failed += 1
+                    continue
+                image_hash = ensure_image_hash_for_account(fb, db, asset, acc.act_id, filepath)
+                db.commit()
+
+                # 6. 建 $5 lifetime Page Like（直接 FB API，不走 deploy_one_account——避免改共享代码）
+                camp = fb.post(f"act_{acc.act_id}/campaigns", {
+                    "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
+                    "status": "ACTIVE", "buying_type": "AUCTION", "lifetime_budget": str(budget),
+                })
+                camp_id = camp.get("id")
+                if not camp_id:
+                    raise Exception(f"FB 未返回 campaign_id: {str(camp)[:200]}")
+                adset = fb.post(f"act_{acc.act_id}/adsets", {
+                    "name": f"{prefix} AdSet", "campaign_id": camp_id, "status": "ACTIVE",
+                    "optimization_goal": "PAGE_LIKES", "billing_event": "IMPRESSIONS",
+                    "promoted_object": json.dumps({"page_id": page_id}),
+                    "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "page": acc.act_id}),
+                    "lifetime_budget": str(budget),
+                })
+                adset_id = adset.get("id")
+                if not adset_id:
+                    raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
+                creative = fb.post(f"act_{acc.act_id}/adcreatives", {
+                    "name": f"{prefix} Creative", "page_id": page_id,
+                    "object_story_spec": json.dumps({
+                        "link_data": {"picture": asset.public_url, "message": "Follow us!"},
+                        "link": f"https://facebook.com/{page_id}",
+                    }),
+                })
+                creative_id = creative.get("id")
+                if not creative_id:
+                    raise Exception(f"FB 未返回 creative_id: {str(creative)[:200]}")
+                ad = fb.post(f"act_{acc.act_id}/ads", {
+                    "name": f"{prefix} Ad", "adset_id": adset_id,
+                    "creative": json.dumps({"creative_id": creative_id}), "status": "ACTIVE",
+                })
+                ad_id = ad.get("id") or ""
+                created += 1
+                write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                          actor_type="system", target_type="ad", target_id=str(ad_id),
+                          action_type="keepalive", source="keepalive", result="success",
+                          metadata={"act_id": acc.act_id, "campaign_id": camp_id,
+                                    "budget_cents": budget, "page_id": page_id})
+                db.commit()
+                logger.info(f"[Keepalive] 账户 {acc.act_id} 建保活 {camp_id}/{ad_id}")
+            except FbApiError as e:
+                failed += 1
+                logger.warning(f"[Keepalive] 账户 {acc.act_id} 失败: {e.friendly}")
+                write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                          actor_type="system", action_type="keepalive", source="keepalive",
+                          result="fail", friendly_error=e.friendly[:200],
+                          metadata={"act_id": acc.act_id})
+                db.commit()
+            except Exception as e:
+                failed += 1
+                logger.warning(f"[Keepalive] 账户 {acc.act_id} 异常: {e}")
+        if created:
+            logger.info(f"[Keepalive] 检查 {len(warming)} 个 warming 账户，建 {created} 条保活，跳过 {skipped}，失败 {failed}")
+        return {"checked": len(warming), "created": created, "skipped": skipped, "failed": failed}
+    except Exception as e:
+        logger.error(f"[Keepalive] 异常: {e}", exc_info=True)
+        return {"error": str(e)}
+    finally:
+        db.close()
+        release_run_lock(lock, 109)

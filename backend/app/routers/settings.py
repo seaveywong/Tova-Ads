@@ -250,3 +250,16 @@ def run_fx_now(user: CurrentUser = Depends(require_superadmin)):
     """手动拉一次实时汇率（不等每日 cron）。"""
     from ..services.fx_sync import run_fx_sync
     return run_fx_sync()
+
+
+@router.get("/keepalive")
+def get_keepalive(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
+    from ..core.keepalive_config import get_keepalive_config
+    return get_keepalive_config(db)
+
+
+@router.put("/keepalive")
+def set_keepalive(body: dict, user: CurrentUser = Depends(require_superadmin),
+                  db: Session = Depends(get_db)):
+    from ..core.keepalive_config import save_keepalive_config
+    return save_keepalive_config(db, body)
