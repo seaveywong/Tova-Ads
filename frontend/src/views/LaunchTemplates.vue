@@ -606,7 +606,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div class="adv-row">
             <div class="adv-info">
               <span class="adv-title">Advantage+ 受众</span>
-              <span class="adv-desc">开启后，FB AI 会根据你的素材和转化数据自动扩展受众，覆盖更多潜在客户</span>
+              <span class="adv-desc">开启后，FB AI 会根据你的素材和转化数据自动扩展兴趣受众。年龄/性别/语言仍可设置作为基础约束。</span>
             </div>
             <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           </div>
@@ -617,10 +617,15 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="c.l + ' (' + c.v + ')'" />
           </el-select>
         </div>
-        <template v-if="!advantage_audience">
         <div class="row"><label>年龄</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
         <div class="row"><label>性别</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">全部</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">男</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">女</button></div></div>
         <div class="row"><label>语言（定向说此语言的人）</label>
+          <el-select v-model="form.audience_language" filterable clearable placeholder="不限语言" style="width:100%" size="small">
+            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
+          </el-select>
+        </div>
+        <template v-if="!advantage_audience">
+        <div class="row"><label>兴趣关键词（FB adinterest 搜索）</label>
           <el-select v-model="form.audience_language" filterable clearable placeholder="不限语言" style="width:100%" size="small">
             <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
           </el-select>
