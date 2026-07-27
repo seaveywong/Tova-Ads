@@ -314,6 +314,16 @@ const blankForm = () => ({
   frequency_cap: 0,
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
+// 卡片完整性判断（列表用，不需打开编辑器）
+const _tplMissing = (t) => {
+  const m = []
+  if (!t.name?.trim()) m.push('模板名')
+  if (!t.asset_id) m.push('素材')
+  if (!t.budget_usd || t.budget_usd <= 0) m.push('预算')
+  if (!t.landing_url && !['OUTCOME_AWARENESS'].includes(t.objective)) m.push('落地页')
+  return m
+}
+const _tplReady = (t) => _tplMissing(t).length === 0
 const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
 
 // 编辑
@@ -526,12 +536,16 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
     <div class="grid" v-loading="loading">
       <div v-for="t in list" :key="t.id" class="card">
-        <div class="card-head"><span class="card-name">{{ t.name }}</span><span class="card-obj">{{ objLabel(t.objective) }}</span></div>
-        <div class="card-meta"><span>{{ fmtUsd(t.budget_usd) }}/天 · {{ t.budget_mode }}</span><span>{{ t.deploy_count }} 次部署</span></div>
-        <div v-if="t.headline" class="card-copy">{{ t.headline }}</div>
+        <div class="card-head">
+          <span class="card-name">{{ t.name }}</span>
+          <span :class="['card-badge', _tplReady(t) ? 'ready' : 'pending']" :title="_tplMissing(t).join('、')">
+            {{ _tplReady(t) ? '✓ 就绪' : '待完善' }}
+          </span>
+        </div>
+        <div class="card-meta"><span class="card-obj">{{ objLabel(t.objective) }}</span><span>{{ fmtUsd(t.budget_usd) }}/天</span></div>
+        <div v-if="!_tplReady(t)" class="card-warn">缺：{{ _tplMissing(t).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(t)">部署</button>
-          <button class="op" :disabled="preflighting" @click="preflight(t)">预检</button>
           <button class="op" @click="openEdit(t)">编辑</button>
           <button class="op danger" @click="removeTpl(t)">归档</button>
         </div>
@@ -918,6 +932,10 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-obj{font-size:11px;color:var(--ac);white-space:nowrap}
+.card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap}
+.card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
+.card-badge.pending{color:var(--warning);background:rgba(255,159,10,.13)}
+.card-warn{font-size:11px;color:var(--warning);padding:2px 0}
 .card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap}
 .card-copy{font-size:11px;color:var(--t2);font-style:italic;max-height:32px;overflow:hidden}
 .card-ops{display:flex;gap:3px;margin-top:4px}

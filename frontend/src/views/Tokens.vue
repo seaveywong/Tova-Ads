@@ -186,6 +186,7 @@ const handleAction = (cmd, t) => {
   if (cmd === 'check') checkToken(t)
   else if (cmd === 'refresh') refreshAccounts(t)
   else if (cmd === 'delete') deleteToken(t)
+  else if (cmd === 'update_token') updateToken(t)
 }
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
@@ -305,6 +306,17 @@ const submitImport = async () => {
   catch (e) { ElMessage.error('失败：'+(e.message||'')) }
   importing.value = false
 }
+const updateToken = async (t) => {
+  try {
+    const { value } = await ElMessageBox.prompt('粘贴新的个人令牌（Access Token）：', `更新密钥 · ${t.alias || t.fb_user_name}`, {
+      confirmButtonText: '更新', cancelButtonText: '取消', inputType: 'password', inputPlaceholder: 'EAA...',
+      inputValidator: (v) => v && v.trim().length > 20 || '令牌太短',
+    })
+    const r = await POST(`/fb/credentials/${t.id}/update-token`, { access_token: value.trim() })
+    ElMessage.success(`密钥已更新（${r.fb_user_name}）`)
+    await load()
+  } catch (e) { if (e === 'cancel') return; ElMessage.error(e.message || '更新失败') }
+}
 const checkToken = async (t) => {
   try { ElMessage.info('检测中…'); const r = await POST(`/fb/credentials/${t.id}/check`, {}); r.now_valid ? ElMessage.success(r.detail||'正常') : ElMessage.warning(r.detail||'异常') }
   catch { ElMessage.error('检测失败') }
@@ -366,6 +378,7 @@ const deleteToken = async (t) => {
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="check">检测有效性</el-dropdown-item>
+                <el-dropdown-item command="update_token">更新密钥</el-dropdown-item>
                 <el-dropdown-item command="refresh">刷新账户</el-dropdown-item>
                 <el-dropdown-item command="delete" divided>删除令牌</el-dropdown-item>
               </el-dropdown-menu>

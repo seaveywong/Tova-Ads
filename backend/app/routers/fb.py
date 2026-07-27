@@ -178,6 +178,50 @@ def delete_credential(
     return {"deleted": True, "id": cred_id}
 
 
+@router.post("/credentials/{cred_id}/update-token")
+def update_credential_token(
+    cred_id: int,
+    body: dict,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """更新令牌密钥（个人令牌过期后更换）。同 fb_user_id 会覆盖更新。"""
+    new_token = (body.get("access_token") or "").strip()
+    if not new_token:
+        raise HTTPException(400, "access_token 不能为空")
+    cred = db.query(FbCredential).filter(
+        FbCredential.id == cred_id, FbCredential.tenant_id == user.tenant_id
+    ).first()
+    if not cred:
+        raise HTTPException(404, "凭证不存在")
+    # 验证新 token
+    fb = FbClient(new_token)
+    try:
+        me = fb.me()
+    except FbApiError as e:
+        raise HTTPException(400, f"新令牌无效：{e.friendly}")
+    # 拉权限快照
+    perm_snapshot = cred.permission_snapshot
+    try:
+        debug = fb.debug_token()
+        scopes = debug.get("data", {}).get("scopes", [])
+        perm_snapshot = json.dumps({"scopes": scopes})
+    except Exception:
+        pass
+    # 更新
+    cred.access_token_enc = encrypt(new_token)
+    cred.status = "active"
+    cred.consecutive_fails = 0
+    cred.last_verified_at = datetime.now(timezone.utc)
+    cred.permission_snapshot = perm_snapshot
+    from ..core.log_utils import write_log, new_trace_id
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="fb_credential", target_id=str(cred_id),
+              action_type="update_token", source="user", result="success")
+    db.commit()
+    return {"ok": True, "fb_user_name": me.get("name", ""), "status": "active"}
+
+
 @router.post("/credentials/{cred_id}/check")
 def check_credential(
     cred_id: int,
