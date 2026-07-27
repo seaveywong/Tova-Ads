@@ -681,7 +681,8 @@ def list_accounts(
         ).all()
         _by_acc = {}
         for r in _rows:
-            _by_acc.setdefault(r[0], []).append(r[1] or r[2] or str(r[1] or "?"))
+            _alias = r[2] or (str(r[1]) if r[1] else "?")
+            _by_acc.setdefault(r[0], []).append(_alias)
         for aid, aliases in _by_acc.items():
             pool_map[aid] = len(aliases)
             pool_alias_map[aid] = " / ".join(aliases)
