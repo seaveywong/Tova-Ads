@@ -88,15 +88,33 @@ router.beforeEach((to, from, next) => {
   next()
 })
 
-// chunk 加载失败（部署后旧 hash 缓存）→ 自动刷新一次拿新 index.html
-router.onError((error) => {
-  if (error.message.includes('Failed to fetch dynamically imported module') ||
-      error.message.includes('Importing a module script failed')) {
-    if (!sessionStorage.getItem('_chunk_reload')) {
-      sessionStorage.setItem('_chunk_reload', '1')
-      window.location.reload()
-    }
+// chunk 加载失败（部署后旧 hash 缓存）→ 带 cache-buster 强制刷新拿新 index.html
+function _handleChunkFail(error) {
+  const msg = (error && error.message) || String(error)
+  if (!msg.includes('Failed to fetch dynamically imported module') &&
+      !msg.includes('Importing a module script failed')) return
+  if (sessionStorage.getItem('_chunk_reload')) return  // 同 session 只刷一次（防死循环）
+  sessionStorage.setItem('_chunk_reload', '1')
+  // 关键：加 ?_r=时间戳 绕开浏览器缓存的旧 index.html（否则 reload 还是旧 hash → 还是 404）
+  try {
+    const u = new URL(window.location.href)
+    u.searchParams.set('_r', String(Date.now()))
+    window.location.replace(u.toString())
+  } catch {
+    window.location.reload()
   }
+}
+router.onError(_handleChunkFail)
+// 非 路由场景的 dynamic import 失败（组件内 import()）也要兜
+window.addEventListener('error', (e) => {
+  if (e && e.error && typeof e.error.message === 'string' &&
+      e.error.message.includes('dynamically imported module')) {
+    _handleChunkFail(e.error)
+  }
+})
+// 成功导航后清 flag（下次部署后能再次触发）
+router.afterEach(() => {
+  sessionStorage.removeItem('_chunk_reload')
 })
 
 export default router
