@@ -424,6 +424,8 @@ const openEdit = async (t) => {
   editing.value = t
   const f = blankForm()
   Object.assign(f, t)
+  // landing_page_id 后端对 NULL 返回 0；归一到 null 让 <select> 的「手动填 URL」选项（:value=null）能匹配选中
+  if (!f.landing_page_id) f.landing_page_id = null
   if (t.audience_json) { try { const a = JSON.parse(t.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
   // 从 advanced_config 恢复 Advantage+ / 版位 / 频次 / CPA（P0-3/P0-4 fix）
   if (t.advanced_config) {
@@ -564,13 +566,17 @@ const saveTpl = async () => {
       if (performance_goal_cpa.value > 0) {
         body.bid_strategy = 'COST_CAP'
         adv.bid_amount = Math.round(performance_goal_cpa.value * 100) // 美元→分
+      } else {
+        delete adv.bid_amount
       }
       // Advantage+ 受众（FB 默认开；关时用手动定向，不加 extra）
-      // Advantage+ 创意（FB 默认开；传入 is_dynamic_creative 标志）
+      // Advantage+ 创意（FB 默认开；传入 is_dynamic_creative 标志；关时移除）
       if (advantage_creative.value) {
         adv.is_dynamic_creative = true
+      } else {
+        delete adv.is_dynamic_creative
       }
-      // 版位
+      // 版位（关时清掉结构化版位键，避免残留进 payload）
       if (form.value.manual_placement) {
         adv.targeting = adv.targeting || {}
         const plats = form.value.placement_platforms || []
@@ -580,23 +586,36 @@ const saveTpl = async () => {
           const positions = form.value[p.v + '_positions']
           if (positions && positions.length) adv.targeting[p.v + '_positions'] = positions
         }
+      } else if (adv.targeting) {
+        delete adv.targeting.publisher_platforms
+        delete adv.targeting.device_platforms
+        for (const p of PLATFORMS) delete adv.targeting[p.v + '_positions']
       }
-      // 频次控制
+      // 频次控制（0/空 = 不限，清掉残留）
       if (form.value.frequency_cap && form.value.frequency_cap > 0) {
         adv.frequency_control_specs = [{
           event: 'IMPRESSIONS', interval_days: 1, max_frequency: form.value.frequency_cap, type: 'CAP'
         }]
+      } else {
+        delete adv.frequency_control_specs
       }
-      // 归因窗口（仅转化类目标）
+      // 归因窗口（清空 = 用 FB 默认，删 key）
       const aSpec = attributionToSpec(form.value.attribution_preset)
       if (aSpec) adv.attribution_spec = aSpec
-      // 时段投放 Dayparting（FB 用广告账户时区，不传 timezone）
+      else delete adv.attribution_spec
+      // 时段投放 Dayparting（FB 用广告账户时区，不传 timezone；关/空 = 删 key）
       if (form.value.daypart_enabled) {
         const sched = gridToSchedule(form.value.daypart_cells)
         if (sched.length) {
           adv.day_parting_schedule = sched
           adv.pacing_type = ['day_parting']
+        } else {
+          delete adv.day_parting_schedule
+          delete adv.pacing_type
         }
+      } else {
+        delete adv.day_parting_schedule
+        delete adv.pacing_type
       }
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}

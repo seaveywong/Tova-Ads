@@ -136,13 +136,14 @@ def delete_template(tid: int, user: CurrentUser = Depends(require_permission("ad
     return {"id": tid, "archived": True}
 
 
-# 复制的字段（不含 id/tenant_id/created_by/status/deploy_count/时间戳）
+# 复制的字段（不含 id/tenant_id/created_by/status/deploy_count/时间戳；不含 lead_form_id——
+# 它是 page 绑定的具体 FB form_id，复制后部署到别的 page 会失效，留给 lead_form_template_id 按页重建）
 _COPY_COLS = [
     "name", "description", "objective", "conversion_goal", "budget_mode", "bid_strategy",
     "daily_budget", "budget_usd", "name_prefix", "optimization_goal", "billing_event",
     "destination_type", "audience_id", "audience_json", "advanced_config", "asset_id",
     "headline", "body", "page_id", "pixel_id", "landing_url", "cta_type", "subcode_slug",
-    "ad_language", "message_template", "lead_form_id", "landing_page_id",
+    "ad_language", "message_template", "landing_page_id",
     "lead_form_template_id", "message_template_id", "beneficiary", "payer",
 ]
 
@@ -342,13 +343,16 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
 
 
 def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str) -> str:
-    """部署时解析 Instant Form ID。优先级：
-    1. tpl.lead_form_id（已建的 FB form_id，直接用）
-    2. tpl.lead_form_template_id（选了表单模板）→ 有 fb_form_id 复用；否则按模板 config 建到目标 page
+    """部署时解析 Instant Form ID（page-aware）。优先级：
+    1. tpl.lead_form_template_id（选了表单模板）→ 同 page 有 fb_form_id 复用；否则按 config 建到「目标 page」
+    2. tpl.lead_form_id（手填的已建 form_id）→ 直接用（用户自负；可能跨 page 失效）
     3. 都没有 → AI 从素材文案自动生成 + 建（_ai_auto_create_form）
+
+    注意：form_id 与 page 绑定（FB 校验 form 属于 adset 的 page）。表单模板路径按目标 page
+    解析，所以多账户不同 page 部署每页都拿到正确的 form；手填 lead_form_id 路径不校验 page，
+    仅当未选模板时兜底。
     """
-    if tpl.lead_form_id:
-        return tpl.lead_form_id
+    # 1. 表单模板（page-aware）
     if tpl.lead_form_template_id:
         from ..models.lead_form_template import LeadFormTemplate
         ft = sdb.query(LeadFormTemplate).filter(
@@ -388,13 +392,16 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                     result = fb.post(f"{page_id}/leadgen_forms", safe)
                     form_id = result.get("id")
                 if form_id:
-                    # 缓存到模板（下次同 page 复用）。多 page 部署时只缓存第一个 page 的（保守）
-                    if not ft.fb_form_id:
+                    # 缓存到模板（同 page 下次复用）。不同 page 的 form 不缓存（每页重建，保证 page 正确）
+                    if not ft.fb_form_id or ft.fb_page_id != page_id:
                         ft.fb_form_id = form_id; ft.fb_page_id = page_id
                     return form_id
             except Exception:
-                pass  # 落到 AI 兜底
-    # 兜底：AI 自动生成
+                pass  # 落到手填/AI 兜底
+    # 2. 手填 lead_form_id（不校验 page；仅未选模板时用）
+    if tpl.lead_form_id:
+        return tpl.lead_form_id
+    # 3. AI 兜底
     if asset and page_id:
         return _ai_auto_create_form(fb, sdb, asset, page_id, landing_url)
     return ""
