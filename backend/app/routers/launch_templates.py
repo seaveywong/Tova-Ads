@@ -44,6 +44,9 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "landing_url": t.landing_url or "", "cta_type": t.cta_type or "",
         "subcode_slug": t.subcode_slug or "", "ad_language": t.ad_language or "",
         "message_template": t.message_template or "", "lead_form_id": t.lead_form_id or "",
+        "landing_page_id": t.landing_page_id or 0,
+        "lead_form_template_id": t.lead_form_template_id or 0,
+        "message_template_id": t.message_template_id or 0,
         "beneficiary": t.beneficiary or "", "payer": t.payer or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
@@ -78,6 +81,9 @@ class TemplateIn(BaseModel):
     ad_language: str = ""
     message_template: str = ""
     lead_form_id: str = ""
+    landing_page_id: Optional[int] = None
+    lead_form_template_id: int = 0
+    message_template_id: int = 0
     beneficiary: str = ""
     payer: str = ""
 
@@ -128,6 +134,39 @@ def delete_template(tid: int, user: CurrentUser = Depends(require_permission("ad
     t.status = "archived"  # 软删（保留部署历史）
     db.commit()
     return {"id": tid, "archived": True}
+
+
+# 复制的字段（不含 id/tenant_id/created_by/status/deploy_count/时间戳）
+_COPY_COLS = [
+    "name", "description", "objective", "conversion_goal", "budget_mode", "bid_strategy",
+    "daily_budget", "budget_usd", "name_prefix", "optimization_goal", "billing_event",
+    "destination_type", "audience_id", "audience_json", "advanced_config", "asset_id",
+    "headline", "body", "page_id", "pixel_id", "landing_url", "cta_type", "subcode_slug",
+    "ad_language", "message_template", "lead_form_id", "landing_page_id",
+    "lead_form_template_id", "message_template_id", "beneficiary", "payer",
+]
+
+
+@router.post("/{tid}/copy")
+def copy_template(tid: int, user: CurrentUser = Depends(require_permission("ads.create")),
+                  db: Session = Depends(get_db)):
+    """复制模板（建变体用）：拷贝全部配置字段，名加「 副本」，deploy_count 归零。"""
+    src = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not src:
+        raise HTTPException(404, "模板不存在")
+    new = LaunchTemplate(tenant_id=user.tenant_id, created_by=user.id, status="draft", deploy_count=0)
+    for col in _COPY_COLS:
+        setattr(new, col, getattr(src, col))
+    new.name = (src.name or "未命名") + " 副本"
+    db.add(new)
+    db.flush()
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="launch_template", target_id=str(new.id),
+              action_type="create", source="user", result="success",
+              metadata={"copied_from": tid, "name": new.name})
+    db.commit()
+    return _tpl_dict(new)
 
 
 # ── 部署 ──
@@ -302,6 +341,65 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
         return None
 
 
+def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str) -> str:
+    """部署时解析 Instant Form ID。优先级：
+    1. tpl.lead_form_id（已建的 FB form_id，直接用）
+    2. tpl.lead_form_template_id（选了表单模板）→ 有 fb_form_id 复用；否则按模板 config 建到目标 page
+    3. 都没有 → AI 从素材文案自动生成 + 建（_ai_auto_create_form）
+    """
+    if tpl.lead_form_id:
+        return tpl.lead_form_id
+    if tpl.lead_form_template_id:
+        from ..models.lead_form_template import LeadFormTemplate
+        ft = sdb.query(LeadFormTemplate).filter(
+            LeadFormTemplate.id == tpl.lead_form_template_id,
+            LeadFormTemplate.tenant_id == tpl.tenant_id).first()
+        if ft:
+            # 已部署到同 page → 复用
+            if ft.fb_form_id and ft.fb_page_id == page_id:
+                return ft.fb_form_id
+            cfg = {}
+            if ft.config_json:
+                try: cfg = json.loads(ft.config_json)
+                except: cfg = {}
+            from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
+            payload = build_lead_form_payload(
+                form_title=cfg.get("form_title", ft.name),
+                privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                locale=cfg.get("locale", ft.locale or "en_US"),
+                target_countries=cfg.get("target_countries", []),
+                description=cfg.get("description", ""),
+                custom_questions=cfg.get("custom_questions", []),
+                extra_contact_fields=cfg.get("extra_contact_fields", ["EMAIL"]),
+                privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
+                thank_you_title=cfg.get("thank_you_title", ""),
+                thank_you_body=cfg.get("thank_you_body", ""),
+                thank_you_button_text=cfg.get("thank_you_button_text", ""),
+                thank_you_website_url=cfg.get("thank_you_website_url", landing_url),
+                follow_up_url=cfg.get("follow_up_url", landing_url),
+                context_card_title=cfg.get("context_card_title", ""),
+                name_prefix="Tova",
+            )
+            try:
+                result = fb.post(f"{page_id}/leadgen_forms", payload)
+                form_id = result.get("id")
+                if not form_id:
+                    safe = lead_form_safe_payload(payload)
+                    result = fb.post(f"{page_id}/leadgen_forms", safe)
+                    form_id = result.get("id")
+                if form_id:
+                    # 缓存到模板（下次同 page 复用）。多 page 部署时只缓存第一个 page 的（保守）
+                    if not ft.fb_form_id:
+                        ft.fb_form_id = form_id; ft.fb_page_id = page_id
+                    return form_id
+            except Exception:
+                pass  # 落到 AI 兜底
+    # 兜底：AI 自动生成
+    if asset and page_id:
+        return _ai_auto_create_form(fb, sdb, asset, page_id, landing_url)
+    return ""
+
+
 def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) -> str:
     """没选表单模板时，从素材 AI 文案自动生成 Instant Form + 建到 FB。返回 form_id。"""
     from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
@@ -384,13 +482,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 page_id = item.page_id or tpl.page_id
                 pixel_id = item.pixel_id or tpl.pixel_id
                 daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
-                # 没选表单模板 → AI 从素材自动生成表单 + 建到 FB（LEADS 目标）
-                lead_form_id = tpl.lead_form_id or ""
-                if not lead_form_id and tpl.objective == "OUTCOME_LEADS" and page_id and asset:
+                # 解析 Instant Form ID：表单模板 > 已建 form_id > AI 自动生成（LEADS 目标）
+                lead_form_id = ""
+                if tpl.objective == "OUTCOME_LEADS" and page_id:
                     try:
-                        lead_form_id = _ai_auto_create_form(fb, sdb, asset, page_id, tpl.landing_url or "")
+                        lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "")
                     except Exception:
-                        pass  # AI 生成/建表单失败不阻断主流程（FB 会用默认表单或报错）
+                        pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
                 # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）
                 message_template = tpl.message_template or ""
                 if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT" and asset:

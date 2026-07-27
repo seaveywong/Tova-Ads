@@ -223,6 +223,63 @@ const LANGS = [
   { v: '31', l: '越南语' },{ v: '34', l: '泰语' },{ v: '32', l: '印尼语' },{ v: '27', l: '日语' },
   { v: '28', l: '韩语' },{ v: '12', l: '西班牙语' },{ v: '14', l: '葡萄牙语' },{ v: '15', l: '阿拉伯语' },
 ]
+// 归因窗口预设 → FB attribution_spec（仅转化类目标生效）
+const ATTRIBUTIONS = [
+  { v: '', l: '默认（FB 自动）' },
+  { v: '1d_click', l: '1天点击' },
+  { v: '7d_click', l: '7天点击' },
+  { v: '1d_click_1d_view', l: '1天点击 + 1天浏览' },
+  { v: '7d_click_1d_view', l: '7天点击 + 1天浏览' },
+]
+function attributionToSpec(preset) {
+  const C = (d) => [{ event_type: 'CLICK', window_days: d }]
+  if (preset === '1d_click') return C(1)
+  if (preset === '7d_click') return C(7)
+  if (preset === '1d_click_1d_view') return [{ event_type: 'CLICK', window_days: 1 }, { event_type: 'IMPRESSION', window_days: 1 }]
+  if (preset === '7d_click_1d_view') return [{ event_type: 'CLICK', window_days: 7 }, { event_type: 'IMPRESSION', window_days: 1 }]
+  return null
+}
+// Dayparting 网格
+const DPA_DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const DPA_FB_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+const emptyGrid = () => Array.from({ length: 7 }, () => Array(24).fill(false))
+// 7×24 矩阵 → FB day_parting_schedule（按天压缩连续时段）
+function gridToSchedule(cells) {
+  const sched = []
+  cells.forEach((hours, di) => {
+    let start = -1
+    for (let h = 0; h <= 24; h++) {
+      const on = h < 24 && hours[h]
+      if (on && start < 0) start = h
+      else if (!on && start >= 0) {
+        sched.push({ days: [DPA_FB_DAYS[di]], start_minute: start * 60, end_minute: h * 60 })
+        start = -1
+      }
+    }
+  })
+  return sched
+}
+// 反向：FB schedule → 7×24 矩阵
+function scheduleToGrid(sched) {
+  const g = emptyGrid()
+  if (!Array.isArray(sched)) return g
+  const dayIdx = Object.fromEntries(DPA_FB_DAYS.map((d, i) => [d, i]))
+  for (const r of sched) {
+    const dis = (r.days || []).map(d => dayIdx[d]).filter(i => i !== undefined)
+    const sm = Math.floor((r.start_minute || 0) / 60)
+    const em = Math.ceil((r.end_minute || 0) / 60)
+    for (const di of dis) for (let h = sm; h < em && h < 24; h++) if (h >= 0) g[di][h] = true
+  }
+  return g
+}
+const toggleCell = (di, h) => { form.value.daypart_cells[di][h] = !form.value.daypart_cells[di][h] }
+const dpaFillAll = () => { form.value.daypart_cells = emptyGrid().map(r => r.map(() => true)) }
+const dpaClearAll = () => { form.value.daypart_cells = emptyGrid() }
+const dpaFillWorkhours = () => {
+  const g = emptyGrid()
+  for (let di = 0; di < 7; di++) for (let h = 9; h < 22; h++) g[di][h] = true
+  form.value.daypart_cells = g
+}
 
 const load = async () => {
   loading.value = true
@@ -230,6 +287,23 @@ const load = async () => {
   loading.value = false
 }
 const loadLandingPages = async () => { try { landingPages.value = await GET('/landing/pages') } catch {} }
+const onLandingChange = async () => {
+  // 选了落地页 → 自动填 public_url + 拉该页子码
+  const p = landingPages.value.find(x => x.id === form.value.landing_page_id)
+  if (p?.public_url) form.value.landing_url = p.public_url
+  // 换页后清掉旧子码（不属于新页）
+  if (form.value.subcode_slug && !subcodesForLanding.value.some(s => s.slug === form.value.subcode_slug)) {
+    form.value.subcode_slug = ''
+  }
+  if (form.value.landing_page_id) {
+    try {
+      const r = await GET(`/subcodes?page_id=${form.value.landing_page_id}&status=all`)
+      // 合并进 allSubcodes（去重，保留其他页的缓存）
+      const others = allSubcodes.value.filter(s => s.page_id !== form.value.landing_page_id)
+      allSubcodes.value = [...others, ...(r.items || [])]
+    } catch {}
+  }
+}
 onMounted(() => { load(); loadLandingPages(); loadFormMsgTemplates() })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
@@ -277,6 +351,12 @@ const accLoadingConfig = ref(new Set())
 // 表单/消息模板
 const formTemplates = ref([])
 const msgTemplates = ref([])
+// 子码（按选中落地页过滤）
+const allSubcodes = ref([])
+const subcodesForLanding = computed(() => {
+  if (!form.value.landing_page_id) return []
+  return allSubcodes.value.filter(s => s.page_id === form.value.landing_page_id)
+})
 const selectedFormTpl = ref(null)
 const selectedMsgTpl = ref(null)
 const formPreviewOpen = ref(false)
@@ -286,15 +366,17 @@ const loadFormMsgTemplates = async () => {
   try { msgTemplates.value = await GET('/form-templates/messages') } catch {}
 }
 const onFormTplChange = (id) => {
-  if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; return }
+  if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; form.value.lead_form_template_id = 0; return }
   const t = formTemplates.value.find(f => f.id === id)
   selectedFormTpl.value = t || null
-  form.value.lead_form_id = t?.fb_form_id || ''  // 有fb_form_id的直接用，没有的部署时建
+  form.value.lead_form_template_id = id
+  form.value.lead_form_id = t?.fb_form_id || ''  // 有fb_form_id的直接用，没有的部署时按模板config建
 }
 const onMsgTplChange = (id) => {
-  if (!id) { selectedMsgTpl.value = null; form.value.message_template = ''; return }
+  if (!id) { selectedMsgTpl.value = null; form.value.message_template = ''; form.value.message_template_id = 0; return }
   const t = msgTemplates.value.find(m => m.id === id)
   selectedMsgTpl.value = t || null
+  form.value.message_template_id = id
   // 存成 JSON（parse_message_template 兼容 JSON 串/纯文本/dict）
   form.value.message_template = t ? JSON.stringify({ text: t.welcome_text, ice_breakers: t.ice_breakers||[] }) : ''
 }
@@ -320,6 +402,8 @@ const blankForm = () => ({
   manual_placement: false, placement_platforms: [], placement_devices: ['desktop','mobile'],
   facebook_positions: [], instagram_positions: [], messenger_positions: [], audience_network_positions: [],
   frequency_cap: 0,
+  attribution_preset: '',
+  daypart_enabled: false, daypart_cells: emptyGrid(), daypart_tz: '',
 })
 const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
 // 卡片完整性判断（列表用，不需打开编辑器）
@@ -357,6 +441,20 @@ const openEdit = async (t) => {
       }
       if (adv.frequency_control_specs) f.frequency_cap = adv.frequency_control_specs[0]?.max_frequency || 0
       if (adv.bid_amount) performance_goal_cpa.value = adv.bid_amount / 100
+      // 归因窗口：反推 preset（匹配常见组合，不匹配则留空）
+      if (Array.isArray(adv.attribution_spec) && adv.attribution_spec.length) {
+        const sig = adv.attribution_spec.map(x => `${x.event_type}:${x.window_days}`).sort().join(',')
+        const map = { 'CLICK:1': '1d_click', 'CLICK:7': '7d_click',
+          'CLICK:1,IMPRESSION:1': '1d_click_1d_view', 'CLICK:7,IMPRESSION:1': '7d_click_1d_view' }
+        f.attribution_preset = map[sig] || ''
+      }
+      // Dayparting：有 day_parting_schedule 表示启用
+      if (Array.isArray(adv.day_parting_schedule) && adv.day_parting_schedule.length) {
+        f.daypart_enabled = true
+        f.daypart_cells = scheduleToGrid(adv.day_parting_schedule)
+      } else {
+        f.daypart_enabled = false; f.daypart_cells = emptyGrid()
+      }
     } catch {}
   }
   // Advantage+ 受众默认值：有手动兴趣 → 关（保留用户的手动定向）；无 → 开
@@ -367,6 +465,14 @@ const openEdit = async (t) => {
   form.value = f
   editingAsset.value = null
   if (t.asset_id) { try { editingAsset.value = await GET('/assets/' + t.asset_id) } catch {} }
+  // 已绑落地页 → 预拉子码（填充子码下拉）
+  if (f.landing_page_id) {
+    try {
+      const r = await GET(`/subcodes?page_id=${f.landing_page_id}&status=all`)
+      const others = allSubcodes.value.filter(s => s.page_id !== f.landing_page_id)
+      allSubcodes.value = [...others, ...(r.items || [])]
+    } catch {}
+  }
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
@@ -442,6 +548,9 @@ const saveTpl = async () => {
       landing_url: form.value.landing_url, cta_type: form.value.cta_type,
       subcode_slug: form.value.subcode_slug, ad_language: form.value.ad_language,
       message_template: form.value.message_template, lead_form_id: form.value.lead_form_id,
+      landing_page_id: form.value.landing_page_id || null,
+      lead_form_template_id: form.value.lead_form_template_id || 0,
+      message_template_id: form.value.message_template_id || 0,
       beneficiary: form.value.beneficiary, payer: form.value.payer,
     }
     // Advantage+ 设置 + 性能目标 + 版位 + 频次 合并进 advanced_config
@@ -478,6 +587,17 @@ const saveTpl = async () => {
           event: 'IMPRESSIONS', interval_days: 1, max_frequency: form.value.frequency_cap, type: 'CAP'
         }]
       }
+      // 归因窗口（仅转化类目标）
+      const aSpec = attributionToSpec(form.value.attribution_preset)
+      if (aSpec) adv.attribution_spec = aSpec
+      // 时段投放 Dayparting（FB 用广告账户时区，不传 timezone）
+      if (form.value.daypart_enabled) {
+        const sched = gridToSchedule(form.value.daypart_cells)
+        if (sched.length) {
+          adv.day_parting_schedule = sched
+          adv.pacing_type = ['day_parting']
+        }
+      }
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
     if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success('已保存') }
@@ -489,6 +609,13 @@ const saveTpl = async () => {
 const removeTpl = async (t) => {
   try { await ElMessageBox.confirm(`归档模板「${t.name}」？`, '确认', { type: 'warning' }); await DELETE('/launch-templates/' + t.id); ElMessage.success('已归档'); await load() }
   catch (e) { if (e === 'cancel') return }
+}
+const copyTpl = async (t) => {
+  try {
+    const r = await POST('/launch-templates/' + t.id + '/copy', {})
+    ElMessage.success(`已复制为「${r.name}」`)
+    await load()
+  } catch (e) { showError(e, '复制失败') }
 }
 // 预检
 const preflighting = ref(false)
@@ -582,6 +709,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(t)">部署</button>
           <button class="op" @click="openEdit(t)">编辑</button>
+          <button class="op" @click="copyTpl(t)" title="复制一份做变体">复制</button>
           <button class="op danger" @click="removeTpl(t)">归档</button>
         </div>
       </div>
@@ -722,11 +850,44 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>受益人 beneficiary</label><input v-model="form.beneficiary" class="inp" placeholder="EU/泰国/印度/巴西/台湾/澳洲/新加坡等必填" /></div>
         <div class="row"><label>付款人</label><input v-model="form.payer" class="inp" /></div>
         <hr class="sep" />
-        <div class="sec-title">频次控制</div>
+        <div class="sec-title">投放节奏</div>
         <div class="row"><label>频次上限（次 / 天，0=不限）</label><input v-model.number="form.frequency_cap" type="number" min="0" class="inp" placeholder="0" /></div>
+        <div class="row"><label>归因窗口</label>
+          <el-select v-model="form.attribution_preset" style="width:100%" size="small" clearable placeholder="默认（FB 自动）">
+            <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="a.l" />
+          </el-select>
+          <span class="hint">仅转化类目标（销售/线索/应用安装）生效；控制多久内的点击/浏览算转化</span>
+        </div>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <label style="margin:0">时段投放（只在指定时段跑广告）</label>
+            <el-switch v-model="form.daypart_enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+          </div>
+          <template v-if="form.daypart_enabled">
+            <div class="dpa-tools">
+              <button type="button" class="op sm" @click="dpaFillAll">全天</button>
+              <button type="button" class="op sm" @click="dpaFillWorkhours">工作时段 9-22</button>
+              <button type="button" class="op sm" @click="dpaClearAll">清空</button>
+              <span class="hint">点格子切换该时段；按广告账户时区生效</span>
+            </div>
+            <div class="dpa-grid">
+              <div class="dpa-corner"></div>
+              <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 点</span></div>
+              <template v-for="di in 7" :key="'d'+di">
+                <div class="dpa-rhdr">{{ DPA_DAYS[di-1] }}</div>
+                <div class="dpa-row">
+                  <div v-for="h in 24" :key="di+'_'+h"
+                       :class="['dpa-cell', form.daypart_cells[di-1][h-1] ? 'on' : '']"
+                       :title="DPA_DAYS[di-1] + ' ' + (h-1) + ':00'"
+                       @click="toggleCell(di-1, h-1)"></div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
         <hr class="sep" />
-        <div class="sec-title">高级（JSON，可选）</div>
-        <div class="row"><label>高级设置</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500}'></textarea><span class="hint">可选，进阶 FB API 字段（JSON），部署时合并</span></div>
+        <div class="sec-title">高级字段（JSON，可选）</div>
+        <div class="row"><label>高级设置</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500}'></textarea><span class="hint">进阶 FB API 字段（JSON），与上方结构化设置合并；留空即可</span></div>
       </div>
 
       <!-- ③ 广告 -->
@@ -761,13 +922,18 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>行动号召 CTA</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="c.l + '（' + c.v + '）'" /></el-select></div>
         <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">主页和像素在部署时按账户选择（不同账户的主页/像素不同）</div>
         <div class="row"><label>落地页</label>
-          <select v-model="form.landing_page_id" class="inp" @change="form.landing_url = (landingPages.find(p=>p.id==form.landing_page_id)?.public_url || form.landing_url)">
+          <select v-model="form.landing_page_id" class="inp" @change="onLandingChange">
             <option :value="null">手动填 URL</option>
             <option v-for="p in landingPages" :key="p.id" :value="p.id">{{ p.title }}（{{ p.public_url || '无URL' }}）</option>
           </select>
         </div>
         <div class="row"><label>落地页 URL</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
-        <div class="row"><label>子码 slug</label><input v-model="form.subcode_slug" class="inp" placeholder="留空=不绑子码" /></div>
+        <div class="row"><label>子码</label>
+          <el-select v-model="form.subcode_slug" filterable clearable placeholder="选该落地页的子码（留空=不绑）" style="width:100%" size="small">
+            <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + (s.status ? ' ('+s.status+')' : '')" />
+          </el-select>
+          <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">该落地页暂无子码，部署时会自动创建</span>
+        </div>
         <!-- 消息类（ENGAGEMENT + 消息目标） -->
         <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">消息广告</span>
@@ -1131,6 +1297,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
 /* 版位树 */
 .placement-chips{display:flex;gap:6px;flex-wrap:wrap}
+/* Dayparting 时段网格 */
+.dpa-tools{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.dpa-tools .op.sm{padding:2px 8px;font-size:11px}
+.dpa-grid{display:grid;grid-template-columns:32px 1fr;grid-auto-rows:auto;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:8px;background:var(--bg2)}
+.dpa-corner{grid-column:1;grid-row:1}
+.dpa-hhdr{grid-column:2;grid-row:1;display:flex;justify-content:space-between;font-size:9px;color:var(--t3);padding:0 2px 3px}
+.dpa-rhdr{grid-column:1;font-size:10px;color:var(--t3);display:flex;align-items:center;justify-content:center}
+.dpa-row{grid-column:2;display:grid;grid-template-columns:repeat(24,1fr);gap:2px}
+.dpa-cell{height:16px;border-radius:3px;background:var(--bg3);border:1px solid var(--bd);cursor:pointer;transition:background .1s}
+.dpa-cell.on{background:var(--ac);border-color:var(--ac)}
+.dpa-cell:hover{outline:1px solid var(--t3)}
 .placement-chip{font-size:12px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:4px}
 .placement-chip input{margin:0}
 .placement-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}

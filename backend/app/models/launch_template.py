@@ -42,6 +42,10 @@ class LaunchTemplate(Base):
     ad_language = Column(Text)
     message_template = Column(Text)  # Messenger 欢迎语（ENGAGEMENT+消息）
     lead_form_id = Column(Text)      # Instant Form ID（LEADS）
+    # 编辑器选中态持久化（迁移0054）：落地页=子码下拉过滤依据；表单/消息模板=回显+部署解析
+    landing_page_id = Column(BigInteger)
+    lead_form_template_id = Column(Integer)
+    message_template_id = Column(Integer)
     # 受益人/付款人披露（EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制；FB adset 的 dsa_beneficiary/dsa_payor）
     beneficiary = Column(Text)
     payer = Column(Text)
