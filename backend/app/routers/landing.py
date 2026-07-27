@@ -1100,16 +1100,31 @@ def _emit_health_alert(db, p, res):
         _level, _prefix = "warning", "⚠️ 落地页自检未通过"
     else:
         _level, _prefix = "info", "落地页自检有提醒"
+    # 受影响广告数：该页 active/reserved 子码里已绑广告的（屏蔽影响面，告知用，不做自动切换）
+    try:
+        from ..models.launch import LandingAdLink
+        _affected = db.query(LandingAdLink).filter(
+            LandingAdLink.page_id == p.id,
+            LandingAdLink.tenant_id == p.tenant_id,
+            LandingAdLink.status.in_(["active", "reserved"]),
+            LandingAdLink.ad_id.isnot(None),
+            LandingAdLink.ad_id != "",
+        ).count()
+    except Exception:
+        _affected = 0
+    _body = (res.get("summary") or "").strip()
+    if _affected:
+        _body = (f"影响 {_affected} 个已绑广告。" + _body).strip()
     write_log(db, tenant_id=p.tenant_id, trace_id=_tid, actor_type="system",
               action_type="landing_health_alert", source="landing",
               target_type="landing_page", target_id=str(p.id), result="success",
-              metadata={"overall": res["overall"], "summary": (res.get("summary") or "")[:100]})
+              metadata={"overall": res["overall"], "summary": (res.get("summary") or "")[:100], "affected_ads": _affected})
     emit_notification(db, tenant_id=p.tenant_id, level=_level,
                       event_type="landing_health", trace_id=_tid,
                       target_type="landing_page", target_id=str(p.id),
                       roles=["owner", "operator"],
                       title=f"{_prefix}：{p.title}",
-                      body=(res.get("summary") or "")[:200])
+                      body=_body[:200])
 
 
 @router.get("/pages/{pid}/health")

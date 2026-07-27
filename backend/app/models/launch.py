@@ -66,6 +66,8 @@ class LandingPage(Base):
     last_health_status = Column(Text)   # pass/warn/fail（自检结果）
     last_health_summary = Column(Text)  # 自检摘要
     last_health_checked_at = Column(DateTime(timezone=True))
+    last_fb_status = Column(Text)       # FB 屏蔽探测：pass/fail/warn（fail=被FB屏）；看板/通知直接读
+    last_fb_checked_at = Column(DateTime(timezone=True))
     ingest_secret = Column(Text)
     protection_rules = Column(Text)
     status = Column(Text, default="draft")

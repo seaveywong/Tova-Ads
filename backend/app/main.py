@@ -122,7 +122,7 @@ _scheduler = BackgroundScheduler()
 
 @app.on_event("startup")
 def _start_scheduler():
-    from .services.guard_engine import run_inspection, run_watchdog, run_reassociate, run_subcode_autobind, run_sentinel_patrol, run_subcode_cleanup
+    from .services.guard_engine import run_inspection, run_watchdog, run_reassociate, run_subcode_autobind, run_sentinel_patrol, run_subcode_cleanup, run_landing_block_scan
     from .services.budget_alerts import run_budget_alerts
     from .services.account_sync import run_account_status_sync
     from .services.ads_cache_sync import run_ads_cache_sync
@@ -143,6 +143,8 @@ def _start_scheduler():
     _scheduler.add_job(run_account_status_sync, "interval", minutes=_eff["account_sync"], id="account_status_sync")
     _scheduler.add_job(run_ads_cache_sync, "interval", minutes=15, id="ads_cache_sync")
     _scheduler.add_job(run_subcode_cleanup, "cron", hour=4, minute=17, id="subcode_cleanup")
+    # 落地页 FB 屏蔽自动探测：每 1h 扫所有 published 页（Graph scrape），屏蔽→critical 告警 + 看板红标
+    _scheduler.add_job(run_landing_block_scan, "interval", minutes=60, id="landing_block_scan")
     # 数据保留：每日 4:33 按配置清理老数据（perf/events/审计/告警等）
     from .core.retention import run_data_retention
     _scheduler.add_job(run_data_retention, "cron", hour=4, minute=33, id="data_retention")

@@ -1003,6 +1003,63 @@ def run_reassociate():
         release_run_lock(lock, 104)
 
 
+def run_landing_block_scan():
+    """定时 FB 屏蔽探测（每 1h）：对所有 published 落地页跑完整自检（含 FB Graph scrape），
+    持久化 last_fb_status + last_health_*，屏蔽则 emit critical 告警。
+    复用 _run_self_check 保持与手动 /health 完全一致；first_client 取令牌（多令牌场景由 first_client 兜底）。
+    不做自动切换（切换需改 FB 广告 URL，风险高）——只告知，人工处理。
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    from ..models.launch import LandingPage
+    from ..routers.landing import _run_self_check, _emit_health_alert
+    lock = acquire_run_lock(107)
+    if not lock:
+        return {"skipped": "lock_busy"}
+    db = SuperSessionLocal()
+    try:
+        pages = db.query(LandingPage).filter(
+            LandingPage.status == "published",
+            LandingPage.custom_domain.isnot(None),
+        ).all()
+        scanned = blocked = 0
+        for p in pages:
+            try:
+                res = _run_self_check(db, p, include_fb=True, live_probe=True)
+                # FB 屏蔽态：fb_ban + fb_subcode 取最差（fail>warn>pass；无 FB 检查项=令牌不可用→null）
+                fb_checks = [c for c in (res.get("checks") or []) if c.get("key") in ("fb_ban", "fb_subcode")]
+                if not fb_checks:
+                    fb_status = None
+                elif any(c.get("status") == "fail" for c in fb_checks):
+                    fb_status = "fail"
+                elif any(c.get("status") == "warn" for c in fb_checks):
+                    fb_status = "warn"
+                else:
+                    fb_status = "pass"
+                now = _dt.now(_tz.utc)
+                p.last_health_status = res.get("overall")
+                p.last_health_summary = res.get("summary")
+                p.last_health_checked_at = now
+                p.last_fb_status = fb_status
+                p.last_fb_checked_at = now
+                db.commit()
+                scanned += 1
+                if fb_status == "fail":
+                    blocked += 1
+                _emit_health_alert(db, p, res)  # fb 屏蔽→critical；6h dedup per page
+            except Exception as e:
+                logger.warning(f"[LandingBlockScan] page {getattr(p,'id','?')} 失败: {e}")
+                db.rollback()
+        if blocked:
+            logger.info(f"[LandingBlockScan] 扫描 {scanned} 页，{blocked} 个疑似被 FB 屏蔽")
+        return {"scanned": scanned, "blocked": blocked}
+    except Exception as e:
+        logger.error(f"[LandingBlockScan] 异常: {e}", exc_info=True)
+        return {"error": str(e)}
+    finally:
+        db.close()
+        release_run_lock(lock, 107)
+
+
 def run_sentinel_patrol():
     """哨兵巡逻（doc 03 §4，1.0 sentinel_patrol 移植）：armed 账户的 ACTIVE 系列→直接全停。
 
