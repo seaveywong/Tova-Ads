@@ -136,7 +136,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
     )
     ad = fb.post(f"{act}/ads", {
-        "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "ACTIVE", "creative": creative,
+        "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "PAUSED", "creative": creative,
     })
     ad_id = ad.get("id")
     if not ad_id:
