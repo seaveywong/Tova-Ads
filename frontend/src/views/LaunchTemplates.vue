@@ -213,7 +213,7 @@ const LANGS = [
   { v: '', l: '不限' },{ v: '24', l: '英语（美国）' },{ v: '6', l: '英语（英国）' },{ v: '37', l: '英语（所有）' },
   { v: '5', l: '中文（简体）' },{ v: '2', l: '中文（繁体）' },{ v: '1', l: '中文（所有）' },
   { v: '31', l: '越南语' },{ v: '34', l: '泰语' },{ v: '32', l: '印尼语' },{ v: '27', l: '日语' },
-  { v: '28', l: '韩语' },{ v: '12', l: '西班牙语' },{ v: '14', l: '葡萄牙语' },{ v: '14', l: '阿拉伯语' },
+  { v: '28', l: '韩语' },{ v: '12', l: '西班牙语' },{ v: '14', l: '葡萄牙语' },{ v: '15', l: '阿拉伯语' },
 ]
 
 const load = async () => {
@@ -333,10 +333,33 @@ const openEdit = async (t) => {
   const f = blankForm()
   Object.assign(f, t)
   if (t.audience_json) { try { const a = JSON.parse(t.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
+  // 从 advanced_config 恢复 Advantage+ / 版位 / 频次 / CPA（P0-3/P0-4 fix）
+  if (t.advanced_config) {
+    try {
+      const adv = JSON.parse(t.advanced_config)
+      advantage_creative.value = !!adv.is_dynamic_creative
+      if (adv.targeting) {
+        const tg = adv.targeting
+        if (tg.publisher_platforms) { f.manual_placement = true; f.placement_platforms = tg.publisher_platforms }
+        if (tg.device_platforms) f.placement_devices = tg.device_platforms
+        for (const p of PLATFORMS) {
+          const key = p.v + '_positions'
+          if (tg[key]) f[key] = tg[key]
+        }
+      }
+      if (adv.frequency_control_specs) f.frequency_cap = adv.frequency_control_specs[0]?.max_frequency || 0
+      if (adv.bid_amount) performance_goal_cpa.value = adv.bid_amount / 100
+    } catch {}
+  }
+  // Advantage+ 受众默认值：有手动兴趣 → 关（保留用户的手动定向）；无 → 开
+  advantage_audience.value = (f.audience_interests || []).length === 0
+  // 恢复表单/消息模板选中状态（P0-2 fix）
+  if (f.lead_form_template_id) { try { selectedFormTpl.value = formTemplates.value.find(x => x.id === f.lead_form_template_id) || null } catch {} }
+  if (f.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === f.message_template_id) || null } catch {} }
   form.value = f
   editingAsset.value = null
   if (t.asset_id) { try { editingAsset.value = await GET('/assets/' + t.asset_id) } catch {} }
-  editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm()
+  validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
   form.value.asset_id = a.id
@@ -415,7 +438,11 @@ const saveTpl = async () => {
     }
     // Advantage+ 设置 + 性能目标 + 版位 + 频次 合并进 advanced_config
     try {
-      let adv = body.advanced_config ? JSON.parse(body.advanced_config) : {}
+      let adv = {}
+      if (body.advanced_config) {
+        try { adv = JSON.parse(body.advanced_config) }
+        catch { ElMessage.warning('高级设置 JSON 格式错误，已忽略'); adv = {} }
+      }
       // 性能目标 CPA（COST_CAP 时生效）
       if (performance_goal_cpa.value > 0) {
         body.bid_strategy = 'COST_CAP'
@@ -625,11 +652,6 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </el-select>
         </div>
         <template v-if="!advantage_audience">
-        <div class="row"><label>兴趣关键词（FB adinterest 搜索）</label>
-          <el-select v-model="form.audience_language" filterable clearable placeholder="不限语言" style="width:100%" size="small">
-            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
-          </el-select>
-        </div>
         <div class="row"><label>兴趣关键词（FB adinterest 搜索）</label>
           <div class="interest-search">
             <input v-model="interestQ" class="inp" placeholder="如 Shopping / 美妆 / 投资" @keyup.enter="searchInterests" />
