@@ -195,7 +195,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         </div>
         <hr class="sep" />
         <div class="sec-title-row"><span class="sec-title">自定义问题</span><button class="btn sm" @click="addQuestion">+ 加问题</button>
-          <button class="btn sm ghost" @click="openAssetPicker" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?'AI 生成中…':'AI 从素材生成' }}</button>
+          <button class="btn sm ghost" @click="openAssetPicker" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?'智能生成中…':'根据素材智能生成问题' }}</button>
         </div>
         <div v-for="(q,i) in fCfg.custom_questions" :key="i" class="question-block">
           <div class="qb-head"><span>问题 {{i+1}}</span><button class="del-btn" @click="removeQuestion(i)">✕</button></div>
@@ -248,7 +248,8 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     </el-drawer>
 
     <!-- 素材选择器（AI 生成用） -->
-    <el-drawer v-model="assetPickerOpen" title="选素材 → AI 生成表单" direction="rtl" size="520px" append-to-body>
+    <el-drawer v-model="assetPickerOpen" title="选择素材 → 自动生成表单问题" direction="rtl" size="520px" append-to-body>
+      <div class="hint" style="margin-bottom:10px">系统会根据素材的 AI 文案内容，自动推荐 2-4 个相关的问题（如"您对哪类产品感兴趣？"），生成后可自由修改。</div>
       <div class="picker-grid">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="aiGenerate(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
