@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
+import { isSuperadminSync } from '../router'
+const isSuper = isSuperadminSync()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
 // 自定义 overlay 用 EP 的 nextZIndex 取 z-index，保证在 el-drawer(2000+) 之上，
@@ -551,32 +553,24 @@ const deleteToken = async (t) => {
       <div class="modal wide">
         <div class="m-title">App 配置</div>
         <div class="app-list" v-loading="appLoading">
-          <div v-if="systemApps.length" class="app-group">
-            <div class="app-group-h">系统级（平台共享 · 超管管理）</div>
-            <div v-for="a in systemApps" :key="a.id" class="app-row">
-              <span class="app-n">{{ a.name || a.app_id }}</span>
-              <span class="badge sys">系统级</span>
-              <span class="app-id">{{ a.app_id }}</span>
-              <div class="app-ops"><button class="mb" @click="editApp(a)">编</button><button class="mb danger" @click="deleteApp(a)">删</button></div>
-            </div>
-          </div>
-          <div v-if="myApps.length" class="app-group">
-            <div class="app-group-h">我的（本租户私有）</div>
-            <div v-for="a in myApps" :key="a.id" class="app-row">
-              <span class="app-n">{{ a.name || a.app_id }}</span>
-              <span class="badge">我的</span>
-              <span class="app-id">{{ a.app_id }}</span>
-              <div class="app-ops"><button class="mb" @click="editApp(a)">编</button><button class="mb danger" @click="deleteApp(a)">删</button></div>
-            </div>
+          <div v-for="a in apps" :key="a.id" class="app-row">
+            <span class="app-n">{{ a.name || a.app_id }}</span>
+            <span v-if="a.is_system" class="badge sys">系统级</span>
+            <span class="app-id">{{ a.app_id }}</span>
+            <div class="app-ops"><button class="mb" @click="editApp(a)">编</button><button class="mb danger" @click="deleteApp(a)">删</button></div>
           </div>
           <div v-if="!apps.length && !appLoading" class="empty">暂无 App</div>
         </div>
         <div class="app-form">
-          <div class="form-h">{{ appEditing ? '编辑 App' : '添加 App' }}</div>
+          <div class="form-h">
+            {{ appEditing ? '编辑 App' : (appForm.is_system ? '添加系统级 App' : '添加 App') }}
+            <a v-if="isSuper && !appEditing" class="sys-toggle" @click="appForm.is_system = !appForm.is_system">
+              {{ appForm.is_system ? '← 改回普通 App' : '添加系统级 App →' }}
+            </a>
+          </div>
           <div class="af-row"><label>名称</label><input v-model="appForm.name" class="input" placeholder="可选（备注名）" /></div>
           <div class="af-row"><label>App ID</label><input v-model="appForm.app_id" class="input" placeholder="必填" /></div>
           <div class="af-row"><label>Secret</label><input v-model="appForm.app_secret" class="input" type="password" placeholder="必填" /></div>
-          <label class="af-ck"><input type="checkbox" v-model="appForm.is_system" /><span>系统级 App（全租户共享，超管管理）</span></label>
           <div class="af-btns">
             <button class="btn primary" @click="saveApp">{{ appEditing ? '更新' : '添加' }}</button>
             <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">取消</button>
@@ -721,7 +715,8 @@ const deleteToken = async (t) => {
 .app-id{font-size:10px;color:var(--t3);font-family:'SF Mono',monospace}
 .app-ops{margin-left:auto;display:flex;gap:3px}
 .app-form{border-top:1px solid var(--bd);padding-top:12px}
-.form-h{font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;letter-spacing:.5px}
+.form-h{font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between}
+.sys-toggle{font-size:11px;text-transform:none;letter-spacing:0;color:var(--ac);cursor:pointer;text-decoration:underline}
 .af-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .af-row label{font-size:12px;color:var(--t3);width:60px;text-align:right;flex-shrink:0}
 .af-row .input{flex:1;min-width:0}
