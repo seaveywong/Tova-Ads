@@ -231,6 +231,7 @@ class AiGenerateFormIn(BaseModel):
     asset_id: int
     country: str = ""
     product_desc: str = ""
+    locale: str = "en_US"  # 表单语言（en_US=英文, zh_TW=繁中, vi_VN=越南...）
 
 
 @router.post("/forms/ai-generate")
@@ -250,20 +251,24 @@ def ai_generate_form(body: AiGenerateFormIn,
     headlines = copy.get("headlines", [])
     bodies = copy.get("bodies", [])
     lang_note = f"目标投放国家：{body.country or '未指定'}" if body.country else ""
+    # 按 locale 决定表单输出语言（不再固定中文）
+    LOCALE_LANG = {
+        "en_US": "English", "en_GB": "English (UK)", "zh_TW": "繁體中文", "zh_CN": "简体中文",
+        "vi_VN": "Tiếng Việt", "th_TH": "ภาษาไทย", "id_ID": "Bahasa Indonesia",
+        "ja_JP": "日本語", "ko_KR": "한국어", "es_ES": "Español", "pt_BR": "Português",
+    }
+    out_lang = LOCALE_LANG.get(body.locale, "English")
     sys_msg = ("你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。"
                "严格只返回 JSON，不要解释。")
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n"
         f"{lang_note}\n产品描述：{body.product_desc or '（从广告素材推断）'}\n\n"
+        f"**表单所有内容（标题/描述/问题/选项/感谢页）必须用 {out_lang} 输出。**\n\n"
         "生成 Instant Form 配置 JSON：\n"
-        '{"form_title":"表单标题(简洁,吸引提交)","description":"表单说明(1句话)",'
-        '"custom_questions":[{"key":"contact_preference","label":"您希望通过哪种方式联系我们？","options":[{"key":"whatsapp","value":"WhatsApp"},{"key":"phone","value":"电话"},{"key":"email","value":"邮件"}]},'
-        '{"key":"budget_range","label":"您的预算范围？","options":[{"key":"low","value":"100以下"},{"key":"mid","value":"100-500"},{"key":"high","value":"500以上"}]},'
-        '{"key":"urgency","label":"您何时需要服务？","placeholder":"如：一周内"}],'
-        '"extra_contact_fields":["EMAIL","PHONE"],"thank_you_title":"感谢页标题","thank_you_body":"感谢页正文"}\n'
-        "生成 2-4 个通用且有商业价值的问题（联系方式偏好/预算/紧迫度/需求描述），"
-        "不要生成和具体产品细节绑定的问题（如'有几根线缆'这种）。"
-        "问题应该适用于大多数行业的潜在客户收集。"
+        '{"form_title":"","description":"","custom_questions":[],'
+        '"extra_contact_fields":["EMAIL","PHONE"],"thank_you_title":"","thank_you_body":""}\n'
+        "生成 2-4 个通用商业问题（联系方式偏好/预算/紧迫度/需求描述），"
+        "不要和具体产品细节绑定。所有文本用指定语言输出。"
     )
     try:
         data = ai.chat_json(
