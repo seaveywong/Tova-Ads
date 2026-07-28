@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_superadmin
+from ..core.deps import CurrentUser, require_superadmin, require_permission
 from ..core.schedule_config import (get_schedule_config, save_schedule_config,
                                      effective_intervals, DEFAULT_SCHEDULE)
 from ..core.retention import (get_retention_config, save_retention_config,
@@ -253,13 +253,13 @@ def run_fx_now(user: CurrentUser = Depends(require_superadmin)):
 
 
 @router.get("/keepalive")
-def get_keepalive(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
+def get_keepalive(user: CurrentUser = Depends(require_permission("ads.pause")), db: Session = Depends(get_db)):
     from ..core.keepalive_config import get_keepalive_config
-    return get_keepalive_config(db)
+    return get_keepalive_config(db, user.tenant_id)
 
 
 @router.put("/keepalive")
-def set_keepalive(body: dict, user: CurrentUser = Depends(require_superadmin),
+def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ads.pause")),
                   db: Session = Depends(get_db)):
     from ..core.keepalive_config import save_keepalive_config
-    return save_keepalive_config(db, body)
+    return save_keepalive_config(db, user.tenant_id, body)

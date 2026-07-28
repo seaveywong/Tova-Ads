@@ -63,6 +63,9 @@ const loadSched = async () => {
     if (isSuper.value) {
       try { sched.value = await GET('/settings/schedule') }
       catch { sched.value = null }
+    }
+    // 保活配置：有 ads.pause 权限就能看（团队 owner/operator）
+    if ((myPerms.value || []).includes('ads.pause') || isSuper.value) {
       try { ka.value = await GET('/settings/keepalive') }
       catch { ka.value = { enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' } }
     }
@@ -500,7 +503,7 @@ const saveKeepalive = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper || (myPerms || []).includes('ads.pause')" class="card">
       <div class="t">保活保护（防休眠）</div>
       <div class="d" style="margin-bottom:12px">开启后，连续 {{ ka.idle_days }} 天无消耗的账户自动建 ${{ ka.budget_usd }} 主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。需素材库有「{{ ka.asset_prefix }}」前缀的图片。</div>
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">

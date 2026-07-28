@@ -1303,27 +1303,44 @@ def run_keepalive():
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
     try:
-        cfg = get_keepalive_config(db)
-        prefix = cfg["campaign_prefix"]
-        idle_days = cfg["idle_days"]
-        budget = int(float(cfg["budget_usd"]) * 100)  # USD → cents (lifetime)
-        asset_prefix = cfg["asset_prefix"]
+        # 按租户读配置（各团队自己管保活参数）
+        from collections import defaultdict
+        tenant_cfgs = {}
+        for row in db.query(SystemSetting).filter(SystemSetting.key.like("keepalive:%")).all():
+            try: tenant_cfgs[int(row.key.split(":")[1])] = json.loads(row.value)
+            except: pass
         asset_dir = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
-        global_enabled = cfg.get("enabled", False)
 
-        # 保活目标账户：全局开关开→所有 managed 账户；关→仅 warmup_state=warming 的
-        q = db.query(Account).filter(
+        # 汇总所有需保活的账户：租户 enabled=true → 该租户全部 managed 账户；否则 → 仅 warming
+        from sqlalchemy import or_
+        warming_q = db.query(Account).filter(
             Account.is_managed == True,  # noqa: E712
             Account.account_status == 1,
         )
-        if not global_enabled:
-            q = q.filter(Account.warmup_state == "warming")
-        warming = q.all()
+        enabled_tenants = {tid for tid, c in tenant_cfgs.items() if c.get("enabled")}
+        if enabled_tenants:
+            warming_q = warming_q.filter(or_(
+                Account.warmup_state == "warming",
+                Account.tenant_id.in_(enabled_tenants),
+            ))
+        else:
+            warming_q = warming_q.filter(Account.warmup_state == "warming")
+        warming = warming_q.all()
 
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
         created = skipped = failed = 0
         for acc in warming:
             try:
+                # 该账户所属租户的保活配置（没配的用默认值）
+                cfg = tenant_cfgs.get(acc.tenant_id) or dict(DEFAULT_KEEPALIVE)
+                from ..core.keepalive_config import DEFAULT_KEEPALIVE
+                for dk, dv in DEFAULT_KEEPALIVE.items():
+                    cfg.setdefault(dk, dv)
+                prefix = cfg["campaign_prefix"]
+                idle_days = cfg["idle_days"]
+                budget = int(float(cfg["budget_usd"]) * 100)
+                asset_prefix = cfg["asset_prefix"]
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
+
                 # 1. 近 idle_days 天消耗
                 spend = db.query(_f.sum(PerfSnapshot.spend)).filter(
                     PerfSnapshot.tenant_id == acc.tenant_id,
