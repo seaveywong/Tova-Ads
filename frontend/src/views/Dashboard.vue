@@ -505,11 +505,12 @@ const urgencyLabel = (a) => {
   if (b <= 300) return '🟡 偏低（建议充值）'
   return '🟢 充足'
 }
-// 账户当前本地时间（用 timezone_name + Intl 算，对齐北京参考）
-const copyIds = (accounts, label) => {
-  const ids = (accounts || []).map(a => a.act_id).filter(Boolean).join('\n')
-  if (!ids) { ElMessage.info('无可复制的 ID'); return }
-  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(`已复制 ${accounts.length} 个${label || 'ID'}`)).catch(() => {})
+// 复制有消耗的账户 ID（当前日期范围）
+const copySpendActIds = () => {
+  const accs = (data.value.accounts || []).filter(a => (a.spend_usd || 0) > 0)
+  const ids = accs.map(a => a.act_id).filter(Boolean).join('\n')
+  if (!ids) { ElMessage.info('当前日期范围无有消耗的账户'); return }
+  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(`已复制 ${accs.length} 个有消耗账户 ID`)).catch(() => {})
 }
 // 复选框选中（充值/余额明细用：勾选账户 → 复制选中 ID）
 const selectedIds = ref(new Set())
@@ -728,6 +729,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
           <button class="refresh-btn" :disabled="loading" @click="refreshData" title="只读库（最新缓存），不调 FB">{{ loading ? '刷新中' : '刷新' }}</button>
           <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" title="⚠ 直接调 Facebook API 强采，频繁会触发限流">{{ refreshing ? '采集中…' : '立即采集' }}</button>
+          <button class="refresh-btn" @click="copySpendActIds" title="复制当前日期范围内有消耗的账户 ID（每行一个）">📋 复制消耗账户</button>
         </div>
       </div>
     <div class="anchor-strip">
