@@ -22,7 +22,9 @@ def run_ads_cache_sync():
         db.close()
         return {"skipped": "already running"}
     try:
-        accounts = db.query(Account).filter(Account.account_status == 1).all()
+        accounts = db.query(Account).filter(
+            Account.is_managed == True, Account.account_status == 1  # noqa: E712
+        ).all()
         updated = 0
         for acc in accounts:
             fb = client_for_account(db, acc.tenant_id, acc.act_id, "read")

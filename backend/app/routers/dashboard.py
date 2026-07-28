@@ -124,14 +124,11 @@ def dashboard(
         stmt = stmt.bindparams(*binds)
     rows = db.execute(stmt, params).fetchall()
 
-    # 账户信息（余额等）——只看纳管中的，已移除的不算
-    accounts = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
-    ).all()
+    # 全部账户（含已移除）——历史消耗必须保留；余额/覆盖只算 managed 子集
+    accounts = db.query(Account).filter(Account.tenant_id == user.tenant_id).all()
     acc_map = {a.act_id: a for a in accounts}
-    # 过滤掉已移除账户的 perf 数据（is_managed=false 的账户历史消耗不展示）
-    managed_act_ids = set(acc_map.keys())
-    rows = [r for r in rows if r.act_id in managed_act_ids]
+    managed_accounts = [a for a in accounts if a.is_managed]
+    managed_act_ids = {a.act_id for a in managed_accounts}
 
     # 止损：按所选范围 + 归属到账户本地日（数据/事件同天统一）。
     # 拉宽 UTC 窗口（覆盖各账户时区偏移 ±1 天），再按账户本地日过滤到 [since, until]。
@@ -210,7 +207,7 @@ def dashboard(
         v = from_minor_units(val, cur)
         return round(to_usd(v, cur), 2) if v is not None else 0.0
     avail_map = {acc.act_id: calc_available_balance(acc.spend_cap, acc.amount_spent, acc.currency or "USD")
-                 for acc in accounts}
+                 for acc in managed_accounts}
     total_balance = sum(avail for avail, _k in avail_map.values() if avail is not None)
     unlimited_count = sum(1 for avail, _k in avail_map.values() if avail is None)
 

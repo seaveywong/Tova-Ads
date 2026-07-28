@@ -529,7 +529,8 @@ def loadable_accounts(
         FbCredential.tenant_id == user.tenant_id, FbCredential.status == "active"
     ).all()
     imported_ids = {a.act_id for a in db.query(Account).filter(
-        Account.tenant_id == user.tenant_id).all()}
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).all()}
     merged: dict = {}
     for c in creds:
         fb = FbClient(decrypt(c.access_token_enc))
@@ -737,7 +738,9 @@ def accounts_at_risk(
     "无任何可用令牌覆盖"的真孤儿发 critical 告警 + TG。
     """
     from ..core.fb_tokens import _is_cred_available
-    query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
+    query = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    )
     if user.role == "operator":
         query = query.filter(Account.owner_user_id == user.id)
     accs = query.all()

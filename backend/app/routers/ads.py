@@ -93,22 +93,28 @@ def list_ads(
         date_from = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
     if not date_to:
         date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    # 手动刷新（强制重拉 FB → 更新 ads_cache）
+    # 手动刷新（强制重拉 FB → 更新 ads_cache）——只刷 managed 账户
     if refresh:
         acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.account_status == 1).all()]
+            Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
+            Account.account_status == 1).all()]
         for a in acts:
             fb = client_for_account(db, user.tenant_id, a, "read")
             if fb:
                 _sync_one(db, user.tenant_id, a, fb)
         db.commit()
-    # 读缓存
+    # 读缓存——只看 managed 账户（已移除的不显示广告）
+    managed_ids = {a.act_id for a in db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).all()}
     q = db.query(AdsCache).filter(AdsCache.tenant_id == user.tenant_id)
     if act_id:
         q = q.filter(AdsCache.act_id == act_id)
-    caches = q.all()
-    # 账户名 + currency 映射
-    _acc_rows = db.query(Account).filter(Account.tenant_id == user.tenant_id).all()
+    caches = [c for c in q.all() if c.act_id in managed_ids]
+    # 账户名 + currency 映射（只查 managed）
+    _acc_rows = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).all()
     acc_map = {a.act_id: a.name for a in _acc_rows}
     cur_map = {a.act_id: (a.currency or "USD") for a in _acc_rows}
     # 合并三层（跨账户）+ 标 act_id/account_name
@@ -213,7 +219,8 @@ def refresh_ads(
 ):
     """手动刷新 ads_cache（单账户 act_id 或全部）。"""
     acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.account_status == 1).all()]
+        Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
+        Account.account_status == 1).all()]
     ok = 0
     for a in acts:
         fb = client_for_account(db, user.tenant_id, a, "read")
