@@ -124,9 +124,14 @@ def dashboard(
         stmt = stmt.bindparams(*binds)
     rows = db.execute(stmt, params).fetchall()
 
-    # 账户信息（余额等）
-    accounts = db.query(Account).filter(Account.tenant_id == user.tenant_id).all()
+    # 账户信息（余额等）——只看纳管中的，已移除的不算
+    accounts = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).all()
     acc_map = {a.act_id: a for a in accounts}
+    # 过滤掉已移除账户的 perf 数据（is_managed=false 的账户历史消耗不展示）
+    managed_act_ids = set(acc_map.keys())
+    rows = [r for r in rows if r.act_id in managed_act_ids]
 
     # 止损：按所选范围 + 归属到账户本地日（数据/事件同天统一）。
     # 拉宽 UTC 窗口（覆盖各账户时区偏移 ±1 天），再按账户本地日过滤到 [since, until]。
