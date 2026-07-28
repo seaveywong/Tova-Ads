@@ -482,40 +482,40 @@ const saveKeepalive = async () => {
       <div class="d" style="margin-bottom:10px">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
 
       <!-- 已绑定 -->
-      <div v-if="userTg.bound" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="color:var(--success);font-size:13px;font-weight:500">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
+      <div v-if="userTg.bound" class="tg-status">
+        <span class="tg-bound-badge">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
         <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发送测试消息' }}</button>
-        <button class="btn" style="color:var(--error);border-color:var(--error)" @click="unbindTg">解绑</button>
+        <button class="btn tg-unbind-btn" @click="unbindTg">解绑</button>
       </div>
 
       <!-- 未绑定 -->
-      <div v-else style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div v-else class="tg-status">
         <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
         <button v-if="tgBindLink" class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
         <div v-if="tgBot.configured && tgBot.bot_username" id="tg-widget" style="min-height:36px"></div>
-        <span v-if="!tgBot.configured" class="d" style="color:var(--warning)">管理员未配置 TG Bot</span>
+        <span v-if="!tgBot.configured" class="tg-warn">管理员未配置 TG Bot</span>
       </div>
 
-      <!-- 验证 Bot 配置（owner/超管，验证 bot_token 是否配对） -->
-      <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
+      <!-- 验证 Bot 配置（owner/超管） -->
+      <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" class="tg-verify">
         <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '验证 Bot 配置' }}</button>
-        <span class="d" style="margin-left:8px;font-size:11px">发送一条测试消息到管理员配置的 Bot，验证 Bot 是否正常工作</span>
+        <span class="tg-verify-hint">发送一条测试消息到管理员配置的 Bot，验证 Bot 是否正常工作</span>
       </div>
     </div>
 
     <div v-if="isSuper || (myPerms || []).includes('ads.pause')" class="card">
       <div class="t">保活保护（防休眠）</div>
-      <div class="d" style="margin-bottom:12px">开启后，连续 {{ ka.idle_days }} 天无消耗的账户自动建 ${{ ka.budget_usd }} 主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。需素材库有「{{ ka.asset_prefix }}」前缀的图片。</div>
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <el-switch v-model="ka.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          <span style="font-size:13px">{{ ka.enabled ? '✅ 全局已开启（所有账户自动纳入）' : '全局关闭（仅逐个开预热的账户）' }}</span>
-        </label>
+      <div class="d">连续 N 天无消耗的账户自动建主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。</div>
+      <div class="ka-switch-row">
+        <el-switch v-model="ka.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+        <span class="ka-switch-label">{{ ka.enabled ? '已开启（本团队所有账户自动纳入）' : '关闭（仅逐个开预热的账户生效）' }}</span>
       </div>
-      <div class="fg-row" style="margin-top:12px;gap:16px;flex-wrap:wrap">
-        <div class="fg"><label>单条预算 ($)</label><input v-model.number="ka.budget_usd" type="number" min="1" step="1" class="ep-input" style="width:80px" /></div>
-        <div class="fg"><label>触发天数</label><input v-model.number="ka.idle_days" type="number" min="1" step="1" class="ep-input" style="width:60px" /></div>
-        <div class="fg"><label>素材前缀</label><input v-model="ka.asset_prefix" class="ep-input" style="width:80px" /></div>
+      <div class="ka-grid">
+        <div class="ka-field"><label>单条预算</label><div class="ka-input-wrap"><input v-model.number="ka.budget_usd" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">$</span></div></div>
+        <div class="ka-field"><label>触发天数</label><div class="ka-input-wrap"><input v-model.number="ka.idle_days" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">天</span></div></div>
+        <div class="ka-field"><label>素材前缀</label><div class="ka-input-wrap"><input v-model="ka.asset_prefix" class="ka-input" style="width:100px" /></div></div>
+      </div>
+      <div class="ka-actions">
         <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? '保存中…' : '保存' }}</button>
       </div>
     </div>
@@ -568,4 +568,24 @@ const saveKeepalive = async () => {
 .fx-cell{display:flex;justify-content:space-between;padding:7px 11px;background:var(--bg3);border-radius:6px;font-size:12px}
 .fx-code{color:var(--t3);font-weight:600}
 .fx-rate{color:var(--t1);font-variant-numeric:tabular-nums}
+
+/* 保活配置 */
+.ka-switch-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 12px;background:var(--bg3);border-radius:8px}
+.ka-switch-label{font-size:13px;color:var(--t2)}
+.ka-grid{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end}
+.ka-field{display:flex;flex-direction:column;gap:4px}
+.ka-field label{font-size:11px;color:var(--t3)}
+.ka-input-wrap{display:flex;align-items:center;gap:4px}
+.ka-input{width:70px;padding:6px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg2);color:var(--t1);font-size:13px}
+.ka-unit{font-size:12px;color:var(--t3)}
+.ka-actions{margin-top:16px}
+
+/* Telegram 通知 */
+.tg-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.tg-bound-badge{color:var(--success);font-size:13px;font-weight:500}
+.tg-unbind-btn{color:var(--error);border-color:var(--error)}
+.tg-warn{color:var(--warning);font-size:12px}
+.tg-verify{margin-top:10px;padding-top:10px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tg-verify .btn{margin-top:0}
+.tg-verify-hint{font-size:11px;color:var(--t3)}
 </style>
