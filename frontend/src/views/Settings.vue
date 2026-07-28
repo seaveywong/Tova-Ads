@@ -44,6 +44,8 @@ const sched = ref({
   },
 })
 const schedSaving = ref(false)
+const ka = ref({ enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' })
+const kaSaving = ref(false)
 const TASK_ORDER = ['inspect', 'watchdog', 'account_sync', 'budget', 'subcode', 'reassociate']
 const effOf = (k) => {
   const base = Number(sched.value?.base_minutes) || 0
@@ -61,6 +63,8 @@ const loadSched = async () => {
     if (isSuper.value) {
       try { sched.value = await GET('/settings/schedule') }
       catch { sched.value = null }
+      try { ka.value = await GET('/settings/keepalive') }
+      catch { ka.value = { enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' } }
     }
   } catch {}
 }
@@ -338,6 +342,14 @@ const runRetentionNow = async () => {
   } catch (e) { ElMessage.error('清理失败：' + (e.message || '')) }
   retentionRunning.value = false
 }
+const saveKeepalive = async () => {
+  kaSaving.value = true
+  try {
+    ka.value = await PUT('/settings/keepalive', { ...ka.value })
+    ElMessage.success(ka.value.enabled ? '保活已全局开启' : '保活已保存')
+  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+  kaSaving.value = false
+}
 </script>
 
 <template>
@@ -485,6 +497,23 @@ const runRetentionNow = async () => {
       <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">
         <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '验证 Bot 配置' }}</button>
         <span class="d" style="margin-left:8px;font-size:11px">发送一条测试消息到管理员配置的 Bot，验证 Bot 是否正常工作</span>
+      </div>
+    </div>
+
+    <div v-if="isSuper" class="card">
+      <div class="t">保活保护（防休眠）</div>
+      <div class="d" style="margin-bottom:12px">开启后，连续 {{ ka.idle_days }} 天无消耗的账户自动建 ${{ ka.budget_usd }} 主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。需素材库有「{{ ka.asset_prefix }}」前缀的图片。</div>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <el-switch v-model="ka.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+          <span style="font-size:13px">{{ ka.enabled ? '✅ 全局已开启（所有账户自动纳入）' : '全局关闭（仅逐个开预热的账户）' }}</span>
+        </label>
+      </div>
+      <div class="fg-row" style="margin-top:12px;gap:16px;flex-wrap:wrap">
+        <div class="fg"><label>单条预算 ($)</label><input v-model.number="ka.budget_usd" type="number" min="1" step="1" class="ep-input" style="width:80px" /></div>
+        <div class="fg"><label>触发天数</label><input v-model.number="ka.idle_days" type="number" min="1" step="1" class="ep-input" style="width:60px" /></div>
+        <div class="fg"><label>素材前缀</label><input v-model="ka.asset_prefix" class="ep-input" style="width:80px" /></div>
+        <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? '保存中…' : '保存' }}</button>
       </div>
     </div>
   </div>
