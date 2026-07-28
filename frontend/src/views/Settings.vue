@@ -489,10 +489,9 @@ const saveKeepalive = async () => {
       </div>
 
       <!-- 未绑定 -->
-      <div v-else class="tg-status">
-        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary" style="text-decoration:none">打开 Telegram 绑定</a>
-        <button v-if="tgBindLink" class="btn" @click="copyText(tgBindLink, '绑定链接已复制')">复制链接</button>
-        <div v-if="tgBot.configured && tgBot.bot_username" id="tg-widget" style="min-height:36px"></div>
+      <div v-else class="tg-bind-area">
+        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">绑定 Telegram</a>
+        <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, '绑定链接已复制')">打不开？复制链接</span>
         <span v-if="!tgBot.configured" class="tg-warn">管理员未配置 TG Bot</span>
       </div>
 
@@ -582,6 +581,10 @@ const saveKeepalive = async () => {
 
 /* Telegram 通知 */
 .tg-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.tg-bind-area{margin-top:4px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.tg-bind-btn{text-decoration:none;margin-top:0}
+.tg-copy-link{font-size:12px;color:var(--ac);cursor:pointer;text-decoration:underline}
+.tg-copy-link:hover{opacity:.8}
 .tg-bound-badge{color:var(--success);font-size:13px;font-weight:500}
 .tg-unbind-btn{color:var(--error);border-color:var(--error)}
 .tg-warn{color:var(--warning);font-size:12px}
