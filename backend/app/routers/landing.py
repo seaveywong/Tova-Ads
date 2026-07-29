@@ -511,7 +511,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             from datetime import datetime as _dt3, timezone as _tz3
             _s2.execute(_text("SET LOCAL app.tenant_id = :tid"), {"tid": str(user.tenant_id)})
             _s2.execute(_text("SET LOCAL app.is_superadmin = :s"), {"s": "true" if user.is_superadmin else "false"})
-            publish_self_check = _run_self_check(_s2, page, include_fb=False, live_probe=False)
+            publish_self_check = _run_self_check(_s2, page, include_fb=False, live_probe=False, loc=getattr(user, "locale", "zh"))
             page.last_health_status = publish_self_check["overall"]
             page.last_health_summary = publish_self_check["summary"]
             page.last_health_checked_at = _dt3.now(_tz3.utc)

@@ -21,6 +21,7 @@ class CurrentUser:
     is_superadmin: bool
     permissions: set[str]
     timezone: str = "Asia/Shanghai"
+    locale: str = "zh"
 
 
 def get_current_user(
@@ -55,6 +56,7 @@ def get_current_user(
         role=role, is_superadmin=is_super,
         permissions=permissions_for_role(db, tenant_id, role) if tenant_id else set(),
         timezone=user.timezone or "Asia/Shanghai",
+        locale=user.locale or "zh",
     )
 
 
