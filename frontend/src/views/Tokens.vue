@@ -356,25 +356,25 @@ const deleteToken = async (tk) => {
         <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>
         <span>{{ t('tokens.type') }}</span><span></span>
       </div>
-      <div v-for="t in sortedTokens" :key="t.id" class="row" :class="statusMeta(t).dot" @click="openDrawer(t)">
-        <span class="c-st"><span class="dot" :class="statusMeta(t).dot"></span>{{ statusMeta(t).label }}</span>
+      <div v-for="tk in sortedTokens" :key="tk.id" class="row" :class="statusMeta(tk).dot" @click="openDrawer(tk)">
+        <span class="c-st"><span class="dot" :class="statusMeta(tk).dot"></span>{{ statusMeta(tk).label }}</span>
         <span class="c-nm" @click.stop>
-          <input v-if="editId===t.id" v-model="editAlias" class="inp" @keyup.enter="saveEdit(t)" @blur="saveEdit(t)" />
-          <span v-else class="nm" @click="startEdit(t)">{{ t.alias || t('tokens.unnamed') }}<span class="pen">✎</span></span>
+          <input v-if="editId===tk.id" v-model="editAlias" class="inp" @keyup.enter="saveEdit(tk)" @blur="saveEdit(tk)" />
+          <span v-else class="nm" @click="startEdit(tk)">{{ tk.alias || t('tokens.unnamed') }}<span class="pen">✎</span></span>
         </span>
         <span class="c-fb">
-          <span class="fbn">{{ t.fb_user_name || '—' }}</span>
-          <span class="fbi" :title="t.fb_user_id">{{ t.fb_user_id?.slice(-10) || '—' }}</span>
+          <span class="fbn">{{ tk.fb_user_name || '—' }}</span>
+          <span class="fbi" :title="tk.fb_user_id">{{ tk.fb_user_id?.slice(-10) || '—' }}</span>
         </span>
-        <span class="c-num" :class="{err:summaryError(t)}" :title="summaryError(t)||t('tokens.accountsCountTip')">{{ summaryError(t) ? '!' : countOf(t,'accounts') }}</span>
-        <span class="c-num">{{ countOf(t,'pages') }}</span>
-        <span class="c-num">{{ countOf(t,'businesses') }}</span>
+        <span class="c-num" :class="{err:summaryError(tk)}" :title="summaryError(tk)||t('tokens.accountsCountTip')">{{ summaryError(tk) ? '!' : countOf(tk,'accounts') }}</span>
+        <span class="c-num">{{ countOf(tk,'pages') }}</span>
+        <span class="c-num">{{ countOf(tk,'businesses') }}</span>
         <span class="c-ty">
-          <span class="tag" :class="t.token_type" :title="typeMeta(t.token_type).title">{{ typeMeta(t.token_type).label }}</span>
-          <span v-if="(t.account_count||0) > 0" class="tag rotate" :title="t('tokens.rotatePoolTip')">↻</span>
+          <span class="tag" :class="tk.token_type" :title="typeMeta(tk.token_type).title">{{ typeMeta(tk.token_type).label }}</span>
+          <span v-if="(tk.account_count||0) > 0" class="tag rotate" :title="t('tokens.rotatePoolTip')">↻</span>
         </span>
         <span class="c-op" @click.stop>
-          <el-dropdown trigger="click" @command="cmd => handleAction(cmd, t)">
+          <el-dropdown trigger="click" @command="cmd => handleAction(cmd, tk)">
             <button class="dots-btn" @click.stop>⋯</button>
             <template #dropdown>
               <el-dropdown-menu>
