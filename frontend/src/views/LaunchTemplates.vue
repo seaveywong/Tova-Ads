@@ -1,9 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { jobStatus, itemStatus } from '../composables/useStatus'
+
+const { t } = useI18n()
 
 const list = ref([])
 const loading = ref(false)
@@ -53,33 +56,33 @@ const activeJob = ref(null)
 let pollTimer = null
 
 const OBJECTIVES = [
-  { v: 'OUTCOME_SALES', l: '购物（转化）' },
-  { v: 'OUTCOME_LEADS', l: '潜在客户（留资）' },
-  { v: 'OUTCOME_TRAFFIC', l: '流量（点击）' },
-  { v: 'OUTCOME_ENGAGEMENT', l: '互动（赞/消息）' },
-  { v: 'OUTCOME_AWARENESS', l: '品牌认知' },
-  { v: 'OUTCOME_APP_PROMOTION', l: '应用推广' },
+  { v: 'OUTCOME_SALES', l: 'launch.obj_sales' },
+  { v: 'OUTCOME_LEADS', l: 'launch.obj_leads' },
+  { v: 'OUTCOME_TRAFFIC', l: 'launch.obj_traffic' },
+  { v: 'OUTCOME_ENGAGEMENT', l: 'launch.obj_engagement' },
+  { v: 'OUTCOME_AWARENESS', l: 'launch.obj_awareness' },
+  { v: 'OUTCOME_APP_PROMOTION', l: 'launch.obj_app_promotion' },
 ]
 const OPT_GOALS = [
-  {v:'LINK_CLICKS',l:'链接点击'},{v:'LANDING_PAGE_VIEWS',l:'落地页浏览'},{v:'REACH',l:'覆盖人数'},
-  {v:'IMPRESSIONS',l:'展示次数'},{v:'OFFSITE_CONVERSIONS',l:'网站转化'},{v:'LEAD_GENERATION',l:'潜在客户'},
-  {v:'PAGE_LIKES',l:'主页赞'},{v:'POST_ENGAGEMENT',l:'帖子互动'},{v:'CONVERSATIONS',l:'消息会话'},
-  {v:'THRUPLAY',l:'视频播放'},{v:'APP_INSTALLS',l:'应用安装'},{v:'VALUE',l:'价值'},
+  {v:'LINK_CLICKS',l:'launch.opt_link_clicks'},{v:'LANDING_PAGE_VIEWS',l:'launch.opt_landing_page_views'},{v:'REACH',l:'launch.opt_reach'},
+  {v:'IMPRESSIONS',l:'launch.opt_impressions'},{v:'OFFSITE_CONVERSIONS',l:'launch.opt_offsite_conversions'},{v:'LEAD_GENERATION',l:'launch.opt_lead_generation'},
+  {v:'PAGE_LIKES',l:'launch.opt_page_likes'},{v:'POST_ENGAGEMENT',l:'launch.opt_post_engagement'},{v:'CONVERSATIONS',l:'launch.opt_conversations'},
+  {v:'THRUPLAY',l:'launch.opt_thruplay'},{v:'APP_INSTALLS',l:'launch.opt_app_installs'},{v:'VALUE',l:'launch.opt_value'},
 ]
 const BILLING_EVENTS = [
-  {v:'IMPRESSIONS',l:'展示'},{v:'LINK_CLICKS',l:'链接点击'},{v:'APP_INSTALLS',l:'应用安装'},
-  {v:'PAGE_LIKES',l:'主页赞'},{v:'POST_ENGAGEMENT',l:'帖子互动'},{v:'THRUPLAY',l:'视频播放'},
+  {v:'IMPRESSIONS',l:'launch.bill_impressions'},{v:'LINK_CLICKS',l:'launch.bill_link_clicks'},{v:'APP_INSTALLS',l:'launch.bill_app_installs'},
+  {v:'PAGE_LIKES',l:'launch.bill_page_likes'},{v:'POST_ENGAGEMENT',l:'launch.bill_post_engagement'},{v:'THRUPLAY',l:'launch.bill_thruplay'},
 ]
 const DEST_TYPES = [
-  {v:'WEBSITE',l:'网站'},{v:'ON_AD',l:'应用内'},{v:'ON_PAGE',l:'主页'},{v:'MESSENGER',l:'Messenger'},
-  {v:'APP',l:'应用'},{v:'WHATSAPP',l:'WhatsApp'},{v:'INSTAGRAM_DIRECT',l:'Instagram 私信'},
+  {v:'WEBSITE',l:'launch.dest_website'},{v:'ON_AD',l:'launch.dest_on_ad'},{v:'ON_PAGE',l:'launch.dest_on_page'},{v:'MESSENGER',l:'launch.dest_messenger'},
+  {v:'APP',l:'launch.dest_app'},{v:'WHATSAPP',l:'launch.dest_whatsapp'},{v:'INSTAGRAM_DIRECT',l:'launch.dest_instagram_direct'},
 ]
 // 转化目标（按 objective 联动）—— FB custom_event_type 枚举
 const CONV_GOAL_LABELS = {
-  Purchase:'购买', AddToCart:'加入购物车', InitiateCheckout:'发起结账', AddPaymentInfo:'填写支付信息',
-  CompleteRegistration:'完成注册', Lead:'潜在客户', Subscribe:'订阅', Contact:'联系',
-  StartTrial:'开始试用', Search:'搜索', APP_INSTALLS:'应用安装', LEVEL_ACHIEVED:'达成关卡',
-  ACHIEVEMENT_UNLOCKED:'解锁成就', SPENT_CREDITS:'消费积分',
+  Purchase:'launch.conv_purchase', AddToCart:'launch.conv_add_to_cart', InitiateCheckout:'launch.conv_initiate_checkout', AddPaymentInfo:'launch.conv_add_payment_info',
+  CompleteRegistration:'launch.conv_complete_registration', Lead:'launch.conv_lead', Subscribe:'launch.conv_subscribe', Contact:'launch.conv_contact',
+  StartTrial:'launch.conv_start_trial', Search:'launch.conv_search', APP_INSTALLS:'launch.conv_app_installs', LEVEL_ACHIEVED:'launch.conv_level_achieved',
+  ACHIEVEMENT_UNLOCKED:'launch.conv_achievement_unlocked', SPENT_CREDITS:'launch.conv_spent_credits',
 }
 const CONV_GOALS = {
   OUTCOME_SALES: ['Purchase','AddToCart','InitiateCheckout','AddPaymentInfo','CompleteRegistration','Lead','Subscribe','Contact','StartTrial','Search'],
@@ -119,22 +122,22 @@ watch(() => form.value.objective, (newObj, oldObj) => {
 // 版位选项
 const PLATFORMS = [
   { v: 'facebook', l: 'Facebook', positions: [
-    {v:'feed',l:'动态消息'},{v:'video_feeds',l:'视频动态'},{v:'instream_video',l:'视频插播'},
-    {v:'story',l:'快拍'},{v:'reels',l:'Reels'},{v:'marketplace',l:'市场'},
-    {v:'right_hand_column',l:'右侧栏'},{v:'search',l:'搜索结果'},
+    {v:'feed',l:'launch.pos_feed'},{v:'video_feeds',l:'launch.pos_video_feeds'},{v:'instream_video',l:'launch.pos_instream_video'},
+    {v:'story',l:'launch.pos_story'},{v:'reels',l:'launch.pos_reels'},{v:'marketplace',l:'launch.pos_marketplace'},
+    {v:'right_hand_column',l:'launch.pos_right_hand_column'},{v:'search',l:'launch.pos_search'},
   ]},
   { v: 'instagram', l: 'Instagram', positions: [
-    {v:'stream',l:'动态'},{v:'story',l:'快拍'},{v:'explore',l:'探索'},
-    {v:'reels',l:'Reels'},{v:'profile',l:'个人主页'},
+    {v:'stream',l:'launch.pos_stream'},{v:'story',l:'launch.pos_story'},{v:'explore',l:'launch.pos_explore'},
+    {v:'reels',l:'launch.pos_reels'},{v:'profile',l:'launch.pos_profile'},
   ]},
   { v: 'messenger', l: 'Messenger', positions: [
-    {v:'messenger_home',l:'首页'},{v:'story',l:'快拍'},{v:'sponsored_messages',l:'推广消息'},
+    {v:'messenger_home',l:'launch.pos_messenger_home'},{v:'story',l:'launch.pos_story'},{v:'sponsored_messages',l:'launch.pos_sponsored_messages'},
   ]},
   { v: 'audience_network', l: 'Audience Network', positions: [
-    {v:'classic',l:'横幅/插屏'},{v:'instream_video',l:'视频插播'},{v:'rewarded_video',l:'激励视频'},
+    {v:'classic',l:'launch.pos_classic'},{v:'instream_video',l:'launch.pos_instream_video'},{v:'rewarded_video',l:'launch.pos_rewarded_video'},
   ]},
 ]
-const DEVICES = [{v:'desktop',l:'桌面'}, {v:'mobile',l:'移动'}]
+const DEVICES = [{v:'desktop',l:'launch.dev_desktop'}, {v:'mobile',l:'launch.dev_mobile'}]
 // 展开的平台
 const expandedPlatforms = ref(new Set(['facebook']))
 const togglePlatformExpand = (v) => {
@@ -179,58 +182,58 @@ const toggleDevice = (dv) => {
   form.value.placement_devices = [...arr]
 }
 const BID_STRATEGIES = [
-  { v: 'LOWEST_COST_WITHOUT_CAP', l: '最低成本（无上限）' },
-  { v: 'LOWEST_COST_WITH_BID_CAP', l: '最低成本（出价上限）' },
-  { v: 'COST_CAP', l: '成本上限' },
+  { v: 'LOWEST_COST_WITHOUT_CAP', l: 'launch.bid_lowest_without_cap' },
+  { v: 'LOWEST_COST_WITH_BID_CAP', l: 'launch.bid_lowest_with_cap' },
+  { v: 'COST_CAP', l: 'launch.bid_cost_cap' },
 ]
 const CTAS = [
-  { v: 'SHOP_NOW', l: '立即购买' },{ v: 'SIGN_UP', l: '注册' },{ v: 'SUBSCRIBE', l: '订阅' },
-  { v: 'LEARN_MORE', l: '了解详情' },{ v: 'DOWNLOAD', l: '下载' },{ v: 'CONTACT_US', l: '联系我们' },
-  { v: 'GET_QUOTE', l: '获取报价' },{ v: 'BOOK_NOW', l: '立即预约' },{ v: 'ORDER_NOW', l: '立即下单' },
-  { v: 'CALL_NOW', l: '立即致电' },{ v: 'MESSAGE_PAGE', l: '发消息' },{ v: 'WATCH_MORE', l: '观看更多' },
-  { v: 'ADD_TO_CART', l: '加入购物车' },{ v: 'BUY_TICKETS', l: '购票' },
+  { v: 'SHOP_NOW', l: 'launch.cta_shop_now' },{ v: 'SIGN_UP', l: 'launch.cta_sign_up' },{ v: 'SUBSCRIBE', l: 'launch.cta_subscribe' },
+  { v: 'LEARN_MORE', l: 'launch.cta_learn_more' },{ v: 'DOWNLOAD', l: 'launch.cta_download' },{ v: 'CONTACT_US', l: 'launch.cta_contact_us' },
+  { v: 'GET_QUOTE', l: 'launch.cta_get_quote' },{ v: 'BOOK_NOW', l: 'launch.cta_book_now' },{ v: 'ORDER_NOW', l: 'launch.cta_order_now' },
+  { v: 'CALL_NOW', l: 'launch.cta_call_now' },{ v: 'MESSAGE_PAGE', l: 'launch.cta_message_page' },{ v: 'WATCH_MORE', l: 'launch.cta_watch_more' },
+  { v: 'ADD_TO_CART', l: 'launch.cta_add_to_cart' },{ v: 'BUY_TICKETS', l: 'launch.cta_buy_tickets' },
 ]
 const SPECIAL_CATS = [
-  { v: '', l: '无' },{ v: 'HOUSING', l: '住房' },{ v: 'EMPLOYMENT', l: '就业' },
-  { v: 'CREDIT', l: '信贷' },{ v: 'ISSUES_ELECTIONS_POLITICS', l: '政治/选举' },
+  { v: '', l: 'launch.scat_none' },{ v: 'HOUSING', l: 'launch.scat_housing' },{ v: 'EMPLOYMENT', l: 'launch.scat_employment' },
+  { v: 'CREDIT', l: 'launch.scat_credit' },{ v: 'ISSUES_ELECTIONS_POLITICS', l: 'launch.scat_politics' },
 ]
 const COUNTRIES = [
-  {v:'US',l:'美国'},{v:'VN',l:'越南'},{v:'TH',l:'泰国'},{v:'ID',l:'印尼'},{v:'PH',l:'菲律宾'},
-  {v:'MY',l:'马来西亚'},{v:'TW',l:'台湾'},{v:'HK',l:'香港'},{v:'SG',l:'新加坡'},{v:'CN',l:'中国大陆'},
-  {v:'BR',l:'巴西'},{v:'MX',l:'墨西哥'},{v:'IN',l:'印度'},{v:'JP',l:'日本'},{v:'KR',l:'韩国'},
-  {v:'GB',l:'英国'},{v:'DE',l:'德国'},{v:'FR',l:'法国'},{v:'AE',l:'阿联酋'},{v:'SA',l:'沙特'},
-  {v:'EG',l:'埃及'},{v:'KW',l:'科威特'},{v:'QA',l:'卡塔尔'},{v:'TR',l:'土耳其'},{v:'ES',l:'西班牙'},
-  {v:'IT',l:'意大利'},{v:'CA',l:'加拿大'},{v:'AU',l:'澳洲'},{v:'NZ',l:'新西兰'},{v:'CL',l:'智利'},
-  {v:'CO',l:'哥伦比亚'},{v:'PE',l:'秘鲁'},{v:'AR',l:'阿根廷'},{v:'ZA',l:'南非'},{v:'NG',l:'尼日利亚'},
-  {v:'KE',l:'肯尼亚'},{v:'BD',l:'孟加拉'},{v:'PK',l:'巴基斯坦'},{v:'PL',l:'波兰'},{v:'NL',l:'荷兰'},
-  {v:'BE',l:'比利时'},{v:'CH',l:'瑞士'},{v:'AT',l:'奥地利'},{v:'SE',l:'瑞典'},{v:'NO',l:'挪威'},
-  {v:'DK',l:'丹麦'},{v:'FI',l:'芬兰'},{v:'PT',l:'葡萄牙'},{v:'GR',l:'希腊'},{v:'CZ',l:'捷克'},
-  {v:'RO',l:'罗马尼亚'},{v:'HU',l:'匈牙利'},{v:'IL',l:'以色列'},{v:'IE',l:'爱尔兰'},{v:'RU',l:'俄罗斯'},
-  {v:'UA',l:'乌克兰'},{v:'BY',l:'白俄罗斯'},{v:'KZ',l:'哈萨克斯坦'},{v:'UZ',l:'乌兹别克斯坦'},
-  {v:'GH',l:'加纳'},{v:'TZ',l:'坦桑尼亚'},{v:'UG',l:'乌干达'},{v:'ET',l:'埃塞俄比亚'},{v:'MA',l:'摩洛哥'},
-  {v:'DZ',l:'阿尔及利亚'},{v:'TN',l:'突尼斯'},{v:'IQ',l:'伊拉克'},{v:'JO',l:'约旦'},{v:'LB',l:'黎巴嫩'},
-  {v:'BH',l:'巴林'},{v:'OM',l:'阿曼'},{v:'PS',l:'巴勒斯坦'},{v:'LK',l:'斯里兰卡'},{v:'NP',l:'尼泊尔'},
-  {v:'MM',l:'缅甸'},{v:'KH',l:'柬埔寨'},{v:'LA',l:'老挝'},{v:'BN',l:'文莱'},{v:'MO',l:'澳门'},
-  {v:'PY',l:'巴拉圭'},{v:'UY',l:'乌拉圭'},{v:'BO',l:'玻利维亚'},{v:'VE',l:'委内瑞拉'},{v:'EC',l:'厄瓜多尔'},
-  {v:'PA',l:'巴拿马'},{v:'GT',l:'危地马拉'},{v:'DO',l:'多米尼加'},{v:'CR',l:'哥斯达黎加'},{v:'SV',l:'萨尔瓦多'},
-  {v:'HN',l:'洪都拉斯'},{v:'JM',l:'牙买加'},{v:'TT',l:'特立尼达和多巴哥'},{v:'PR',l:'波多黎各'},
-  {v:'IS',l:'冰岛'},{v:'LU',l:'卢森堡'},{v:'MT',l:'马耳他'},{v:'CY',l:'塞浦路斯'},{v:'HR',l:'克罗地亚'},
-  {v:'SK',l:'斯洛伐克'},{v:'SI',l:'斯洛文尼亚'},{v:'BG',l:'保加利亚'},{v:'RS',l:'塞尔维亚'},{v:'LT',l:'立陶宛'},
-  {v:'LV',l:'拉脱维亚'},{v:'EE',l:'爱沙尼亚'},{v:'AL',l:'阿尔巴尼亚'},{v:'BA',l:'波黑'},{v:'MD',l:'摩尔多瓦'},
+  {v:'US',l:'launch.country_US'},{v:'VN',l:'launch.country_VN'},{v:'TH',l:'launch.country_TH'},{v:'ID',l:'launch.country_ID'},{v:'PH',l:'launch.country_PH'},
+  {v:'MY',l:'launch.country_MY'},{v:'TW',l:'launch.country_TW'},{v:'HK',l:'launch.country_HK'},{v:'SG',l:'launch.country_SG'},{v:'CN',l:'launch.country_CN'},
+  {v:'BR',l:'launch.country_BR'},{v:'MX',l:'launch.country_MX'},{v:'IN',l:'launch.country_IN'},{v:'JP',l:'launch.country_JP'},{v:'KR',l:'launch.country_KR'},
+  {v:'GB',l:'launch.country_GB'},{v:'DE',l:'launch.country_DE'},{v:'FR',l:'launch.country_FR'},{v:'AE',l:'launch.country_AE'},{v:'SA',l:'launch.country_SA'},
+  {v:'EG',l:'launch.country_EG'},{v:'KW',l:'launch.country_KW'},{v:'QA',l:'launch.country_QA'},{v:'TR',l:'launch.country_TR'},{v:'ES',l:'launch.country_ES'},
+  {v:'IT',l:'launch.country_IT'},{v:'CA',l:'launch.country_CA'},{v:'AU',l:'launch.country_AU'},{v:'NZ',l:'launch.country_NZ'},{v:'CL',l:'launch.country_CL'},
+  {v:'CO',l:'launch.country_CO'},{v:'PE',l:'launch.country_PE'},{v:'AR',l:'launch.country_AR'},{v:'ZA',l:'launch.country_ZA'},{v:'NG',l:'launch.country_NG'},
+  {v:'KE',l:'launch.country_KE'},{v:'BD',l:'launch.country_BD'},{v:'PK',l:'launch.country_PK'},{v:'PL',l:'launch.country_PL'},{v:'NL',l:'launch.country_NL'},
+  {v:'BE',l:'launch.country_BE'},{v:'CH',l:'launch.country_CH'},{v:'AT',l:'launch.country_AT'},{v:'SE',l:'launch.country_SE'},{v:'NO',l:'launch.country_NO'},
+  {v:'DK',l:'launch.country_DK'},{v:'FI',l:'launch.country_FI'},{v:'PT',l:'launch.country_PT'},{v:'GR',l:'launch.country_GR'},{v:'CZ',l:'launch.country_CZ'},
+  {v:'RO',l:'launch.country_RO'},{v:'HU',l:'launch.country_HU'},{v:'IL',l:'launch.country_IL'},{v:'IE',l:'launch.country_IE'},{v:'RU',l:'launch.country_RU'},
+  {v:'UA',l:'launch.country_UA'},{v:'BY',l:'launch.country_BY'},{v:'KZ',l:'launch.country_KZ'},{v:'UZ',l:'launch.country_UZ'},
+  {v:'GH',l:'launch.country_GH'},{v:'TZ',l:'launch.country_TZ'},{v:'UG',l:'launch.country_UG'},{v:'ET',l:'launch.country_ET'},{v:'MA',l:'launch.country_MA'},
+  {v:'DZ',l:'launch.country_DZ'},{v:'TN',l:'launch.country_TN'},{v:'IQ',l:'launch.country_IQ'},{v:'JO',l:'launch.country_JO'},{v:'LB',l:'launch.country_LB'},
+  {v:'BH',l:'launch.country_BH'},{v:'OM',l:'launch.country_OM'},{v:'PS',l:'launch.country_PS'},{v:'LK',l:'launch.country_LK'},{v:'NP',l:'launch.country_NP'},
+  {v:'MM',l:'launch.country_MM'},{v:'KH',l:'launch.country_KH'},{v:'LA',l:'launch.country_LA'},{v:'BN',l:'launch.country_BN'},{v:'MO',l:'launch.country_MO'},
+  {v:'PY',l:'launch.country_PY'},{v:'UY',l:'launch.country_UY'},{v:'BO',l:'launch.country_BO'},{v:'VE',l:'launch.country_VE'},{v:'EC',l:'launch.country_EC'},
+  {v:'PA',l:'launch.country_PA'},{v:'GT',l:'launch.country_GT'},{v:'DO',l:'launch.country_DO'},{v:'CR',l:'launch.country_CR'},{v:'SV',l:'launch.country_SV'},
+  {v:'HN',l:'launch.country_HN'},{v:'JM',l:'launch.country_JM'},{v:'TT',l:'launch.country_TT'},{v:'PR',l:'launch.country_PR'},
+  {v:'IS',l:'launch.country_IS'},{v:'LU',l:'launch.country_LU'},{v:'MT',l:'launch.country_MT'},{v:'CY',l:'launch.country_CY'},{v:'HR',l:'launch.country_HR'},
+  {v:'SK',l:'launch.country_SK'},{v:'SI',l:'launch.country_SI'},{v:'BG',l:'launch.country_BG'},{v:'RS',l:'launch.country_RS'},{v:'LT',l:'launch.country_LT'},
+  {v:'LV',l:'launch.country_LV'},{v:'EE',l:'launch.country_EE'},{v:'AL',l:'launch.country_AL'},{v:'BA',l:'launch.country_BA'},{v:'MD',l:'launch.country_MD'},
 ]
 const LANGS = [
-  { v: '', l: '不限' },{ v: '24', l: '英语（美国）' },{ v: '6', l: '英语（英国）' },{ v: '37', l: '英语（所有）' },
-  { v: '5', l: '中文（简体）' },{ v: '2', l: '中文（繁体）' },{ v: '1', l: '中文（所有）' },
-  { v: '31', l: '越南语' },{ v: '34', l: '泰语' },{ v: '32', l: '印尼语' },{ v: '27', l: '日语' },
-  { v: '28', l: '韩语' },{ v: '12', l: '西班牙语' },{ v: '14', l: '葡萄牙语' },{ v: '15', l: '阿拉伯语' },
+  { v: '', l: 'launch.lang_any' },{ v: '24', l: 'launch.lang_en_us' },{ v: '6', l: 'launch.lang_en_gb' },{ v: '37', l: 'launch.lang_en_all' },
+  { v: '5', l: 'launch.lang_zh_cn' },{ v: '2', l: 'launch.lang_zh_tw' },{ v: '1', l: 'launch.lang_zh_all' },
+  { v: '31', l: 'launch.lang_vi' },{ v: '34', l: 'launch.lang_th' },{ v: '32', l: 'launch.lang_id' },{ v: '27', l: 'launch.lang_ja' },
+  { v: '28', l: 'launch.lang_ko' },{ v: '12', l: 'launch.lang_es' },{ v: '14', l: 'launch.lang_pt' },{ v: '15', l: 'launch.lang_ar' },
 ]
 // 归因窗口预设 → FB attribution_spec（仅转化类目标生效）
 const ATTRIBUTIONS = [
-  { v: '', l: '默认（FB 自动）' },
-  { v: '1d_click', l: '1天点击' },
-  { v: '7d_click', l: '7天点击' },
-  { v: '1d_click_1d_view', l: '1天点击 + 1天浏览' },
-  { v: '7d_click_1d_view', l: '7天点击 + 1天浏览' },
+  { v: '', l: 'launch.attr_default' },
+  { v: '1d_click', l: 'launch.attr_1d_click' },
+  { v: '7d_click', l: 'launch.attr_7d_click' },
+  { v: '1d_click_1d_view', l: 'launch.attr_1d_click_1d_view' },
+  { v: '7d_click_1d_view', l: 'launch.attr_7d_click_1d_view' },
 ]
 function attributionToSpec(preset) {
   const C = (d) => [{ event_type: 'CLICK', window_days: d }]
@@ -241,7 +244,7 @@ function attributionToSpec(preset) {
   return null
 }
 // Dayparting 网格
-const DPA_DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const DPA_DAYS = ['launch.dpa_mon', 'launch.dpa_tue', 'launch.dpa_wed', 'launch.dpa_thu', 'launch.dpa_fri', 'launch.dpa_sat', 'launch.dpa_sun']
 const DPA_FB_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
 const emptyGrid = () => Array.from({ length: 7 }, () => Array(24).fill(false))
 // 7×24 矩阵 → FB day_parting_schedule（按天压缩连续时段）
@@ -284,7 +287,7 @@ const dpaFillWorkhours = () => {
 
 const load = async () => {
   loading.value = true
-  try { list.value = await GET('/launch-templates') } catch (e) { showError(e, '加载失败') }
+  try { list.value = await GET('/launch-templates') } catch (e) { showError(e, t('common.fail')) }
   loading.value = false
 }
 const loadLandingPages = async () => { try { landingPages.value = await GET('/landing/pages') } catch {} }
@@ -314,7 +317,7 @@ const snapshotForm = () => { _formSnapshot = JSON.stringify(form.value) }
 const isDirty = computed(() => _formSnapshot && JSON.stringify(form.value) !== _formSnapshot)
 const onEditBeforeClose = (done) => {
   if (isDirty.value) {
-    ElMessageBox.confirm('有未保存的修改，确认丢弃？', '关闭确认', { type: 'warning', confirmButtonText: '丢弃', cancelButtonText: '继续编辑' })
+    ElMessageBox.confirm(t('launch.confirmDiscardMsg'), t('launch.closeConfirm'), { type: 'warning', confirmButtonText: t('common.discard'), cancelButtonText: t('launch.keepEditing') })
       .then(() => done()).catch(() => {})
   } else { done() }
 }
@@ -323,18 +326,18 @@ const onEditBeforeClose = (done) => {
 const validationErrors = ref([])
 const validateTemplate = () => {
   const errs = []
-  if (!form.value.name?.trim()) errs.push('模板名')
-  if (!form.value.asset_id) errs.push('素材（广告 Tab）')
-  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push('每日预算')
+  if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
+  if (!form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
+  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
   if (!form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
-    errs.push('落地页（选已有或填URL）')
+    errs.push(t('launch.fieldLandingPickOrUrl'))
   return errs
 }
 // 完整性状态（UI 显示用）
 const completionStatus = computed(() => {
   const errs = validateTemplate()
-  if (!errs.length) return { ready: true, label: '就绪', missing: [] }
-  return { ready: false, label: '待完善', missing: errs }
+  if (!errs.length) return { ready: true, label: t('launch.ready'), missing: [] }
+  return { ready: false, label: t('launch.pending'), missing: errs }
 })
 
 // #5 部署历史
@@ -406,30 +409,30 @@ const blankForm = () => ({
   attribution_preset: '',
   daypart_enabled: false, daypart_cells: emptyGrid(), daypart_tz: '',
 })
-const objLabel = (v) => OBJECTIVES.find(o => o.v === v)?.l || v
+const objLabel = (v) => t(OBJECTIVES.find(o => o.v === v)?.l || v)
 // 卡片完整性判断（列表用，不需打开编辑器）
-const _tplMissing = (t) => {
+const _tplMissing = (tpl) => {
   const m = []
-  if (!t.name?.trim()) m.push('模板名')
-  if (!t.asset_id) m.push('素材')
-  if (!t.budget_usd || t.budget_usd <= 0) m.push('预算')
-  if (!t.landing_url && !['OUTCOME_AWARENESS'].includes(t.objective)) m.push('落地页')
+  if (!tpl.name?.trim()) m.push(t('launch.fieldTplName'))
+  if (!tpl.asset_id) m.push(t('launch.asset'))
+  if (!tpl.budget_usd || tpl.budget_usd <= 0) m.push(t('launch.budget'))
+  if (!tpl.landing_url && !['OUTCOME_AWARENESS'].includes(tpl.objective)) m.push(t('launch.landing'))
   return m
 }
-const _tplReady = (t) => _tplMissing(t).length === 0
+const _tplReady = (tpl) => _tplMissing(tpl).length === 0
 const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
 
 // 编辑
 const openNew = () => { editing.value = null; form.value = blankForm(); editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
-const openEdit = async (t) => {
-  editing.value = t
+const openEdit = async (tpl) => {
+  editing.value = tpl
   const f = blankForm()
-  Object.assign(f, t)
+  Object.assign(f, tpl)
   // landing_page_id 后端对 NULL 返回 0；归一到 null 让 <select> 的「手动填 URL」选项（:value=null）能匹配选中
   if (!f.landing_page_id) f.landing_page_id = null
-  if (t.audience_json) { try { const a = JSON.parse(t.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
+  if (tpl.audience_json) { try { const a = JSON.parse(tpl.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
   // 从 advanced_config 恢复 Advantage+ / 版位 / 频次 / CPA（P0-3/P0-4 fix）
-  if (t.advanced_config) {
+  if (tpl.advanced_config) {
     try {
       const adv = JSON.parse(t.advanced_config)
       advantage_creative.value = !!adv.is_dynamic_creative
@@ -467,7 +470,7 @@ const openEdit = async (t) => {
   if (f.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === f.message_template_id) || null } catch {} }
   form.value = f
   editingAsset.value = null
-  if (t.asset_id) { try { editingAsset.value = await GET('/assets/' + t.asset_id) } catch {} }
+  if (tpl.asset_id) { try { editingAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   // 已绑落地页 → 预拉子码（填充子码下拉）
   if (f.landing_page_id) {
     try {
@@ -497,7 +500,7 @@ const searchInterests = async () => {
   if (!interestQ.value.trim()) return
   interestSearching.value = true
   try { interestResults.value = await GET('/audiences/search?q=' + encodeURIComponent(interestQ.value.trim()) + '&limit=10') }
-  catch (e) { showError(e, '兴趣搜索失败') }
+  catch (e) { showError(e, t('launch.interestSearchFail')) }
   interestSearching.value = false
 }
 const addInterest = (it) => {
@@ -515,7 +518,7 @@ const togglePlatform = (v) => {
 }
 const fmtSize = (n) => { if (!n) return ''; if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return Math.floor(n/1e3)+'K'; return String(n) }
 const importAiInterests = async () => {
-  if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning('该素材无 AI 兴趣词')
+  if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning(t('launch.noAiInterests'))
   let added = 0
   for (const kw of editingAsset.value.ai_audience.interests) {
     try {
@@ -523,7 +526,7 @@ const importAiInterests = async () => {
       if (r[0]) { if (!form.value.audience_interests.find(x => x.id === String(r[0].id))) { form.value.audience_interests.push({ id: String(r[0].id), name: r[0].name }); added++ } }
     } catch {}
   }
-  ElMessage.success(`从 AI 导入 ${added} 个兴趣`)
+  ElMessage.success(t('launch.importedInterests', { n: added }))
 }
 // 保存
 const buildAudienceJson = () => {
@@ -534,7 +537,7 @@ const buildAudienceJson = () => {
 const saveTpl = async () => {
   validationErrors.value = validateTemplate()
   if (validationErrors.value.length) {
-    return ElMessage.warning('待完善：缺 ' + validationErrors.value.join('、'))
+    return ElMessage.warning(t('launch.pendingMissing', { fields: validationErrors.value.join('、') }))
   }
   saving.value = true
   try {
@@ -561,7 +564,7 @@ const saveTpl = async () => {
       let adv = {}
       if (body.advanced_config) {
         try { adv = JSON.parse(body.advanced_config) }
-        catch { ElMessage.warning('高级设置 JSON 格式错误，已忽略'); adv = {} }
+        catch { ElMessage.warning(t('launch.advJsonInvalid')); adv = {} }
       }
       // 性能目标 CPA（COST_CAP 时生效）
       if (performance_goal_cpa.value > 0) {
@@ -620,38 +623,38 @@ const saveTpl = async () => {
       }
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
-    if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success('已保存') }
-    else { await POST('/launch-templates', body); ElMessage.success('已创建') }
+    if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success(t('common.saved')) }
+    else { await POST('/launch-templates', body); ElMessage.success(t('launch.created')) }
     editOpen.value = false; await load(); snapshotForm()
-  } catch (e) { showError(e, '保存模板失败') }
+  } catch (e) { showError(e, t('launch.saveTplFail')) }
   saving.value = false
 }
-const removeTpl = async (t) => {
-  try { await ElMessageBox.confirm(`归档模板「${t.name}」？`, '确认', { type: 'warning' }); await DELETE('/launch-templates/' + t.id); ElMessage.success('已归档'); await load() }
+const removeTpl = async (tpl) => {
+  try { await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/launch-templates/' + tpl.id); ElMessage.success(t('launch.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
-const copyTpl = async (t) => {
+const copyTpl = async (tpl) => {
   try {
-    const r = await POST('/launch-templates/' + t.id + '/copy', {})
-    ElMessage.success(`已复制为「${r.name}」`)
+    const r = await POST('/launch-templates/' + tpl.id + '/copy', {})
+    ElMessage.success(t('launch.copiedAs', { name: r.name }))
     await load()
-  } catch (e) { showError(e, '复制失败') }
+  } catch (e) { showError(e, t('launch.copyFail')) }
 }
 // 预检
 const preflighting = ref(false)
-const preflight = async (t) => {
+const preflight = async (tpl) => {
   preflighting.value = true
   try {
-    const r = await POST('/launch-templates/' + t.id + '/preflight', { act_id: accounts.value[0]?.act_id || '' })
+    const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: accounts.value[0]?.act_id || '' })
     preflightResult.value = r; preflightVisible.value = true
-  } catch (e) { showError(e, '预检失败') }
+  } catch (e) { showError(e, t('launch.preflightFail')) }
   preflighting.value = false
 }
 // 部署
-const openDeploy = async (t) => {
-  deployTpl.value = t; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
+const openDeploy = async (tpl) => {
+  deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   accLoading.value = true
-  try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, '加载账户失败') }
+  try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, t('launch.loadAccFail')) }
   accLoading.value = false
 }
 const toggleAcc = async (id) => {
@@ -674,13 +677,13 @@ const toggleAcc = async (id) => {
   }
 }
 const startDeploy = async () => {
-  if (!selectedAccs.value.size) return ElMessage.warning('先选账户')
+  if (!selectedAccs.value.size) return ElMessage.warning(t('launch.selectAccFirst'))
   const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
   deploying.value = true
   try {
     const r = await POST('/launch-templates/' + deployTpl.value.id + '/deploy', { items })
-    deployOpen.value = false; ElMessage.success(`已提交：${r.total} 个账户`); openProgress(r.job_id); await load()
-  } catch (e) { showError(e, '部署提交失败') }
+    deployOpen.value = false; ElMessage.success(t('launch.submitted', { n: r.total })); openProgress(r.job_id); await load()
+  } catch (e) { showError(e, t('launch.deploySubmitFail')) }
   deploying.value = false
 }
 // 进度
@@ -697,8 +700,8 @@ const pollJob = async (jobId) => {
   } catch {}
 }
 const retryItem = async (it) => {
-  try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success('已提交重试')
-    if (!pollTimer) pollTimer = setInterval(() => pollJob(activeJob.value.id), 2500) } catch (e) { showError(e, '重试失败') }
+  try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success(t('launch.retrySubmitted'))
+    if (!pollTimer) pollTimer = setInterval(() => pollJob(activeJob.value.id), 2500) } catch (e) { showError(e, t('launch.retryFail')) }
 }
 const statusText = (s) => itemStatus(s).label
 const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
@@ -709,115 +712,115 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 <template>
   <div class="page">
     <div class="bar">
-      <div class="t">投放模板</div>
+      <div class="t">{{ t('launch.title') }}</div>
       <div style="display:flex;gap:8px">
-        <button class="btn" @click="openHistory">部署历史</button>
-        <button class="btn primary" @click="openNew">+ 新建模板</button>
+        <button class="btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
+        <button class="btn primary" @click="openNew">+ {{ t('launch.newTemplate') }}</button>
       </div>
     </div>
-    <div class="d">选模板 + 选账户 → 一键批量部署到多账户。</div>
+    <div class="d">{{ t('launch.subtitle') }}</div>
 
     <div class="grid" v-loading="loading">
-      <div v-for="t in list" :key="t.id" class="card">
+      <div v-for="tpl in list" :key="tpl.id" class="card">
         <div class="card-head">
-          <span class="card-name">{{ t.name }}</span>
-          <span :class="['card-badge', _tplReady(t) ? 'ready' : 'pending']" :title="_tplMissing(t).join('、')">
-            {{ _tplReady(t) ? '✓ 就绪' : '待完善' }}
+          <span class="card-name">{{ tpl.name }}</span>
+          <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
+            {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
           </span>
         </div>
-        <div class="card-meta"><span class="card-obj">{{ objLabel(t.objective) }}</span><span>{{ fmtUsd(t.budget_usd) }}/天</span></div>
-        <div v-if="!_tplReady(t)" class="card-warn">缺：{{ _tplMissing(t).join('、') }}</div>
+        <div class="card-meta"><span class="card-obj">{{ objLabel(tpl.objective) }}</span><span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span></div>
+        <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
-          <button class="op primary" @click="openDeploy(t)">部署</button>
-          <button class="op" @click="openEdit(t)">编辑</button>
-          <button class="op" @click="copyTpl(t)" title="复制一份做变体">复制</button>
-          <button class="op danger" @click="removeTpl(t)">归档</button>
+          <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
+          <button class="op" @click="openEdit(tpl)">{{ t('common.edit') }}</button>
+          <button class="op" @click="copyTpl(tpl)" :title="t('launch.copyVariant')">{{ t('common.copy') }}</button>
+          <button class="op danger" @click="removeTpl(tpl)">{{ t('launch.archive') }}</button>
         </div>
       </div>
-      <div v-if="!list.length && !loading" class="empty">暂无模板，点「+ 新建模板」。</div>
+      <div v-if="!list.length && !loading" class="empty">{{ t('launch.emptyHint') }}</div>
     </div>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
-    <el-drawer v-model="editOpen" :title="editing ? '编辑模板' : '新建模板'" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
+    <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="level-tabs">
-        <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① 系列 Campaign</button>
-        <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② 广告组 Ad Set</button>
-        <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ 广告 Ad</button>
+        <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① {{ t('launch.levelCampaign') }}</button>
+        <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ t('launch.levelAdSet') }}</button>
+        <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ {{ t('launch.levelAd') }}</button>
       </div>
       <!-- #8 summary strip：跨级概览 -->
       <div class="summary-strip">
-        <span class="ss-chip" @click="editLevel='campaign'" title="点击跳到系列">目标：{{ OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective }}</span>
-        <span class="ss-chip" @click="editLevel='adset'" title="点击跳到广告组">受众：{{ (form.audience_countries||[]).join(',') || '默认' }} · {{ (form.audience_interests||[]).length }}兴趣</span>
-        <span class="ss-chip" @click="editLevel='ad'" title="点击跳到广告">素材：{{ editingAsset?.name || '未选' }}</span>
+        <span class="ss-chip" @click="editLevel='campaign'" :title="t('launch.gotoCampaign')">{{ t('launch.objColon') }}{{ t(OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective) }}</span>
+        <span class="ss-chip" @click="editLevel='adset'" :title="t('launch.gotoAdSet')">{{ t('launch.audienceColon') }}{{ (form.audience_countries||[]).join(',') || t('launch.defaultAudience') }} · {{ t('launch.interestCount', { n: (form.audience_interests||[]).length }) }}</span>
+        <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.assetColon') }}{{ editingAsset?.name || t('launch.notSelected') }}</span>
         <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
-          {{ completionStatus.ready ? '✓ 就绪' : '待完善：' + completionStatus.missing.join('、') }}
+          {{ completionStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + completionStatus.missing.join('、') }}
         </span>
       </div>
 
       <!-- ① 系列 -->
       <div v-if="editLevel==='campaign'" class="form">
-        <div class="row"><label>模板名</label><input v-model="form.name" class="inp" placeholder="如 US-shopping-夏季" /></div>
-        <div class="row"><label>广告目标</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="o.l" /></el-select></div>
-        <div class="row" v-if="convGoalsForObjective.length"><label>转化目标</label>
-          <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable placeholder="选择转化事件">
-            <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
+        <div class="row"><label>{{ t('launch.fieldTplName') }}</label><input v-model="form.name" class="inp" :placeholder="t('launch.tplNamePlaceholder')" /></div>
+        <div class="row"><label>{{ t('launch.objective') }}</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" /></el-select></div>
+        <div class="row" v-if="convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
+          <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
+            <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
           </el-select>
         </div>
-        <div class="row"><label>预算模式</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">广告组预算</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">Advantage+ 系列预算</button></div>
-          <span v-if="form.budget_mode==='CBO'" class="hint">FB AI 自动在各广告组间分配预算，最大化整体效果</span>
+        <div class="row"><label>{{ t('launch.budgetMode') }}</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">{{ t('launch.abo') }}</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">{{ t('launch.cbo') }}</button></div>
+          <span v-if="form.budget_mode==='CBO'" class="hint">{{ t('launch.cboHint') }}</span>
         </div>
-        <div class="row"><label>每日预算（美元）</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">部署时按账户本币自动换算</span></div>
-        <div class="row"><label>出价策略</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
-        <div class="row"><label>特殊广告类别</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="s.l" /></el-select></div>
-        <div class="row"><label>广告命名前缀</label><input v-model="form.name_prefix" class="inp" /></div>
+        <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+        <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
+        <div class="row"><label>{{ t('launch.specialAdCategory') }}</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="t(s.l)" /></el-select></div>
+        <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
       </div>
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
-        <div class="row"><label>优化目标</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" label="自动（按目标推）" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="g.l" /></el-select></div>
-        <div class="row"><label>计费事件</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="b.l" /></el-select></div>
-        <div class="row"><label>转化目的地</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" label="自动" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="d.l" /></el-select></div>
+        <div class="row"><label>{{ t('launch.optimizationGoal') }}</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoByObj')" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" /></el-select></div>
+        <div class="row"><label>{{ t('launch.billingEvent') }}</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
+        <div class="row"><label>{{ t('launch.conversionDest') }}</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoOpt')" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="t(d.l)" /></el-select></div>
         <hr class="sep" />
-        <div class="sec-title">性能目标（可选）</div>
-        <div class="row"><label>每次结果成本目标（美元，0=不限）</label>
-          <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" placeholder="如 5.0（留空=最低成本）" />
-          <span class="hint">设了目标后出价策略自动切"成本上限"，FB 按此 CPA 优化</span>
+        <div class="sec-title">{{ t('launch.perfGoalOptional') }}</div>
+        <div class="row"><label>{{ t('launch.cpaGoalLabel') }}</label>
+          <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.cpaGoalPlaceholder')" />
+          <span class="hint">{{ t('launch.cpaGoalHint') }}</span>
         </div>
         <hr class="sep" />
-        <div class="sec-title">受众定向</div>
+        <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
         <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为） -->
         <div class="advantage-box">
           <div class="adv-row">
             <div class="adv-info">
-              <span class="adv-title">Advantage+ 受众</span>
-              <span class="adv-desc">开启后，FB AI 会根据你的素材和转化数据自动扩展兴趣受众。年龄/性别/语言仍可设置作为基础约束。</span>
+              <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
+              <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
             </div>
             <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           </div>
         </div>
-        <div class="row"><label>国家/地区</label>
+        <div class="row"><label>{{ t('launch.countries') }}</label>
           <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
-            placeholder="搜索选择国家/地区（可多选）" style="width:100%" size="small">
-            <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="c.l + ' (' + c.v + ')'" />
+            :placeholder="t('launch.countriesPlaceholder')" style="width:100%" size="small">
+            <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="t(c.l) + ' (' + c.v + ')'" />
           </el-select>
         </div>
-        <div class="row"><label>年龄</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
-        <div class="row"><label>性别</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">全部</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">男</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">女</button></div></div>
-        <div class="row"><label>语言（定向说此语言的人）</label>
-          <el-select v-model="form.audience_language" filterable clearable placeholder="不限语言" style="width:100%" size="small">
-            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="l.l" />
+        <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
+        <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
+        <div class="row"><label>{{ t('launch.languageLabel') }}</label>
+          <el-select v-model="form.audience_language" filterable clearable :placeholder="t('launch.langAny')" style="width:100%" size="small">
+            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
           </el-select>
         </div>
         <template v-if="!advantage_audience">
-        <div class="row"><label>兴趣关键词（FB adinterest 搜索）</label>
+        <div class="row"><label>{{ t('launch.interestLabel') }}</label>
           <div class="interest-search">
-            <input v-model="interestQ" class="inp" placeholder="如 Shopping / 美妆 / 投资" @keyup.enter="searchInterests" />
-            <button class="btn sm" :disabled="interestSearching" @click="searchInterests">{{ interestSearching ? '…' : '搜索' }}</button>
-            <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">从素材AI导入</button>
+            <input v-model="interestQ" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterests" />
+            <button class="btn sm" :disabled="interestSearching" @click="searchInterests">{{ interestSearching ? '…' : t('common.search') }}</button>
+            <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">{{ t('launch.importFromAssetAi') }}</button>
           </div>
-          <div v-if="interestSearching" class="search-results"><div class="search-loading">搜索中…</div></div>
+          <div v-if="interestSearching" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
           <div v-else-if="interestResults.length" class="search-results">
-            <div class="search-results-head"><span>搜索结果（点击 + 添加，可连续选多个）</span><button class="clear-btn" @click="clearInterestSearch">清空 ✕</button></div>
+            <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearInterestSearch">{{ t('launch.clear') }} ✕</button></div>
             <div v-for="r in interestResults" :key="r.id" :class="['search-item', { added: isInterestAdded(r.id) }]" @click="!isInterestAdded(r.id) && addInterest(r)">
               <span>{{ r.name }}</span>
               <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
@@ -826,30 +829,30 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             </div>
           </div>
         </div>
-        <div class="row"><label>已选兴趣（{{ form.audience_interests.length }}）</label>
+        <div class="row"><label>{{ t('launch.selectedInterests', { n: form.audience_interests.length }) }}</label>
           <div class="interest-list">
             <span v-for="(it,i) in form.audience_interests" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeInterest(i)">✕</button></span>
-            <span v-if="!form.audience_interests.length" class="hint">点上方搜索添加</span>
+            <span v-if="!form.audience_interests.length" class="hint">{{ t('launch.addViaSearch') }}</span>
           </div>
         </div>
         </template>
         <hr class="sep" />
-        <div class="sec-title">版位</div>
-        <div class="row"><label>投放版位</label>
+        <div class="sec-title">{{ t('launch.placement') }}</div>
+        <div class="row"><label>{{ t('launch.adPlacement') }}</label>
           <div class="seg">
-            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">Advantage+（自动推荐）</button>
-            <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">手动选择</button>
+            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">{{ t('launch.advPlusPlacement') }}</button>
+            <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">{{ t('launch.manualSelect') }}</button>
           </div>
         </div>
         <div v-if="form.manual_placement">
-          <div class="row"><label>设备</label>
+          <div class="row"><label>{{ t('launch.device') }}</label>
             <div class="placement-chips">
               <label v-for="d in DEVICES" :key="d.v" class="placement-chip" :class="{on:(form.placement_devices||[]).includes(d.v)}">
-                <input type="checkbox" :checked="(form.placement_devices||[]).includes(d.v)" @change="toggleDevice(d.v)" /> {{ d.l }}
+                <input type="checkbox" :checked="(form.placement_devices||[]).includes(d.v)" @change="toggleDevice(d.v)" /> {{ t(d.l) }}
               </label>
             </div>
           </div>
-          <div class="row"><label>平台和版位</label>
+          <div class="row"><label>{{ t('launch.platformsAndPlacements') }}</label>
             <div class="placement-tree">
               <div v-for="p in PLATFORMS" :key="p.v" class="pt-node">
                 <div class="pt-head" @click="togglePlatformExpand(p.v)">
@@ -860,46 +863,46 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
                 </div>
                 <div v-if="expandedPlatforms.has(p.v) && isPlatformOn(p.v)" class="pt-positions">
                   <label v-for="pos in p.positions" :key="pos.v" class="pos-chip" :class="{on:isPosOn(p.v,pos.v)}">
-                    <input type="checkbox" :checked="isPosOn(p.v,pos.v)" @change="togglePos(p.v,pos.v)" /> {{ pos.l }}
+                    <input type="checkbox" :checked="isPosOn(p.v,pos.v)" @change="togglePos(p.v,pos.v)" /> {{ t(pos.l) }}
                   </label>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        <div class="sec-title">披露（部分国家强制）</div>
-        <div class="row"><label>受益人 beneficiary</label><input v-model="form.beneficiary" class="inp" placeholder="EU/泰国/印度/巴西/台湾/澳洲/新加坡等必填" /></div>
-        <div class="row"><label>付款人</label><input v-model="form.payer" class="inp" /></div>
+        <div class="sec-title">{{ t('launch.disclosure') }}</div>
+        <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
+        <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
         <hr class="sep" />
-        <div class="sec-title">投放节奏</div>
-        <div class="row"><label>频次上限（次 / 天，0=不限）</label><input v-model.number="form.frequency_cap" type="number" min="0" class="inp" placeholder="0" /></div>
-        <div class="row"><label>归因窗口</label>
-          <el-select v-model="form.attribution_preset" style="width:100%" size="small" clearable placeholder="默认（FB 自动）">
-            <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="a.l" />
+        <div class="sec-title">{{ t('launch.pacing') }}</div>
+        <div class="row"><label>{{ t('launch.freqCapLabel') }}</label><input v-model.number="form.frequency_cap" type="number" min="0" class="inp" placeholder="0" /></div>
+        <div class="row"><label>{{ t('launch.attributionWindow') }}</label>
+          <el-select v-model="form.attribution_preset" style="width:100%" size="small" clearable :placeholder="t('launch.attr_default')">
+            <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="t(a.l)" />
           </el-select>
-          <span class="hint">仅转化类目标（销售/线索/应用安装）生效；控制多久内的点击/浏览算转化</span>
+          <span class="hint">{{ t('launch.attributionHint') }}</span>
         </div>
         <div class="row" style="flex-direction:column;align-items:stretch">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <label style="margin:0">时段投放（只在指定时段跑广告）</label>
+            <label style="margin:0">{{ t('launch.daypartLabel') }}</label>
             <el-switch v-model="form.daypart_enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           </div>
           <template v-if="form.daypart_enabled">
             <div class="dpa-tools">
-              <button type="button" class="op sm" @click="dpaFillAll">全天</button>
-              <button type="button" class="op sm" @click="dpaFillWorkhours">工作时段 9-22</button>
-              <button type="button" class="op sm" @click="dpaClearAll">清空</button>
-              <span class="hint">点格子切换该时段；按广告账户时区生效</span>
+              <button type="button" class="op sm" @click="dpaFillAll">{{ t('launch.daypartAllDay') }}</button>
+              <button type="button" class="op sm" @click="dpaFillWorkhours">{{ t('launch.daypartWorkhours') }}</button>
+              <button type="button" class="op sm" @click="dpaClearAll">{{ t('launch.clear') }}</button>
+              <span class="hint">{{ t('launch.daypartHint') }}</span>
             </div>
             <div class="dpa-grid">
               <div class="dpa-corner"></div>
-              <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 点</span></div>
+              <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 {{ t('launch.hour') }}</span></div>
               <template v-for="di in 7" :key="'d'+di">
-                <div class="dpa-rhdr">{{ DPA_DAYS[di-1] }}</div>
+                <div class="dpa-rhdr">{{ t(DPA_DAYS[di-1]) }}</div>
                 <div class="dpa-row">
                   <div v-for="h in 24" :key="di+'_'+h"
                        :class="['dpa-cell', form.daypart_cells[di-1][h-1] ? 'on' : '']"
-                       :title="DPA_DAYS[di-1] + ' ' + (h-1) + ':00'"
+                       :title="t(DPA_DAYS[di-1]) + ' ' + (h-1) + ':00'"
                        @click="toggleCell(di-1, h-1)"></div>
                 </div>
               </template>
@@ -907,94 +910,94 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </template>
         </div>
         <hr class="sep" />
-        <div class="sec-title">高级字段（JSON，可选）</div>
-        <div class="row"><label>高级设置</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" placeholder='如 {"bid_amount":500}'></textarea><span class="hint">进阶 FB API 字段（JSON），与上方结构化设置合并；留空即可</span></div>
+        <div class="sec-title">{{ t('launch.advancedFieldsTitle') }}</div>
+        <div class="row"><label>{{ t('launch.advancedSettings') }}</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" :placeholder='t(&apos;launch.advancedPlaceholder&apos;)'></textarea><span class="hint">{{ t('launch.advancedHint') }}</span></div>
       </div>
 
       <!-- ③ 广告 -->
       <div v-if="editLevel==='ad'" class="form">
-        <div class="row"><label>素材</label>
+        <div class="row"><label>{{ t('launch.asset') }}</label>
           <div class="asset-pick">
             <div v-if="editingAsset" class="asset-chosen" @click="openPreview(editingAsset)" style="cursor:pointer">
               <img v-if="editingAsset.type==='image'" :src="editingAsset.public_url" class="asset-thumb" />
               <video v-else :src="editingAsset.public_url" class="asset-thumb" preload="metadata" />
-              <span class="asset-name">{{ editingAsset.name }}（点击预览）</span>
+              <span class="asset-name">{{ editingAsset.name }}（{{ t('launch.clickToPreview') }}）</span>
             </div>
-            <button class="btn sm" @click="openAssetPicker">{{ editingAsset ? '换' : '选择素材' }}</button>
+            <button class="btn sm" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
           </div>
         </div>
         <!-- Advantage+ 创意（对齐 FB Ads Manager） -->
         <div class="advantage-box">
           <div class="adv-row">
             <div class="adv-info">
-              <span class="adv-title">Advantage+ 创意</span>
-              <span class="adv-desc">开启后，FB 将自动为你的素材生成文案变体、裁切比例、添加音乐，提升表现</span>
+              <span class="adv-title">{{ t('launch.advPlusCreative') }}</span>
+              <span class="adv-desc">{{ t('launch.advPlusCreativeDesc') }}</span>
             </div>
             <el-switch v-model="advantage_creative" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           </div>
         </div>
         <div v-if="editingAsset && (editingAsset.ai_copy?.headlines||[]).length" class="ai-copy">
-          <div class="ai-copy-t">AI 文案（点选填充）</div>
-          <div v-for="(h,i) in (editingAsset.ai_copy?.headlines||[])" :key="'h'+i" class="ai-pick" @click="form.headline=h"><span class="ai-tag">标题{{i+1}}</span> {{ h }}</div>
-          <div v-for="(b,i) in (editingAsset.ai_copy?.bodies||[])" :key="'b'+i" class="ai-pick" @click="form.body=b"><span class="ai-tag">正文{{i+1}}</span> {{ b }}</div>
+          <div class="ai-copy-t">{{ t('launch.aiCopyHint') }}</div>
+          <div v-for="(h,i) in (editingAsset.ai_copy?.headlines||[])" :key="'h'+i" class="ai-pick" @click="form.headline=h"><span class="ai-tag">{{ t('launch.headlineN', { n: i+1 }) }}</span> {{ h }}</div>
+          <div v-for="(b,i) in (editingAsset.ai_copy?.bodies||[])" :key="'b'+i" class="ai-pick" @click="form.body=b"><span class="ai-tag">{{ t('launch.bodyN', { n: i+1 }) }}</span> {{ b }}</div>
         </div>
-        <div class="row"><label>标题 headline</label><input v-model="form.headline" class="inp" /></div>
-        <div class="row"><label>正文 body</label><textarea v-model="form.body" class="inp ta" rows="3"></textarea></div>
-        <div class="row"><label>行动号召 CTA</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="c.l + '（' + c.v + '）'" /></el-select></div>
-        <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">主页和像素在部署时按账户选择（不同账户的主页/像素不同）</div>
-        <div class="row"><label>落地页</label>
+        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" /></div>
+        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3"></textarea></div>
+        <div class="row"><label>{{ t('launch.ctaLabel') }}</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" /></el-select></div>
+        <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.pagePixelHint') }}</div>
+        <div class="row"><label>{{ t('launch.landing') }}</label>
           <select v-model="form.landing_page_id" class="inp" @change="onLandingChange">
-            <option :value="null">手动填 URL</option>
-            <option v-for="p in landingPages" :key="p.id" :value="p.id">{{ p.title }}（{{ p.public_url || '无URL' }}）</option>
+            <option :value="null">{{ t('launch.manualUrl') }}</option>
+            <option v-for="p in landingPages" :key="p.id" :value="p.id">{{ p.title }}（{{ p.public_url || t('launch.noUrl') }}）</option>
           </select>
         </div>
-        <div class="row"><label>落地页 URL</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
-        <div class="row"><label>子码</label>
-          <el-select v-model="form.subcode_slug" filterable clearable placeholder="选该落地页的子码（留空=不绑）" style="width:100%" size="small">
+        <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
+        <div class="row"><label>{{ t('launch.subcode') }}</label>
+          <el-select v-model="form.subcode_slug" filterable clearable :placeholder="t('launch.subcodePlaceholder')" style="width:100%" size="small">
             <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + (s.status ? ' ('+s.status+')' : '')" />
           </el-select>
-          <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">该落地页暂无子码，部署时会自动创建</span>
+          <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
         </div>
         <!-- 消息类（ENGAGEMENT + 消息目标） -->
         <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
-          <hr class="sep" /><div class="sec-title-row"><span class="sec-title">消息广告</span>
-            <router-link to="/form-templates" class="new-link">管理消息模板 →</router-link>
+          <hr class="sep" /><div class="sec-title-row"><span class="sec-title">{{ t('launch.messageAd') }}</span>
+            <router-link to="/form-templates" class="new-link">{{ t('launch.manageMsgTpl') }} →</router-link>
           </div>
-          <div class="row"><label>Messenger 欢迎语模板</label>
-            <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable placeholder="选消息模板（留空=不设）" @change="onMsgTplChange">
+          <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
+            <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="onMsgTplChange">
               <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
             </el-select>
           </div>
           <div v-if="selectedMsgTpl" class="tpl-preview-bar" @click="msgPreviewOpen = true">
             <span>{{ (selectedMsgTpl.welcome_text||'').slice(0,50) }}…</span>
-            <span class="preview-link">预览</span>
+            <span class="preview-link">{{ t('common.preview') }}</span>
           </div>
         </template>
         <!-- 表单类（LEADS + Instant Forms） -->
         <template v-if="form.objective === 'OUTCOME_LEADS'">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
-            <router-link to="/form-templates" class="new-link">管理表单模板 →</router-link>
+            <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
           </div>
-          <div class="row"><label>表单模板</label>
-            <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable placeholder="选表单模板" @change="onFormTplChange">
+          <div class="row"><label>{{ t('launch.formTemplate') }}</label>
+            <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
               <el-option v-for="f in formTemplates" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
             </el-select>
           </div>
           <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
             <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
-            <span class="preview-link">预览</span>
+            <span class="preview-link">{{ t('common.preview') }}</span>
           </div>
         </template>
       </div>
 
       <template #footer>
-        <button class="btn" @click="editOpen=false">取消</button>
-        <button class="btn primary" :disabled="saving" @click="saveTpl">{{ saving ? '保存中…' : '保存' }}</button>
+        <button class="btn" @click="editOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="saving" @click="saveTpl">{{ saving ? t('launch.saving') : t('common.save') }}</button>
       </template>
     </el-drawer>
 
     <!-- 素材选择器 -->
-    <el-drawer v-model="assetPickerOpen" title="选择素材" direction="rtl" size="560px" append-to-body>
+    <el-drawer v-model="assetPickerOpen" :title="t('launch.selectAsset')" direction="rtl" size="560px" append-to-body>
       <div class="picker-grid" v-loading="pickerLoading">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
@@ -1013,11 +1016,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     </el-dialog>
 
     <!-- 部署抽屉 -->
-    <el-drawer v-model="deployOpen" :title="`部署 · ${deployTpl?.name||''}`" direction="rtl" size="680px">
-      <div class="d">勾选账户。每账户的主页/像素从下拉选（默认填模板值）。</div>
+    <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
+      <div class="d">{{ t('launch.deploySubtitle') }}</div>
       <div class="deploy-search-row">
-        <input v-model="deploySearch" class="inp" placeholder="搜索账户名/ID（模糊）" />
-        <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} 个账户</span>
+        <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
+        <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
       </div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" class="acc-block">
@@ -1025,21 +1028,21 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <input type="checkbox" :checked="selectedAccs.has(a.act_id)" @change="toggleAcc(a.act_id)" />
             <span class="acc-name">{{ a.name || a.act_id }}</span>
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
-            <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? '正常' : '异常'">{{ a.account_status === 1 ? '正常' : '异常' }}</span>
+            <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
           </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
-              <span class="config-loading">加载主页/像素…</span>
+              <span class="config-loading">{{ t('launch.loadingPagePixel') }}</span>
             </template>
             <template v-else>
-              <label>主页</label>
+              <label>{{ t('launch.page') }}</label>
               <select v-model="deployItems[a.act_id].page_id" class="inp sm">
-                <option value="">默认({{ deployTpl?.page_id || '无' }})</option>
+                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') }) }}</option>
                 <option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
               </select>
-              <label>像素</label>
+              <label>{{ t('launch.pixel') }}</label>
               <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
-                <option value="">默认({{ deployTpl?.pixel_id || '无' }})</option>
+                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.none') }) }}</option>
                 <option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
               </select>
             </template>
@@ -1047,14 +1050,14 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
       </div>
       <template #footer>
-        <span class="sel-count">已选 {{ selectedAccs.size }}</span>
-        <button class="btn" @click="deployOpen=false">取消</button>
-        <button class="btn primary" :disabled="deploying||!selectedAccs.size" @click="startDeploy">{{ deploying?'提交中…':'开始部署' }}</button>
+        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}</span>
+        <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="deploying||!selectedAccs.size" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
       </template>
     </el-drawer>
 
     <!-- 进度 -->
-    <el-dialog v-model="progressOpen" title="部署进度" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearInterval(pollTimer);pollTimer=null}">
+    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearInterval(pollTimer);pollTimer=null}">
       <div v-if="activeJob" class="prog">
         <div class="prog-head">
           <span>{{ activeJob.template_name }}</span>
@@ -1066,32 +1069,32 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="dot" :style="{background:statusColor(it.status)}"></span>
             <span class="pi-act">{{ it.act_id }}</span>
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
-            <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">FB广告→</a>
+            <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">{{ t('launch.fbAds') }}→</a>
             <span v-if="it.error" class="pi-err" :title="it.error">{{ it.error.slice(0,50) }}</span>
-            <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">重试</button>
+            <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
           </div>
         </div>
       </div>
     </el-dialog>
     <!-- 预检结果（结构化展示） -->
-    <el-dialog v-model="preflightVisible" title="预检 · 即将发给 FB 的参数" width="700px" append-to-body>
+    <el-dialog v-model="preflightVisible" :title="t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
         <div class="pf-summary">
-          <span>账户币种：<b>{{ preflightResult.currency }}</b></span>
-          <span>预算：$${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（本币最小单位）</span>
-          <span>汇率：{{ preflightResult.fx_rate || '无' }}</span>
-          <span>模式：{{ preflightResult.budget_mode }}</span>
+          <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
+          <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ t('launch.minorUnitHint') }}）</span>
+          <span>{{ t('launch.fxRate') }}：{{ preflightResult.fx_rate || t('launch.none') }}</span>
+          <span>{{ t('launch.modeColon') }}{{ preflightResult.budget_mode }}</span>
         </div>
         <div class="pf-section">
-          <div class="pf-title">系列 Campaign</div>
+          <div class="pf-title">{{ t('launch.pfCampaign') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
         </div>
         <div class="pf-section">
-          <div class="pf-title">广告组 Ad Set</div>
+          <div class="pf-title">{{ t('launch.pfAdSet') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
         </div>
         <div class="pf-section">
-          <div class="pf-title">广告创意 Creative</div>
+          <div class="pf-title">{{ t('launch.pfCreative') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.creative" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
         </div>
         <div v-if="preflightResult.notes" class="pf-notes">
@@ -1101,7 +1104,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     </el-dialog>
 
     <!-- 部署历史 -->
-    <el-dialog v-model="historyOpen" title="部署历史" width="600px" append-to-body>
+    <el-dialog v-model="historyOpen" :title="t('launch.deployHistory')" width="600px" append-to-body>
       <div class="history-list">
         <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
           <div class="hi-main">
@@ -1110,11 +1113,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </div>
           <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ (j.created_at||'').slice(0,16) }}</div>
         </div>
-        <div v-if="!jobs.length" class="empty-sm">暂无部署记录</div>
+        <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
       </div>
     </el-dialog>
     <!-- 表单预览 -->
-    <el-dialog v-model="formPreviewOpen" title="表单预览" width="400px" append-to-body>
+    <el-dialog v-model="formPreviewOpen" :title="t('launch.formPreview')" width="400px" append-to-body>
       <div v-if="selectedFormTpl" class="phone-mockup">
         <div class="pm-screen">
           <div class="pm-header">{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</div>
@@ -1128,7 +1131,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       </div>
     </el-dialog>
     <!-- 消息预览 -->
-    <el-dialog v-model="msgPreviewOpen" title="消息预览" width="380px" append-to-body>
+    <el-dialog v-model="msgPreviewOpen" :title="t('launch.msgPreview')" width="380px" append-to-body>
       <div v-if="selectedMsgTpl" class="messenger-mockup">
         <div class="mm-bubble">{{ selectedMsgTpl.welcome_text }}</div>
         <div v-if="(selectedMsgTpl.ice_breakers||[]).length" class="mm-quick-replies">

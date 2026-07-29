@@ -1,86 +1,114 @@
-// 中央状态术语 registry。所有"状态枚举 → 中文标签 + 样式类"集中在此，
+// 中央状态术语 registry。所有"状态枚举 → 翻译 key + 样式类"集中在此，
 // 页面只消费、不自定义映射。新增状态只改这里，全局生效。
+// label 字段存的是 i18n key；resolver 在返回时调 t() 解析，故 locale 切换实时生效，
+// 且调用方无需改动（仍用 xxxStatus(s).label）。
 // cls 约定：ok(绿/正常) / warn(黄/注意) / off(灰/停用) / err(红/异常)
+import i18n from '../i18n'
+const t = i18n.global.t
 
 // FB 广告 / 系列 / 组 effective_status
 export const FB_AD_STATUS = {
-  ACTIVE:            { label: '投放中', cls: 'ok' },
-  PAUSED:            { label: '已暂停', cls: 'off' },
-  CAMPAIGN_PAUSED:   { label: '系列暂停', cls: 'off' },
-  ADSET_PAUSED:      { label: '组暂停', cls: 'off' },
-  ARCHIVED:          { label: '已归档', cls: 'off' },
-  DELETED:           { label: '已删除', cls: 'off' },
-  DISAPPROVED:       { label: '被拒', cls: 'err' },
-  PENDING_REVIEW:    { label: '审核中', cls: 'warn' },
-  REVIEW_IN_PROGRESS:{ label: '审核中', cls: 'warn' },
-  PREVIEW:           { label: '预览', cls: 'warn' },
-  IN_PROCESS:        { label: '处理中', cls: 'warn' },
-  WITH_ISSUES:       { label: '有问题', cls: 'warn' },
+  ACTIVE:            { key: 'status.adActive',          cls: 'ok' },
+  PAUSED:            { key: 'status.adPaused',           cls: 'off' },
+  CAMPAIGN_PAUSED:   { key: 'status.adCampaignPaused',   cls: 'off' },
+  ADSET_PAUSED:      { key: 'status.adsetPaused',        cls: 'off' },
+  ARCHIVED:          { key: 'status.adArchived',         cls: 'off' },
+  DELETED:           { key: 'status.adDeleted',          cls: 'off' },
+  DISAPPROVED:       { key: 'status.adDisapproved',      cls: 'err' },
+  PENDING_REVIEW:    { key: 'status.adReview',           cls: 'warn' },
+  REVIEW_IN_PROGRESS:{ key: 'status.adReview',           cls: 'warn' },
+  PREVIEW:           { key: 'status.adPreview',          cls: 'warn' },
+  IN_PROCESS:        { key: 'status.adInProcess',        cls: 'warn' },
+  WITH_ISSUES:       { key: 'status.adWithIssues',       cls: 'warn' },
 }
-export const fbAdStatus = (s) => FB_AD_STATUS[s] || { label: s || '—', cls: 'off' }
+export const fbAdStatus = (s) => {
+  const e = FB_AD_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 账户 account_status（FB 数字码）
 export const ACCOUNT_STATUS = {
-  1:   { label: '可用',   cls: 'ok' },
-  2:   { label: '已禁用', cls: 'off' },
-  3:   { label: '未结算', cls: 'warn' },
-  7:   { label: '被封',   cls: 'err' },
-  9:   { label: '待关闭', cls: 'warn' },
-  100: { label: '待关闭', cls: 'warn' },
-  101: { label: '已关闭', cls: 'off' },
+  1:   { key: 'status.accActive',       cls: 'ok' },
+  2:   { key: 'status.accDisabled',     cls: 'off' },
+  3:   { key: 'status.accUnsettled',    cls: 'warn' },
+  7:   { key: 'status.accBanned',       cls: 'err' },
+  9:   { key: 'status.accPendingClose', cls: 'warn' },
+  100: { key: 'status.accPendingClose', cls: 'warn' },
+  101: { key: 'status.accClosed',       cls: 'off' },
 }
-export const accountStatus = (code) => ACCOUNT_STATUS[Number(code)] || { label: '—', cls: 'off' }
+export const accountStatus = (code) => {
+  const e = ACCOUNT_STATUS[Number(code)]
+  return e ? { label: t(e.key), cls: e.cls } : { label: '—', cls: 'off' }
+}
 
 // 部署任务状态
 export const JOB_STATUS = {
-  pending:        { label: '等待', cls: 'off' },
-  running:        { label: '运行中', cls: 'warn' },
-  completed:      { label: '已完成', cls: 'ok' },
-  partial_failed: { label: '部分失败', cls: 'warn' },
-  failed:         { label: '失败', cls: 'err' },
+  pending:        { key: 'status.jobPending',   cls: 'off' },
+  running:        { key: 'status.jobRunning',   cls: 'warn' },
+  completed:      { key: 'status.jobCompleted', cls: 'ok' },
+  partial_failed: { key: 'status.jobPartial',   cls: 'warn' },
+  failed:         { key: 'status.jobFailed',    cls: 'err' },
 }
-export const jobStatus = (s) => JOB_STATUS[s] || { label: s || '—', cls: 'off' }
+export const jobStatus = (s) => {
+  const e = JOB_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 部署单项状态
 export const ITEM_STATUS = {
-  pending:  { label: '等待', cls: 'off' },
-  creating: { label: '创建中', cls: 'warn' },
-  success:  { label: '✓ 成功', cls: 'ok' },
-  fail:     { label: '✗ 失败', cls: 'err' },
+  pending:  { key: 'status.itemPending',  cls: 'off' },
+  creating: { key: 'status.itemCreating', cls: 'warn' },
+  success:  { key: 'status.itemSuccess',  cls: 'ok' },
+  fail:     { key: 'status.itemFail',     cls: 'err' },
 }
-export const itemStatus = (s) => ITEM_STATUS[s] || { label: s || '—', cls: 'off' }
+export const itemStatus = (s) => {
+  const e = ITEM_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 子码状态
 export const SUBCODE_STATUS = {
-  active:   { label: '投放中', cls: 'ok' },
-  reserved: { label: '保留',   cls: 'off' },
-  archived: { label: '已归档', cls: 'off' },
-  deleted:  { label: '已删除', cls: 'err' },
+  active:   { key: 'status.subActive',   cls: 'ok' },
+  reserved: { key: 'status.subReserved', cls: 'off' },
+  archived: { key: 'status.subArchived', cls: 'off' },
+  deleted:  { key: 'status.subDeleted',  cls: 'err' },
 }
-export const subcodeStatus = (s) => SUBCODE_STATUS[s] || { label: s || '—', cls: 'off' }
+export const subcodeStatus = (s) => {
+  const e = SUBCODE_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 落地页状态
 export const LP_STATUS = {
-  published: { label: '已发布', cls: 'ok' },
-  draft:     { label: '草稿',   cls: 'off' },
-  archived:  { label: '已归档', cls: 'off' },
+  published: { key: 'status.lpPublished', cls: 'ok' },
+  draft:     { key: 'status.lpDraft',     cls: 'off' },
+  archived:  { key: 'status.lpArchived',  cls: 'off' },
 }
-export const lpStatus = (s) => LP_STATUS[s] || { label: s || '—', cls: 'off' }
+export const lpStatus = (s) => {
+  const e = LP_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 租户 / 成员状态
 export const TENANT_STATUS = {
-  active:    { label: '正常',   cls: 'ok' },
-  invited:   { label: '已邀请', cls: 'warn' },
-  suspended: { label: '已停用', cls: 'off' },
-  archived:  { label: '已归档', cls: 'off' },
+  active:    { key: 'status.tenantActive',    cls: 'ok' },
+  invited:   { key: 'status.tenantInvited',   cls: 'warn' },
+  suspended: { key: 'status.tenantSuspended', cls: 'off' },
+  archived:  { key: 'status.tenantArchived',  cls: 'off' },
 }
-export const tenantStatus = (s) => TENANT_STATUS[s] || { label: s || '—', cls: 'off' }
+export const tenantStatus = (s) => {
+  const e = TENANT_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
 
 // 素材 AI 分析状态
 export const AI_STATUS = {
-  pending:  { label: '待分析', cls: 'off' },
-  analyzing:{ label: '分析中', cls: 'warn' },
-  done:     { label: '✓ 已分析', cls: 'ok' },
-  failed:   { label: '✗ 失败',   cls: 'err' },
+  pending:   { key: 'status.aiPending',   cls: 'off' },
+  analyzing: { key: 'status.aiAnalyzing', cls: 'warn' },
+  done:      { key: 'status.aiDone',      cls: 'ok' },
+  failed:    { key: 'status.aiFailed',    cls: 'err' },
 }
-export const aiStatus = (s) => AI_STATUS[s] || { label: '未分析', cls: 'off' }
+export const aiStatus = (s) => {
+  const e = AI_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: t('status.aiNone'), cls: 'off' }
+}

@@ -1,15 +1,23 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
+import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync } from '../router'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useI18n()
 const { theme, toggle: toggleTheme } = useTheme()
+const { locale, toggle: toggleLocale } = useLocale()
+
+// 角色 → i18n key（locale 切换实时生效）
+const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin' }
+const roleLabel = (r) => (r && ROLE_KEY[r]) ? t(ROLE_KEY[r]) : (r || '')
 
 // 移动端侧边栏抽屉态
 const isMobile = ref(false)
@@ -20,7 +28,6 @@ if (_mq) { isMobile.value = _mq.matches; _mq.addEventListener?.('change', _onMq)
 
 // 当前用户权限
 const myPerms = ref([])
-const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
 
 // 导航 → 所需权限（同 router/ROUTE_PERMS）
 const NAV_PERMS = {
@@ -29,31 +36,31 @@ const NAV_PERMS = {
   settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'], assets: ['assets.manage'],
 }
 
-// 导航
+// 导航（titleKey/labelKey 走 i18n，locale 切换实时生效）
 const allNavGroups = [
-  { title: '数据中心', items: [
-    { name: 'dashboard', label: '数据看板', icon: 'DataAnalysis' },
+  { titleKey: 'nav.groupData', items: [
+    { name: 'dashboard', labelKey: 'nav.dashboard', icon: 'DataAnalysis' },
   ]},
-  { title: '广告管理', items: [
-    { name: 'ads', label: '广告账户', icon: 'Promotion' },
-    { name: 'ad-manager', label: '广告管理器', icon: 'Operation' },
-    { name: 'launch-templates', label: '投放模板', icon: 'Aim' },
-    { name: 'form-templates', label: '表单模板', icon: 'Document' },
-    { name: 'assets', label: '素材库', icon: 'Picture' },
+  { titleKey: 'nav.groupAds', items: [
+    { name: 'ads', labelKey: 'nav.ads', icon: 'Promotion' },
+    { name: 'ad-manager', labelKey: 'nav.ad-manager', icon: 'Operation' },
+    { name: 'launch-templates', labelKey: 'nav.launch-templates', icon: 'Aim' },
+    { name: 'form-templates', labelKey: 'nav.form-templates', icon: 'Document' },
+    { name: 'assets', labelKey: 'nav.assets', icon: 'Picture' },
   ]},
-  { title: '自动化', items: [
-    { name: 'landing', label: '落地页', icon: 'Link' },
-    { name: 'guard', label: '规则引擎', icon: 'SetUp' },
+  { titleKey: 'nav.groupAuto', items: [
+    { name: 'landing', labelKey: 'nav.landing', icon: 'Link' },
+    { name: 'guard', labelKey: 'nav.guard', icon: 'SetUp' },
   ]},
-  { title: '授权', items: [
-    { name: 'tokens', label: 'Facebook', icon: 'Connection' },
+  { titleKey: 'nav.groupAuth', items: [
+    { name: 'tokens', labelKey: 'nav.tokens', icon: 'Connection' },
   ]},
-  { title: '系统', items: [
-    { name: 'settings', label: '设置', icon: 'Setting' },
-    { name: 'members', label: '成员权限', icon: 'User' },
-    { name: 'logs', label: '操作日志', icon: 'Document' },
-    { name: 'admin-teams', label: '团队管理', icon: 'OfficeBuilding' },
-    { name: 'kpi-mapping', label: '转化映射', icon: 'Histogram' },
+  { titleKey: 'nav.groupSystem', items: [
+    { name: 'settings', labelKey: 'nav.settings', icon: 'Setting' },
+    { name: 'members', labelKey: 'nav.members', icon: 'User' },
+    { name: 'logs', labelKey: 'nav.logs', icon: 'Document' },
+    { name: 'admin-teams', labelKey: 'nav.admin-teams', icon: 'OfficeBuilding' },
+    { name: 'kpi-mapping', labelKey: 'nav.kpi-mapping', icon: 'Histogram' },
   ]},
 ]
 // 按权限过滤导航项
@@ -100,21 +107,21 @@ const toggleSentinel = async (val) => {
     await POST(`/guard/sentinel/${val ? 'arm' : 'disarm'}`, {})
     sentinelOn.value = val
     loadGuard()
-  } catch (e) { ElMessage.error(e.message || '操作失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const emergencyLoading = ref(false)
 const emergencyPause = async () => {
   try {
-    await ElMessageBox.confirm('确定要全局紧急暂停所有 ACTIVE 广告？此操作不可撤销。', '⚠️ 紧急暂停', {
-      type: 'error', confirmButtonText: '确认暂停', cancelButtonText: '取消'
+    await ElMessageBox.confirm(t('layout.emergencyConfirm'), t('layout.emergencyTitle'), {
+      type: 'error', confirmButtonText: t('layout.emergencyConfirmBtn'), cancelButtonText: t('common.cancel')
     })
   } catch { return }
   emergencyLoading.value = true
   try {
     const r = await POST('/guard/emergency-pause', {})
-    ElMessage.success(`已暂停 ${r.paused || 0} 条广告`)
+    ElMessage.success(t('layout.emergencyPaused', { n: r.paused || 0 }))
     loadGuard()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('layout.emergencyFail', { msg: e.message || '' })) }
   emergencyLoading.value = false
 }
 
@@ -131,9 +138,9 @@ const switchTeam = async (tid) => {
   try {
     const r = await POST('/auth/switch-tenant', { tenant_id: tid })
     setToken(r.access_token)
-    ElMessage.success(`已切换到「${r.tenant_name}」`)
+    ElMessage.success(t('layout.switchedTeam', { name: r.tenant_name }))
     location.reload()  // 新 tenant 上下文：权限/数据全变，整页重载最稳
-  } catch (e) { ElMessage.error(e.message || '切换失败') }
+  } catch (e) { ElMessage.error(e.message || t('layout.switchFail')) }
 }
 const logout = () => { setToken(''); setUserPerms([]); localStorage.removeItem('tova_super'); router.push('/login') }
 
@@ -177,7 +184,7 @@ const closeNotifsOnOutside = (e) => {
   notifOpen.value = false
 }
 
-const currentTitle = computed(() => route.meta.title || '')
+const currentTitle = computed(() => route.meta.titleKey ? t(route.meta.titleKey) : '')
 // 导航点击：先关所有弹窗再跳（防 el-dropdown click-outside 吞第一次点击）
 const navTo = (name) => {
   notifOpen.value = false
@@ -197,28 +204,28 @@ watch(() => route.path, () => { sidebarOpen.value = false })
         <span class="logo-text">Tova Ads</span>
       </div>
       <nav class="nav">
-        <template v-for="group in navGroups" :key="group.title">
-          <div class="nav-sec-title">{{ group.title }}</div>
+        <template v-for="group in navGroups" :key="group.titleKey">
+          <div class="nav-sec-title">{{ t(group.titleKey) }}</div>
           <div v-for="item in group.items" :key="item.name"
                class="nav-item" :class="{ active: route.name === item.name }"
                @click="navTo(item.name)">
             <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
+            <span>{{ t(item.labelKey) }}</span>
           </div>
         </template>
       </nav>
       <div v-if="myPerms.includes('ads.pause') || isSuperadmin" class="guard-panel">
-        <div class="guard-title">安全守护</div>
+        <div class="guard-title">{{ t('layout.safetyGuard') }}</div>
         <div class="guard-row">
-          <span>哨兵</span>
+          <span>{{ t('layout.sentinel') }}</span>
           <el-switch :model-value="sentinelOn" @change="toggleSentinel" size="small"
                      active-color="#0a84ff" inactive-color="#3a3a5c" />
         </div>
         <div class="guard-row">
-          <span>规则 {{ guardStatus.rules_enabled }} 条</span>
+          <span>{{ t('layout.rulesCount', { n: guardStatus.rules_enabled }) }}</span>
           <span class="guard-dot" :class="{ on: guardStatus.rules_enabled > 0 }"></span>
         </div>
-        <button class="emergency-btn" :disabled="emergencyLoading" @click="emergencyPause">{{ emergencyLoading ? '暂停中…' : '全局紧急暂停' }}</button>
+        <button class="emergency-btn" :disabled="emergencyLoading" @click="emergencyPause">{{ emergencyLoading ? t('layout.pausing') : t('layout.emergencyPause') }}</button>
       </div>
     </aside>
 
@@ -234,7 +241,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           <el-dropdown v-if="memberships.length > 1" trigger="click" @command="switchTeam">
             <span class="team-switcher">
               <el-icon><OfficeBuilding /></el-icon>
-              <span class="team-name">{{ currentTenantName || '未加入团队' }}</span>
+              <span class="team-name">{{ currentTenantName || t('layout.noTeam') }}</span>
               <el-icon v-if="memberships.length > 1" class="caret"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -242,13 +249,17 @@ watch(() => route.path, () => { sidebarOpen.value = false })
                 <el-dropdown-item v-for="m in memberships" :key="m.tenant_id" :command="m.tenant_id"
                   :disabled="m.tenant_id === currentTenantId">
                   <span>{{ m.tenant_name }}</span>
-                  <span class="mute-role">· {{ ROLE_ZH[m.role] || m.role }}</span>
-                  <span v-if="m.tenant_id === currentTenantId" class="cur-mark">当前</span>
+                  <span class="mute-role">· {{ roleLabel(m.role) }}</span>
+                  <span v-if="m.tenant_id === currentTenantId" class="cur-mark">{{ t('layout.current') }}</span>
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-icon class="topbar-icon" @click="toggleTheme" :title="theme === 'dark' ? '切亮色' : '切暗色'">
+          <span class="lang-toggle" @click="toggleLocale"
+                :title="locale === 'zh' ? t('layout.langToEn') : t('layout.langToZh')">
+            {{ locale === 'zh' ? 'EN' : '中' }}
+          </span>
+          <el-icon class="topbar-icon" @click="toggleTheme" :title="theme === 'dark' ? t('layout.themeToLight') : t('layout.themeToDark')">
             <Sunny v-if="theme === 'dark'" />
             <Moon v-else />
           </el-icon>
@@ -257,7 +268,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
               <el-icon class="topbar-icon" @click="toggleNotifs"><Bell /></el-icon>
             </el-badge>
             <div v-if="notifOpen" class="notif-dropdown">
-              <div class="notif-header">最近通知</div>
+              <div class="notif-header">{{ t('layout.notifTitle') }}</div>
               <div v-for="n in recentNotifs" :key="n.id" class="notif-item">
                 <span :class="['notif-level-dot', n.level]"></span>
                 <div class="notif-body">
@@ -265,20 +276,20 @@ watch(() => route.path, () => { sidebarOpen.value = false })
                   <div class="notif-time">{{ fmtTime(n.created_at) }}</div>
                 </div>
               </div>
-              <div v-if="!recentNotifs.length" class="notif-empty">暂无通知</div>
+              <div v-if="!recentNotifs.length" class="notif-empty">{{ t('layout.notifEmpty') }}</div>
             </div>
           </div>
           <el-dropdown trigger="click" @command="cmd => cmd === 'logout' && logout()">
             <span class="user-info">
               <el-icon class="topbar-icon"><User /></el-icon>
               <span class="user-email">{{ userEmail.split('@')[0] }}</span>
-              <span v-if="isSuperadmin" class="role-badge super">超管</span>
-              <span v-else class="role-badge">{{ ROLE_ZH[userRole] || userRole }}</span>
+              <span v-if="isSuperadmin" class="role-badge super">{{ t('role.super') }}</span>
+              <span v-else class="role-badge">{{ roleLabel(userRole) }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item disabled>{{ isSuperadmin ? '平台超管' : (ROLE_ZH[userRole] || userRole) }}</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+                <el-dropdown-item disabled>{{ isSuperadmin ? t('role.superadmin') : roleLabel(userRole) }}</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>{{ t('layout.logout') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -378,6 +389,14 @@ watch(() => route.path, () => { sidebarOpen.value = false })
   transition: color 0.15s;
 }
 .topbar-icon:hover { color: var(--t1); }
+/* 语言切换（显眼文字 chip） */
+.lang-toggle {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 3px 8px; border-radius: var(--rs);
+  background: var(--bg3); color: var(--t2); cursor: pointer;
+  user-select: none; transition: background 0.15s, color 0.15s;
+}
+.lang-toggle:hover { background: var(--acg); color: var(--ac); }
 
 /* 通知下拉 */
 .notif-wrapper { position: relative; }

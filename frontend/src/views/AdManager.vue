@@ -5,7 +5,9 @@ import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const accounts = ref([])
@@ -32,18 +34,18 @@ const curRange = computed(() => {
 
 const statusLabel = (s) => fbAdStatus(s).label
 const statusDot = (s) => fbAdStatus(s).cls
-const OBJ_MAP = { OUTCOME_SALES: '销量', OUTCOME_TRAFFIC: '流量', OUTCOME_ENGAGEMENT: '互动', OUTCOME_AWARENESS: '品牌认知', OUTCOME_LEAD_GENERATION: '线索', LINK_CLICKS: '流量', CONVERSIONS: '销量', MESSAGES: '消息', PAGE_LIKES: '主页赞', POST_ENGAGEMENT: '互动', VIDEO_VIEWS: '视频观看', BRAND_AWARENESS: '品牌认知', REACH: '覆盖' }
-const objLabel = (o) => OBJ_MAP[o] || o || '-'
-const OPT_MAP = { OFFSITE_CONVERSIONS: '转化', LINK_CLICKS: '链接点击', LANDING_PAGE_VIEWS: '落地页浏览', POST_ENGAGEMENT: '互动', REACH: '覆盖', IMPRESSIONS: '展示', VIDEO_VIEWS: '视频观看', APP_INSTALLS: '应用安装', LEAD_GENERATION: '潜在客户', MESSAGING_CONVERSATIONS: '消息对话', VALUE: '价值' }
-const optLabel = (o) => OPT_MAP[o] || o || '-'
+const OBJ_MAP = computed(() => ({ OUTCOME_SALES: t('adm.objSales'), OUTCOME_TRAFFIC: t('adm.objTraffic'), OUTCOME_ENGAGEMENT: t('adm.objEngagement'), OUTCOME_AWARENESS: t('adm.objAwareness'), OUTCOME_LEAD_GENERATION: t('adm.objLead'), LINK_CLICKS: t('adm.objTraffic'), CONVERSIONS: t('adm.objSales'), MESSAGES: t('adm.objMessages'), PAGE_LIKES: t('adm.objPageLikes'), POST_ENGAGEMENT: t('adm.objEngagement'), VIDEO_VIEWS: t('adm.objVideoViews'), BRAND_AWARENESS: t('adm.objAwareness'), REACH: t('adm.objReach') }))
+const objLabel = (o) => OBJ_MAP.value[o] || o || '-'
+const OPT_MAP = computed(() => ({ OFFSITE_CONVERSIONS: t('adm.optConversion'), LINK_CLICKS: t('adm.optLinkClicks'), LANDING_PAGE_VIEWS: t('adm.optLandingViews'), POST_ENGAGEMENT: t('adm.objEngagement'), REACH: t('adm.objReach'), IMPRESSIONS: t('adm.optImpressions'), VIDEO_VIEWS: t('adm.objVideoViews'), APP_INSTALLS: t('adm.optAppInstalls'), LEAD_GENERATION: t('adm.optLeadGen'), MESSAGING_CONVERSATIONS: t('adm.optMsgConv'), VALUE: t('adm.optValue') }))
+const optLabel = (o) => OPT_MAP.value[o] || o || '-'
 
 const _idOf = (v) => (v && typeof v === 'object') ? v.id : v
 const fmtMoney = (v) => (v == null) ? '-' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 const fmtNum = (v) => (v == null || v === 0) ? '-' : Number(v).toLocaleString()
 const fmtBudget = (a, ctx) => {
-  if (a.daily_budget_amount != null) return `${fmtMoney(a.daily_budget_amount)}/日`
-  if (a.lifetime_budget_amount != null) return `${fmtMoney(a.lifetime_budget_amount)} 总`
-  return ctx === 'campaign' ? '组预算' : '系列预算'
+  if (a.daily_budget_amount != null) return t('adm.budgetDaily', { v: fmtMoney(a.daily_budget_amount) })
+  if (a.lifetime_budget_amount != null) return t('adm.budgetLifetime', { v: fmtMoney(a.lifetime_budget_amount) })
+  return ctx === 'campaign' ? t('adm.budgetAdsetLevel') : t('adm.budgetCampaignLevel')
 }
 const hasBudget = (a) => a.daily_budget_amount != null || a.lifetime_budget_amount != null
 
@@ -54,12 +56,12 @@ const rowStyle = computed(() => ({ gridTemplateColumns: cols.value }))
 
 const loadAccounts = async () => {
   try { accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]; await load(); await loadRedirectMap() }
-  catch (e) { ElMessage.error(e.message || '加载账户失败') }
+  catch (e) { ElMessage.error(e.message || t('adm.loadAccountsFail')) }
 }
 const load = async () => {
   loading.value = true
   try { const params = new URLSearchParams(curRange.value); data.value = await GET(`/ads/list?${params.toString()}`); drillCampaign.value = ''; drillAdset.value = '' }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }
   loading.value = false
 }
 const statusMatch = (s) => statusFilter.value === 'all' ? true : (statusFilter.value === 'active' ? s === 'ACTIVE' : (s === 'PAUSED' || (s && s.includes('PAUSED'))))
@@ -88,8 +90,8 @@ const curList = computed(() => {
   })
 })
 const drillName = computed(() => {
-  if (tab.value === 'adset' && drillCampaign.value) { const c = (data.value.campaigns || []).find(x => x.id === drillCampaign.value); return c ? `系列：${c.name}` : '' }
-  if (tab.value === 'ad' && drillAdset.value) { const s = (data.value.adsets || []).find(x => x.id === drillAdset.value); return s ? `组：${s.name}` : '' }
+  if (tab.value === 'adset' && drillCampaign.value) { const c = (data.value.campaigns || []).find(x => x.id === drillCampaign.value); return c ? t('adm.drillCampaign', { name: c.name }) : '' }
+  if (tab.value === 'ad' && drillAdset.value) { const s = (data.value.adsets || []).find(x => x.id === drillAdset.value); return s ? t('adm.drillAdset', { name: s.name }) : '' }
   return ''
 })
 const drillToAdset = (c) => { drillCampaign.value = c.id; tab.value = 'adset'; if (c.act_id && !selectedActs.value.includes(c.act_id)) selectedActs.value = [c.act_id] }
@@ -114,7 +116,7 @@ const curLevel = () => tab.value === 'campaign' ? 'campaign' : (tab.value === 'a
 const toggleStatus = async (item) => {
   const ns = item.effective_status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
   opLoading.value = true
-  try { const r = await POST('/ads/status', { act_id: item.act_id, node_id: item.id, level: curLevel(), status: ns }); if (r.success) { item.effective_status = r.effective_status || ns; item.status = ns; ElMessage.success(ns === 'ACTIVE' ? '已开启' : '已暂停') } else ElMessage.error(r.error || '操作失败') } catch (e) { ElMessage.error(e.message || '操作失败') }
+  try { const r = await POST('/ads/status', { act_id: item.act_id, node_id: item.id, level: curLevel(), status: ns }); if (r.success) { item.effective_status = r.effective_status || ns; item.status = ns; ElMessage.success(ns === 'ACTIVE' ? t('adm.activated') : t('adm.paused')) } else ElMessage.error(r.error || t('common.opFail')) } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   opLoading.value = false
 }
 const openBudget = (item) => {
@@ -124,7 +126,7 @@ const openBudget = (item) => {
   budgetDialog.value = true
 }
 const saveBudget = async () => {
-  if (!budgetInput.value || budgetInput.value <= 0) return ElMessage.warning('预算必须大于 0')
+  if (!budgetInput.value || budgetInput.value <= 0) return ElMessage.warning(t('adm.budgetGtZero'))
   const bt = budgetTarget.value.budget_type
   const payload = { act_id: budgetTarget.value.act_id, node_id: budgetTarget.value.node_id, level: budgetTarget.value.level, budget_type: bt }
   payload[bt === 'lifetime' ? 'lifetime_budget' : 'daily_budget'] = budgetInput.value
@@ -137,25 +139,25 @@ const saveBudget = async () => {
         if (bt === 'lifetime') { it.lifetime_budget_amount = budgetInput.value; it.lifetime_budget = r.budget_minor }
         else { it.daily_budget_amount = budgetInput.value; it.daily_budget = r.budget_minor }
       }
-      ElMessage.success('预算已更新'); budgetDialog.value = false
-    } else ElMessage.error(r.error || '操作失败')
-  } catch (e) { ElMessage.error(e.message || '操作失败') }
+      ElMessage.success(t('adm.budgetUpdated')); budgetDialog.value = false
+    } else ElMessage.error(r.error || t('common.opFail'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   opLoading.value = false
 }
 const budgetQuick = (m) => { budgetInput.value = Math.round(budgetInput.value * m * 100) / 100 }
 const deleteItem = async (item) => {
-  try { await ElMessageBox.confirm(`删除「${item.name}」？删除后不可恢复。`, '确认删除', { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' }); opLoading.value = true; const r = await POST('/ads/delete', { act_id: item.act_id, node_id: item.id }); if (r.success) { ElMessage.success('已删除'); await load() } else ElMessage.error(r.error || '删除失败') } catch(e) { /* cancelled */ }
+  try { await ElMessageBox.confirm(t('adm.delConfirm', { name: item.name }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' }); opLoading.value = true; const r = await POST('/ads/delete', { act_id: item.act_id, node_id: item.id }); if (r.success) { ElMessage.success(t('adm.deleted')); await load() } else ElMessage.error(r.error || t('common.fail')) } catch(e) { /* cancelled */ }
   opLoading.value = false
 }
 const batchStatus = async (status) => {
-  if (!selected.value.size) return ElMessage.warning('先点选广告行')
+  if (!selected.value.size) return ElMessage.warning(t('adm.selectRowsFirst'))
   if (status === 'PAUSED') {
-    try { await ElMessageBox.confirm(`批量暂停 ${selected.value.size} 条广告？`, '确认批量暂停', { type: 'warning', confirmButtonText: '暂停', cancelButtonText: '取消' }) }
+    try { await ElMessageBox.confirm(t('adm.batchPauseConfirm', { n: selected.value.size }), t('adm.batchPauseTitle'), { type: 'warning', confirmButtonText: t('adm.paused'), cancelButtonText: t('common.cancel') }) }
     catch { return }
   }
   const items = []; for (const id of selected.value) { const it = curList.value.find(x => x.id === id); if (it) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
   opLoading.value = true
-  try { const r = await POST('/ads/batch-status', { items }); ElMessage.success(`${r.success_count}/${items.length} 成功`); await load(); selected.value = new Set() } catch (e) { ElMessage.error(e.message || '批量操作失败') }
+  try { const r = await POST('/ads/batch-status', { items }); ElMessage.success(t('adm.batchResult', { ok: r.success_count, n: items.length })); await load(); selected.value = new Set() } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
 const onAction = (cmd, item) => { if (cmd === 'toggle') toggleStatus(item); else if (cmd === 'budget') openBudget(item); else if (cmd === 'delete') deleteItem(item); else if (cmd === 'redirect') openRedirect(item); else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', ad_id: item.id } }); else if (cmd === 'diagnose') openDiagnose(item) }
@@ -167,11 +169,11 @@ const diagData = ref(null)
 const openDiagnose = async (item) => {
   diagOpen.value = true; diagLoading.value = true; diagData.value = null
   try { diagData.value = await GET('/ads/' + item.id + '/diagnose') }
-  catch (e) { ElMessage.error('诊断失败：' + (e.message || '')) }
+  catch (e) { ElMessage.error(t('adm.diagFail', { msg: e.message || '' })) }
   diagLoading.value = false
 }
-const RULE_ZH = { bleed_abs: '空耗止损', cpa_exceed: 'CPA超标', consecutive_bad: '连续恶化', click_no_conv: '点击无转化', reach_no_conv: '覆盖无转化', low_ctr_no_conv: '低CTR无转化', budget_burn_fast: '瞬烧制止' }
-const CS_ZH = { fb: '仅Facebook', landing: '仅落地页', either: '综合（取大）' }
+const RULE_ZH = computed(() => ({ bleed_abs: t('adm.ruleBleedAbs'), cpa_exceed: t('adm.ruleCpaExceed'), consecutive_bad: t('adm.ruleConsecutiveBad'), click_no_conv: t('adm.ruleClickNoConv'), reach_no_conv: t('adm.ruleReachNoConv'), low_ctr_no_conv: t('adm.ruleLowCtrNoConv'), budget_burn_fast: t('adm.ruleBudgetBurnFast') }))
+const CS_ZH = computed(() => ({ fb: t('adm.csFb'), landing: t('adm.csLanding'), either: t('adm.csEither') }))
 const goLandingLogs = (slug, adId) => { router.push({ name: 'landing', query: { tab: 'logs', slug, ad_id: adId } }) }
 const loadRedirectMap = async () => { try { redirectMap.value = await GET('/ads/redirects/map') } catch (e) {} }
 const openRedirect = (item) => { redirectTarget.value = { id: item.id, name: item.name }; redirectInput.value = redirectMap.value[item.id] || ''; redirectDialog.value = true }
@@ -180,14 +182,14 @@ const saveRedirect = async () => {
   try { await POST('/ads/redirects', { ad_id: adId, target_url: redirectInput.value.trim() })
     if (redirectInput.value.trim()) { redirectMap.value = { ...redirectMap.value, [adId]: redirectInput.value.trim() } }
     else { const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m }
-    ElMessage.success(redirectInput.value.trim() ? '跳转链接已设' : '已恢复默认跳转'); redirectDialog.value = false
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    ElMessage.success(redirectInput.value.trim() ? t('adm.redirectSet') : t('adm.redirectRestored')); redirectDialog.value = false
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const openRedirectMgmt = async () => { redirectMgmtOpen.value = true; try { redirectList.value = await GET('/ads/redirects') } catch (e) {} }
-const removeRedirect = async (adId) => { try { await DELETE('/ads/redirects/' + adId); const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m; redirectList.value = redirectList.value.filter(r => r.ad_id !== adId); ElMessage.success('已恢复默认') } catch (e) {} }
+const removeRedirect = async (adId) => { try { await DELETE('/ads/redirects/' + adId); const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m; redirectList.value = redirectList.value.filter(r => r.ad_id !== adId); ElMessage.success(t('adm.redirectRestored')) } catch (e) {} }
 const resetRedirects = async () => {
-  try { await ElMessageBox.confirm('清空所有广告跳转覆盖？所有广告将恢复落地页默认跳转。', '确认', { type: 'warning' })
-    const r = await POST('/ads/redirects/reset', {}); redirectMap.value = {}; redirectList.value = []; ElMessage.success('已清空 ' + (r.cleared || 0) + ' 条')
+  try { await ElMessageBox.confirm(t('adm.resetRedirectsMsg'), t('common.confirm'), { type: 'warning' })
+    const r = await POST('/ads/redirects/reset', {}); redirectMap.value = {}; redirectList.value = []; ElMessage.success(t('adm.redirectsCleared', { n: r.cleared || 0 }))
   } catch (e) {}
 }
 const toggleSelect = (id) => { const s = new Set(selected.value); s.has(id) ? s.delete(id) : s.add(id); selected.value = s }
@@ -199,129 +201,129 @@ const isSelected = (id) => selected.value.has(id)
   <div class="page">
     <div class="ctrl-bar">
       <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn" :class="{ active: datePreset === opt.key && !showCustom }" @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
-      <button class="ctrl-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">自定义</button>
-      <div v-if="showCustom" class="custom-range"><input type="date" v-model="customFrom" class="date-input" /><span class="sep">—</span><input type="date" v-model="customTo" class="date-input" /><button class="ctrl-btn apply" @click="load">查询</button></div>
-      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable placeholder="全部账户" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
-      <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">全部</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">投放中</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">暂停</button></div>
-      <input v-model="searchQ" class="ctrl-btn search-input" placeholder="搜索广告名/ID" />
-      <button class="ctrl-btn" @click="openRedirectMgmt">跳转链接<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <button class="ctrl-btn primary" :disabled="loading" @click="load" style="margin-left:auto">{{ loading ? '加载中…' : '刷新' }}</button>
+      <button class="ctrl-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('adm.customRange') }}</button>
+      <div v-if="showCustom" class="custom-range"><input type="date" v-model="customFrom" class="date-input" /><span class="sep">—</span><input type="date" v-model="customTo" class="date-input" /><button class="ctrl-btn apply" @click="load">{{ t('common.search') }}</button></div>
+      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
+      <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button></div>
+      <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
+      <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
+      <button class="ctrl-btn primary" :disabled="loading" @click="load" style="margin-left:auto">{{ loading ? t('common.loading') + '…' : t('common.refresh') }}</button>
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">
-        <span class="batch-count">已选 {{ selected.size }} 条</span>
-        <button class="ctrl-btn sm" @click="selectAll">全选/取消</button>
-        <button class="ctrl-btn sm" @click="batchStatus('ACTIVE')" :disabled="opLoading">批量开启</button>
-        <button class="ctrl-btn sm" @click="batchStatus('PAUSED')" :disabled="opLoading">批量暂停</button>
-        <button class="ctrl-btn sm ghost" @click="selected = new Set()">取消选择</button>
+        <span class="batch-count">{{ t('adm.selectedCount', { n: selected.size }) }}</span>
+        <button class="ctrl-btn sm" @click="selectAll">{{ t('adm.selectAll') }}</button>
+        <button class="ctrl-btn sm" @click="batchStatus('ACTIVE')" :disabled="opLoading">{{ t('adm.batchActivate') }}</button>
+        <button class="ctrl-btn sm" @click="batchStatus('PAUSED')" :disabled="opLoading">{{ t('adm.batchPause') }}</button>
+        <button class="ctrl-btn sm ghost" @click="selected = new Set()">{{ t('adm.clearSelection') }}</button>
       </div>
     </transition>
     <div class="tabs">
-      <div :class="['tab', { on: tab === 'campaign' }]" @click="tab = 'campaign'; clearDrill(); selected = new Set()">广告系列</div>
-      <div :class="['tab', { on: tab === 'adset' }]" @click="tab = 'adset'; selected = new Set()">广告组</div>
-      <div :class="['tab', { on: tab === 'ad' }]" @click="tab = 'ad'; selected = new Set()">广告</div>
+      <div :class="['tab', { on: tab === 'campaign' }]" @click="tab = 'campaign'; clearDrill(); selected = new Set()">{{ t('adm.tabCampaign') }}</div>
+      <div :class="['tab', { on: tab === 'adset' }]" @click="tab = 'adset'; selected = new Set()">{{ t('adm.tabAdset') }}</div>
+      <div :class="['tab', { on: tab === 'ad' }]" @click="tab = 'ad'; selected = new Set()">{{ t('adm.tabAd') }}</div>
       <div v-if="drillName" class="drill-tag">{{ drillName }} <span @click="clearDrill">✕</span></div>
     </div>
     <div class="tbl" v-loading="loading">
       <template v-if="tab === 'campaign'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">状态{{ sortIcon('_status_rank') }}</div><div>系列</div><div>目标</div><div class="so" @click="sortBy('daily_budget_amount')">预算{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">消耗{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">转化{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">覆盖{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">频次{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid">{{ c.account_name }} · {{ c.id }}</div></div>
           <div>{{ objLabel(c.objective) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(c) }" @click.stop="hasBudget(c) && openBudget(c)">{{ fmtBudget(c, 'campaign') }}</div>
           <div>{{ fmtMoney(c.spend) }}</div><div>{{ c.conversions || 0 }}</div><div>{{ c.cpa ? fmtMoney(c.cpa) : '-' }}</div><div>{{ fmtNum(c.reach) }}</div><div>{{ c.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, c)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ c.effective_status === 'ACTIVE' ? '暂停' : '开启' }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(c)" command="budget">改预算</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">删除</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, c)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ c.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(c)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
       <template v-else-if="tab === 'adset'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">状态{{ sortIcon('_status_rank') }}</div><div>广告组</div><div>优化目标</div><div class="so" @click="sortBy('daily_budget_amount')">预算{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">消耗{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">转化{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">覆盖{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">频次{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid">{{ s.account_name }} · {{ s.id }}</div></div>
           <div>{{ optLabel(s.optimization_goal) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(s) }" @click.stop="hasBudget(s) && openBudget(s)">{{ fmtBudget(s, 'adset') }}</div>
           <div>{{ fmtMoney(s.spend) }}</div><div>{{ s.conversions || 0 }}</div><div>{{ s.cpa ? fmtMoney(s.cpa) : '-' }}</div><div>{{ fmtNum(s.reach) }}</div><div>{{ s.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, s)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ s.effective_status === 'ACTIVE' ? '暂停' : '开启' }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(s)" command="budget">改预算</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">删除</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, s)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ s.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(s)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
       <template v-else>
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">状态{{ sortIcon('_status_rank') }}</div><div>广告</div><div>子码</div><div class="so" @click="sortBy('spend')">消耗{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">转化{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">访问{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">通过{{ sortIcon('landing_pass') }}</div><div>通过率</div><div class="so" @click="sortBy('reach')">覆盖{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
         <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}</div>
-          <div class="nm">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="'已设跳转：' + redirectMap[a.id] + '（点击修改）'">跳转</span><div class="sid">{{ a.account_name }} · {{ a.id }}</div></div>
-          <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="'/a/' + a.slug + ' · 该广告通过 ' + (a.landing_pass||0) + '（点击查日志）'">/a/{{ a.slug }}</code><span v-else class="muted" title="该广告暂无落地流量（访客点 /a/子码?ad= 后自动绑定）">未铺</span></div>
-          <div>{{ fmtMoney(a.spend) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ a.cpa ? fmtMoney(a.cpa) : '-' }}</div><div class="lv" :title="'落地访问量（visit+redirect）'">{{ a.landing_visits || '-' }}</div><div class="lp" :title="'通过量=按钮点击+跳转（按IP去重）'">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? '通过 ' + (a.landing_pass||0) + ' / 访问 ' + a.landing_visits : '无访问'">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? a.ctr + '%' : '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? '暂停' : '开启' }}</el-dropdown-item><el-dropdown-item command="redirect">跳转链接{{ redirectMap[a.id] ? ' · 已设' : '' }}</el-dropdown-item><el-dropdown-item command="logs">查看落地日志</el-dropdown-item><el-dropdown-item command="diagnose">🔍 广告诊断</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">删除</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div class="nm">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid">{{ a.account_name }} · {{ a.id }}</div></div>
+          <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="t('adm.slugTitle', { slug: a.slug, pass: a.landing_pass||0 })">/a/{{ a.slug }}</code><span v-else class="muted" :title="t('adm.slugEmptyTitle')">{{ t('adm.slugEmpty') }}</span></div>
+          <div>{{ fmtMoney(a.spend) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ a.cpa ? fmtMoney(a.cpa) : '-' }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? a.ctr + '%' : '-' }}</div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
-      <div v-if="!curList.length && !loading" class="empty">暂无数据</div>
+      <div v-if="!curList.length && !loading" class="empty">{{ t('common.noData') }}</div>
     </div>
-    <el-dialog v-model="budgetDialog" :title="`改预算 · ${budgetTarget?.name || ''}`" width="360px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
+    <el-dialog v-model="budgetDialog" :title="t('adm.editBudgetTitle', { name: budgetTarget?.name || '' })" width="360px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
       <div class="budget-form">
-        <label>{{ budgetTarget?.budget_type === 'lifetime' ? '总预算（本币）' : '日预算（本币）' }}</label>
+        <label>{{ budgetTarget?.budget_type === 'lifetime' ? t('adm.lifetimeBudgetLabel') : t('adm.dailyBudgetLabel') }}</label>
         <input v-model.number="budgetInput" type="number" min="1" step="0.01" class="budget-input" />
         <div class="quick-btns"><button v-for="m in [1, 1.2, 1.5, 2]" :key="m" class="ctrl-btn sm" @click="budgetQuick(m)">×{{ m }}</button></div>
       </div>
-      <template #footer><button class="ctrl-btn" @click="budgetDialog = false">取消</button><button class="ctrl-btn primary" :disabled="opLoading" @click="saveBudget">{{ opLoading ? '保存中…' : '保存' }}</button></template>
+      <template #footer><button class="ctrl-btn" @click="budgetDialog = false">{{ t('common.cancel') }}</button><button class="ctrl-btn primary" :disabled="opLoading" @click="saveBudget">{{ opLoading ? t('common.saving') + '…' : t('common.save') }}</button></template>
     </el-dialog>
 
-    <el-dialog v-model="redirectDialog" :title="`跳转链接 · ${redirectTarget?.name || ''}`" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
+    <el-dialog v-model="redirectDialog" :title="t('adm.redirectDialogTitle', { name: redirectTarget?.name || '' })" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
       <div class="rd-form">
-        <label>该广告的专属跳转链接</label>
-        <input v-model.trim="redirectInput" class="budget-input" placeholder="https://...（留空=用落地页默认）" />
-        <div class="rd-hint">设了之后，这条广告的访客都跳到这个链接；其他广告不受影响。留空保存 = 恢复落地页默认。</div>
+        <label>{{ t('adm.redirectFormLabel') }}</label>
+        <input v-model.trim="redirectInput" class="budget-input" :placeholder="t('adm.redirectInputPh')" />
+        <div class="rd-hint">{{ t('adm.redirectHint') }}</div>
       </div>
       <template #footer>
-        <button class="ctrl-btn" @click="redirectDialog = false">取消</button>
-        <button v-if="redirectMap[redirectTarget?.id]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">恢复默认</button>
-        <button class="ctrl-btn primary" @click="saveRedirect">保存</button>
+        <button class="ctrl-btn" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
+        <button v-if="redirectMap[redirectTarget?.id]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">{{ t('adm.restoreDefault') }}</button>
+        <button class="ctrl-btn primary" @click="saveRedirect">{{ t('common.save') }}</button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="redirectMgmtOpen" title="广告跳转链接管理" width="640px" :destroy-on-close="true" append-to-body>
+    <el-dialog v-model="redirectMgmtOpen" :title="t('adm.redirectMgmtTitle')" width="640px" :destroy-on-close="true" append-to-body>
       <div class="rd-mgmt-bar">
-        <span class="rd-cnt">共 {{ redirectList.length }} 条已设跳转</span>
-        <button class="ctrl-btn sm" :disabled="!redirectList.length" @click="resetRedirects">全部恢复默认</button>
+        <span class="rd-cnt">{{ t('adm.redirectMgmtCount', { n: redirectList.length }) }}</span>
+        <button class="ctrl-btn sm" :disabled="!redirectList.length" @click="resetRedirects">{{ t('adm.restoreAllDefault') }}</button>
       </div>
       <div class="rd-mgmt-list" v-loading="false">
         <div v-for="r in redirectList" :key="r.ad_id" class="rd-mgmt-row">
           <code class="rd-mid">{{ r.ad_id }}</code>
           <span class="rd-murl" :title="r.target_url">{{ r.target_url }}</span>
-          <button class="ctrl-btn sm" @click="removeRedirect(r.ad_id)">移除</button>
+          <button class="ctrl-btn sm" @click="removeRedirect(r.ad_id)">{{ t('common.remove') }}</button>
         </div>
-        <div v-if="!redirectList.length" class="empty" style="padding:30px">暂无广告设了专属跳转（都走落地页默认）</div>
+        <div v-if="!redirectList.length" class="empty" style="padding:30px">{{ t('adm.redirectMgmtEmpty') }}</div>
       </div>
     </el-dialog>
 
-    <el-drawer v-model="diagOpen" title="广告诊断" direction="rtl" size="520px" :destroy-on-close="true">
+    <el-drawer v-model="diagOpen" :title="t('adm.adDiagnose')" direction="rtl" size="520px" :destroy-on-close="true">
       <div v-loading="diagLoading" class="diag-body">
         <template v-if="diagData">
           <div v-if="diagData.fb_error" class="diag-warn">⚠ {{ diagData.fb_error }}</div>
           <div class="diag-sec">
-            <div class="diag-sec-title">基础信息</div>
+            <div class="diag-sec-title">{{ t('adm.diagBasicInfo') }}</div>
             <div class="diag-grid">
-              <div><span class="dl">账户</span><span class="dv">{{ diagData.account_name }}</span></div>
-              <div><span class="dl">广告ID</span><span class="dv">{{ diagData.ad_id }}</span></div>
-              <div><span class="dl">子码</span><span class="dv">{{ diagData.subcode || '未绑' }}</span></div>
-              <div><span class="dl">FB状态</span><span class="dv">{{ statusLabel(diagData.fb_status) }}</span></div>
+              <div><span class="dl">{{ t('adm.diagAccount') }}</span><span class="dv">{{ diagData.account_name }}</span></div>
+              <div><span class="dl">{{ t('adm.diagAdId') }}</span><span class="dv">{{ diagData.ad_id }}</span></div>
+              <div><span class="dl">{{ t('adm.colSubcode') }}</span><span class="dv">{{ diagData.subcode || t('adm.unbound') }}</span></div>
+              <div><span class="dl">{{ t('adm.diagFbStatus') }}</span><span class="dv">{{ statusLabel(diagData.fb_status) }}</span></div>
             </div>
           </div>
           <div class="diag-sec">
-            <div class="diag-sec-title">今日数据（{{ diagData.account_timezone }}）</div>
+            <div class="diag-sec-title">{{ t('adm.diagTodayData', { tz: diagData.account_timezone }) }}</div>
             <div class="diag-grid">
-              <div><span class="dl">消耗</span><span class="dv">{{ diagData.spend_usd ? '$' + diagData.spend_usd : '—' }}</span></div>
-              <div><span class="dl">曝光</span><span class="dv">{{ diagData.impressions || 0 }}</span></div>
-              <div><span class="dl">点击</span><span class="dv">{{ diagData.clicks || 0 }}</span></div>
-              <div><span class="dl">覆盖</span><span class="dv">{{ diagData.reach || 0 }}</span></div>
-              <div><span class="dl">FB转化</span><span class="dv">{{ diagData.fb_conversions }} <span class="dsub">{{ diagData.fb_kpi_source }}</span></span></div>
-              <div><span class="dl">落地点击</span><span class="dv">{{ diagData.landing_clicks }} <span class="dsub">去重IP</span></span></div>
-              <div><span class="dl">落地访问</span><span class="dv">{{ diagData.landing_visits }}</span></div>
-              <div><span class="dl">有效转化</span><span class="dv hl">{{ diagData.effective_conversions }} <span class="dsub">{{ CS_ZH[diagData.conversion_source] || diagData.conversion_source }}</span></span></div>
+              <div><span class="dl">{{ t('adm.colSpend') }}</span><span class="dv">{{ diagData.spend_usd ? '$' + diagData.spend_usd : '—' }}</span></div>
+              <div><span class="dl">{{ t('adm.diagImpressions') }}</span><span class="dv">{{ diagData.impressions || 0 }}</span></div>
+              <div><span class="dl">{{ t('adm.diagClicks') }}</span><span class="dv">{{ diagData.clicks || 0 }}</span></div>
+              <div><span class="dl">{{ t('adm.colReach') }}</span><span class="dv">{{ diagData.reach || 0 }}</span></div>
+              <div><span class="dl">{{ t('adm.diagFbConv') }}</span><span class="dv">{{ diagData.fb_conversions }} <span class="dsub">{{ diagData.fb_kpi_source }}</span></span></div>
+              <div><span class="dl">{{ t('adm.diagLandingClicks') }}</span><span class="dv">{{ diagData.landing_clicks }} <span class="dsub">{{ t('adm.dedupIp') }}</span></span></div>
+              <div><span class="dl">{{ t('adm.diagLandingVisits') }}</span><span class="dv">{{ diagData.landing_visits }}</span></div>
+              <div><span class="dl">{{ t('adm.diagEffectiveConv') }}</span><span class="dv hl">{{ diagData.effective_conversions }} <span class="dsub">{{ CS_ZH[diagData.conversion_source] || diagData.conversion_source }}</span></span></div>
             </div>
           </div>
           <div class="diag-sec" v-if="diagData.rules.length">
-            <div class="diag-sec-title">规则评估</div>
+            <div class="diag-sec-title">{{ t('adm.diagRuleEval') }}</div>
             <div v-for="r in diagData.rules" :key="r.rule_id" class="diag-rule" :class="{ hit: r.hit }">
               <span class="rule-icon">{{ r.hit ? '🔴' : '🟢' }}</span>
               <div class="rule-info">
@@ -329,25 +331,25 @@ const isSelected = (id) => selected.value.has(id)
                 <div class="rule-detail" v-if="r.detail">{{ r.detail }}</div>
                 <div class="rule-meta">
                   <span>CPA={{ r.cpa != null ? '$' + r.cpa : '—' }}</span>
-                  <span>FB={{ r.fb_conversions }} 落地={{ r.landing_clicks }} 有效={{ r.effective_conversions }}</span>
+                  <span>FB={{ r.fb_conversions }} {{ t('adm.colLandingShort') }}={{ r.landing_clicks }} {{ t('adm.effectiveShort') }}={{ r.effective_conversions }}</span>
                 </div>
               </div>
             </div>
           </div>
           <div class="diag-sec" v-if="!diagData.rules.length && !diagData.fb_error">
-            <div class="diag-empty">暂无启用规则</div>
+            <div class="diag-empty">{{ t('adm.diagNoRules') }}</div>
           </div>
           <div class="diag-sec" v-if="diagData.cooldown">
-            <div class="diag-sec-title">冷却状态</div>
+            <div class="diag-sec-title">{{ t('adm.diagCooldown') }}</div>
             <div class="diag-cooldown">
-              🔒 规则「{{ diagData.cooldown.rule }}」在 {{ diagData.cooldown.remaining_min }} 分钟前暂停了此广告，冷却中（剩余 {{ diagData.cooldown.remaining_min }} 分钟）
+              🔒 {{ t('adm.diagCooldownMsg', { rule: diagData.cooldown.rule, min: diagData.cooldown.remaining_min }) }}
             </div>
           </div>
           <div class="diag-sec" v-if="diagData.whitelisted">
-            <div class="diag-warn" style="background:rgba(48,209,97,.08);color:var(--success)">✓ 今日已加白（巡检跳过此广告）</div>
+            <div class="diag-warn" style="background:rgba(48,209,97,.08);color:var(--success)">✓ {{ t('adm.diagWhitelisted') }}</div>
           </div>
           <div class="diag-sec" v-if="diagData.recent_actions && diagData.recent_actions.length">
-            <div class="diag-sec-title">最近操作</div>
+            <div class="diag-sec-title">{{ t('adm.diagRecentActions') }}</div>
             <div v-for="a in diagData.recent_actions" :key="a.time" class="diag-action">
               <span class="da-time">{{ a.time ? a.time.slice(5,19).replace('T',' ') : '' }}</span>
               <span class="da-type">{{ a.action }}</span>

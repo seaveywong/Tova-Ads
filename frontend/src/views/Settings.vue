@@ -1,27 +1,30 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, PATCH, PUT, POST } from '../api'
 import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
+
 // 时区
 const TZ_OPTIONS = [
-  { tz: 'Asia/Shanghai', label: '北京/上海' }, { tz: 'Asia/Hong_Kong', label: '香港' },
-  { tz: 'Asia/Taipei', label: '台北' }, { tz: 'Asia/Tokyo', label: '东京' },
-  { tz: 'Asia/Seoul', label: '首尔' }, { tz: 'Asia/Singapore', label: '新加坡' },
-  { tz: 'Asia/Bangkok', label: '曼谷' }, { tz: 'Asia/Jakarta', label: '雅加达' },
-  { tz: 'Asia/Kolkata', label: '孟买' }, { tz: 'America/Los_Angeles', label: '洛杉矶' },
-  { tz: 'America/New_York', label: '纽约' }, { tz: 'America/Sao_Paulo', label: '圣保罗' },
-  { tz: 'Europe/London', label: '伦敦' }, { tz: 'Europe/Paris', label: '巴黎' },
-  { tz: 'Australia/Sydney', label: '悉尼' }, { tz: 'UTC', label: 'UTC' },
+  { tz: 'Asia/Shanghai', label: t('settings.tzShanghai') }, { tz: 'Asia/Hong_Kong', label: t('settings.tzHongKong') },
+  { tz: 'Asia/Taipei', label: t('settings.tzTaipei') }, { tz: 'Asia/Tokyo', label: t('settings.tzTokyo') },
+  { tz: 'Asia/Seoul', label: t('settings.tzSeoul') }, { tz: 'Asia/Singapore', label: t('settings.tzSingapore') },
+  { tz: 'Asia/Bangkok', label: t('settings.tzBangkok') }, { tz: 'Asia/Jakarta', label: t('settings.tzJakarta') },
+  { tz: 'Asia/Kolkata', label: t('settings.tzMumbai') }, { tz: 'America/Los_Angeles', label: t('settings.tzLosAngeles') },
+  { tz: 'America/New_York', label: t('settings.tzNewYork') }, { tz: 'America/Sao_Paulo', label: t('settings.tzSaoPaulo') },
+  { tz: 'Europe/London', label: t('settings.tzLondon') }, { tz: 'Europe/Paris', label: t('settings.tzParis') },
+  { tz: 'Australia/Sydney', label: t('settings.tzSydney') }, { tz: 'UTC', label: 'UTC' },
 ]
 const tz = ref(userTz.value)
 const saving = ref(false)
 const pick = async (z) => {
   saving.value = true
-  try { await PATCH('/auth/me', { timezone: z }); setUserTz(z); ElMessage.success('已切换，所有时间按此时区显示') }
-  catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+  try { await PATCH('/auth/me', { timezone: z }); setUserTz(z); ElMessage.success(t('settings.tzSwitched')) }
+  catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   saving.value = false
 }
 
@@ -29,8 +32,8 @@ const pick = async (z) => {
 const isSuper = ref(isSuperadminSync())
 const myPerms = ref([])
 const copyText = async (text, tip) => {
-  try { await navigator.clipboard.writeText(text); ElMessage.success(tip || '已复制') }
-  catch { ElMessage.error('复制失败，请手动选中复制') }
+  try { await navigator.clipboard.writeText(text); ElMessage.success(tip || t('common.copied')) }
+  catch { ElMessage.error(t('settings.copyFailManual')) }
 }
 const sched = ref({
   base_minutes: 5,
@@ -38,9 +41,9 @@ const sched = ref({
   multipliers: { inspect: 1, watchdog: 2, account_sync: 6, budget: 3, reassociate: 24, subcode: 12 },
   effective: { inspect: 5, watchdog: 10, account_sync: 30, budget: 15, reassociate: 120, subcode: 60, sentinel: 3 },
   task_labels: {
-    inspect: '巡检（止损评估）', watchdog: '令牌健康检查', account_sync: '账户状态/余额',
-    budget: '预算进度告警', reassociate: '失效账户重绑', subcode: '子码自动绑定',
-    sentinel: '哨兵巡逻',
+    inspect: t('settings.taskInspect'), watchdog: t('settings.taskWatchdog'), account_sync: t('settings.taskAccountSync'),
+    budget: t('settings.taskBudget'), reassociate: t('settings.taskReassociate'), subcode: t('settings.taskSubcode'),
+    sentinel: t('settings.taskSentinel'),
   },
 })
 const schedSaving = ref(false)
@@ -78,8 +81,8 @@ const saveSched = async () => {
   if (Number(sched.value.sentinel_minutes) !== (e.sentinel ?? 0)) {
     try {
       await ElMessageBox.confirm(
-        `哨兵巡逻间隔将改为 ${sched.value.sentinel_minutes} 分钟，确认？`,
-        '哨兵间隔变更', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }
+        t('settings.sentinelChangeMsg', { n: sched.value.sentinel_minutes }),
+        t('settings.sentinelChangeTitle'), { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') }
       )
     } catch { return }
   }
@@ -87,8 +90,8 @@ const saveSched = async () => {
   if (Number(sched.value.base_minutes) !== Number(e.base ?? sched.value.base_minutes) && Number(e.base) > 0) {
     try {
       await ElMessageBox.confirm(
-        `基础间隔改为 ${sched.value.base_minutes} 分钟？这是所有定时任务（巡检/预算/看门狗等）的频率基数，会全局影响止损/告警的响应速度。`,
-        '基础间隔变更', { type: 'warning', confirmButtonText: '确认变更', cancelButtonText: '取消' }
+        t('settings.baseChangeMsg', { n: sched.value.base_minutes }),
+        t('settings.baseChangeTitle'), { type: 'warning', confirmButtonText: t('settings.confirmChange'), cancelButtonText: t('common.cancel') }
       )
     } catch { return }
   }
@@ -100,8 +103,8 @@ const saveSched = async () => {
       multipliers: sched.value.multipliers,
     })
     sched.value.effective = r.effective
-    ElMessage.success('已保存')
-  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+    ElMessage.success(t('common.saved'))
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   schedSaving.value = false
 }
 
@@ -109,7 +112,7 @@ const saveSched = async () => {
 const AI_PRESETS = {
   'https://api.deepseek.com/v1': { label: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] },
   'https://api.openai.com/v1': { label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'] },
-  'https://generativelanguage.googleapis.com/v1beta/openai': { label: 'Gemini（OpenAI 兼容）', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'] },
+  'https://generativelanguage.googleapis.com/v1beta/openai': { label: t('settings.aiPresetGemini'), models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'] },
 }
 const aiBaseOptions = Object.entries(AI_PRESETS).map(([url, p]) => ({ url, label: p.label }))
 const aiCfg = ref({ ai_base_url: '', ai_api_key_masked: '', ai_api_key_set: false, ai_model: '',
@@ -141,27 +144,27 @@ const saveAi = async () => {
     if (aiForm.value.ai_vision_base_url && aiForm.value.ai_vision_base_url !== aiCfg.value.ai_vision_base_url) body.ai_vision_base_url = aiForm.value.ai_vision_base_url
     if (aiForm.value.ai_vision_api_key) body.ai_vision_api_key = aiForm.value.ai_vision_api_key
     if (aiForm.value.ai_vision_model && aiForm.value.ai_vision_model !== aiCfg.value.ai_vision_model) body.ai_vision_model = aiForm.value.ai_vision_model
-    if (!Object.keys(body).length) { ElMessage.info('无变更'); aiSaving.value = false; return }
+    if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); aiSaving.value = false; return }
     await PUT('/settings/ai', body)
-    ElMessage.success('已保存')
+    ElMessage.success(t('common.saved'))
     await loadAi()
-  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   aiSaving.value = false
 }
 const testAi = async () => {
   aiTesting.value = true
   try {
     const r = await POST('/settings/ai/test', {})
-    r.ok ? ElMessage.success('文案模型：' + r.detail) : ElMessage.error('文案模型失败：' + r.detail)
-  } catch (e) { ElMessage.error('测试失败') }
+    r.ok ? ElMessage.success(t('settings.textModelOk', { detail: r.detail })) : ElMessage.error(t('settings.textModelFail', { detail: r.detail }))
+  } catch (e) { ElMessage.error(t('settings.testFail')) }
   aiTesting.value = false
 }
 const testVisionAi = async () => {
   aiVisionTesting.value = true
   try {
     const r = await POST('/settings/ai/test?vision=true', {})
-    r.ok ? ElMessage.success('视觉模型：' + r.detail) : ElMessage.error('视觉模型失败：' + r.detail)
-  } catch (e) { ElMessage.error('测试失败') }
+    r.ok ? ElMessage.success(t('settings.visionModelOk', { detail: r.detail })) : ElMessage.error(t('settings.visionModelFail', { detail: r.detail }))
+  } catch (e) { ElMessage.error(t('settings.testFail')) }
   aiVisionTesting.value = false
 }
 
@@ -171,19 +174,19 @@ const acctSaving = ref(false)
 const pwdForm = ref({ old: '', new: '', confirm: '' })
 const pwdSaving = ref(false)
 const saveEmail = async () => {
-  if (!acctEmail.value.trim() || !acctEmail.value.includes('@')) return ElMessage.warning('填有效邮箱')
+  if (!acctEmail.value.trim() || !acctEmail.value.includes('@')) return ElMessage.warning(t('settings.invalidEmail'))
   acctSaving.value = true
-  try { await PATCH('/auth/me/email', { email: acctEmail.value.trim() }); ElMessage.success('用户名已更新，下次登录用新邮箱') }
-  catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  try { await PATCH('/auth/me/email', { email: acctEmail.value.trim() }); ElMessage.success(t('settings.emailUpdated')) }
+  catch (e) { ElMessage.error(t('settings.opFail', { msg: e.message || '' })) }
   acctSaving.value = false
 }
 const savePwd = async () => {
-  if (!pwdForm.value.old || !pwdForm.value.new) return ElMessage.warning('填旧/新密码')
-  if (pwdForm.value.new !== pwdForm.value.confirm) return ElMessage.error('两次新密码不一致')
-  if (pwdForm.value.new.length < 8) return ElMessage.error('新密码至少 8 位')
+  if (!pwdForm.value.old || !pwdForm.value.new) return ElMessage.warning(t('settings.fillOldNewPwd'))
+  if (pwdForm.value.new !== pwdForm.value.confirm) return ElMessage.error(t('settings.pwdMismatch'))
+  if (pwdForm.value.new.length < 8) return ElMessage.error(t('settings.pwdMinLen'))
   pwdSaving.value = true
-  try { await PUT('/auth/me/password', { old_password: pwdForm.value.old, new_password: pwdForm.value.new }); ElMessage.success('密码已更新，请用新密码重新登录'); pwdForm.value = { old: '', new: '', confirm: '' } }
-  catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  try { await PUT('/auth/me/password', { old_password: pwdForm.value.old, new_password: pwdForm.value.new }); ElMessage.success(t('settings.pwdUpdatedRelogin')); pwdForm.value = { old: '', new: '', confirm: '' } }
+  catch (e) { ElMessage.error(t('settings.opFail', { msg: e.message || '' })) }
   pwdSaving.value = false
 }
 // 域名服务配置（超管）
@@ -203,11 +206,11 @@ const saveCf = async () => {
     const body = {}
     if (cfForm.value.cf_api_token) body.cf_api_token = cfForm.value.cf_api_token
     if (cfForm.value.cf_account_id && cfForm.value.cf_account_id !== cfCfg.value.cf_account_id) body.cf_account_id = cfForm.value.cf_account_id
-    if (!Object.keys(body).length) { ElMessage.info('无变更'); cfSaving.value = false; return }
+    if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); cfSaving.value = false; return }
     await PUT('/settings/cf', body)
-    ElMessage.success('已保存')
+    ElMessage.success(t('common.saved'))
     await loadCf()
-  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   cfSaving.value = false
 }
 // TG OAuth 通知绑定
@@ -241,9 +244,9 @@ const loadTg = async () => {
           window.onTelegramAuth = async (u) => {
             try {
               await POST('/notifications/tg/oauth-callback', u)
-              ElMessage.success(`TG 绑定成功：${u.username || u.id}`)
+              ElMessage.success(t('settings.tgBindOk', { name: u.username || u.id }))
               userTg.value = await GET('/notifications/tg/user-binding')
-            } catch (e) { ElMessage.error(e.message || 'TG 绑定失败') }
+            } catch (e) { ElMessage.error(e.message || t('settings.tgBindFail')) }
           }
         })
       }
@@ -252,35 +255,35 @@ const loadTg = async () => {
 }
 const testUserTg = async () => {
   testTgLoading.value = true
-  try { await POST('/notifications/tg/user-test'); ElMessage.success('测试消息已发送到你的 TG') }
-  catch (e) { ElMessage.error(e.message || '发送失败') }
+  try { await POST('/notifications/tg/user-test'); ElMessage.success(t('settings.tgTestSentUser')) }
+  catch (e) { ElMessage.error(e.message || t('settings.sendFail')) }
   testTgLoading.value = false
 }
 const testTenantTg = async () => {
   testTgLoading.value = true
-  try { await POST('/notifications/tg/test'); ElMessage.success('测试消息已发送到租户 TG') }
-  catch (e) { ElMessage.error(e.message || '发送失败（管理员未绑租户 TG）') }
+  try { await POST('/notifications/tg/test'); ElMessage.success(t('settings.tgTestSentTenant')) }
+  catch (e) { ElMessage.error(e.message || t('settings.tgTestFailTenant')) }
   testTgLoading.value = false
 }
 const bindTgManual = async () => {
-  if (!tgManual.value.chat_id.trim()) return ElMessage.warning('填 chat_id')
+  if (!tgManual.value.chat_id.trim()) return ElMessage.warning(t('settings.fillChatId'))
   tgManual.value.saving = true
   try {
     await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: tgManual.value.chat_id.trim() })
-    ElMessage.success('已绑定')
+    ElMessage.success(t('settings.bound'))
     tgManual.value.chat_id = ''
     userTg.value = await GET('/notifications/tg/user-binding')
-  } catch (e) { ElMessage.error(e.message || '绑定失败') }
+  } catch (e) { ElMessage.error(e.message || t('settings.bindFail')) }
   tgManual.value.saving = false
 }
 const unbindTg = async () => {
   try {
-    await ElMessageBox.confirm('确定解绑 TG？解绑后不再收到 TG 告警通知。', '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('settings.tgUnbindConfirm'), t('common.confirm'), { type: 'warning' })
     // 用空 chat_id 触发后端删除/解绑（或直接 DELETE，但后端没有 DELETE 端点，用空值覆盖）
     await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: '' })
-    ElMessage.success('已解绑')
+    ElMessage.success(t('settings.tgUnbound'))
     userTg.value = await GET('/notifications/tg/user-binding')
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || '失败') }
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
 }
 onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadRetention(); await loadFx(); await loadTg() })
 
@@ -293,8 +296,8 @@ const loadFx = async () => {
 }
 const runFx = async () => {
   fxLoading.value = true
-  try { const r = await POST('/settings/fx/run'); ElMessage.success(`已更新 ${r.updated} 个币种汇率`); await loadFx() }
-  catch (e) { ElMessage.error('拉取失败：' + (e.message || '')) }
+  try { const r = await POST('/settings/fx/run'); ElMessage.success(t('settings.fxUpdated', { n: r.updated })); await loadFx() }
+  catch (e) { ElMessage.error(t('settings.fetchFail', { msg: e.message || '' })) }
   fxLoading.value = false
 }
 const fxFetched = computed(() => fxRates.value[0]?.fetched_at?.slice(0,16).replace('T',' ') || '')
@@ -317,40 +320,40 @@ const saveRetention = async () => {
     const o = origDays.value[t.key]; return o !== undefined && Number(t.days) < Number(o) && Number(o) > 0
   })
   if (shrunk.length) {
-    const detail = shrunk.map(t => `${t.label} ${origDays.value[t.key]}→${t.days}天`).join('、')
+    const detail = shrunk.map(tb => t('settings.retentionShrinkItem', { label: tb.label, from: origDays.value[tb.key], to: tb.days })).join('、')
     try {
       await ElMessageBox.confirm(
-        `以下数据保留天数被调小，下次清理（每日 4:33）将删除超龄记录：\n${detail}\n\n确定？`,
-        '保留策略收紧 · 将删数据', { type: 'warning', confirmButtonText: '确认收紧', cancelButtonText: '取消' }
+        t('settings.retentionShrinkMsg', { detail }),
+        t('settings.retentionShrinkTitle'), { type: 'warning', confirmButtonText: t('settings.confirmShrink'), cancelButtonText: t('common.cancel') }
       )
     } catch { return }
   }
   retentionSaving.value = true
   try {
     const days = {}
-    retention.value.tables.forEach(t => { days[t.key] = t.days })
+    retention.value.tables.forEach(tb => { days[tb.key] = tb.days })
     retention.value = await PUT('/settings/retention', { days })
-    origDays.value = {}; (retention.value.tables || []).forEach(t => { origDays.value[t.key] = t.days })
-    ElMessage.success('保留策略已保存（每日 4:33 自动清理）')
-  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+    origDays.value = {}; (retention.value.tables || []).forEach(tb => { origDays.value[tb.key] = tb.days })
+    ElMessage.success(t('settings.retentionSaved'))
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   retentionSaving.value = false
 }
 const runRetentionNow = async () => {
   retentionRunning.value = true
   try {
     const r = await POST('/settings/retention/run')
-    const parts = Object.entries(r).map(([t, v]) => `${t}:${v.deleted ?? 0}删`)
-    ElMessage.success('清理完成 · ' + parts.join(' '))
+    const parts = Object.entries(r).map(([k, v]) => t('settings.retentionCleanItem', { table: k, n: v.deleted ?? 0 }))
+    ElMessage.success(t('settings.retentionCleanDone', { detail: parts.join(' ') }))
     await loadRetention()
-  } catch (e) { ElMessage.error('清理失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('settings.cleanFail', { msg: e.message || '' })) }
   retentionRunning.value = false
 }
 const saveKeepalive = async () => {
   kaSaving.value = true
   try {
     ka.value = await PUT('/settings/keepalive', { ...ka.value })
-    ElMessage.success(ka.value.enabled ? '保活已全局开启' : '保活已保存')
-  } catch (e) { ElMessage.error('保存失败：' + (e.message || '')) }
+    ElMessage.success(ka.value.enabled ? t('settings.keepaliveEnabled') : t('common.saved'))
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   kaSaving.value = false
 }
 </script>
@@ -358,164 +361,164 @@ const saveKeepalive = async () => {
 <template>
   <div class="page">
     <div class="card">
-      <div class="t">账户</div>
-      <div class="d">登录用户名（邮箱）和密码。修改密码后需用新密码重新登录。</div>
-      <div class="form-l"><label>用户名</label><input v-model="acctEmail" class="input" placeholder="登录邮箱" /></div>
-      <button class="btn primary" :disabled="acctSaving" @click="saveEmail">保存用户名</button>
+      <div class="t">{{ t('settings.accountTitle') }}</div>
+      <div class="d">{{ t('settings.accountDesc') }}</div>
+      <div class="form-l"><label>{{ t('settings.username') }}</label><input v-model="acctEmail" class="input" :placeholder="t('settings.loginEmailPh')" /></div>
+      <button class="btn primary" :disabled="acctSaving" @click="saveEmail">{{ t('settings.saveUsername') }}</button>
       <div class="acct-sep"></div>
-      <div class="form-l"><label>旧密码</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" placeholder="当前密码" /></div>
-      <div class="form-l"><label>新密码</label><el-input v-model="pwdForm.new" type="password" autocomplete="new-password" show-password class="ep-input" placeholder="至少 8 位" /></div>
-      <div class="form-l"><label>确认</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? '两次不一致' : '再次输入新密码'" /></div>
-      <button class="btn primary" :disabled="pwdSaving" @click="savePwd">修改密码</button>
+      <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>
+      <div class="form-l"><label>{{ t('settings.newPwd') }}</label><el-input v-model="pwdForm.new" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="t('settings.pwdMin8Ph')" /></div>
+      <div class="form-l"><label>{{ t('settings.confirm') }}</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? t('settings.pwdMismatchPh') : t('settings.reenterNewPwdPh')" /></div>
+      <button class="btn primary" :disabled="pwdSaving" @click="savePwd">{{ t('settings.changePwd') }}</button>
     </div>
 
     <div class="card">
-      <div class="t">系统显示时区</div>
-      <div class="d">系统各项时间的显示时区。</div>
+      <div class="t">{{ t('settings.tzTitle') }}</div>
+      <div class="d">{{ t('settings.tzDesc') }}</div>
       <el-select v-model="tz" filterable allow-create default-first-option
-        placeholder="搜索城市或输入时区名（如 Asia/Shanghai）" style="width:100%" :disabled="saving" @change="pick">
-        <el-option v-for="z in TZ_OPTIONS" :key="z.tz" :value="z.tz" :label="`${z.label}（${z.tz}）`" />
+        :placeholder="t('settings.tzSearchPh')" style="width:100%" :disabled="saving" @change="pick">
+        <el-option v-for="z in TZ_OPTIONS" :key="z.tz" :value="z.tz" :label="t('settings.tzOption', { label: z.label, tz: z.tz })" />
       </el-select>
     </div>
 
     <div v-if="isSuper && sched" class="card">
-      <div class="t">任务调度</div>
-      <div class="d">各自动任务的执行频率。</div>
+      <div class="t">{{ t('settings.scheduleTitle') }}</div>
+      <div class="d">{{ t('settings.scheduleDesc') }}</div>
       <div class="base-row">
-        <span class="base-label">基础节拍</span>
+        <span class="base-label">{{ t('settings.baseBeat') }}</span>
         <input v-model.number="sched.base_minutes" type="number" min="1" class="base-input" />
-        <span class="base-unit">分钟</span>
+        <span class="base-unit">{{ t('settings.minutes') }}</span>
       </div>
-      <div class="task-head"><span>任务</span><span>倍数</span><span>生效</span></div>
+      <div class="task-head"><span>{{ t('settings.taskCol') }}</span><span>{{ t('settings.multiplierCol') }}</span><span>{{ t('settings.effectiveCol') }}</span></div>
       <div v-for="k in TASK_ORDER" :key="k" class="task-row">
         <span class="task-name">{{ sched.task_labels?.[k] || k }}</span>
         <input v-model.number="sched.multipliers[k]" type="number" min="1" step="0.5" class="mult-input" />
-        <span class="eff">{{ effOf(k) }} 分钟</span>
+        <span class="eff">{{ t('settings.minSuffix', { n: effOf(k) }) }}</span>
       </div>
       <div class="sentinel-sep"></div>
       <div class="task-row sentinel-row">
-        <span class="task-name">{{ sched.task_labels?.sentinel || '哨兵巡逻' }}</span>
+        <span class="task-name">{{ sched.task_labels?.sentinel || t('settings.taskSentinel') }}</span>
         <input v-model.number="sched.sentinel_minutes" type="number" min="1" max="10" class="mult-input" />
-        <span class="eff">{{ sched.sentinel_minutes }} 分钟</span>
+        <span class="eff">{{ t('settings.minSuffix', { n: sched.sentinel_minutes }) }}</span>
       </div>
-      <button class="btn primary" :disabled="schedSaving" @click="saveSched">保存并生效</button>
+      <button class="btn primary" :disabled="schedSaving" @click="saveSched">{{ t('settings.saveAndApply') }}</button>
     </div>
 
     <div v-if="isSuper" class="card">
-      <div class="t">AI 配置</div>
-      <div class="d">系统 AI 服务。OpenAI 兼容接口。文案模型管 KPI/文案生成；视觉模型管素材 AI 识别（看图生成文案/受众）。</div>
-      <div class="sub-t">文案模型（KPI / 文案生成）</div>
-      <div class="form-l"><label>服务商</label>
+      <div class="t">{{ t('settings.aiTitle') }}</div>
+      <div class="d">{{ t('settings.aiDesc') }}</div>
+      <div class="sub-t">{{ t('settings.aiTextModelTitle') }}</div>
+      <div class="form-l"><label>{{ t('settings.provider') }}</label>
         <el-select v-model="aiForm.ai_base_url" filterable allow-create default-first-option
-          placeholder="选服务商或填 Base URL" style="flex:1">
-          <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="`${o.label}（${o.url}）`" />
+          :placeholder="t('settings.providerPh')" style="flex:1">
+          <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="t('settings.providerOpt', { label: o.label, url: o.url })" />
         </el-select>
       </div>
-      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_api_key_set ? aiCfg.ai_api_key_masked : '填新 key 覆盖'" /></div>
+      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_api_key_set ? aiCfg.ai_api_key_masked : t('settings.fillNewKeyPh')" /></div>
       <div class="form-l"><label>Model</label>
         <el-select v-model="aiForm.ai_model" filterable allow-create default-first-option
-          placeholder="选模型或填模型名" style="flex:1">
+          :placeholder="t('settings.modelPh')" style="flex:1">
           <el-option v-for="m in aiModelOptions" :key="m" :value="m" :label="m" />
         </el-select>
       </div>
-      <div class="sub-t" style="margin-top:18px">视觉模型（素材 AI 识别，看图）</div>
-      <div class="d" style="margin-bottom:6px">用 Gemini 等视觉模型。DeepSeek 纯文本看不了图，所以素材识别单独配这里。</div>
-      <div class="form-l"><label>服务商</label>
+      <div class="sub-t" style="margin-top:18px">{{ t('settings.aiVisionModelTitle') }}</div>
+      <div class="d" style="margin-bottom:6px">{{ t('settings.aiVisionDesc') }}</div>
+      <div class="form-l"><label>{{ t('settings.provider') }}</label>
         <el-select v-model="aiForm.ai_vision_base_url" filterable allow-create default-first-option
-          placeholder="选服务商或填 Base URL" style="flex:1">
-          <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="`${o.label}（${o.url}）`" />
+          :placeholder="t('settings.providerPh')" style="flex:1">
+          <el-option v-for="o in aiBaseOptions" :key="o.url" :value="o.url" :label="t('settings.providerOpt', { label: o.label, url: o.url })" />
         </el-select>
       </div>
-      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_vision_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_vision_api_key_set ? aiCfg.ai_vision_api_key_masked : '填新 key 覆盖'" /></div>
+      <div class="form-l"><label>API Key</label><input v-model="aiForm.ai_vision_api_key" class="input" type="password" autocomplete="new-password" :placeholder="aiCfg.ai_vision_api_key_set ? aiCfg.ai_vision_api_key_masked : t('settings.fillNewKeyPh')" /></div>
       <div class="form-l"><label>Model</label>
         <el-select v-model="aiForm.ai_vision_model" filterable allow-create default-first-option
-          placeholder="选模型或填模型名" style="flex:1">
+          :placeholder="t('settings.modelPh')" style="flex:1">
           <el-option v-for="m in aiVisionModelOptions" :key="m" :value="m" :label="m" />
         </el-select>
       </div>
       <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn primary" :disabled="aiSaving" @click="saveAi">保存</button>
-        <button class="btn" :disabled="aiTesting" @click="testAi">测试文案</button>
-        <button class="btn" :disabled="aiVisionTesting" @click="testVisionAi">测试视觉</button>
+        <button class="btn primary" :disabled="aiSaving" @click="saveAi">{{ t('common.save') }}</button>
+        <button class="btn" :disabled="aiTesting" @click="testAi">{{ t('settings.testText') }}</button>
+        <button class="btn" :disabled="aiVisionTesting" @click="testVisionAi">{{ t('settings.testVision') }}</button>
       </div>
     </div>
 
     <div v-if="isSuper" class="card">
-      <div class="t">域名服务配置</div>
-      <div class="d">落地页发布、域名导入用的域名服务凭据。Token 需有 Pages 编辑 + Zone 读取权限。</div>
-      <div class="form-l"><label>账户 ID</label><input v-model="cfForm.cf_account_id" class="input" placeholder="账户 ID" /></div>
-      <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : '填新 token 覆盖'" /></div>
-      <button class="btn primary" :disabled="cfSaving" @click="saveCf">保存</button>
+      <div class="t">{{ t('settings.cfTitle') }}</div>
+      <div class="d">{{ t('settings.cfDesc') }}</div>
+      <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
+      <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : t('settings.fillNewTokenPh')" /></div>
+      <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
     </div>
 
     <div v-if="isSuper" class="card">
-      <div class="t">数据保留</div>
-      <div class="d">各表老数据的保留天数，到期自动清理（每日 4:33）。填 0 = 永久保留。账户/落地页/配置类不清理。</div>
-      <div class="ret-head"><span>数据</span><span>保留天数</span><span>说明</span></div>
-      <div v-for="t in retention.tables" :key="t.key" class="ret-row" :class="{forever: t.days===0}">
-        <span class="ret-name">{{ t.label }}</span>
-        <input v-model.number="t.days" type="number" min="0" step="10" class="ret-input" />
-        <span class="ret-hint">{{ t.days === 0 ? '永久保留' : `${t.days} 天前删除` }} · {{ t.key }}</span>
+      <div class="t">{{ t('settings.retentionTitle') }}</div>
+      <div class="d">{{ t('settings.retentionDesc') }}</div>
+      <div class="ret-head"><span>{{ t('settings.retDataCol') }}</span><span>{{ t('settings.retDaysCol') }}</span><span>{{ t('settings.retDescCol') }}</span></div>
+      <div v-for="row in retention.tables" :key="row.key" class="ret-row" :class="{forever: row.days===0}">
+        <span class="ret-name">{{ row.label }}</span>
+        <input v-model.number="row.days" type="number" min="0" step="10" class="ret-input" />
+        <span class="ret-hint">{{ row.days === 0 ? t('settings.foreverKeep') : t('settings.delBefore', { n: row.days }) }} · {{ row.key }}</span>
       </div>
-      <div v-if="retention.last_run" class="ret-lastrun">上次清理：{{ retention.last_run.slice(0,19).replace('T',' ') }}</div>
+      <div v-if="retention.last_run" class="ret-lastrun">{{ t('settings.lastClean', { ts: retention.last_run.slice(0,19).replace('T',' ') }) }}</div>
       <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn primary" :disabled="retentionSaving" @click="saveRetention">保存策略</button>
-        <button class="btn" :disabled="retentionRunning" @click="runRetentionNow">{{ retentionRunning ? '清理中…' : '立即清理一次' }}</button>
+        <button class="btn primary" :disabled="retentionSaving" @click="saveRetention">{{ t('settings.savePolicy') }}</button>
+        <button class="btn" :disabled="retentionRunning" @click="runRetentionNow">{{ retentionRunning ? t('settings.cleaning') : t('settings.cleanNow') }}</button>
       </div>
     </div>
 
     <div v-if="isSuper" class="card">
-      <div class="t">汇率（止损换算）</div>
-      <div class="d">止损阈值按 USD 比较，非美元账户用此汇率换算。每日 3:07 自动从开放 API 拉实时汇率（避免 VND/IDR 漂移致 $20 阈值误判）。</div>
+      <div class="t">{{ t('settings.fxTitle') }}</div>
+      <div class="d">{{ t('settings.fxDesc') }}</div>
       <div class="fx-grid">
         <div v-for="r in fxRates" :key="r.code" class="fx-cell">
           <span class="fx-code">{{ r.code }}</span>
           <span class="fx-rate">{{ r.rate < 2 ? r.rate.toFixed(4) : r.rate.toLocaleString(undefined,{maximumFractionDigits:2}) }}</span>
         </div>
       </div>
-      <div v-if="fxFetched" class="ret-lastrun">上次同步：{{ fxFetched }} UTC</div>
-      <button class="btn" :disabled="fxLoading" @click="runFx" style="margin-top:14px">{{ fxLoading ? '拉取中…' : '立即同步汇率' }}</button>
+      <div v-if="fxFetched" class="ret-lastrun">{{ t('settings.lastSync', { ts: fxFetched }) }}</div>
+      <button class="btn" :disabled="fxLoading" @click="runFx" style="margin-top:14px">{{ fxLoading ? t('settings.fetching') : t('settings.syncFxNow') }}</button>
     </div>
 
     <div class="card">
-      <div class="t">Telegram 通知</div>
-      <div class="d" style="margin-bottom:10px">绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。</div>
+      <div class="t">{{ t('settings.tgTitle') }}</div>
+      <div class="d" style="margin-bottom:10px">{{ t('settings.tgDesc') }}</div>
 
       <!-- 已绑定 -->
       <div v-if="userTg.bound" class="tg-status">
-        <span class="tg-bound-badge">✅ 已绑定 {{ userTg.chat_id_masked }}</span>
-        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? '发送中…' : '发送测试消息' }}</button>
-        <button class="btn tg-unbind-btn" @click="unbindTg">解绑</button>
+        <span class="tg-bound-badge">{{ t('settings.tgBoundBadge', { id: userTg.chat_id_masked }) }}</span>
+        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? t('settings.sending') : t('settings.sendTestMsg') }}</button>
+        <button class="btn tg-unbind-btn" @click="unbindTg">{{ t('settings.unbind') }}</button>
       </div>
 
       <!-- 未绑定 -->
       <div v-else class="tg-bind-area">
-        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">绑定 Telegram</a>
-        <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, '绑定链接已复制')">打不开？复制链接</span>
-        <span v-if="!tgBot.configured" class="tg-warn">管理员未配置 TG Bot</span>
+        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">{{ t('settings.bindTelegram') }}</a>
+        <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, t('settings.bindLinkCopied'))">{{ t('settings.cannotOpenCopy') }}</span>
+        <span v-if="!tgBot.configured" class="tg-warn">{{ t('settings.tgBotNotConfigured') }}</span>
       </div>
 
       <!-- 验证 Bot 配置（owner/超管） -->
       <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" class="tg-verify">
-        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? '发送中…' : '验证 Bot 配置' }}</button>
-        <span class="tg-verify-hint">发送一条测试消息到管理员配置的 Bot，验证 Bot 是否正常工作</span>
+        <button class="btn" :disabled="testTgLoading" @click="testTenantTg">{{ testTgLoading ? t('settings.sending') : t('settings.verifyBotConfig') }}</button>
+        <span class="tg-verify-hint">{{ t('settings.verifyBotHint') }}</span>
       </div>
     </div>
 
     <div v-if="isSuper || (myPerms || []).includes('ads.pause')" class="card">
-      <div class="t">保活保护（防休眠）</div>
-      <div class="d">连续 N 天无消耗的账户自动建主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。</div>
+      <div class="t">{{ t('settings.keepaliveTitle') }}</div>
+      <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
         <el-switch v-model="ka.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-        <span class="ka-switch-label">{{ ka.enabled ? '已开启（本团队所有账户自动纳入）' : '关闭（仅逐个开预热的账户生效）' }}</span>
+        <span class="ka-switch-label">{{ ka.enabled ? t('settings.kaOnLabel') : t('settings.kaOffLabel') }}</span>
       </div>
       <div class="ka-grid">
-        <div class="ka-field"><label>单条预算</label><div class="ka-input-wrap"><input v-model.number="ka.budget_usd" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">$</span></div></div>
-        <div class="ka-field"><label>触发天数</label><div class="ka-input-wrap"><input v-model.number="ka.idle_days" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">天</span></div></div>
-        <div class="ka-field"><label>素材前缀</label><div class="ka-input-wrap"><input v-model="ka.asset_prefix" class="ka-input" style="width:100px" /></div></div>
+        <div class="ka-field"><label>{{ t('settings.kaBudget') }}</label><div class="ka-input-wrap"><input v-model.number="ka.budget_usd" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">$</span></div></div>
+        <div class="ka-field"><label>{{ t('settings.kaTriggerDays') }}</label><div class="ka-input-wrap"><input v-model.number="ka.idle_days" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">{{ t('settings.days') }}</span></div></div>
+        <div class="ka-field"><label>{{ t('settings.kaAssetPrefix') }}</label><div class="ka-input-wrap"><input v-model="ka.asset_prefix" class="ka-input" style="width:100px" /></div></div>
       </div>
       <div class="ka-actions">
-        <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? '保存中…' : '保存' }}</button>
+        <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? t('settings.saving') : t('common.save') }}</button>
       </div>
     </div>
   </div>

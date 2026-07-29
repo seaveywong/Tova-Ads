@@ -1,20 +1,22 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET } from '../api'
 import { isSuperadminSync } from '../router'
 import { ElMessage } from 'element-plus'
 import { fmtTime } from '../composables/useTz'
 import { dateShortcuts, presetRange } from '../composables/useDateRange'
+const { t } = useI18n()
 const pickerShortcuts = dateShortcuts()
 
 const isSuper = ref(isSuperadminSync())
 
 const tabs = [
-  { key: 'all', label: '全部', params: {} },
-  { key: 'user', label: '操作', params: { actor_type: 'user' } },
-  { key: 'system', label: '系统', params: { actor_type: 'system,sentinel,sync,warmup' } },
-  { key: 'login', label: '登录', params: { action_type: 'login,switch_tenant' } },
-  { key: 'fail', label: '失败', params: { result: 'fail' } },
+  { key: 'all', label: 'audit.tabAll', params: {} },
+  { key: 'user', label: 'audit.tabUser', params: { actor_type: 'user' } },
+  { key: 'system', label: 'audit.tabSystem', params: { actor_type: 'system,sentinel,sync,warmup' } },
+  { key: 'login', label: 'audit.tabLogin', params: { action_type: 'login,switch_tenant' } },
+  { key: 'fail', label: 'audit.tabFail', params: { result: 'fail' } },
 ]
 const tab = ref('all')
 
@@ -56,7 +58,7 @@ const load = async () => {
     const [rows, cnt] = await Promise.all([GET('/logs?' + qs), GET('/logs/count?' + qsCount)])
     logs.value = rows
     total.value = (cnt && cnt.count) || 0
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loading.value = false
 }
 const loadActors = async () => { try { actors.value = await GET('/logs/actors') } catch {} }
@@ -76,23 +78,23 @@ const onExpandChange = async (row, expandedRows) => {
   row._traceLoading = false
 }
 
-const TYPE_ZH = { user: '用户', system: '系统', sentinel: '哨兵', sync: '同步', warmup: '预热' }
+const TYPE_ZH = { user: 'audit.typeUser', system: 'audit.typeSystem', sentinel: 'audit.typeSentinel', sync: 'audit.typeSync', warmup: 'audit.typeWarmup' }
 const ACTION_ZH = {
-  inspection_heartbeat: '巡检心跳', pause: '止损暂停', deploy: '广告部署', login: '登录',
-  switch_tenant: '切换团队', account_permission_error: '令牌权限不足', token_rate_limited: '令牌限流',
-  landing_health_alert: '落地页告警', coverage_lost: '覆盖丢失', create: '创建', update: '更新',
-  delete: '删除', archive: '归档', rule_pause: '规则止损', sentinel_pause: '哨兵暂停',
-  emergency_pause: '紧急暂停', token_expired: '令牌过期', token_invalid: '令牌失效',
+  inspection_heartbeat: 'audit.actionInspectionHeartbeat', pause: 'audit.actionPause', deploy: 'audit.actionDeploy', login: 'audit.actionLogin',
+  switch_tenant: 'audit.actionSwitchTenant', account_permission_error: 'audit.actionAccountPermissionError', token_rate_limited: 'audit.actionTokenRateLimited',
+  landing_health_alert: 'audit.actionLandingHealthAlert', coverage_lost: 'audit.actionCoverageLost', create: 'audit.actionCreate', update: 'audit.actionUpdate',
+  delete: 'audit.actionDelete', archive: 'audit.actionArchive', rule_pause: 'audit.actionRulePause', sentinel_pause: 'audit.actionSentinelPause',
+  emergency_pause: 'audit.actionEmergencyPause', token_expired: 'audit.actionTokenExpired', token_invalid: 'audit.actionTokenInvalid',
 }
 const TARGET_ZH = {
-  scheduler: '调度器', ad: '广告', account: '账户', fb_credential: '令牌',
-  landing_page: '落地页', launch_template: '投放模板', launch_job: '部署任务',
-  form_template: '表单模板', user: '用户', team: '团队', subcode: '子码', rule: '规则',
+  scheduler: 'audit.targetScheduler', ad: 'audit.targetAd', account: 'audit.targetAccount', fb_credential: 'audit.targetFbCredential',
+  landing_page: 'audit.targetLandingPage', launch_template: 'audit.targetLaunchTemplate', launch_job: 'audit.targetLaunchJob',
+  form_template: 'audit.targetFormTemplate', user: 'audit.targetUser', team: 'audit.targetTeam', subcode: 'audit.targetSubcode', rule: 'audit.targetRule',
 }
 const SOURCE_ZH = {
-  scheduled: '定时任务', rule_engine: '规则引擎', fb_api: 'FB接口', guard: '止损引擎',
-  landing: '落地页', launch: '广告部署', sentinel: '哨兵', watchdog: '看门狗',
-  user: '用户操作', warmup: '预热', sync: '数据同步',
+  scheduled: 'audit.sourceScheduled', rule_engine: 'audit.sourceRuleEngine', fb_api: 'audit.sourceFbApi', guard: 'audit.sourceGuard',
+  landing: 'audit.sourceLanding', launch: 'audit.sourceLaunch', sentinel: 'audit.sourceSentinel', watchdog: 'audit.sourceWatchdog',
+  user: 'audit.sourceUser', warmup: 'audit.sourceWarmup', sync: 'audit.sourceSync',
 }
 const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
 const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; dateRange.value = []; page.value = 1; load() }
@@ -103,92 +105,92 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
     <div class="card">
       <div class="head">
         <div class="tabs">
-          <button v-for="t in tabs" :key="t.key" :class="['tab',{on:tab===t.key}]" @click="setTab(t.key)">{{ t.label }}</button>
+          <button v-for="tb in tabs" :key="tb.key" :class="['tab',{on:tab===tb.key}]" @click="setTab(tb.key)">{{ t(tb.label) }}</button>
         </div>
-        <button class="btn" @click="load">刷新</button>
+        <button class="btn" @click="load">{{ t('common.refresh') }}</button>
       </div>
 
       <div class="filters">
         <div class="filter-item">
-          <span class="flabel">动作</span>
-          <input v-model="fAction" class="input" placeholder="如 login / pause / upsert" @keyup.enter="load" />
+          <span class="flabel">{{ t('audit.fieldAction') }}</span>
+          <input v-model="fAction" class="input" :placeholder="t('audit.actionPlaceholder')" @keyup.enter="load" />
         </div>
         <div class="filter-item">
-          <span class="flabel">用户</span>
+          <span class="flabel">{{ t('audit.fieldUser') }}</span>
           <select v-model="fUser" class="sel" @change="load">
-            <option :value="0">全部</option>
+            <option :value="0">{{ t('common.all') }}</option>
             <option v-for="a in actors" :key="a.id" :value="a.id">{{ a.email }}</option>
           </select>
         </div>
         <div class="filter-item">
-          <span class="flabel">链路</span>
-          <input v-model="fTrace" class="input mono" placeholder="trace_id 拉全链路" @keyup.enter="load" />
+          <span class="flabel">{{ t('audit.fieldTrace') }}</span>
+          <input v-model="fTrace" class="input mono" :placeholder="t('audit.tracePlaceholder')" @keyup.enter="load" />
         </div>
         <div class="filter-item">
-          <span class="flabel">日期</span>
+          <span class="flabel">{{ t('audit.fieldDate') }}</span>
           <el-date-picker v-model="dateRange" type="daterange" size="small" value-format="YYYY-MM-DD"
-            start-placeholder="开始" end-placeholder="结束" style="width:240px" :shortcuts="pickerShortcuts" @change="onDateChange" />
+            :start-placeholder="t('audit.dateStart')" :end-placeholder="t('audit.dateEnd')" style="width:240px" :shortcuts="pickerShortcuts" @change="onDateChange" />
         </div>
-        <button v-if="fAction || fUser || fTrace || (dateRange && dateRange.length)" class="clear" @click="resetFilters">清除</button>
+        <button v-if="fAction || fUser || fTrace || (dateRange && dateRange.length)" class="clear" @click="resetFilters">{{ t('audit.clear') }}</button>
       </div>
 
       <div class="pager">
-        <span class="pager-info">共 {{ total }} 条 · 第 {{ page }} / {{ totalPages() }} 页</span>
+        <span class="pager-info">{{ t('audit.pagerInfo', { total: total, page: page, pages: totalPages() }) }}</span>
         <div class="pager-ops">
-          <button class="btn" :disabled="page <= 1 || loading" @click="goPage(page - 1)">上一页</button>
-          <button class="btn" :disabled="page >= totalPages() || loading" @click="goPage(page + 1)">下一页</button>
+          <button class="btn" :disabled="page <= 1 || loading" @click="goPage(page - 1)">{{ t('audit.prevPage') }}</button>
+          <button class="btn" :disabled="page >= totalPages() || loading" @click="goPage(page + 1)">{{ t('audit.nextPage') }}</button>
         </div>
       </div>
 
-      <div class="tbl-wrap"><el-table :data="logs" v-loading="loading" style="width:100%" empty-text="暂无日志" row-key="id" size="small"
+      <div class="tbl-wrap"><el-table :data="logs" v-loading="loading" style="width:100%" :empty-text="t('common.noData')" row-key="id" size="small"
                 @expand-change="onExpandChange">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="trace-inline" v-loading="row._traceLoading">
               <div class="trace-head-inline">
-                <span class="trace-label">链路 <code>{{ row.trace_id }}</code></span>
-                <span v-if="row._traceLogs" class="trace-count-inline">{{ row._traceLogs.length }} 条</span>
+                <span class="trace-label">{{ t('audit.traceLabel') }} <code>{{ row.trace_id }}</code></span>
+                <span v-if="row._traceLogs" class="trace-count-inline">{{ t('audit.traceCount', { n: row._traceLogs.length }) }}</span>
               </div>
               <div class="trace-list-inline">
                 <div v-for="l in (row._traceLogs || [])" :key="l.id" class="trace-row">
                   <span :class="['t-dot', l.result]"></span>
                   <span class="t-time">{{ (l.created_at || '').slice(11,19) }}</span>
-                  <span :class="['tag sm', l.actor_type]">{{ TYPE_ZH[l.actor_type] || l.actor_type }}</span>
-                  <code class="t-act">{{ ACTION_ZH[l.action_type] || l.action_type }}</code>
-                  <span v-if="l.target_type" class="t-tgt">{{ TARGET_ZH[l.target_type] || l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
+                  <span :class="['tag sm', l.actor_type]">{{ TYPE_ZH[l.actor_type] ? t(TYPE_ZH[l.actor_type]) : l.actor_type }}</span>
+                  <code class="t-act">{{ ACTION_ZH[l.action_type] ? t(ACTION_ZH[l.action_type]) : l.action_type }}</code>
+                  <span v-if="l.target_type" class="t-tgt">{{ TARGET_ZH[l.target_type] ? t(TARGET_ZH[l.target_type]) : l.target_type }}<span v-if="l.target_id">#{{ l.target_id }}</span></span>
                   <span :style="{color:rowColor(l)}">{{ l.result === 'success' ? '✓' : '✗' }}</span>
                   <span v-if="l.friendly_error" class="t-err">{{ l.friendly_error }}</span>
                 </div>
-                <div v-if="row._traceLogs && !row._traceLogs.length && !row._traceLoading" class="trace-empty-inline">该链路无更多记录</div>
+                <div v-if="row._traceLogs && !row._traceLogs.length && !row._traceLoading" class="trace-empty-inline">{{ t('audit.traceEmpty') }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="150">
+        <el-table-column :label="t('audit.colTime')" width="150">
           <template #default="{ row }"><span class="mute">{{ fmtTime(row.created_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="类型" width="74">
-          <template #default="{ row }"><span :class="['tag', row.actor_type]">{{ TYPE_ZH[row.actor_type] || row.actor_type }}</span></template>
+        <el-table-column :label="t('audit.colType')" width="74">
+          <template #default="{ row }"><span :class="['tag', row.actor_type]">{{ TYPE_ZH[row.actor_type] ? t(TYPE_ZH[row.actor_type]) : row.actor_type }}</span></template>
         </el-table-column>
-        <el-table-column label="动作" width="120">
-          <template #default="{ row }"><code class="act">{{ ACTION_ZH[row.action_type] || row.action_type }}</code></template>
+        <el-table-column :label="t('audit.colAction')" width="120">
+          <template #default="{ row }"><code class="act">{{ ACTION_ZH[row.action_type] ? t(ACTION_ZH[row.action_type]) : row.action_type }}</code></template>
         </el-table-column>
-        <el-table-column label="对象" min-width="150">
+        <el-table-column :label="t('audit.colTarget')" min-width="150">
           <template #default="{ row }">
-            <span v-if="row.target_type" class="tgt">{{ TARGET_ZH[row.target_type] || row.target_type }}<span v-if="row.target_id" class="tid">#{{ row.target_id }}</span></span>
+            <span v-if="row.target_type" class="tgt">{{ TARGET_ZH[row.target_type] ? t(TARGET_ZH[row.target_type]) : row.target_type }}<span v-if="row.target_id" class="tid">#{{ row.target_id }}</span></span>
             <span v-else class="dash">—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="isSuper" label="团队" width="56" align="center">
+        <el-table-column v-if="isSuper" :label="t('audit.colTeam')" width="56" align="center">
           <template #default="{ row }"><span class="mute">#{{ row.tenant_id }}</span></template>
         </el-table-column>
-        <el-table-column label="结果" width="68">
-          <template #default="{ row }"><span :class="['res', row.result]">{{ row.result === 'success' ? '✓ 成功' : '✗ 失败' }}</span></template>
+        <el-table-column :label="t('audit.colResult')" width="68">
+          <template #default="{ row }"><span :class="['res', row.result]">{{ row.result === 'success' ? t('audit.resultSuccess') : t('audit.resultFail') }}</span></template>
         </el-table-column>
-        <el-table-column label="详情" min-width="200">
+        <el-table-column :label="t('common.detail')" min-width="200">
           <template #default="{ row }">
             <div class="detail-cell">
-              <span v-if="row.source" class="src-tag">{{ SOURCE_ZH[row.source] || row.source }}</span>
+              <span v-if="row.source" class="src-tag">{{ SOURCE_ZH[row.source] ? t(SOURCE_ZH[row.source]) : row.source }}</span>
               <span v-if="row.friendly_error" class="err">{{ row.friendly_error }}</span>
               <span v-if="row.trigger_detail" class="trig">{{ row.trigger_detail }}</span>
               <span v-if="row.metadata" class="meta">

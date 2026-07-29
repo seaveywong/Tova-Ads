@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { accountStatus } from '../composables/useStatus'
@@ -8,6 +9,7 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 
+const { t } = useI18n()
 const router = useRouter()
 const accounts = ref([])
 const loading = ref(true)
@@ -19,7 +21,7 @@ const customFrom = ref('')
 const customTo = ref('')
 const rangeLabel = computed(() => {
   if (showCustom.value && customFrom.value) return `${customFrom.value.slice(5)}~${(customTo.value || customFrom.value).slice(5)}`
-  return DATE_PRESETS.find(o => o.key === datePreset.value)?.label || '今日'
+  return DATE_PRESETS.find(o => o.key === datePreset.value)?.label || t('common.today')
 })
 const curRange = computed(() => {
   if (showCustom.value && customFrom.value) return { date_from: customFrom.value, date_to: customTo.value || customFrom.value }
@@ -40,38 +42,44 @@ const toggleAcc = (id) => { selectedAccs.value.has(id) ? selectedAccs.value.dele
 const selectAllAccs = () => { if (selectedAccs.value.size === accounts.value.length) { selectedAccs.value.clear() } else { selectedAccs.value = new Set(accounts.value.map(a => a.act_id)) }; selectedAccs.value = new Set(selectedAccs.value) }
 const isAccSelected = (id) => selectedAccs.value.has(id)
 const batchRemove = async () => {
-  if (!selectedAccs.value.size) return ElMessage.warning('先勾选账户')
+  if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   try {
-    await ElMessageBox.confirm(`移除 ${selectedAccs.value.size} 个账户纳管？（历史数据保留）`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('ads.batchRemoveConfirm', { n: selectedAccs.value.size }), t('common.confirm'), { type: 'warning' })
     accLoading.value = true
     for (const actId of selectedAccs.value) { await DELETE(`/fb/accounts/${actId}`) }
-    ElMessage.success('已移除 ' + selectedAccs.value.size + ' 个账户'); selectedAccs.value.clear(); await load()
+    ElMessage.success(t('ads.removed', { n: selectedAccs.value.size })); selectedAccs.value.clear(); await load()
   } catch(e) {} finally { accLoading.value = false }
 }
-const batchSyncLabel = ref('批量同步')
+const batchSyncLabel = ref(t('ads.batchSync'))
 const batchSync = async () => {
-  if (!selectedAccs.value.size) return ElMessage.warning('先勾选账户')
+  if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   accLoading.value = true
   const targets = accounts.value.filter(a => selectedAccs.value.has(a.act_id) && a.fb_credential_id)
   const total = targets.length
   let ok = 0, fail = 0, done = 0
   const errs = []
   for (const a of targets) {
-    batchSyncLabel.value = `同步 ${done}/${total}…`
+    batchSyncLabel.value = t('ads.syncing', { done, total })
     try { await POST('/fb/credentials/' + a.fb_credential_id + '/refresh-accounts'); ok++ }
     catch (e) { fail++; errs.push(`${a.act_id} (${a.name || ''}): ${e.message || e}`) }
     done++
   }
-  batchSyncLabel.value = '批量同步'
+  batchSyncLabel.value = t('ads.batchSync')
   if (fail) {
-    showError(`成功 ${ok} / 失败 ${fail}：\n\n${errs.join('\n')}`, '批量同步失败明细')
+    showError(t('ads.batchSyncResult', { ok, fail, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
   } else {
-    ElMessage.success(`已刷新 ${ok} 个账户`)
+    ElMessage.success(t('ads.refreshed', { n: ok }))
   }
   selectedAccs.value.clear(); await load()
   accLoading.value = false
 }
-const balKindLabel = (k) => k === 'limited' ? '有限' : (k === 'unlimited' ? '不限' : '高限')
+const balKindLabel = (k) => k === 'limited' ? t('ads.balLimited') : (k === 'unlimited' ? t('ads.balUnlimited') : t('ads.balHighLimited'))
+const boundTokenTitle = (a) => {
+  const alias = a.bound_alias || t('ads.unbound')
+  const state = a.bound_available ? t('ads.tokenOk') : t('ads.tokenAbnormal')
+  const pool = a.pool_aliases ? ' · ' + t('ads.rotatingToken', { aliases: a.pool_aliases }) : ''
+  return `${alias} · ${state}${pool}`
+}
 const cpa = (a) => (a.recent_conversions > 0) ? (a.recent_spend / a.recent_conversions).toFixed(2) : '-'
 
 const load = async () => {
@@ -79,39 +87,39 @@ const load = async () => {
   try {
     const ps = new URLSearchParams(curRange.value)
     accounts.value = await GET('/fb/accounts?' + ps.toString())
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loading.value = false
 }
 const openLoad = async () => {
   loadOpen.value = true; loadLoading.value = true
   try { loadables.value = (await GET('/fb/credentials/loadable-accounts')).map(a => ({ ...a, _checked: false })) }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loadLoading.value = false
 }
 const doImport = async () => {
   const ids = loadables.value.filter(a => a._checked && !a.imported).map(a => a.account_id).filter(Boolean)
-  if (!ids.length) return ElMessage.warning('勾选要导入的账户')
+  if (!ids.length) return ElMessage.warning(t('ads.selectToImport'))
   importing.value = true
   try {
     const r = await POST('/fb/import', { account_ids: ids })
-    ElMessage.success(`已导入 ${r.count || 0} 个（跳过已存在 ${r.skipped_existing || 0}）`)
+    ElMessage.success(t('ads.imported', { n: r.count || 0, skipped: r.skipped_existing || 0 }))
     loadOpen.value = false; await load()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   importing.value = false
 }
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success('ID 已复制：' + id) }
+const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('ads.idCopied', { id })) }
 const onCmd = async (cmd, a) => {
   if (cmd === 'manager') router.push({ name: 'ad-manager', query: { act: a.act_id } })
   else if (cmd === 'sync') {
-    if (!a.fb_credential_id) return ElMessage.warning('该账户未绑定令牌')
-    try { await POST(`/fb/credentials/${a.fb_credential_id}/refresh-accounts`); ElMessage.success('已刷新'); await load() }
-    catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    if (!a.fb_credential_id) return ElMessage.warning(t('ads.noBoundToken'))
+    try { await POST(`/fb/credentials/${a.fb_credential_id}/refresh-accounts`); ElMessage.success(t('ads.refreshedSimple')); await load() }
+    catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   } else if (cmd === 'warmup') {
     await toggleWarmup([a.act_id], a.warmup_state !== 'warming')
   } else if (cmd === 'remove') {
     try {
-      await ElMessageBox.confirm(`移除「${a.name}」纳管？（历史数据保留）`, '确认', { type: 'warning' })
-      await DELETE(`/fb/accounts/${a.act_id}`); ElMessage.success('已移除'); await load()
+      await ElMessageBox.confirm(t('ads.removeConfirm', { name: a.name }), t('common.confirm'), { type: 'warning' })
+      await DELETE(`/fb/accounts/${a.act_id}`); ElMessage.success(t('ads.removedSimple')); await load()
     } catch(e) {}
   }
 }
@@ -121,13 +129,13 @@ const toggleWarmup = async (actIds, arm) => {
   let ok = 0
   for (const actId of actIds) {
     try { await POST(`/guard/warmup/${arm ? 'arm' : 'disarm'}`, { act_ids: [actId] }); ok++ }
-    catch (e) { ElMessage.error(`${actId}: ${e.message || '失败'}`) }
+    catch (e) { ElMessage.error(`${actId}: ${e.message || t('common.fail')}`) }
   }
-  if (ok) ElMessage.success(`${arm ? '预热保护' : '取消预热'} ${ok} 个账户`)
+  if (ok) ElMessage.success(t('ads.warmupToggled', { label: arm ? t('ads.warmupArm') : t('ads.warmupDisarm'), n: ok }))
   accLoading.value = false; await load()
 }
 const batchWarmup = async (arm) => {
-  if (!selectedAccs.value.size) return ElMessage.warning('先勾选账户')
+  if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   await toggleWarmup([...selectedAccs.value], arm)
   selectedAccs.value.clear()
 }
@@ -141,35 +149,35 @@ onMounted(async () => {
 <template>
   <div class="page">
     <div class="date-bar">
-      <h2 class="title">广告账户 <span class="cnt">{{ accounts.length }}</span></h2>
+      <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ accounts.length }}</span></h2>
       <button v-for="opt in DATE_PRESETS" :key="opt.key" class="date-btn"
         :class="{ active: datePreset === opt.key && !showCustom }"
         @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
-      <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">自定义</button>
+      <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('ads.custom') }}</button>
       <div v-if="showCustom" class="custom-range">
         <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
         <input type="date" v-model="customTo" class="date-input" />
-        <button class="date-btn apply" @click="load">查询</button>
+        <button class="date-btn apply" @click="load">{{ t('ads.query') }}</button>
       </div>
-      <button class="refresh-btn primary" @click="openLoad">载入账户</button>
+      <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
-      <span class="batch-count">已选 {{ selectedAccs.size }}</span>
+      <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>
       <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel }}</button>
-      <button class="batch-btn" @click="batchWarmup(true)" :disabled="accLoading">预热保护</button>
-      <button class="batch-btn" @click="batchWarmup(false)" :disabled="accLoading">取消预热</button>
-      <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">批量移除</button>
-      <button class="batch-btn" @click="selectedAccs.clear()">取消</button>
+      <button class="batch-btn" @click="batchWarmup(true)" :disabled="accLoading">{{ t('ads.warmupArm') }}</button>
+      <button class="batch-btn" @click="batchWarmup(false)" :disabled="accLoading">{{ t('ads.warmupDisarm') }}</button>
+      <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">{{ t('ads.batchRemove') }}</button>
+      <button class="batch-btn" @click="selectedAccs.clear()">{{ t('common.cancel') }}</button>
     </div>
     <div class="tbl" v-loading="loading || accLoading">
       <div class="row head">
         <div><input type="checkbox" :checked="selectedAccs.size === accounts.length && accounts.length > 0" @click="selectAllAccs" /></div>
-        <div>状态</div><div>账户</div><div>余额</div><div>可用额度</div>
-        <div>消耗 <span class="rng">{{ rangeLabel }}</span></div><div>转化</div><div>CPA</div><div>生效令牌</div><div></div>
+        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
+        <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
       <div v-for="a in accounts" :key="a.act_id" class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
-        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" title="预热保护中：巡检/哨兵跳过该账户">预热</span></div>
+        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
           <div class="acc-name">{{ a.name }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
@@ -184,45 +192,45 @@ onMounted(async () => {
         <div>{{ cpa(a) }}</div>
         <div>
           <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')"
-                :title="`${a.bound_alias || '未绑'} · ${a.bound_available ? '可用' : '异常'}${a.pool_aliases ? ' · 轮换令牌：' + a.pool_aliases : ''}`">
-            {{ a.bound_alias || '未绑' }}
+                :title="boundTokenTitle(a)">
+            {{ a.bound_alias || t('ads.unbound') }}
           </span>
-          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="a.pool_aliases || `候选池 ${a.pool_count} 个令牌`">+{{ (a.pool_count||0) - 1 }}</span>
+          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="a.pool_aliases || t('ads.poolTooltip', { n: a.pool_count })">+{{ (a.pool_count||0) - 1 }}</span>
         </div>
         <div class="ops">
           <el-dropdown trigger="click" @command="cmd => onCmd(cmd, a)" placement="bottom-end">
             <button class="more-btn">⚙</button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="manager">在广告管理器查看</el-dropdown-item>
-                <el-dropdown-item command="sync">同步状态/余额</el-dropdown-item>
-                <el-dropdown-item command="warmup" divided>{{ a.warmup_state === 'warming' ? '取消预热' : '预热保护' }}</el-dropdown-item>
-                <el-dropdown-item command="remove">移除纳管</el-dropdown-item>
+                <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
+                <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
+                <el-dropdown-item command="warmup" divided>{{ a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
+                <el-dropdown-item command="remove">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
         </div>
       </div>
       <div v-if="!accounts.length && !loading" class="empty empty-cta">
-        <div class="empty-title">还没有纳管的广告账户</div>
-        <div class="empty-step">① 先去 <router-link to="/tokens" class="empty-link">Facebook 授权</router-link> 绑定令牌</div>
-        <div class="empty-step">② 回到本页点「载入账户」导入</div>
+        <div class="empty-title">{{ t('ads.emptyTitle') }}</div>
+        <div class="empty-step">{{ t('ads.emptyStep1') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLink') }}</router-link> {{ t('ads.emptyStep1b') }}</div>
+        <div class="empty-step">{{ t('ads.emptyStep2') }}</div>
       </div>
     </div>
 
     <div v-if="loadOpen" class="overlay" @click.self="loadOpen = false">
       <div class="modal">
-        <div class="modal-title">载入账户 <button class="mb" @click="loadOpen = false">✕</button></div>
+        <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="loadOpen = false">✕</button></div>
         <div class="load-list" v-loading="loadLoading">
           <div v-for="a in loadables" :key="a.account_id" class="load-row">
             <input type="checkbox" v-model="a._checked" :disabled="a.imported" />
             <span class="lm-name">{{ a.name }}</span>
             <code>{{ a.account_id }}</code>
-            <span class="tag" :class="a.imported ? 'off' : 'ok'">{{ a.imported ? '已导入' : '可导入' }}</span>
+            <span class="tag" :class="a.imported ? 'off' : 'ok'">{{ a.imported ? t('ads.importedTag') : t('ads.importableTag') }}</span>
           </div>
-          <div v-if="!loadables.length && !loadLoading" class="empty">无可载入账户（先在 Facebook 授权页绑定令牌）</div>
+          <div v-if="!loadables.length && !loadLoading" class="empty">{{ t('ads.noLoadable') }}</div>
         </div>
-        <button class="btn primary" :disabled="importing" style="margin-top:12px" @click="doImport">{{ importing ? '导入中…' : '导入选中' }}</button>
+        <button class="btn primary" :disabled="importing" style="margin-top:12px" @click="doImport">{{ importing ? t('ads.importing') : t('ads.importSelected') }}</button>
       </div>
     </div>
   </div>

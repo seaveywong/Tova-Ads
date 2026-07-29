@@ -1,9 +1,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { aiStatus } from '../composables/useStatus'
+
+const { t } = useI18n()
 
 const assets = ref([])
 const loading = ref(false)
@@ -39,8 +42,8 @@ const _tickAnalyze = () => {
 const analyzeStageText = (a) => {
   if (!analyzingIds.value.has(a.id)) return ''
   const s = analyzeElapsed.value[a.id] || 0
-  const stage = s < 6 ? '抽帧/读图' : s < 20 ? '识别内容' : s < 45 ? '生成文案' : '整理受众'
-  return `分析中 · ${stage} · ${s}s`
+  const stageKey = s < 6 ? 'stageFrame' : s < 20 ? 'stageRecognize' : s < 45 ? 'stageCopy' : 'stageAudience'
+  return t('assets.analyzingStage', { stage: t(`assets.${stageKey}`), s })
 }
 
 // 批量选择
@@ -64,7 +67,7 @@ const aiStyle = ref('standard')
 const PURPOSE_KEYS = new Set(['general','attract_male','attract_female','attract_investors','promote_clothing','promote_beauty','promote_health','promote_app','promote_course','promote_finance','ecommerce','lead_gen','brand_awareness'])
 const purposeLabel = (v) => {
   if (!v) return ''
-  if (String(v).startsWith('custom:')) return '自定义：' + v.slice(7)
+  if (String(v).startsWith('custom:')) return t('assets.customPurpose', { v: v.slice(7) })
   const p = aiOpts.value.purposes.find(x => x.value === v)
   return p ? p.label : v
 }
@@ -78,12 +81,12 @@ const editSaving = ref(false)
 const BASE = 'https://api.tovaads.com'
 
 const COUNTRIES = [
-  { code: 'US', label: '美国' }, { code: 'VN', label: '越南' }, { code: 'TH', label: '泰国' },
-  { code: 'ID', label: '印尼' }, { code: 'PH', label: '菲律宾' }, { code: 'MY', label: '马来西亚' },
-  { code: 'TW', label: '台湾' }, { code: 'HK', label: '香港' }, { code: 'SG', label: '新加坡' },
-  { code: 'CN', label: '中国大陆' }, { code: 'BR', label: '巴西' }, { code: 'MX', label: '墨西哥' },
-  { code: 'IN', label: '印度' }, { code: 'JP', label: '日本' }, { code: 'KR', label: '韩国' },
-  { code: 'GB', label: '英国' }, { code: 'DE', label: '德国' }, { code: 'FR', label: '法国' },
+  { code: 'US', label: 'United States' }, { code: 'VN', label: 'Vietnam' }, { code: 'TH', label: 'Thailand' },
+  { code: 'ID', label: 'Indonesia' }, { code: 'PH', label: 'Philippines' }, { code: 'MY', label: 'Malaysia' },
+  { code: 'TW', label: 'Taiwan' }, { code: 'HK', label: 'Hong Kong' }, { code: 'SG', label: 'Singapore' },
+  { code: 'CN', label: 'Mainland China' }, { code: 'BR', label: 'Brazil' }, { code: 'MX', label: 'Mexico' },
+  { code: 'IN', label: 'India' }, { code: 'JP', label: 'Japan' }, { code: 'KR', label: 'South Korea' },
+  { code: 'GB', label: 'United Kingdom' }, { code: 'DE', label: 'Germany' }, { code: 'FR', label: 'France' },
 ]
 
 const load = async () => {
@@ -94,7 +97,7 @@ const load = async () => {
     if (fTag.value) params.set('tag', fTag.value)
     if (fSearch.value.trim()) params.set('search', fSearch.value.trim())
     assets.value = await GET('/assets?' + params.toString())
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loading.value = false
 }
 onMounted(async () => {
@@ -102,12 +105,12 @@ onMounted(async () => {
   try { aiOpts.value = await GET('/assets/ai-purposes') } catch {}
 })
 
-const typeChips = [
-  { key: '', label: '全部' },
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-]
-const setType = (t) => { fType.value = t; load() }
+const typeChips = computed(() => [
+  { key: '', label: t('common.all') },
+  { key: 'image', label: t('assets.typeImage') },
+  { key: 'video', label: t('assets.typeVideo') },
+])
+const setType = (k) => { fType.value = k; load() }
 
 // 所有标签（从素材列表提取）
 const allTags = computed(() => {
@@ -130,7 +133,7 @@ const onDrop = (e) => {
 const removeUploadItem = (i) => uploadFiles.value.splice(i, 1)
 
 const submitUpload = async () => {
-  if (!uploadFiles.value.length) return ElMessage.warning('先选择文件')
+  if (!uploadFiles.value.length) return ElMessage.warning(t('assets.selectFileFirst'))
   uploadSaving.value = true
   let ok = 0, fail = 0
   for (const item of uploadFiles.value) {
@@ -147,10 +150,10 @@ const submitUpload = async () => {
         headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') },
         body: fd,
       })
-      if (r.status === 401) { localStorage.removeItem('tova_token'); throw new Error('未登录') }
+      if (r.status === 401) { localStorage.removeItem('tova_token'); throw new Error(t('error.unauthorized')) }
       const text = await r.text()
       const data = JSON.parse(text)
-      if (!r.ok) throw new Error(data.detail || '上传失败')
+      if (!r.ok) throw new Error(data.detail || t('assets.uploadFailed'))
       item.status = 'done'
       ok++
     } catch (e) {
@@ -159,8 +162,8 @@ const submitUpload = async () => {
     }
   }
   uploadSaving.value = false
-  if (ok) { ElMessage.success(`${ok} 个素材上传成功`); uploadOpen.value = false; await load() }
-  if (fail) ElMessage.error(`${fail} 个失败`)
+  if (ok) { ElMessage.success(t('assets.uploadOkCount', { n: ok })); uploadOpen.value = false; await load() }
+  if (fail) ElMessage.error(t('assets.uploadFailCount', { n: fail }))
 }
 
 // 重命名（inline）
@@ -172,21 +175,21 @@ const saveRename = async (a) => {
   try {
     const r = await PUT('/assets/' + a.id, { name: n })
     Object.assign(a, r)
-    ElMessage.success('已重命名')
-  } catch (e) { ElMessage.error(e.message || '重命名失败') }
+    ElMessage.success(t('assets.renamedOk'))
+  } catch (e) { ElMessage.error(e.message || t('assets.renameFailed')) }
 }
 
 // 改标签
 const editTags = async (a) => {
   try {
-    const { value } = await ElMessageBox.prompt('标签（逗号分隔）', `标签 · ${a.name}`, {
+    const { value } = await ElMessageBox.prompt(t('assets.tagsPromptPh'), t('assets.tagsPromptTitle', { name: a.name }), {
       inputValue: (a.tags || []).join(', '),
-      confirmButtonText: '保存', cancelButtonText: '取消',
+      confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
     })
-    const tags = value.split(',').map(t => t.trim()).filter(Boolean)
+    const tags = value.split(',').map(x => x.trim()).filter(Boolean)
     const r = await PUT('/assets/' + a.id, { tags })
     Object.assign(a, r)
-    ElMessage.success('标签已更新')
+    ElMessage.success(t('assets.tagsUpdated'))
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
@@ -207,11 +210,11 @@ const analyze = async (a) => {
     })
     const text = await r.text()
     const data = JSON.parse(text)
-    if (!r.ok) throw new Error(data.detail || '分析失败')
+    if (!r.ok) throw new Error(data.detail || t('assets.analyzeFailed'))
     Object.assign(a, data)
-    ElMessage.success('AI 分析完成')
+    ElMessage.success(t('assets.analyzeDone'))
   } catch (e) {
-    showError(e, 'AI 分析失败')
+    showError(e, t('assets.analyzeFailed'))
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
   } finally {
     analyzingIds.value.delete(a.id)
@@ -224,7 +227,7 @@ const analyze = async (a) => {
 const batchAnalyzing = ref(false)
 const batchAnalyze = async () => {
   if (!selCount.value) return
-  if (analyzingIds.value.size > 0) return ElMessage.warning('有素材正在分析中')
+  if (analyzingIds.value.size > 0) return ElMessage.warning(t('assets.someAnalyzing'))
   batchAnalyzing.value = true
   const ids = [...selected.value]
   let ok = 0, fail = 0
@@ -233,23 +236,23 @@ const batchAnalyze = async () => {
     if (a) await analyze(a).then(() => { ok++ }).catch(() => { fail++ })
   }
   batchAnalyzing.value = false
-  if (fail) ElMessage.warning(`完成：成功 ${ok}，失败 ${fail}`)
-  else ElMessage.success(`已批量分析 ${ok} 个`)
+  if (fail) ElMessage.warning(t('assets.batchDonePartial', { ok, fail }))
+  else ElMessage.success(t('assets.batchAnalyzed', { n: ok }))
 }
 const batchDelete = async () => {
   if (!selCount.value) return
   const ids = [...selected.value]
   try {
-    await ElMessageBox.confirm(`确定删除选中的 ${ids.length} 个素材？\n服务器文件 + 记录一起删（不可恢复）。`, '批量硬删',
-      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' })
+    await ElMessageBox.confirm(t('assets.batchDeleteConfirm', { n: ids.length }), t('assets.batchDelete'),
+      { type: 'warning', confirmButtonText: t('assets.confirmDelete'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
     let ok = 0, fail = 0
     for (const id of ids) {
       try { await DELETE('/assets/' + id); ok++ } catch { fail++ }
     }
-    ElMessage.success(`已删除 ${ok} 个` + (fail ? `，失败 ${fail}` : ''))
+    ElMessage.success(t('assets.deletedCount', { ok }) + (fail ? t('assets.failAppend', { n: fail }) : ''))
     clearSel()
     await load()
-  } catch (e) { if (e === 'cancel') return; ElMessage.error('删除失败') }
+  } catch (e) { if (e === 'cancel') return; ElMessage.error(t('assets.deleteFailed')) }
 }
 const batchTagOpen = ref(false)
 const batchTagStr = ref('')
@@ -257,7 +260,7 @@ const batchTagSaving = ref(false)
 const openBatchTag = () => { if (!selCount.value) return; batchTagStr.value = ''; batchTagOpen.value = true }
 const saveBatchTag = async () => {
   const add = batchTagStr.value.split(',').map(t => t.trim()).filter(Boolean)
-  if (!add.length) return ElMessage.warning('填标签')
+  if (!add.length) return ElMessage.warning(t('assets.fillTags'))
   batchTagSaving.value = true
   let ok = 0, fail = 0
   for (const id of [...selected.value]) {
@@ -268,7 +271,7 @@ const saveBatchTag = async () => {
     } catch { fail++ }
   }
   batchTagSaving.value = false
-  ElMessage.success(`已给 ${ok} 个打标签` + (fail ? `，失败 ${fail}` : ''))
+  ElMessage.success(t('assets.taggedCount', { ok }) + (fail ? t('assets.failAppend', { n: fail }) : ''))
   batchTagOpen.value = false
   await load()
 }
@@ -308,9 +311,9 @@ const saveEdit = async () => {
     }
     const r = await PUT('/assets/' + editAsset.value.id + '/ai', body)
     Object.assign(editAsset.value, r)
-    ElMessage.success('已保存')
+    ElMessage.success(t('common.saved'))
     editOpen.value = false
-  } catch (e) { ElMessage.error(e.message || '保存失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   editSaving.value = false
 }
 
@@ -319,21 +322,21 @@ const changeCountry = async (a, code) => {
   try {
     const r = await PUT('/assets/' + a.id, { country: code })
     Object.assign(a, r)
-  } catch (e) { ElMessage.error(e.message || '改国家失败') }
+  } catch (e) { ElMessage.error(e.message || t('assets.changeCountryFailed')) }
 }
 
 // 删除（硬删）
 const remove = async (a) => {
   try {
-    const usage = a.usage_count > 0 ? `\n\n⚠ 该素材被 ${a.usage_count} 个投放模板引用，删除后需重新选素材。` : ''
-    await ElMessageBox.confirm(`确定删除「${a.name}」？\n服务器文件 + 记录一起删除（不可恢复）。${usage}`, '硬删确认',
-      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消', confirmButtonClass: 'el-button--danger' })
+    const usage = a.usage_count > 0 ? t('assets.deleteUsageWarn', { n: a.usage_count }) : ''
+    await ElMessageBox.confirm(t('assets.deleteConfirm', { name: a.name }) + usage, t('assets.deleteTitle'),
+      { type: 'warning', confirmButtonText: t('assets.confirmDelete'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
     await DELETE('/assets/' + a.id)
-    ElMessage.success('已删除')
+    ElMessage.success(t('assets.deleted'))
     assets.value = assets.value.filter(x => x.id !== a.id)
   } catch (e) {
     if (e === 'cancel') return
-    ElMessage.error(e.message || '删除失败')
+    ElMessage.error(e.message || t('assets.deleteFailed'))
   }
 }
 
@@ -368,38 +371,38 @@ const countryLabel = (code) => {
         <div class="type-segs">
           <button v-for="tc in typeChips" :key="tc.key" :class="['seg', { on: fType === tc.key }]" @click="setType(tc.key)">{{ tc.label }}</button>
         </div>
-        <el-select v-if="allTags.length" v-model="fTag" placeholder="标签" clearable size="small" style="width:140px" @change="load">
-          <el-option v-for="t in allTags" :key="t" :value="t" :label="t" />
+        <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable size="small" style="width:140px" @change="load">
+          <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
         </el-select>
-        <input v-model="fSearch" class="search-input" placeholder="搜索名称" @keyup.enter="load" />
+        <input v-model="fSearch" class="search-input" :placeholder="t('assets.searchNamePh')" @keyup.enter="load" />
       </div>
       <div class="bar-r">
-        <div class="ai-toggle" :title="aiOn ? 'AI 识别开：点 AI分析 自动生成文案/受众' : 'AI 识别关：手动键入文案/受众'">
-          <span class="ai-toggle-label">AI 识别</span>
+        <div class="ai-toggle" :title="aiOn ? t('assets.aiOnTitle') : t('assets.aiOffTitle')">
+          <span class="ai-toggle-label">{{ t('assets.aiRecognition') }}</span>
           <el-switch :model-value="aiOn" @change="toggleAi" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
         </div>
-        <button class="btn primary" @click="openUpload">+ 上传素材</button>
+        <button class="btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
       </div>
     </div>
 
     <!-- AI 分析参数（aiOn 时显示，作用于卡片 AI分析 按钮） -->
     <div v-if="aiOn" class="ai-bar">
       <div class="ai-field">
-        <span class="ai-field-label">用途</span>
+        <span class="ai-field-label">{{ t('assets.purpose') }}</span>
         <el-select v-model="aiPurpose" filterable allow-create default-first-option size="small" style="width:220px">
           <el-option v-for="p in aiOpts.purposes" :key="p.value" :value="p.value" :label="p.label" />
         </el-select>
       </div>
       <div class="ai-field">
-        <span class="ai-field-label">深度</span>
+        <span class="ai-field-label">{{ t('assets.depth') }}</span>
         <div class="seg-grp">
           <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg2', { on: aiDepth === d.value }]"
-                  :title="`${d.copy_count} 条文案${d.video_frames > 1 ? ' / ' + d.video_frames + ' 帧' : ''}`"
+                  :title="t('assets.depthTitle', { copy: d.copy_count, frames: d.video_frames })"
                   @click="aiDepth = d.value">{{ d.label }}</button>
         </div>
       </div>
       <div class="ai-field">
-        <span class="ai-field-label">风格</span>
+        <span class="ai-field-label">{{ t('assets.style') }}</span>
         <div class="seg-grp">
           <button v-for="s in aiOpts.styles" :key="s.value" :class="['seg2', { on: aiStyle === s.value, warn: s.value === 'aggressive' }]"
                   :title="s.hint" @click="aiStyle = s.value">{{ s.label }}</button>
@@ -409,26 +412,26 @@ const countryLabel = (code) => {
 
     <!-- 批量操作栏（有选中时显示） -->
     <div v-if="selCount" class="batch-bar">
-      <span class="batch-count">已选 {{ selCount }} 个</span>
-      <button class="btn ghost" @click="selAll">全选</button>
-      <button class="btn" :disabled="analyzingIds.size > 0 || batchAnalyzing" @click="batchAnalyze">{{ batchAnalyzing ? '分析中…' : '批量AI分析' }}</button>
-      <button class="btn" @click="openBatchTag">批量打标签</button>
-      <button class="btn danger" @click="batchDelete">批量删除</button>
-      <button class="btn ghost" @click="clearSel">取消选择</button>
+      <span class="batch-count">{{ t('assets.selectedN', { n: selCount }) }}</span>
+      <button class="btn ghost" @click="selAll">{{ t('assets.selectAll') }}</button>
+      <button class="btn" :disabled="analyzingIds.size > 0 || batchAnalyzing" @click="batchAnalyze">{{ batchAnalyzing ? t('assets.analyzingDots') : t('assets.batchAnalyze') }}</button>
+      <button class="btn" @click="openBatchTag">{{ t('assets.batchTag') }}</button>
+      <button class="btn danger" @click="batchDelete">{{ t('assets.batchDelete') }}</button>
+      <button class="btn ghost" @click="clearSel">{{ t('assets.clearSelection') }}</button>
     </div>
 
     <!-- 网格 -->
     <div class="grid" v-loading="loading">
       <div v-for="a in assets" :key="a.id" class="card" :class="{ selected: selected.has(a.id) }">
         <!-- 选择 checkbox（左上，hover 或已选时显） -->
-        <label class="card-check" :class="{ on: selected.has(a.id) }" @click.stop title="选中">
+        <label class="card-check" :class="{ on: selected.has(a.id) }" @click.stop :title="t('assets.selectItem')">
           <input type="checkbox" :checked="selected.has(a.id)" @change="toggleSel(a.id)" />
         </label>
         <div class="thumb-wrap" @click="openPreview(a)" style="cursor:pointer">
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
-          <span class="type-badge">{{ a.type === 'video' ? '视频' : '图片' }}</span>
+          <span class="type-badge">{{ a.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
         </div>
         <div class="card-body">
           <!-- 名称（双击编辑） -->
@@ -439,50 +442,50 @@ const countryLabel = (code) => {
           <!-- AI 文案预览（首条 headline） -->
           <div v-if="a.ai_status === 'done' && (a.ai_copy?.headlines || [])[0]" class="copy-teaser" :title="(a.ai_copy.headlines || []).join(' / ')">{{ (a.ai_copy.headlines || [])[0] }}</div>
           <!-- 分析失败原因 -->
-          <div v-if="a.ai_status === 'failed'" class="ai-failed" :title="a.ai_error">⚠ 分析失败 · {{ (a.ai_error || '点 AI分析 重试').slice(0, 30) }}</div>
+          <div v-if="a.ai_status === 'failed'" class="ai-failed" :title="a.ai_error">⚠ {{ t('assets.analyzeFailed') }} · {{ (a.ai_error || t('assets.retryHint')).slice(0, 30) }}</div>
           <!-- 标签 -->
           <div class="tag-row">
-            <span v-for="t in (a.tags || []).slice(0,2)" :key="t" class="tag-chip">{{ t }}</span>
+            <span v-for="tg in (a.tags || []).slice(0,2)" :key="tg" class="tag-chip">{{ tg }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
-            <span v-if="a.fb_image_hash" class="fb-mark" title="已上传到 FB">FB</span>
-            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="'AI 已分析 · ' + purposeLabel(a.ai_purpose)">AI{{ a.ai_purpose && a.ai_purpose !== 'general' ? '·' + purposeLabel(a.ai_purpose) : '' }}</span>
+            <span v-if="a.fb_image_hash" class="fb-mark" :title="t('assets.fbUploaded')">FB</span>
+            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="t('assets.aiAnalyzed', { p: purposeLabel(a.ai_purpose) })">AI{{ a.ai_purpose && a.ai_purpose !== 'general' ? '·' + purposeLabel(a.ai_purpose) : '' }}</span>
           </div>
           <div class="card-meta">
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
             <span v-if="a.width" class="meta-dim">{{ a.width }}×{{ a.height }}</span>
             <span class="meta-id">#{{ a.id }}</span>
-            <span v-if="a.country" class="meta-country-badge" @click.stop="openEdit(a)" :title="'国家：' + countryLabel(a.country) + '（点改）'">{{ a.country }}</span>
+            <span v-if="a.country" class="meta-country-badge" @click.stop="openEdit(a)" :title="t('assets.countryTitle', { c: countryLabel(a.country) })">{{ a.country }}</span>
           </div>
         </div>
         <div class="card-ops">
           <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
-            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : 'AI分析' }}
+            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : t('assets.aiAnalyze') }}
           </button>
-          <button class="op" @click="openEdit(a)">文案/受众</button>
-          <button class="op" @click="startRename(a)">重命名</button>
-          <button class="op danger" @click="remove(a)">删除</button>
+          <button class="op" @click="openEdit(a)">{{ t('assets.copyAudience') }}</button>
+          <button class="op" @click="startRename(a)">{{ t('assets.rename') }}</button>
+          <button class="op danger" @click="remove(a)">{{ t('common.delete') }}</button>
         </div>
       </div>
-      <div v-if="!assets.length && !loading" class="empty">暂无素材，点「+ 上传素材」添加。</div>
+      <div v-if="!assets.length && !loading" class="empty">{{ t('assets.empty') }}</div>
     </div>
 
     <!-- 批量打标签弹窗 -->
-    <el-dialog v-model="batchTagOpen" title="批量打标签" width="420px" append-to-body>
-      <div class="edit-tip">给选中的 {{ selCount }} 个素材加上以下标签（逗号分隔，会与已有标签合并去重）。</div>
-      <input v-model="batchTagStr" class="edit-input" placeholder="如 shopping, us, 测试" style="margin-top:8px" />
+    <el-dialog v-model="batchTagOpen" :title="t('assets.batchTag')" width="420px" append-to-body>
+      <div class="edit-tip">{{ t('assets.batchTagTip', { n: selCount }) }}</div>
+      <input v-model="batchTagStr" class="edit-input" :placeholder="t('assets.batchTagPh')" style="margin-top:8px" />
       <template #footer>
-        <button class="btn" @click="batchTagOpen = false">取消</button>
-        <button class="btn primary" :disabled="batchTagSaving" @click="saveBatchTag">{{ batchTagSaving ? '保存中…' : '保存' }}</button>
+        <button class="btn" @click="batchTagOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="batchTagSaving" @click="saveBatchTag">{{ batchTagSaving ? t('assets.savingDots') : t('common.save') }}</button>
       </template>
     </el-dialog>
 
     <!-- 上传抽屉 -->
-    <el-drawer v-model="uploadOpen" title="上传素材" direction="rtl" size="520px" :destroy-on-close="true">
+    <el-drawer v-model="uploadOpen" :title="t('assets.uploadAsset')" direction="rtl" size="520px" :destroy-on-close="true">
       <div class="drop-zone" @dragover.prevent @drop="onDrop">
-        <div class="drop-text">拖拽文件到此</div>
-        <div class="drop-or">或</div>
-        <label class="file-btn">选择文件<input type="file" accept="image/*,video/*" multiple @change="onFileChange" hidden /></label>
-        <div class="drop-hint">支持图片（jpg/png/webp）和视频（mp4/mov）</div>
+        <div class="drop-text">{{ t('assets.dropHere') }}</div>
+        <div class="drop-or">{{ t('assets.or') }}</div>
+        <label class="file-btn">{{ t('assets.selectFiles') }}<input type="file" accept="image/*,video/*" multiple @change="onFileChange" hidden /></label>
+        <div class="drop-hint">{{ t('assets.dropHint') }}</div>
       </div>
       <div v-if="uploadFiles.length" class="upload-list">
         <div v-for="(item, i) in uploadFiles" :key="i" class="upload-item">
@@ -491,70 +494,70 @@ const countryLabel = (code) => {
             <span class="upload-size">{{ fmtSize(item.file.size) }}</span>
             <button class="upload-remove" @click="removeUploadItem(i)">✕</button>
           </div>
-          <input v-model="item.name" class="upload-name-input" placeholder="素材名称（默认文件名）" />
+          <input v-model="item.name" class="upload-name-input" :placeholder="t('assets.assetNamePh')" />
           <select v-model="item.countryStr" class="upload-country-select">
-            <option value="">投放国家（选填，驱动 AI 文案语言）</option>
+            <option value="">{{ t('assets.countryPh') }}</option>
             <option v-for="c in COUNTRIES" :key="c.code" :value="c.code">{{ c.label }} ({{ c.code }})</option>
           </select>
-          <input v-model="item.uploadTagsStr" class="upload-tags-input" placeholder="标签（逗号分隔，选填）" />
-          <span v-if="item.status === 'done'" class="upload-status done">✓ 完成</span>
-          <span v-if="item.status === 'fail'" class="upload-status fail">✗ 失败</span>
-          <span v-if="item.status === 'uploading'" class="upload-status uploading">上传中…</span>
+          <input v-model="item.uploadTagsStr" class="upload-tags-input" :placeholder="t('assets.tagsInputPh')" />
+          <span v-if="item.status === 'done'" class="upload-status done">✓ {{ t('assets.uploadDone') }}</span>
+          <span v-if="item.status === 'fail'" class="upload-status fail">✗ {{ t('common.fail') }}</span>
+          <span v-if="item.status === 'uploading'" class="upload-status uploading">{{ t('assets.uploadingDots') }}</span>
         </div>
       </div>
       <template #footer>
-        <button class="btn" @click="uploadOpen = false">取消</button>
-        <button class="btn primary" :disabled="uploadSaving || !uploadFiles.length" @click="submitUpload">{{ uploadSaving ? '上传中…' : `上传 ${uploadFiles.length} 个` }}</button>
+        <button class="btn" @click="uploadOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="uploadSaving || !uploadFiles.length" @click="submitUpload">{{ uploadSaving ? t('assets.uploadingDots') : t('assets.uploadN', { n: uploadFiles.length }) }}</button>
       </template>
     </el-drawer>
 
     <!-- AI 文案/受众编辑弹窗 -->
-    <el-dialog v-model="editOpen" :title="`文案 / 受众 · ${editAsset?.name || ''}`" width="560px" append-to-body :close-on-click-modal="false">
+    <el-dialog v-model="editOpen" :title="t('assets.editTitle', { name: editAsset?.name || '' })" width="560px" append-to-body :close-on-click-modal="false">
       <div v-if="editAsset" class="edit-form">
         <div class="edit-row">
-          <label>目标国家</label>
+          <label>{{ t('assets.targetCountry') }}</label>
           <select :value="editAsset.country || ''" class="edit-country" @change="changeCountry(editAsset, $event.target.value)">
-            <option value="">未指定（英文）</option>
+            <option value="">{{ t('assets.unspecifiedEn') }}</option>
             <option v-for="c in COUNTRIES" :key="c.code" :value="c.code" :selected="editAsset.country === c.code">{{ c.label }} ({{ c.code }})</option>
           </select>
-          <span class="edit-hint">驱动 AI 文案语言</span>
+          <span class="edit-hint">{{ t('assets.drivesAiLang') }}</span>
         </div>
         <div class="edit-row">
-          <label>画面分析 analysis</label>
-          <textarea v-model="editForm.analysis" class="edit-textarea" rows="2" placeholder="画面/视频内容和广告意图"></textarea>
+          <label>{{ t('assets.analysis') }}</label>
+          <textarea v-model="editForm.analysis" class="edit-textarea" rows="2" :placeholder="t('assets.analysisPh')"></textarea>
         </div>
         <div class="edit-row">
-          <label>标题 headlines <button class="add-btn" @click="addH">+ 加一条</button></label>
+          <label>{{ t('assets.headlines') }} <button class="add-btn" @click="addH">{{ t('assets.addOne') }}</button></label>
           <div v-for="(h, i) in editForm.headlines" :key="'h'+i" class="variant-row">
-            <input v-model="editForm.headlines[i]" class="edit-input" placeholder="标题（40字内）" maxlength="60" />
+            <input v-model="editForm.headlines[i]" class="edit-input" :placeholder="t('assets.headlinePh')" maxlength="60" />
             <button v-if="editForm.headlines.length > 1" class="del-btn" @click="delH(i)">✕</button>
           </div>
         </div>
         <div class="edit-row">
-          <label>正文 bodies <button class="add-btn" @click="addB">+ 加一条</button></label>
+          <label>{{ t('assets.bodies') }} <button class="add-btn" @click="addB">{{ t('assets.addOne') }}</button></label>
           <div v-for="(b, i) in editForm.bodies" :key="'b'+i" class="variant-row">
-            <textarea v-model="editForm.bodies[i]" class="edit-textarea" rows="2" placeholder="文案（125字内，含 CTA）" maxlength="200"></textarea>
+            <textarea v-model="editForm.bodies[i]" class="edit-textarea" rows="2" :placeholder="t('assets.bodyPh')" maxlength="200"></textarea>
             <button v-if="editForm.bodies.length > 1" class="del-btn" @click="delB(i)">✕</button>
           </div>
         </div>
         <div class="edit-row">
-          <label>兴趣词 interests（FB 受众定向，英文）</label>
-          <input v-model="editForm.interestsStr" class="edit-input" placeholder="英文兴趣词（逗号分隔，如 Cable management, Home office）" />
+          <label>{{ t('assets.interestsLabel') }}</label>
+          <input v-model="editForm.interestsStr" class="edit-input" :placeholder="t('assets.interestsPh')" />
         </div>
         <div class="edit-row">
-          <label>受众描述 audience note</label>
-          <input v-model="editForm.audienceNote" class="edit-input" placeholder="目标受众特征简述" />
+          <label>{{ t('assets.audienceNoteLabel') }}</label>
+          <input v-model="editForm.audienceNote" class="edit-input" :placeholder="t('assets.audienceNotePh')" />
         </div>
         <div class="edit-row">
-          <label>国家 countries</label>
-          <input v-model="editForm.countriesStr" class="edit-input" placeholder="投放国家代码（逗号分隔，如 US,VN）" />
+          <label>{{ t('assets.countriesLabel') }}</label>
+          <input v-model="editForm.countriesStr" class="edit-input" :placeholder="t('assets.countriesPh')" />
         </div>
-        <div v-if="aiOn" class="edit-tip">点卡片「AI分析」可按当前用途/深度/风格自动填充以上字段。</div>
-        <div v-else class="edit-tip">AI 识别已关，请手动键入。打开右上「AI 识别」开关可自动生成。</div>
+        <div v-if="aiOn" class="edit-tip">{{ t('assets.editTipOn') }}</div>
+        <div v-else class="edit-tip">{{ t('assets.editTipOff') }}</div>
       </div>
       <template #footer>
-        <button class="btn" @click="editOpen = false">取消</button>
-        <button class="btn primary" :disabled="editSaving" @click="saveEdit">{{ editSaving ? '保存中…' : '保存' }}</button>
+        <button class="btn" @click="editOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="editSaving" @click="saveEdit">{{ editSaving ? t('assets.savingDots') : t('common.save') }}</button>
       </template>
     </el-dialog>
 
@@ -564,19 +567,19 @@ const countryLabel = (code) => {
         <img v-if="previewAsset.type === 'image'" :src="previewAsset.public_url" style="max-width:100%;max-height:70vh;border-radius:8px" />
         <video v-else-if="previewAsset.type === 'video'" :src="previewAsset.public_url" controls style="max-width:100%;max-height:70vh;border-radius:8px" />
         <div style="margin-top:10px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-          <span class="meta-info">{{ previewAsset.type === 'video' ? '视频' : '图片' }}</span>
+          <span class="meta-info">{{ previewAsset.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
           <span v-if="previewAsset.file_size" class="meta-info">{{ fmtSize(previewAsset.file_size) }}</span>
           <span v-if="previewAsset.width" class="meta-info">{{ previewAsset.width }}×{{ previewAsset.height }}</span>
           <span v-if="previewAsset.country" class="meta-info">{{ countryLabel(previewAsset.country) }}</span>
           <span class="meta-info">#{{ previewAsset.id }}</span>
         </div>
         <div v-if="previewAsset.ai_status === 'done'" class="preview-ai">
-          <div class="preview-ai-title">AI 文案 · {{ purposeLabel(previewAsset.ai_purpose) }}</div>
+          <div class="preview-ai-title">{{ t('assets.aiCopyTitle', { p: purposeLabel(previewAsset.ai_purpose) }) }}</div>
           <div v-if="previewAsset.ai_copy?.analysis" class="preview-ai-line preview-ai-analysis">{{ previewAsset.ai_copy.analysis }}</div>
           <div v-for="(h, i) in (previewAsset.ai_copy?.headlines || [])" :key="'ph'+i" class="preview-ai-line"><b>H{{ i+1 }}：</b>{{ h }}</div>
           <div v-for="(b, i) in (previewAsset.ai_copy?.bodies || [])" :key="'pb'+i" class="preview-ai-line"><b>B{{ i+1 }}：</b>{{ b }}</div>
-          <div v-if="(previewAsset.ai_audience?.interests || []).length" class="preview-ai-line"><b>兴趣：</b>{{ (previewAsset.ai_audience.interests || []).join(' · ') }}</div>
-          <div v-if="previewAsset.ai_audience?.audience_note" class="preview-ai-line"><b>受众：</b>{{ previewAsset.ai_audience.audience_note }}</div>
+          <div v-if="(previewAsset.ai_audience?.interests || []).length" class="preview-ai-line"><b>{{ t('assets.interestsColon') }}</b>{{ (previewAsset.ai_audience.interests || []).join(' · ') }}</div>
+          <div v-if="previewAsset.ai_audience?.audience_note" class="preview-ai-line"><b>{{ t('assets.audienceColon') }}</b>{{ previewAsset.ai_audience.audience_note }}</div>
         </div>
       </div>
     </el-dialog>

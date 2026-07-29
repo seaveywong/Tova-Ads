@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { useRouter } from 'vue-router'
 
+const { t } = useI18n()
 const router = useRouter()
 const tab = ref('form')
 const forms = ref([])
@@ -39,15 +41,15 @@ const LOCALES = [
   {v:'ja_JP',l:'日本語'},{v:'ko_KR',l:'한국어'},{v:'es_ES',l:'Español'},{v:'pt_BR',l:'Português'},
 ]
 const CONTACT_FIELDS = [
-  {v:'EMAIL',l:'邮箱'},{v:'PHONE',l:'电话'},{v:'CITY',l:'城市'},{v:'STATE',l:'州/省'},
-  {v:'ZIP_CODE',l:'邮编'},{v:'COUNTRY',l:'国家'},{v:'DATE_OF_BIRTH',l:'生日'},{v:'GENDER',l:'性别'},
-  {v:'MARITAL_STATUS',l:'婚姻状况'},{v:'LAST_NAME',l:'姓'},
+  {v:'EMAIL',l:t('formtpl.contact.email')},{v:'PHONE',l:t('formtpl.contact.phone')},{v:'CITY',l:t('formtpl.contact.city')},{v:'STATE',l:t('formtpl.contact.state')},
+  {v:'ZIP_CODE',l:t('formtpl.contact.zip')},{v:'COUNTRY',l:t('formtpl.contact.country')},{v:'DATE_OF_BIRTH',l:t('formtpl.contact.dob')},{v:'GENDER',l:t('formtpl.contact.gender')},
+  {v:'MARITAL_STATUS',l:t('formtpl.contact.marital')},{v:'LAST_NAME',l:t('formtpl.contact.lastName')},
 ]
 
 const load = async () => {
   loading.value = true
   try { forms.value = await GET('/form-templates/forms'); messages.value = await GET('/form-templates/messages') }
-  catch (e) { showError(e, '加载失败') }
+  catch (e) { showError(e, t('formtpl.loadFail')) }
   loading.value = false
 }
 onMounted(load)
@@ -73,20 +75,20 @@ const toggleContact = (v) => {
   if (i >= 0) arr.splice(i, 1); else arr.push(v)
 }
 const saveForm = async () => {
-  if (!fMeta.value.name.trim()) return ElMessage.warning('填模板名')
-  if (!fCfg.value.form_title.trim()) return ElMessage.warning('填表单标题')
-  if (!fCfg.value.privacy_url.trim()) return ElMessage.warning('填隐私政策 URL')
+  if (!fMeta.value.name.trim()) return ElMessage.warning(t('formtpl.needName'))
+  if (!fCfg.value.form_title.trim()) return ElMessage.warning(t('formtpl.needFormTitle'))
+  if (!fCfg.value.privacy_url.trim()) return ElMessage.warning(t('formtpl.needPrivacyUrl'))
   saving.value = true
   try {
     const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, config: fCfg.value }
-    if (editingForm.value) { await PUT('/form-templates/forms/' + editingForm.value.id, body); ElMessage.success('已保存') }
-    else { await POST('/form-templates/forms', body); ElMessage.success('已创建') }
+    if (editingForm.value) { await PUT('/form-templates/forms/' + editingForm.value.id, body); ElMessage.success(t('common.saved')) }
+    else { await POST('/form-templates/forms', body); ElMessage.success(t('common.create') + t('common.success')) }
     formOpen.value = false; await load()
-  } catch (e) { showError(e, '保存失败') }
+  } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
 }
 const removeForm = async (t) => {
-  try { await ElMessageBox.confirm(`归档「${t.name}」？`, '确认', { type: 'warning' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success('已归档'); await load() }
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
 const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.config || {}; previewOpen.value = true }
@@ -105,8 +107,8 @@ const aiGenerate = async (a) => {
     if (cfg.extra_contact_fields) fCfg.value.extra_contact_fields = cfg.extra_contact_fields
     if (cfg.thank_you_title) fCfg.value.thank_you_title = cfg.thank_you_title
     if (cfg.thank_you_body) fCfg.value.thank_you_body = cfg.thank_you_body
-    ElMessage.success('AI 已生成表单配置（可修改后保存）')
-  } catch (e) { showError(e, 'AI 生成失败') }
+    ElMessage.success(t('formtpl.aiGenerated'))
+  } catch (e) { showError(e, t('formtpl.aiFail')) }
   aiLoading.value = false
 }
 
@@ -116,19 +118,19 @@ const openMsgEdit = (t) => { editingMsg.value = t; mCfg.value = { name: t.name, 
 const addIB = () => mCfg.value.ice_breakers.push({ title: '', response: '' })
 const removeIB = (i) => mCfg.value.ice_breakers.splice(i, 1)
 const saveMsg = async () => {
-  if (!mCfg.value.name.trim()) return ElMessage.warning('填模板名')
-  if (!mCfg.value.welcome_text.trim()) return ElMessage.warning('填欢迎语')
+  if (!mCfg.value.name.trim()) return ElMessage.warning(t('formtpl.needName'))
+  if (!mCfg.value.welcome_text.trim()) return ElMessage.warning(t('formtpl.needWelcome'))
   saving.value = true
   try {
     const body = { name: mCfg.value.name, welcome_text: mCfg.value.welcome_text, ice_breakers: mCfg.value.ice_breakers }
-    if (editingMsg.value) { await PUT('/form-templates/messages/' + editingMsg.value.id, body); ElMessage.success('已保存') }
-    else { await POST('/form-templates/messages', body); ElMessage.success('已创建') }
+    if (editingMsg.value) { await PUT('/form-templates/messages/' + editingMsg.value.id, body); ElMessage.success(t('common.saved')) }
+    else { await POST('/form-templates/messages', body); ElMessage.success(t('common.create') + t('common.success')) }
     msgOpen.value = false; await load()
-  } catch (e) { showError(e, '保存失败') }
+  } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
 }
 const removeMsg = async (t) => {
-  try { await ElMessageBox.confirm(`归档「${t.name}」？`, '确认', { type: 'warning' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success('已归档'); await load() }
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
 const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; previewOpen.value = true }
@@ -139,130 +141,130 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     <div class="bar">
       <div class="tabs">
         <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">Instant Form</button>
-        <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">Messenger 消息</button>
+        <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
       </div>
-      <button class="btn primary" @click="tab==='form'?openFormNew():openMsgNew()">+ 新建{{ tab==='form'?'表单':'消息' }}</button>
+      <button class="btn primary" @click="tab==='form'?openFormNew():openMsgNew()">{{ t('formtpl.newBtn', { kind: tab==='form' ? t('formtpl.formUnit') : t('formtpl.msgUnit') }) }}</button>
     </div>
 
     <!-- Instant Form 列表 -->
     <div v-if="tab==='form'" class="grid" v-loading="loading">
-      <div v-for="t in forms" :key="t.id" class="card">
-        <div class="card-head"><span class="card-name">{{ t.name }}</span><span v-if="t.fb_form_id" class="badge ok">已部署</span></div>
+      <div v-for="item in forms" :key="item.id" class="card">
+        <div class="card-head"><span class="card-name">{{ item.name }}</span><span v-if="item.fb_form_id" class="badge ok">{{ t('formtpl.deployed') }}</span></div>
         <div class="card-meta">
-          <span>{{ (t.config||{}).form_title || '—' }}</span>
-          <span>{{ ((t.config||{}).custom_questions||[]).length }} 个问题</span>
-          <span>{{ t.locale }}</span>
+          <span>{{ (item.config||{}).form_title || '—' }}</span>
+          <span>{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
+          <span>{{ item.locale }}</span>
         </div>
         <div class="card-ops">
-          <button class="op" @click="previewForm(t)">预览</button>
-          <button class="op" @click="openFormEdit(t)">编辑</button>
-          <button class="op danger" @click="removeForm(t)">归档</button>
+          <button class="op" @click="previewForm(item)">{{ t('common.preview') }}</button>
+          <button class="op" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
+          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button>
         </div>
       </div>
-      <div v-if="!forms.length && !loading" class="empty">暂无表单模板</div>
+      <div v-if="!forms.length && !loading" class="empty">{{ t('formtpl.noForms') }}</div>
     </div>
 
     <!-- Messenger 列表 -->
     <div v-if="tab==='msg'" class="grid" v-loading="loading">
-      <div v-for="t in messages" :key="t.id" class="card">
-        <div class="card-head"><span class="card-name">{{ t.name }}</span></div>
-        <div class="card-msg-preview">{{ (t.welcome_text||'').slice(0,60) }}{{ (t.welcome_text||'').length>60?'…':'' }}</div>
-        <div class="card-meta"><span>{{ (t.ice_breakers||[]).length }} 个快捷回复</span></div>
+      <div v-for="item in messages" :key="item.id" class="card">
+        <div class="card-head"><span class="card-name">{{ item.name }}</span></div>
+        <div class="card-msg-preview">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
+        <div class="card-meta"><span>{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
         <div class="card-ops">
-          <button class="op" @click="previewMsg(t)">预览</button>
-          <button class="op" @click="openMsgEdit(t)">编辑</button>
-          <button class="op danger" @click="removeMsg(t)">归档</button>
+          <button class="op" @click="previewMsg(item)">{{ t('common.preview') }}</button>
+          <button class="op" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
+          <button class="op danger" @click="removeMsg(item)">{{ t('formtpl.archive') }}</button>
         </div>
       </div>
-      <div v-if="!messages.length && !loading" class="empty">暂无消息模板</div>
+      <div v-if="!messages.length && !loading" class="empty">{{ t('formtpl.noMessages') }}</div>
     </div>
 
     <!-- 表单编辑抽屉 -->
-    <el-drawer v-model="formOpen" :title="editingForm?'编辑表单':'新建表单'" direction="rtl" size="640px" :destroy-on-close="true">
+    <el-drawer v-model="formOpen" :title="editingForm?t('formtpl.editForm'):t('formtpl.newForm')" direction="rtl" size="640px" :destroy-on-close="true">
       <div class="form">
-        <div class="row"><label>模板名</label><input v-model="fMeta.name" class="inp" placeholder="如 购物线索-通用" /></div>
+        <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="fMeta.name" class="inp" :placeholder="t('formtpl.tplNamePh')" /></div>
         <hr class="sep" />
-        <div class="sec-title">表单信息</div>
-        <div class="row"><label>表单标题</label><input v-model="fCfg.form_title" class="inp" placeholder="用户看到的表单标题" /></div>
-        <div class="row"><label>表单描述</label><input v-model="fCfg.description" class="inp" placeholder="一句话说明" /></div>
-        <div class="row"><label>语言</label><el-select v-model="fMeta.locale" style="width:100%" size="small"><el-option v-for="l in LOCALES" :key="l.v" :value="l.v" :label="l.l" /></el-select></div>
-        <div class="row"><label>隐私政策 URL</label><input v-model="fCfg.privacy_url" class="inp" placeholder="https://...（必填）" /></div>
-        <div class="row"><label>隐私链接文字</label><input v-model="fCfg.privacy_link_text" class="inp" /></div>
-        <div class="row"><label>表单可见性</label>
+        <div class="sec-title">{{ t('formtpl.secFormInfo') }}</div>
+        <div class="row"><label>{{ t('formtpl.formTitle') }}</label><input v-model="fCfg.form_title" class="inp" :placeholder="t('formtpl.formTitlePh')" /></div>
+        <div class="row"><label>{{ t('formtpl.formDesc') }}</label><input v-model="fCfg.description" class="inp" :placeholder="t('formtpl.formDescPh')" /></div>
+        <div class="row"><label>{{ t('formtpl.language') }}</label><el-select v-model="fMeta.locale" style="width:100%" size="small"><el-option v-for="l in LOCALES" :key="l.v" :value="l.v" :label="l.l" /></el-select></div>
+        <div class="row"><label>{{ t('formtpl.privacyUrl') }}</label><input v-model="fCfg.privacy_url" class="inp" :placeholder="t('formtpl.privacyUrlPh')" /></div>
+        <div class="row"><label>{{ t('formtpl.privacyLinkText') }}</label><input v-model="fCfg.privacy_link_text" class="inp" /></div>
+        <div class="row"><label>{{ t('formtpl.formVisibility') }}</label>
           <el-select v-model="fCfg.is_optimized_for_quality" style="width:100%" size="small">
-            <el-option :value="true" label="限制提交（过滤低质量线索，FB 会评估用户行为）" />
-            <el-option :value="false" label="公开（任何人都能提交）" />
+            <el-option :value="true" :label="t('formtpl.visibilityRestricted')" />
+            <el-option :value="false" :label="t('formtpl.visibilityPublic')" />
           </el-select>
         </div>
-        <div class="row"><label>表单欢迎语（用户打开表单前看到）</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" placeholder="如：感谢您的兴趣！请花 1 分钟填写以下信息，我们将尽快联系您。"></textarea></div>
-        <div class="row"><label>仅目标国家可见</label>
+        <div class="row"><label>{{ t('formtpl.welcomeMessage') }}</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" :placeholder="t('formtpl.welcomeMessagePh')"></textarea></div>
+        <div class="row"><label>{{ t('formtpl.targetCountryOnly') }}</label>
           <el-switch v-model="fCfg.block_display_for_non_targeted" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          <span class="hint">开启后，非目标国家用户看不到此表单</span>
+          <span class="hint">{{ t('formtpl.targetCountryHint') }}</span>
         </div>
         <hr class="sep" />
-        <div class="sec-title">联系字段（用户需填写的信息）</div>
+        <div class="sec-title">{{ t('formtpl.secContactFields') }}</div>
         <div class="chips">
           <label v-for="f in CONTACT_FIELDS" :key="f.v" class="chip" :class="{on:(fCfg.extra_contact_fields||[]).includes(f.v)}">
             <input type="checkbox" :checked="(fCfg.extra_contact_fields||[]).includes(f.v)" @change="toggleContact(f.v)" /> {{ f.l }}
           </label>
         </div>
         <hr class="sep" />
-        <div class="sec-title-row"><span class="sec-title">自定义问题</span><button class="btn sm" @click="addQuestion">+ 加问题</button>
-          <button class="btn sm ghost" @click="openAssetPicker" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?'智能生成中…':'根据素材智能生成问题' }}</button>
+        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secCustomQuestions') }}</span><button class="btn sm" @click="addQuestion">{{ t('formtpl.addQuestion') }}</button>
+          <button class="btn sm ghost" @click="openAssetPicker" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button>
         </div>
         <div v-for="(q,i) in fCfg.custom_questions" :key="i" class="question-block">
-          <div class="qb-head"><span>问题 {{i+1}}</span><button class="del-btn" @click="removeQuestion(i)">✕</button></div>
-          <input v-model="q.label" class="inp" placeholder="问题文本（如：您想了解哪类产品？）" />
-          <input v-model="q.placeholder" class="inp sm-mt" placeholder="输入提示（选填）" />
-          <input v-model="q.key" class="inp sm-mt" placeholder="字段 key（英文，如 product_interest）" />
+          <div class="qb-head"><span>{{ t('formtpl.questionN', { n: i+1 }) }}</span><button class="del-btn" @click="removeQuestion(i)">✕</button></div>
+          <input v-model="q.label" class="inp" :placeholder="t('formtpl.questionTextPh')" />
+          <input v-model="q.placeholder" class="inp sm-mt" :placeholder="t('formtpl.questionHintPh')" />
+          <input v-model="q.key" class="inp sm-mt" :placeholder="t('formtpl.questionKeyPh')" />
           <div v-if="q.options && q.options.length" class="options-list">
             <div v-for="(o,oi) in q.options" :key="oi" class="option-row">
-              <input v-model="o.value" class="inp sm" placeholder="选项文本" />
+              <input v-model="o.value" class="inp sm" :placeholder="t('formtpl.optionTextPh')" />
               <button class="del-btn sm" @click="removeOption(q,oi)">✕</button>
             </div>
           </div>
-          <button class="btn sm ghost" @click="addOption(q)" v-if="!q.options || !q.options.length">+ 加选项（变选择题）</button>
-          <button class="btn sm ghost" @click="addOption(q)" v-else>+ 加选项</button>
+          <button class="btn sm ghost" @click="addOption(q)" v-if="!q.options || !q.options.length">{{ t('formtpl.addOptionMakeChoice') }}</button>
+          <button class="btn sm ghost" @click="addOption(q)" v-else>{{ t('formtpl.addOption') }}</button>
         </div>
         <hr class="sep" />
-        <div class="sec-title">感谢页（提交后显示）</div>
-        <div class="row"><label>感谢标题</label><input v-model="fCfg.thank_you_title" class="inp" placeholder="如：感谢您的提交！" /></div>
-        <div class="row"><label>感谢正文</label><textarea v-model="fCfg.thank_you_body" class="inp ta" rows="2"></textarea></div>
-        <div class="row"><label>按钮文字</label><input v-model="fCfg.thank_you_button_text" class="inp" placeholder="如：访问网站" /></div>
-        <div class="row"><label>按钮链接</label><input v-model="fCfg.thank_you_website_url" class="inp" placeholder="https://..." /></div>
-        <div class="row"><label>跟进链接</label><input v-model="fCfg.follow_up_url" class="inp" placeholder="https://..." /></div>
+        <div class="sec-title">{{ t('formtpl.secThankYou') }}</div>
+        <div class="row"><label>{{ t('formtpl.thankTitle') }}</label><input v-model="fCfg.thank_you_title" class="inp" :placeholder="t('formtpl.thankTitlePh')" /></div>
+        <div class="row"><label>{{ t('formtpl.thankBody') }}</label><textarea v-model="fCfg.thank_you_body" class="inp ta" rows="2"></textarea></div>
+        <div class="row"><label>{{ t('formtpl.buttonText') }}</label><input v-model="fCfg.thank_you_button_text" class="inp" :placeholder="t('formtpl.buttonTextPh')" /></div>
+        <div class="row"><label>{{ t('formtpl.buttonLink') }}</label><input v-model="fCfg.thank_you_website_url" class="inp" placeholder="https://..." /></div>
+        <div class="row"><label>{{ t('formtpl.followUpLink') }}</label><input v-model="fCfg.follow_up_url" class="inp" placeholder="https://..." /></div>
       </div>
       <template #footer>
-        <button class="btn" @click="formOpen=false">取消</button>
-        <button class="btn primary" :disabled="saving" @click="saveForm">{{ saving?'保存中…':'保存' }}</button>
+        <button class="btn" @click="formOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="saving" @click="saveForm">{{ saving?t('formtpl.saving'):t('common.save') }}</button>
       </template>
     </el-drawer>
 
     <!-- 消息编辑抽屉 -->
-    <el-drawer v-model="msgOpen" :title="editingMsg?'编辑消息':'新建消息'" direction="rtl" size="560px" :destroy-on-close="true">
+    <el-drawer v-model="msgOpen" :title="editingMsg?t('formtpl.editMsg'):t('formtpl.newMsg')" direction="rtl" size="560px" :destroy-on-close="true">
       <div class="form">
-        <div class="row"><label>模板名</label><input v-model="mCfg.name" class="inp" /></div>
+        <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="mCfg.name" class="inp" /></div>
         <hr class="sep" />
-        <div class="sec-title">欢迎语</div>
-        <div class="row"><label>主文本</label><textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" placeholder="用户点广告进 Messenger 后自动发的第一条消息"></textarea></div>
+        <div class="sec-title">{{ t('formtpl.secWelcome') }}</div>
+        <div class="row"><label>{{ t('formtpl.mainText') }}</label><textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" :placeholder="t('formtpl.welcomeTextPh')"></textarea></div>
         <hr class="sep" />
-        <div class="sec-title-row"><span class="sec-title">快捷回复（Ice Breakers）</span><button class="btn sm" @click="addIB">+ 加一条</button></div>
+        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button></div>
         <div v-for="(ib,i) in mCfg.ice_breakers" :key="i" class="ib-block">
-          <div class="qb-head"><span>快捷回复 {{i+1}}</span><button class="del-btn" @click="removeIB(i)">✕</button></div>
-          <input v-model="ib.title" class="inp" placeholder="按钮文字（如：了解价格）" />
-          <textarea v-model="ib.response" class="inp ta sm-mt" rows="2" placeholder="点按钮后自动回复的内容"></textarea>
+          <div class="qb-head"><span>{{ t('formtpl.quickReplyN', { n: i+1 }) }}</span><button class="del-btn" @click="removeIB(i)">✕</button></div>
+          <input v-model="ib.title" class="inp" :placeholder="t('formtpl.ibButtonTextPh')" />
+          <textarea v-model="ib.response" class="inp ta sm-mt" rows="2" :placeholder="t('formtpl.ibResponsePh')"></textarea>
         </div>
-        <div v-if="!mCfg.ice_breakers.length" class="hint">快捷回复是用户在欢迎语下方看到的按钮，点击后自动回复预设内容。</div>
+        <div v-if="!mCfg.ice_breakers.length" class="hint">{{ t('formtpl.ibEmptyHint') }}</div>
       </div>
       <template #footer>
-        <button class="btn" @click="msgOpen=false">取消</button>
-        <button class="btn primary" :disabled="saving" @click="saveMsg">{{ saving?'保存中…':'保存' }}</button>
+        <button class="btn" @click="msgOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="saving" @click="saveMsg">{{ saving?t('formtpl.saving'):t('common.save') }}</button>
       </template>
     </el-drawer>
 
     <!-- 素材选择器（AI 生成用） -->
-    <el-drawer v-model="assetPickerOpen" title="选择素材 → 自动生成表单问题" direction="rtl" size="520px" append-to-body>
-      <div class="hint" style="margin-bottom:10px">系统会根据素材的 AI 文案内容，自动推荐 2-4 个相关的问题（如"您对哪类产品感兴趣？"），生成后可自由修改。</div>
+    <el-drawer v-model="assetPickerOpen" :title="t('formtpl.pickerTitle')" direction="rtl" size="520px" append-to-body>
+      <div class="hint" style="margin-bottom:10px">{{ t('formtpl.pickerHint') }}</div>
       <div class="picker-grid">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="aiGenerate(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
@@ -273,24 +275,24 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     </el-drawer>
 
     <!-- 预览弹窗 -->
-    <el-dialog v-model="previewOpen" :title="previewType==='form'?'表单预览':'消息预览'" width="420px" append-to-body>
+    <el-dialog v-model="previewOpen" :title="previewType==='form'?t('formtpl.previewFormTitle'):t('formtpl.previewMsgTitle')" width="420px" append-to-body>
       <!-- 表单预览：手机 mockup -->
       <div v-if="previewType==='form' && previewData" class="phone-mockup">
         <div class="pm-screen">
-          <div class="pm-header">{{ previewData.form_title || '表单标题' }}</div>
+          <div class="pm-header">{{ previewData.form_title || t('formtpl.pmFormTitle') }}</div>
           <div v-if="previewData.description" class="pm-desc">{{ previewData.description }}</div>
           <div class="pm-fields">
-            <div class="pm-field"><span class="pm-label">名</span><div class="pm-input-mock">—</div></div>
+            <div class="pm-field"><span class="pm-label">{{ t('formtpl.pmFirstName') }}</span><div class="pm-input-mock">—</div></div>
             <div v-for="f in (previewData.extra_contact_fields||[])" :key="f" class="pm-field"><span class="pm-label">{{ f }}</span><div class="pm-input-mock">—</div></div>
             <div v-for="(q,i) in (previewData.custom_questions||[])" :key="'q'+i" class="pm-field">
-              <span class="pm-label">{{ q.label || '问题' }}</span>
+              <span class="pm-label">{{ q.label || t('formtpl.pmQuestion') }}</span>
               <div v-if="q.options && q.options.length" class="pm-options">
                 <span v-for="(o,oi) in q.options" :key="oi" class="pm-option">{{ o.value }}</span>
               </div>
               <div v-else class="pm-input-mock">—</div>
             </div>
           </div>
-          <button class="pm-submit">提交</button>
+          <button class="pm-submit">{{ t('formtpl.pmSubmit') }}</button>
           <a class="pm-privacy">{{ previewData.privacy_link_text || 'Privacy Policy' }}</a>
           <div v-if="previewData.thank_you_title" class="pm-thankyou">
             <div class="pm-ty-title">{{ previewData.thank_you_title }}</div>

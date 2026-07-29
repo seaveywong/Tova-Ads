@@ -3,24 +3,26 @@ import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 
+const { t } = useI18n()
 const route = useRoute()
 
 const EVENT_TYPES = [
-  { v: '', l: '全部动作' }, { v: 'visit', l: '访问' }, { v: 'click', l: '点击' },
-  { v: 'submit', l: '提交' }, { v: 'redirect', l: '跳转' }, { v: 'block', l: '拦截' },
-  { v: 'pass', l: '放行' }, { v: 'error', l: '错误' },
+  { v: '', l: t('lplogs.actionAll') }, { v: 'visit', l: t('lplogs.actionVisit') }, { v: 'click', l: t('lplogs.actionClick') },
+  { v: 'submit', l: t('lplogs.actionSubmit') }, { v: 'redirect', l: t('lplogs.actionRedirect') }, { v: 'block', l: t('lplogs.actionBlock') },
+  { v: 'pass', l: t('lplogs.actionPass') }, { v: 'error', l: t('lplogs.actionError') },
 ]
 const DECISIONS = [
-  { v: '', l: '全部结果' }, { v: 'allow', l: '放行' },
-  { v: 'block', l: '拦截' }, { v: 'redirect', l: '跳转' },
+  { v: '', l: t('lplogs.resultAll') }, { v: 'allow', l: t('lplogs.actionPass') },
+  { v: 'block', l: t('lplogs.actionBlock') }, { v: 'redirect', l: t('lplogs.actionRedirect') },
 ]
 
 // 原因 → 中文
 const REASON_LABEL = {
-  pass: '通过', device_block: '设备拦截', ua_block: 'UA拦截',
-  country_block: '国家拦截', country_allow: '地区未放行', dedup: '重复访客',
+  pass: t('lplogs.reasonPass'), device_block: t('lplogs.reasonDeviceBlock'), ua_block: t('lplogs.reasonUaBlock'),
+  country_block: t('lplogs.reasonCountryBlock'), country_allow: t('lplogs.reasonCountryAllow'), dedup: t('lplogs.reasonDedup'),
 }
 const reasonLabel = (r) => REASON_LABEL[r] || r || ''
 
@@ -68,13 +70,13 @@ const trim = (s) => String(s).replace(/\s+/g, ' ').trim()
 const srcLabel = (e) => {
   const pf = SRC_PLATFORM_ZH[e.source_platform] || ''
   const d = e.source_detail || ''
-  if (e.source_type === 'crawler') return d || '爬虫'
-  if (e.source_type === 'controlled') return trim(`广告·受控 ${d} ${pf}`)
-  if (e.source_type === 'external') return trim(`广告·外部 ${d} ${pf}`)
-  if (e.source_type === 'placeholder') return trim(`占位符 ${pf}`)
-  if (e.source_platform === 'facebook') return 'FB·无广告'  // 有 fbclid 无 ad_id
+  if (e.source_type === 'crawler') return d || t('lplogs.srcCrawler')
+  if (e.source_type === 'controlled') return trim(`${t('lplogs.adPrefix')}·${t('lplogs.srcControlled')} ${d} ${pf}`)
+  if (e.source_type === 'external') return trim(`${t('lplogs.adPrefix')}·${t('lplogs.srcExternal')} ${d} ${pf}`)
+  if (e.source_type === 'placeholder') return trim(`${t('lplogs.srcPlaceholder')} ${pf}`)
+  if (e.source_platform === 'facebook') return t('lplogs.fbNoAd')  // 有 fbclid 无 ad_id
   if (e.referrer) return refLabel(e.referrer)
-  return '直接访问'
+  return t('lplogs.directAccess')
 }
 const srcClass = (e) => {
   if (e.source_type === 'controlled') return 'src-ok'
@@ -86,19 +88,19 @@ const srcClass = (e) => {
 }
 const srcTitle = (e) => {
   const pf = SRC_PLATFORM_ZH[e.source_platform] || e.source_platform || ''
-  if (e.source_type === 'crawler') return trim(`${e.source_detail || '爬虫'} · ${e.asn_name || ''} AS${e.asn || '?'}`)
-  if (e.source_type === 'controlled') return trim(`${pf} · 受控账户广告（ad_id ${e.ad_id} 在本系统）${e.source_detail ? '· ' + e.source_detail : ''}`)
-  if (e.source_type === 'external') return trim(`${pf} · 外部账户（ad_id ${e.ad_id} 不在本系统，可能盗用）${e.source_detail ? '· ' + e.source_detail : ''}`)
-  if (e.source_type === 'placeholder') return `${pf} · 占位符未替换（${e.ad_id}）`
-  if (e.source_platform === 'facebook') return 'Facebook 点击但无广告参数（fbclid）'
-  if (e.referrer) return '来源：' + e.referrer
-  return '直接访问或来源未知'
+  if (e.source_type === 'crawler') return trim(`${e.source_detail || t('lplogs.srcCrawler')} · ${e.asn_name || ''} AS${e.asn || '?'}`)
+  if (e.source_type === 'controlled') return trim(`${pf} · ${t('lplogs.srcControlledTitle', { adId: e.ad_id })}${e.source_detail ? '· ' + e.source_detail : ''}`)
+  if (e.source_type === 'external') return trim(`${pf} · ${t('lplogs.srcExternalTitle', { adId: e.ad_id })}${e.source_detail ? '· ' + e.source_detail : ''}`)
+  if (e.source_type === 'placeholder') return `${pf} · ${t('lplogs.srcPlaceholderTitle', { adId: e.ad_id })}`
+  if (e.source_platform === 'facebook') return t('lplogs.srcFbTitle')
+  if (e.referrer) return t('lplogs.sourceLabel') + '：' + e.referrer
+  return t('lplogs.directUnknown')
 }
 // ASN 展示：名称优先，机房标红（机房=非真人可疑：爬虫/刷量/VPN）
 const asnDisplay = (e) => e.asn_name || (e.asn ? 'AS' + e.asn : '-')
 const asnTitle = (e) => {
-  const t = { platform: '平台自有', datacenter: '机房/VPS（非真人，可疑：爬虫/刷量/VPN）', isp: '家宽ISP（真人）' }[e.asn_type] || '未收录'
-  return trim(`${e.asn_name || '(未收录ASN)'} · AS${e.asn || '?'} · ${t}`)
+  const label = { platform: t('lplogs.asnPlatform'), datacenter: t('lplogs.asnDatacenter'), isp: t('lplogs.asnIsp') }[e.asn_type] || t('lplogs.asnUnknown')
+  return trim(`${e.asn_name || t('lplogs.asnUnknown')} · AS${e.asn || '?'} · ${label}`)
 }
 // 像素短显：单像素显示完整ID，多像素显示第一个+数量（真实 fire 的，不推断；空=未记录）
 const pixelLabel = (e) => {
@@ -151,11 +153,11 @@ const buildParams = () => {
 // 来源分布统计（chip 条）：受控/外部/爬虫/占位符/未知 + 机房数。点 chip 即筛选
 const stats = ref(null)
 const statChips = [
-  { key: 'controlled', label: '受控', cls: 'src-ok' },
-  { key: 'external', label: '外部', cls: 'src-bad' },
-  { key: 'crawler', label: '爬虫', cls: 'src-bot' },
-  { key: 'placeholder', label: '占位符', cls: 'src-warn' },
-  { key: 'unknown', label: '直接', cls: 'muted' },
+  { key: 'controlled', label: t('lplogs.srcControlled'), cls: 'src-ok' },
+  { key: 'external', label: t('lplogs.srcExternal'), cls: 'src-bad' },
+  { key: 'crawler', label: t('lplogs.srcCrawlerShort'), cls: 'src-bot' },
+  { key: 'placeholder', label: t('lplogs.srcPlaceholder'), cls: 'src-warn' },
+  { key: 'unknown', label: t('lplogs.direct'), cls: 'muted' },
 ]
 const buildStatsParams = () => {
   const p = {}
@@ -181,7 +183,7 @@ const load = async () => {
     const r = await GET('/landing/logs?' + new URLSearchParams(buildParams()).toString())
     items.value = r.items || []
     total.value = r.total || 0
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loading.value = false
 }
 const search = () => { offset.value = 0; load() }
@@ -219,15 +221,15 @@ const saveRedirect = async () => {
   try { await POST('/ads/redirects', { ad_id: redirectAd.value, target_url: redirectInput.value.trim() })
     if (redirectInput.value.trim()) redirectMap.value = { ...redirectMap.value, [redirectAd.value]: redirectInput.value.trim() }
     else { const m = { ...redirectMap.value }; delete m[redirectAd.value]; redirectMap.value = m }
-    ElMessage.success(redirectInput.value.trim() ? '跳转链接已设' : '已恢复默认'); redirectDialog.value = false
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    ElMessage.success(redirectInput.value.trim() ? t('lplogs.redirectSet') : t('lplogs.redirectReset')); redirectDialog.value = false
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const eventLabel = (v) => EVENT_TYPES.find(x => x.v === v)?.l || v || '-'
 const decisionLabel = (v) => DECISIONS.find(x => x.v === v)?.l || v || ''
 const decisionClass = (d, et) => d === 'block' || et === 'block' ? 'err' : (d === 'allow' || et === 'visit' ? 'ok' : 'warn')
 const pageTitle = () => {
   const p = pages.value.find(x => String(x.id) === String(fPage.value))
-  return p ? p.title : '全部落地页'
+  return p ? p.title : t('lplogs.allLandingPages')
 }
 
 onMounted(async () => {
@@ -251,17 +253,17 @@ watch(() => route.query, (q) => {
 <template>
   <div class="page">
     <div class="ctrl-bar">
-      <h2 class="title">落地页日志 <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
+      <h2 class="title">{{ t('lplogs.pageTitle') }} <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
       <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn sm" :class="{ on: preset === opt.key }" @click="setPreset(opt.key)">{{ opt.label }}</button>
       <input type="date" v-model="fFrom" class="date-input" @change="onDateManual" />
       <span class="sep">—</span>
       <input type="date" v-model="fTo" class="date-input" @change="onDateManual" />
       <select v-model="fPage" class="sel" @change="search">
-        <option value="">全部落地页</option>
+        <option value="">{{ t('lplogs.allLandingPages') }}</option>
         <option v-for="p in pages" :key="p.id" :value="p.id">{{ p.title }}</option>
       </select>
       <select v-model="fAct" class="sel" @change="search">
-        <option value="">全部账户</option>
+        <option value="">{{ t('lplogs.allAccounts') }}</option>
         <option v-for="a in accounts" :key="a.act_id" :value="a.act_id">{{ a.name }}</option>
       </select>
       <select v-model="fEvent" class="sel" @change="search">
@@ -271,36 +273,36 @@ watch(() => route.query, (q) => {
         <option v-for="o in DECISIONS" :key="o.v" :value="o.v">{{ o.l }}</option>
       </select>
       <select v-model="fSource" class="sel" @change="search">
-        <option value="">全部来源</option>
-        <option value="controlled">广告·受控</option>
-        <option value="external">广告·外部</option>
-        <option value="crawler">爬虫</option>
-        <option value="placeholder">占位符</option>
-        <option value="unknown">直接访问</option>
+        <option value="">{{ t('lplogs.allSources') }}</option>
+        <option value="controlled">{{ t('lplogs.adPrefix') }}·{{ t('lplogs.srcControlled') }}</option>
+        <option value="external">{{ t('lplogs.adPrefix') }}·{{ t('lplogs.srcExternal') }}</option>
+        <option value="crawler">{{ t('lplogs.srcCrawlerShort') }}</option>
+        <option value="placeholder">{{ t('lplogs.srcPlaceholder') }}</option>
+        <option value="unknown">{{ t('lplogs.directAccess') }}</option>
       </select>
-      <input v-model="fSlug" class="txt" placeholder="子码" @keyup.enter="search" />
-      <input v-model="fAd" class="txt" placeholder="广告 ID" @keyup.enter="search" />
-      <input v-model="fQ" class="txt q" placeholder="搜索 国家/城市/来源" @keyup.enter="search" />
-      <button class="ctrl-btn primary" @click="search">查询</button>
-      <button class="ctrl-btn" @click="reset">重置</button>
+      <input v-model="fSlug" class="txt" :placeholder="t('lplogs.subcode')" @keyup.enter="search" />
+      <input v-model="fAd" class="txt" :placeholder="t('lplogs.adId')" @keyup.enter="search" />
+      <input v-model="fQ" class="txt q" :placeholder="t('lplogs.searchPlaceholder')" @keyup.enter="search" />
+      <button class="ctrl-btn primary" @click="search">{{ t('common.search') }}</button>
+      <button class="ctrl-btn" @click="reset">{{ t('lplogs.reset') }}</button>
     </div>
     <div class="stats-bar" v-if="stats">
-      <span class="stats-label">来源分布<span class="stats-win">{{ stats.window === 'today' ? '今日' : '所选范围' }} · {{ stats.total }}</span></span>
+      <span class="stats-label">{{ t('lplogs.sourceDistribution') }}<span class="stats-win">{{ stats.window === 'today' ? t('common.today') : t('lplogs.selectedRange') }} · {{ stats.total }}</span></span>
       <button v-for="c in statChips" :key="c.key" class="stat-chip" :class="[c.cls, { on: fSource === c.key }]" @click="toggleSource(c.key)">
         {{ c.label }} <b>{{ stats[c.key] || 0 }}</b>
       </button>
-      <span v-if="stats.datacenter" class="stat-chip static src-bad" title="机房/VPS IP 来的访问（非真人：爬虫/刷量/VPN）">⚠ 机房 {{ stats.datacenter }}</span>
+      <span v-if="stats.datacenter" class="stat-chip static src-bad" :title="t('lplogs.datacenterHint')">⚠ {{ t('lplogs.datacenter') }} {{ stats.datacenter }}</span>
     </div>
     <div class="tbl" v-loading="loading">
       <div class="row head">
-        <div>时间</div><div>子码</div><div>账户</div><div>广告</div><div>像素</div><div>设备</div><div>地区</div><div>ASN</div><div>动作</div><div>原因</div><div>来源 / 去向</div>
+        <div>{{ t('lplogs.colTime') }}</div><div>{{ t('lplogs.subcode') }}</div><div>{{ t('lplogs.colAccount') }}</div><div>{{ t('lplogs.adId') }}</div><div>{{ t('lplogs.colPixel') }}</div><div>{{ t('lplogs.colDevice') }}</div><div>{{ t('lplogs.colRegion') }}</div><div>ASN</div><div>{{ t('lplogs.colAction') }}</div><div>{{ t('lplogs.colReason') }}</div><div>{{ t('lplogs.colSourceDest') }}</div>
       </div>
       <div v-for="e in items" :key="e.id" class="row">
         <div class="t-time">{{ fmtTime(e.created_at) }}</div>
-        <div><code class="slug" @click="goSlug(e.slug)" :title="'点击过滤子码 ' + e.slug">/a/{{ e.slug }}</code></div>
-        <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? '点击过滤账户 ' + e.act_name : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
-        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\nFB点击ID: ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? '点击过滤广告 ' + e.ad_id : ''" @click="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? '已设：' + redirectMap[e.ad_id] : '设跳转链接'">跳</button></div>
-        <div class="t-px" :title="e.fired_pixel_ids ? '真实 fire 的像素：' + e.fired_pixel_ids : '未记录（worker 旧版 / redirect 模式 / 未 fire）——不推断'">
+        <div><code class="slug" @click="goSlug(e.slug)" :title="t('lplogs.clickFilterSubcode', { slug: e.slug })">/a/{{ e.slug }}</code></div>
+        <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? t('lplogs.clickFilterAccount', { name: e.act_name }) : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
+        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\n' + t('lplogs.fbClickId') + ': ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? t('lplogs.clickFilterAd', { adId: e.ad_id }) : ''" @click="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? t('lplogs.redirectSetTitle', { url: redirectMap[e.ad_id] }) : t('lplogs.setRedirect')">{{ t('lplogs.redirectShort') }}</button></div>
+        <div class="t-px" :title="e.fired_pixel_ids ? t('lplogs.firedPixelHint', { ids: e.fired_pixel_ids }) : t('lplogs.pixelNotRecorded')">
           <code v-if="e.fired_pixel_ids">{{ pixelLabel(e) }}</code>
           <span v-else class="muted">—</span>
         </div>
@@ -314,30 +316,30 @@ watch(() => route.query, (q) => {
         <div class="t-reason" :title="e.reason || ''">{{ reasonLabel(e.reason) || '-' }}</div>
         <div class="t-src">
           <template v-if="hasRedirect(e)">
-            <a v-if="e.target_url" :href="e.target_url" target="_blank" rel="noopener" :title="'跳转目标：' + e.target_url">{{ e.target_url }}</a>
+            <a v-if="e.target_url" :href="e.target_url" target="_blank" rel="noopener" :title="t('lplogs.redirectTargetTitle', { url: e.target_url })">{{ e.target_url }}</a>
             <span v-else class="muted">-</span>
           </template>
           <span v-else :class="srcClass(e)" :title="srcTitle(e)">{{ srcLabel(e) }}</span>
         </div>
       </div>
-      <div v-if="!items.length && !loading" class="empty">暂无访问日志{{ fSlug ? '（子码 ' + fSlug + '）' : '' }}</div>
+      <div v-if="!items.length && !loading" class="empty">{{ fSlug ? t('lplogs.emptyWithSubcode', { slug: fSlug }) : t('lplogs.empty') }}</div>
     </div>
     <div v-if="total > limit" class="pager">
-      <button class="ctrl-btn sm" :disabled="offset === 0" @click="prev">上一页</button>
-      <span class="pg-info">{{ offset + 1 }}–{{ Math.min(offset + limit, total) }} / 共 {{ total }}</span>
-      <button class="ctrl-btn sm" :disabled="offset + limit >= total" @click="next">下一页</button>
+      <button class="ctrl-btn sm" :disabled="offset === 0" @click="prev">{{ t('lplogs.prevPage') }}</button>
+      <span class="pg-info">{{ offset + 1 }}–{{ Math.min(offset + limit, total) }} / {{ t('lplogs.totalUnit', { n: total }) }}</span>
+      <button class="ctrl-btn sm" :disabled="offset + limit >= total" @click="next">{{ t('lplogs.nextPage') }}</button>
     </div>
 
-    <el-dialog v-model="redirectDialog" :title="`跳转链接 · 广告 ${redirectAd}`" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
+    <el-dialog v-model="redirectDialog" :title="t('lplogs.redirectDialogTitle', { adId: redirectAd })" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <label style="font-size:12px;color:var(--t3)">该广告的专属跳转链接（留空=用落地页默认）</label>
+        <label style="font-size:12px;color:var(--t3)">{{ t('lplogs.redirectDialogHint') }}</label>
         <input v-model.trim="redirectInput" class="txt" style="width:100%" placeholder="https://..." />
-        <div style="font-size:11px;color:var(--t3);line-height:1.5">设了之后这条广告的访客都跳这；其他广告不变。</div>
+        <div style="font-size:11px;color:var(--t3);line-height:1.5">{{ t('lplogs.redirectDialogDesc') }}</div>
       </div>
       <template #footer>
-        <button class="ctrl-btn" @click="redirectDialog = false">取消</button>
-        <button v-if="redirectMap[redirectAd]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">恢复默认</button>
-        <button class="ctrl-btn primary" @click="saveRedirect">保存</button>
+        <button class="ctrl-btn" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
+        <button v-if="redirectMap[redirectAd]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">{{ t('lplogs.resetDefault') }}</button>
+        <button class="ctrl-btn primary" @click="saveRedirect">{{ t('common.save') }}</button>
       </template>
     </el-dialog>
   </div>

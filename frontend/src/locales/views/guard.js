@@ -1,0 +1,53 @@
+// Guard namespace（规则引擎）。zh/en 同文件。
+// 注：点号 key（cat.bleed / rt.* / param.* / action.* / conv.* / lm.* / human.* / ago.* / unit.*）
+// 在此为嵌套对象——vue-i18n 的 t('guard.cat.bleed') 按点号走嵌套路径解析。
+export default {
+  zh: {
+    loadFail: '加载失败', nameRequired: '填规则名', created: '已创建', deleted: '已删', toggleFail: '开关失败', inspectFail: '巡检失败',
+    delConfirm: '删除规则「{name}」？',
+    disableTitle: '确认停用', disableConfirm: '停用规则「{name}」？该规则将停止评估，名下广告失去此条保护。',
+    forceTitle: '强制重检', forceConfirm: '强制重检跳过冷却直接调 Facebook API 评估全部广告，频繁触发可能被 FB 限流。继续？', forceContinue: '继续重检',
+    inspectSummary: '评估 {evaluated} 条 · 命中 {hits} · 暂停 {paused}', inspectSummaryDetail: '{summary}（已停：{names}{more}）', andMore: ' 等',
+    inspectNow: '立即巡检', inspectNowTip: '读最新缓存评估（不调 FB）', force: '强制重检', forceTip: '⚠ 跳过冷却直接调 FB 评估全部广告，频繁触发会限流',
+    newRule: '+ 新建规则', scopeAccounts: '账户 {n} 个', scopeGlobal: '全局', noHits: '未命中过', hitCount: '命中 {n} 次',
+    convLabel: '转化口径：', landingMetricLabel: '落地指标：', empty: '暂无规则，点「+ 新建规则」创建。',
+    editTitle: '编辑规则', createTitle: '新建规则', ruleName: '规则名', ruleNamePh: '如：VND 账户止血', type: '类型', threshold: '阈值', actionLabel: '动作',
+    convLabelOpt: '转化口径', landingMetricOpt: '落地页指标', scopeAccountsLabel: '作用账户', scopeAccountsPh: '留空=名下全部账户；可多选指定账户',
+    cat: { bleed: '空耗止损', cost: '成本超标', decline: '效果下滑' },
+    rt: { bleed_abs: '空耗止损（消耗无转化）', cpa_exceed: 'CPA 超标', consecutive_bad: '连续恶化', click_no_conv: '点击无转化', reach_no_conv: '覆盖无转化', low_ctr_no_conv: '低 CTR 无转化', budget_burn_fast: '瞬烧制止（增量）' },
+    param: { spend_gte: '消耗≥', cpa_target: '目标CPA', ratio: '超标倍数', days: '连续天数', clicks_gte: '点击≥', reach_gte: '覆盖≥', ctr_lte: 'CTR≤', delta_gte: '增量≥' },
+    unit: { day: '天', times: '次', people: '人' },
+    action: { observe: '只告警', pause: '停广告', pause_adset: '停广告组', pause_campaign: '停广告系列', observe_opt: '只告警（观察）' },
+    conv: { fb: '仅 Facebook', either: '综合（落地页 + Facebook）', landing: '仅落地页' },
+    lm: { pass: '通过量（点击按钮次数）', visit: '访问量（到达落地页次数）', pass_short: '通过量（点击按钮）', visit_short: '访问量（到达落地页）' },
+    human: {
+      bleed_abs: '消耗≥${n} 且 无转化', cpa_exceed: 'CPA > 目标${target}×{ratio}（超标）', consecutive_bad: '连续{days}天 CPA超标（目标${target}×{ratio}）',
+      click_no_conv: '点击≥{n} 且 无转化', reach_no_conv: '覆盖≥{reach} 且 消耗≥${spend} 无转化', low_ctr_no_conv: '消耗≥${spend} 且 CTR≤{ctr}% 无转化', budget_burn_fast: '单轮增量消耗≥${n}（瞬烧）',
+    },
+    ago: { minutes: ' · {n}分钟前', hours: ' · {n}小时前', date: ' · {d}' },
+  },
+  en: {
+    loadFail: 'Failed to load', nameRequired: 'Enter a rule name', created: 'Created', deleted: 'Deleted', toggleFail: 'Toggle failed', inspectFail: 'Inspection failed',
+    delConfirm: 'Delete rule "{name}"?',
+    disableTitle: 'Confirm disable', disableConfirm: 'Disable rule "{name}"? It will stop evaluating and its ads will lose this protection.',
+    forceTitle: 'Force re-inspect', forceConfirm: 'Force re-inspect skips the cooldown and calls the Facebook API to evaluate all ads. Frequent triggers may get rate-limited by FB. Continue?', forceContinue: 'Re-inspect',
+    inspectSummary: 'Evaluated {evaluated} · Hit {hits} · Paused {paused}', inspectSummaryDetail: '{summary} (paused: {names}{more})', andMore: ' etc.',
+    inspectNow: 'Inspect now', inspectNowTip: 'Evaluate using the latest cache (no FB call)', force: 'Force re-inspect', forceTip: '⚠ Skips cooldown, calls FB to evaluate all ads; frequent use may be rate-limited',
+    newRule: '+ New rule', scopeAccounts: '{n} accounts', scopeGlobal: 'Global', noHits: 'Never hit', hitCount: 'Hit {n} times',
+    convLabel: 'Conversion source: ', landingMetricLabel: 'Landing metric: ', empty: 'No rules yet. Click "+ New rule" to create one.',
+    editTitle: 'Edit rule', createTitle: 'New rule', ruleName: 'Rule name', ruleNamePh: 'e.g. VND account stop-loss', type: 'Type', threshold: 'Threshold', actionLabel: 'Action',
+    convLabelOpt: 'Conversion source', landingMetricOpt: 'Landing metric', scopeAccountsLabel: 'Scope accounts', scopeAccountsPh: 'Empty = all accounts; select specific accounts',
+    cat: { bleed: 'Bleed stop-loss', cost: 'Cost overrun', decline: 'Performance decline' },
+    rt: { bleed_abs: 'Bleed stop-loss (spend with no conversion)', cpa_exceed: 'CPA over target', consecutive_bad: 'Consecutive decline', click_no_conv: 'Clicks without conversion', reach_no_conv: 'Reach without conversion', low_ctr_no_conv: 'Low CTR without conversion', budget_burn_fast: 'Budget burn check (delta)' },
+    param: { spend_gte: 'Spend ≥', cpa_target: 'Target CPA', ratio: 'Over-target ratio', days: 'Consecutive days', clicks_gte: 'Clicks ≥', reach_gte: 'Reach ≥', ctr_lte: 'CTR ≤', delta_gte: 'Delta ≥' },
+    unit: { day: 'days', times: 'clicks', people: 'people' },
+    action: { observe: 'Alert only', pause: 'Pause ad', pause_adset: 'Pause ad set', pause_campaign: 'Pause campaign', observe_opt: 'Alert only (observe)' },
+    conv: { fb: 'Facebook only', either: 'Combined (landing page + Facebook)', landing: 'Landing page only' },
+    lm: { pass: 'Pass-through (button clicks)', visit: 'Visits (landing page arrivals)', pass_short: 'Pass-through (button clicks)', visit_short: 'Visits (landing page arrivals)' },
+    human: {
+      bleed_abs: 'Spend ≥ ${n} with no conversion', cpa_exceed: 'CPA > target ${target}×{ratio} (over target)', consecutive_bad: '{days} consecutive days CPA over target (${target}×{ratio})',
+      click_no_conv: 'Clicks ≥ {n} with no conversion', reach_no_conv: 'Reach ≥ {reach} and spend ≥ ${spend} with no conversion', low_ctr_no_conv: 'Spend ≥ ${spend} and CTR ≤ {ctr}% with no conversion', budget_burn_fast: 'Single-round delta spend ≥ ${n} (burn)',
+    },
+    ago: { minutes: ' · {n} min ago', hours: ' · {n} h ago', date: ' · {d}' },
+  },
+}

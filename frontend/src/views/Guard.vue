@@ -1,44 +1,47 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
+
 // 规则类型元数据：label + 默认分类 + 参数 schema（key/label/默认/单位）
 const RULE_TYPES = {
-  bleed_abs: { label: '空耗止损（消耗无转化）', category: '空耗止损', params: [
-    { key: 'spend_threshold', label: '消耗≥', def: 20, unit: 'USD' },
+  bleed_abs: { label: t('guard.rt.bleed_abs'), category: t('guard.cat.bleed'), params: [
+    { key: 'spend_threshold', label: t('guard.param.spend_gte'), def: 20, unit: 'USD' },
   ]},
-  cpa_exceed: { label: 'CPA 超标', category: '成本超标', params: [
-    { key: 'cpa_target', label: '目标CPA', def: 8, unit: 'USD' },
-    { key: 'ratio', label: '超标倍数', def: 1.3, unit: 'x' },
+  cpa_exceed: { label: t('guard.rt.cpa_exceed'), category: t('guard.cat.cost'), params: [
+    { key: 'cpa_target', label: t('guard.param.cpa_target'), def: 8, unit: 'USD' },
+    { key: 'ratio', label: t('guard.param.ratio'), def: 1.3, unit: 'x' },
   ]},
   // trend_drop（ROAS 下滑）暂不做：依赖 purchase_roas，只对电商/价值类广告有效，非电商恒 0 会误导
   // trend_drop: { label: 'ROAS 下滑', category: '效果下滑', params: [
   //   { key: 'drop_threshold', label: '下滑≥', def: 40, unit: '%' },
   // ]},
-  consecutive_bad: { label: '连续恶化', category: '效果下滑', params: [
-    { key: 'param_days', label: '连续天数', def: 2, unit: '天' },
-    { key: 'cpa_target', label: '目标CPA', def: 8, unit: 'USD' },
-    { key: 'ratio', label: '超标倍数', def: 1.3, unit: 'x' },
+  consecutive_bad: { label: t('guard.rt.consecutive_bad'), category: t('guard.cat.decline'), params: [
+    { key: 'param_days', label: t('guard.param.days'), def: 2, unit: t('guard.unit.day') },
+    { key: 'cpa_target', label: t('guard.param.cpa_target'), def: 8, unit: 'USD' },
+    { key: 'ratio', label: t('guard.param.ratio'), def: 1.3, unit: 'x' },
   ]},
-  click_no_conv: { label: '点击无转化', category: '空耗止损', params: [
-    { key: 'min_clicks', label: '点击≥', def: 50, unit: '次' },
+  click_no_conv: { label: t('guard.rt.click_no_conv'), category: t('guard.cat.bleed'), params: [
+    { key: 'min_clicks', label: t('guard.param.clicks_gte'), def: 50, unit: t('guard.unit.times') },
   ]},
-  reach_no_conv: { label: '覆盖无转化', category: '空耗止损', params: [
-    { key: 'reach_threshold', label: '覆盖≥', def: 1000, unit: '人' },
-    { key: 'min_spend', label: '消耗≥', def: 10, unit: 'USD' },
+  reach_no_conv: { label: t('guard.rt.reach_no_conv'), category: t('guard.cat.bleed'), params: [
+    { key: 'reach_threshold', label: t('guard.param.reach_gte'), def: 1000, unit: t('guard.unit.people') },
+    { key: 'min_spend', label: t('guard.param.spend_gte'), def: 10, unit: 'USD' },
   ]},
-  low_ctr_no_conv: { label: '低 CTR 无转化', category: '空耗止损', params: [
-    { key: 'min_spend', label: '消耗≥', def: 10, unit: 'USD' },
-    { key: 'max_ctr', label: 'CTR≤', def: 0.5, unit: '%' },
+  low_ctr_no_conv: { label: t('guard.rt.low_ctr_no_conv'), category: t('guard.cat.bleed'), params: [
+    { key: 'min_spend', label: t('guard.param.spend_gte'), def: 10, unit: 'USD' },
+    { key: 'max_ctr', label: t('guard.param.ctr_lte'), def: 0.5, unit: '%' },
   ]},
-  budget_burn_fast: { label: '瞬烧制止（增量）', category: '空耗止损', params: [
-    { key: 'threshold_abs', label: '增量≥', def: 20, unit: 'USD' },
+  budget_burn_fast: { label: t('guard.rt.budget_burn_fast'), category: t('guard.cat.bleed'), params: [
+    { key: 'threshold_abs', label: t('guard.param.delta_gte'), def: 20, unit: 'USD' },
   ]},
 }
-const ACTIONS = { observe: '只告警', pause: '停广告', default: '停广告', pause_adset: '停广告组', pause_campaign: '停广告系列' }
-const CONV_SRC = { fb: '仅 Facebook', either: '综合（落地页 + Facebook）' }
-const LANDING_METRIC = { pass: '通过量（点击按钮）', visit: '访问量（到达落地页）' }
+const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign') }))
+const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
+const LANDING_METRIC = computed(() => ({ pass: t('guard.lm.pass_short'), visit: t('guard.lm.visit_short') }))
 
 const rules = ref([])
 const loading = ref(true)
@@ -53,7 +56,7 @@ const load = async () => {
   try {
     rules.value = await GET('/guard/rules')
     accountsList.value = await GET('/fb/accounts').catch(() => [])
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('guard.loadFail')) }
   loading.value = false
 }
 onMounted(load)
@@ -67,13 +70,13 @@ const paramsSummary = (r) => {
 // 说人话：把规则类型+参数+动作拼成一句大白话（"消耗≥$20 且 无转化 → 停广告"）
 const p = (r, k) => r.params?.[k]  // 空值=用后端默认，这里只回显已填的
 const HUMAN = {
-  bleed_abs: r => `消耗≥$${p(r,'spend_threshold')||20} 且 无转化`,
-  cpa_exceed: r => `CPA > 目标$${p(r,'cpa_target')||8}×${p(r,'ratio')||1.3}（超标）`,
-  consecutive_bad: r => `连续${p(r,'param_days')||2}天 CPA超标（目标$${p(r,'cpa_target')||8}×${p(r,'ratio')||1.3}）`,
-  click_no_conv: r => `点击≥${p(r,'min_clicks')||50} 且 无转化`,
-  reach_no_conv: r => `覆盖≥${fmtN(p(r,'reach_threshold')||1000)} 且 消耗≥$${p(r,'min_spend')||10} 无转化`,
-  low_ctr_no_conv: r => `消耗≥$${p(r,'min_spend')||10} 且 CTR≤${p(r,'max_ctr')||0.5}% 无转化`,
-  budget_burn_fast: r => `单轮增量消耗≥$${p(r,'threshold_abs')||20}（瞬烧）`,
+  bleed_abs: r => t('guard.human.bleed_abs', { n: p(r,'spend_threshold')||20 }),
+  cpa_exceed: r => t('guard.human.cpa_exceed', { target: p(r,'cpa_target')||8, ratio: p(r,'ratio')||1.3 }),
+  consecutive_bad: r => t('guard.human.consecutive_bad', { days: p(r,'param_days')||2, target: p(r,'cpa_target')||8, ratio: p(r,'ratio')||1.3 }),
+  click_no_conv: r => t('guard.human.click_no_conv', { n: p(r,'min_clicks')||50 }),
+  reach_no_conv: r => t('guard.human.reach_no_conv', { reach: fmtN(p(r,'reach_threshold')||1000), spend: p(r,'min_spend')||10 }),
+  low_ctr_no_conv: r => t('guard.human.low_ctr_no_conv', { spend: p(r,'min_spend')||10, ctr: p(r,'max_ctr')||0.5 }),
+  budget_burn_fast: r => t('guard.human.budget_burn_fast', { n: p(r,'threshold_abs')||20 }),
 }
 const fmtN = (n) => Number(n).toLocaleString()
 const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r))
@@ -81,12 +84,12 @@ const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSum
 const hitLabel = (r) => {
   const h = r.hits
   if (!h || !h.count) return null
-  let s = `命中 ${h.count} 次`
+  let s = t('guard.hitCount', { n: h.count })
   if (h.last_at) {
     const dt = new Date(h.last_at)
     const now = new Date()
     const diff = (now - dt) / 3600000
-    s += diff < 1 ? ` · ${Math.round(diff*60)}分钟前` : diff < 24 ? ` · ${Math.round(diff)}小时前` : ` · ${dt.toLocaleDateString('zh-CN')}`
+    s += diff < 1 ? t('guard.ago.minutes', { n: Math.round(diff*60) }) : diff < 24 ? t('guard.ago.hours', { n: Math.round(diff) }) : t('guard.ago.date', { d: dt.toLocaleDateString() })
   }
   return s
 }
@@ -98,7 +101,7 @@ const onTypeChange = () => {
 }
 const openCreate = () => {
   editing.value = null
-  form.value = { name: '', rule_type: 'bleed_abs', category: '空耗止损', params: {}, conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
+  form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
   onTypeChange()
   editOpen.value = true
 }
@@ -118,7 +121,7 @@ const openEdit = (r) => {
   editOpen.value = true
 }
 const save = async () => {
-  if (!form.value.name.trim()) return ElMessage.warning('填规则名')
+  if (!form.value.name.trim()) return ElMessage.warning(t('guard.nameRequired'))
   const cleanParams = {}
   Object.entries(form.value.params || {}).forEach(([k, v]) => {
     if (v !== '' && v !== null && v !== undefined) cleanParams[k] = v
@@ -133,43 +136,43 @@ const save = async () => {
   try {
     if (editing.value) await PUT(`/guard/rules/${editing.value}`, body)
     else await POST('/guard/rules', body)
-    ElMessage.success(editing.value ? '已更新' : '已创建')
+    ElMessage.success(editing.value ? t('common.savedOk') : t('guard.created'))
     editOpen.value = false
     await load()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.opFail') + '：' + (e.message || '')) }
 }
 const onToggle = async (r, val) => {
   // v-model 已先翻转 r.enabled；PUT 失败则回滚
   if (!val) {
-    try { await ElMessageBox.confirm(`停用规则「${r.name}」？该规则将停止评估，名下广告失去此条保护。`, '确认停用', { type: 'warning', confirmButtonText: '停用', cancelButtonText: '取消' }) }
+    try { await ElMessageBox.confirm(t('guard.disableConfirm', { name: r.name }), t('guard.disableTitle'), { type: 'warning', confirmButtonText: t('common.disable'), cancelButtonText: t('common.cancel') }) }
     catch { r.enabled = true; return }  // 取消 → 回滚开关
   }
   try { await PUT(`/guard/rules/${r.id}`, { enabled: val }) }
-  catch (e) { r.enabled = !val; ElMessage.error('开关失败：' + (e.message || '')) }
+  catch (e) { r.enabled = !val; ElMessage.error(t('guard.toggleFail') + '：' + (e.message || '')) }
 }
 const remove = async (r) => {
-  try { await ElMessageBox.confirm(`删除规则「${r.name}」？`, '确认', { type: 'warning' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success('已删'); await load() }
+  try { await ElMessageBox.confirm(t('guard.delConfirm', { name: r.name }), t('common.confirm'), { type: 'warning' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success(t('guard.deleted')); await load() }
   catch {}
 }
 const doInspect = async (force = false) => {
   if (force) {
     try {
-      await ElMessageBox.confirm('强制重检跳过冷却直接调 Facebook API 评估全部广告，频繁触发可能被 FB 限流。继续？', '强制重检',
-        { type: 'warning', confirmButtonText: '继续重检', cancelButtonText: '取消' })
+      await ElMessageBox.confirm(t('guard.forceConfirm'), t('guard.forceTitle'),
+        { type: 'warning', confirmButtonText: t('guard.forceContinue'), cancelButtonText: t('common.cancel') })
     } catch { return }
   }
   inspecting.value = true
   try {
     const r = await POST(`/guard/inspect${force ? '?force=true' : ''}`, {})
-    const summary = `评估 ${r.evaluated ?? 0} 条 · 命中 ${r.hits ?? 0} · 暂停 ${r.paused ?? 0}`
+    const summary = t('guard.inspectSummary', { evaluated: r.evaluated ?? 0, hits: r.hits ?? 0, paused: r.paused ?? 0 })
     if (r.details && r.details.length) {
       const names = r.details.slice(0, 3).map(d => d.ad_name || d.ad_id).join('、')
-      ElMessage.success(`${summary}（已停：${names}${r.details.length > 3 ? ' 等' : ''}）`)
+      ElMessage.success(t('guard.inspectSummaryDetail', { summary, names, more: r.details.length > 3 ? t('guard.andMore') : '' }))
     } else {
       ElMessage.success(summary)
     }
     await load()  // 巡检后刷新规则命中数
-  } catch (e) { ElMessage.error('巡检失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('guard.inspectFail') + '：' + (e.message || '')) }
   inspecting.value = false
 }
 </script>
@@ -179,9 +182,9 @@ const doInspect = async (force = false) => {
     <div class="bar">
       <div class="bar-l"></div>
       <div class="bar-r">
-        <button class="btn" :disabled="inspecting" @click="doInspect(false)" title="读最新缓存评估（不调 FB）">立即巡检</button>
-        <button class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" title="⚠ 跳过冷却直接调 FB 评估全部广告，频繁触发会限流">强制重检</button>
-        <button class="btn primary" @click="openCreate">+ 新建规则</button>
+        <button class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
+        <button class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
+        <button class="btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
       </div>
     </div>
 
@@ -190,36 +193,36 @@ const doInspect = async (force = false) => {
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
           <span class="cat-tag">{{ r.category }}</span>
-          <span class="scope-tag">{{ r.scope_act_id ? '账户 ' + r.scope_act_id.split(',').length + ' 个' : '全局' }}</span>
+          <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
           <span class="action-tag">{{ ACTIONS[r.action] || r.action }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
         </div>
         <div class="rule-body">
           <span class="rule-cond">{{ humanText(r) }} <span class="rule-arrow">→</span> <span class="rule-do">{{ ACTIONS[r.action] || r.action }}</span></span>
           <span v-if="hitLabel(r)" class="rule-hit" :class="{ active: r.hits?.count > 0 }">{{ hitLabel(r) }}</span>
-          <span v-else class="rule-hit idle">未命中过</span>
+          <span v-else class="rule-hit idle">{{ t('guard.noHits') }}</span>
         </div>
         <div class="rule-foot">
-          <span class="conv">转化口径：{{ CONV_SRC[r.conversion_source] || r.conversion_source }}<span v-if="r.conversion_source !== 'fb'" class="conv-lm"> · 落地指标：{{ LANDING_METRIC[r.params?.landing_metric] || '通过量' }}</span></span>
+          <span class="conv">{{ t('guard.convLabel') }}{{ CONV_SRC[r.conversion_source] || r.conversion_source }}<span v-if="r.conversion_source !== 'fb'" class="conv-lm"> · {{ t('guard.landingMetricLabel') }}{{ LANDING_METRIC[r.params?.landing_metric] || t('guard.lm.pass_short') }}</span></span>
           <div class="rule-ops">
-            <button class="mb" @click="openEdit(r)">编辑</button>
-            <button class="mb danger" @click="remove(r)">删除</button>
+            <button class="mb" @click="openEdit(r)">{{ t('common.edit') }}</button>
+            <button class="mb danger" @click="remove(r)">{{ t('common.delete') }}</button>
           </div>
         </div>
       </div>
-      <div v-if="!rules.length && !loading" class="empty">暂无规则，点「+ 新建规则」创建。</div>
+      <div v-if="!rules.length && !loading" class="empty">{{ t('guard.empty') }}</div>
     </div>
 
     <div v-if="editOpen" class="overlay" @click.self="editOpen=false">
       <div class="modal">
-        <div class="m-title">{{ editing ? '编辑规则' : '新建规则' }}</div>
-        <div class="form-l"><label>规则名</label><input v-model="form.name" class="input" placeholder="如：VND 账户止血" /></div>
-        <div class="form-l"><label>类型</label>
+        <div class="m-title">{{ editing ? t('guard.editTitle') : t('guard.createTitle') }}</div>
+        <div class="form-l"><label>{{ t('guard.ruleName') }}</label><input v-model="form.name" class="input" :placeholder="t('guard.ruleNamePh')" /></div>
+        <div class="form-l"><label>{{ t('guard.type') }}</label>
           <select v-model="form.rule_type" class="input" @change="onTypeChange">
             <option v-for="(meta, key) in RULE_TYPES" :key="key" :value="key">{{ meta.label }}</option>
           </select>
         </div>
-        <div class="form-l" v-if="currentSchema.params.length"><label>阈值</label>
+        <div class="form-l" v-if="currentSchema.params.length"><label>{{ t('guard.threshold') }}</label>
           <div class="params-grid">
             <div v-for="sp in currentSchema.params" :key="sp.key" class="param-row">
               <span class="param-label">{{ sp.label }}</span>
@@ -228,34 +231,34 @@ const doInspect = async (force = false) => {
             </div>
           </div>
         </div>
-        <div class="form-l"><label>动作</label>
+        <div class="form-l"><label>{{ t('guard.actionLabel') }}</label>
           <select v-model="form.action" class="input">
-            <option value="observe">只告警（观察）</option>
-            <option value="pause">停广告</option>
-            <option value="pause_adset">停广告组</option>
-            <option value="pause_campaign">停广告系列</option>
+            <option value="observe">{{ t('guard.action.observe_opt') }}</option>
+            <option value="pause">{{ t('guard.action.pause') }}</option>
+            <option value="pause_adset">{{ t('guard.action.pause_adset') }}</option>
+            <option value="pause_campaign">{{ t('guard.action.pause_campaign') }}</option>
           </select>
         </div>
-        <div class="form-l"><label>转化口径</label>
+        <div class="form-l"><label>{{ t('guard.convLabelOpt') }}</label>
           <select v-model="form.conversion_source" class="input">
-            <option value="either">综合（落地页 + Facebook）</option>
-            <option value="fb">仅 Facebook</option>
-            <option value="landing">仅落地页</option>
+            <option value="either">{{ t('guard.conv.either') }}</option>
+            <option value="fb">{{ t('guard.conv.fb') }}</option>
+            <option value="landing">{{ t('guard.conv.landing') }}</option>
           </select>
         </div>
-        <div class="form-l" v-if="form.conversion_source !== 'fb'"><label>落地页指标</label>
+        <div class="form-l" v-if="form.conversion_source !== 'fb'"><label>{{ t('guard.landingMetricOpt') }}</label>
           <select v-model="form.landing_metric" class="input">
-            <option value="pass">通过量（点击按钮次数）</option>
-            <option value="visit">访问量（到达落地页次数）</option>
+            <option value="pass">{{ t('guard.lm.pass') }}</option>
+            <option value="visit">{{ t('guard.lm.visit') }}</option>
           </select>
         </div>
-        <div class="form-l"><label>作用账户</label>
+        <div class="form-l"><label>{{ t('guard.scopeAccountsLabel') }}</label>
           <el-select v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip
-            placeholder="留空=名下全部账户；可多选指定账户" style="width:100%">
+            :placeholder="t('guard.scopeAccountsPh')" style="width:100%">
             <el-option v-for="a in accountsList" :key="a.act_id" :value="a.act_id" :label="`${a.name}（${a.act_id}）`" />
           </el-select>
         </div>
-        <div class="m-foot"><button class="btn" @click="editOpen=false">取消</button><button class="btn primary" @click="save">{{ editing ? '保存' : '创建' }}</button></div>
+        <div class="m-foot"><button class="btn" @click="editOpen=false">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
       </div>
     </div>
   </div>

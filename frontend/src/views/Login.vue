@@ -1,10 +1,14 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { api, setToken, GET } from '../api'
 import { setUserPerms } from '../router'
+import { useLocale } from '../composables/useLocale'
 import { ElMessage } from 'element-plus'
 
+const { t } = useI18n()
+const { locale, toggle: toggleLocale } = useLocale()
 const router = useRouter()
 const email = ref('')
 const password = ref('')
@@ -12,7 +16,7 @@ const loading = ref(false)
 const canLogin = computed(() => email.value.trim() && password.value)
 
 const login = async () => {
-  if (!email.value.trim() || !password.value) return ElMessage.warning('填邮箱和密码')
+  if (!email.value.trim() || !password.value) return ElMessage.warning(t('login.errFill'))
   loading.value = true
   try {
     const res = await api('POST', '/auth/login', { email: email.value, password: password.value })
@@ -30,12 +34,16 @@ const login = async () => {
 
 <template>
   <div class="login-page">
+    <span class="lang-toggle" @click="toggleLocale"
+          :title="locale === 'zh' ? t('layout.langToEn') : t('layout.langToZh')">
+      {{ locale === 'zh' ? 'EN' : '中' }}
+    </span>
     <div class="login-card">
-      <h1 class="login-title">Tova Ads</h1>
-      <p class="login-sub">广告投放管理系统</p>
-      <el-input v-model="email" placeholder="邮箱" class="login-input" autocomplete="username" @keyup.enter="login" />
-      <el-input v-model="password" type="password" placeholder="密码" class="login-input" autocomplete="current-password" show-password @keyup.enter="login" />
-      <el-button type="primary" class="login-btn" :loading="loading" :disabled="!canLogin" @click="login">登录</el-button>
+      <h1 class="login-title">{{ t('login.title') }}</h1>
+      <p class="login-sub">{{ t('login.subtitle') }}</p>
+      <el-input v-model="email" :placeholder="t('login.emailPlaceholder')" class="login-input" autocomplete="username" @keyup.enter="login" />
+      <el-input v-model="password" type="password" :placeholder="t('login.passwordPlaceholder')" class="login-input" autocomplete="current-password" show-password @keyup.enter="login" />
+      <el-button type="primary" class="login-btn" :loading="loading" :disabled="!canLogin" @click="login">{{ t('login.signIn') }}</el-button>
     </div>
   </div>
 </template>
@@ -47,7 +55,16 @@ const login = async () => {
   align-items: center;
   justify-content: center;
   background: var(--bg);
+  position: relative;
 }
+.lang-toggle {
+  position: absolute; top: 20px; right: 24px;
+  font-size: 12px; font-weight: 700;
+  padding: 4px 10px; border-radius: var(--rs);
+  background: var(--bg3); color: var(--t2); cursor: pointer;
+  user-select: none; transition: background 0.15s, color 0.15s;
+}
+.lang-toggle:hover { background: var(--acg); color: var(--ac); }
 .login-card {
   width: 360px;
   padding: 40px;

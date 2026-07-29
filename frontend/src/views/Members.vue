@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tenantStatus } from '../composables/useStatus'
+const { t } = useI18n()
 const memberStatus = (s) => tenantStatus(s)
 
 const tab = ref('members')
@@ -31,7 +33,7 @@ const load = async () => {
     roles.value = r
     members.value = m
     permGroups.value = p.groups || []
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('members.loadFail')) }
   loading.value = false
 }
 onMounted(load)
@@ -57,26 +59,26 @@ const openEditRole = (r) => {
   roleOpen.value = true
 }
 const saveRole = async () => {
-  if (!roleForm.value.name.trim()) return ElMessage.warning('填角色名')
+  if (!roleForm.value.name.trim()) return ElMessage.warning(t('members.roleNameRequired'))
   try {
     if (editingRole.value) {
       await PUT(`/rbac/roles/${editingRole.value.id}`, roleForm.value)
-      ElMessage.success('角色已更新')
+      ElMessage.success(t('members.roleUpdated'))
     } else {
       await POST('/rbac/roles', roleForm.value)
-      ElMessage.success('角色已创建')
+      ElMessage.success(t('members.roleCreated'))
     }
     roleOpen.value = false
     await load()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const removeRole = async (r) => {
-  if (r.is_system) return ElMessage.warning('系统角色不可删除')
-  if (r.member_count > 0) return ElMessage.warning('该角色下有成员，请先转移')
+  if (r.is_system) return ElMessage.warning(t('members.systemRoleNoDelete'))
+  if (r.member_count > 0) return ElMessage.warning(t('members.roleHasMembers'))
   try {
-    await ElMessageBox.confirm(`删除角色「${roleLabel(r.name)}」？`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('members.delRoleConfirm', { name: roleLabel(r.name) }), t('common.confirm'), { type: 'warning' })
     await DELETE(`/rbac/roles/${r.id}`)
-    ElMessage.success('已删除')
+    ElMessage.success(t('common.delete') + t('members.doneSuffix'))
     await load()
   } catch {}
 }
@@ -85,16 +87,16 @@ const removeRole = async (r) => {
 const inviteSaving = ref(false)
 const openInvite = () => { inviteForm.value = { email: '', password: '', role: 'operator' }; inviteOpen.value = true }
 const submitInvite = async () => {
-  if (!inviteForm.value.email.trim()) return ElMessage.warning('填邮箱')
+  if (!inviteForm.value.email.trim()) return ElMessage.warning(t('members.emailRequired'))
   inviteSaving.value = true
   try {
     const r = await POST('/rbac/members/invite', inviteForm.value)
     inviteOpen.value = false
     await load()
     await ElMessageBox.alert(
-      r.default_password ? `已邀请，默认密码：${r.default_password}（请告知对方首次登录后修改）` : '已邀请',
-      '邀请成功', { confirmButtonText: '知道了', type: 'success' })
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+      r.default_password ? t('members.invitedWithPwd', { pwd: r.default_password }) : t('members.invited'),
+      t('members.inviteSuccess'), { confirmButtonText: t('common.ok'), type: 'success' })
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   inviteSaving.value = false
 }
 const changeRole = async (m, roleName) => {
@@ -102,59 +104,59 @@ const changeRole = async (m, roleName) => {
   const fromOwner = m.role === 'owner'
   try {
     const msg = fromOwner
-      ? `将 ${m.email} 从【管理员】改为【${roleName}】？\n\n管理员降级会立即收回其管理权限（含改规则/改配置/邀人）。`
-      : `将 ${m.email} 的角色改为【${roleName}】？`
-    await ElMessageBox.confirm(msg, '角色变更', { type: fromOwner ? 'warning' : 'info', confirmButtonText: '确认', cancelButtonText: '取消' })
+      ? t('members.changeRoleFromOwner', { email: m.email, role: roleLabel(roleName) })
+      : t('members.changeRole', { email: m.email, role: roleLabel(roleName) })
+    await ElMessageBox.confirm(msg, t('members.roleChange'), { type: fromOwner ? 'warning' : 'info', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
   } catch { return }  // 取消则 select 自动回弹到 m.role（受控）
   try {
     await PUT(`/rbac/members/${m.membership_id}/role`, { role: roleName })
-    ElMessage.success('角色已更新')
+    ElMessage.success(t('members.roleUpdated'))
     await load()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const removeMember = async (m) => {
   try {
-    await ElMessageBox.confirm(`移除成员「${m.email}」？`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('members.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning' })
     await DELETE(`/rbac/members/${m.membership_id}`)
-    ElMessage.success('已移除')
+    ElMessage.success(t('members.removed'))
     await load()
   } catch {}
 }
 
-const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
-const roleLabel = (name) => ROLE_ZH[name] || name
+const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin', super: 'role.super' }
+const roleLabel = (name) => ROLE_KEY[name] ? t(ROLE_KEY[name]) : name
 const permLabel = (key) => {
-  const map = { 'ads.read':'看广告','ads.create':'建广告','ads.pause':'停广告','ads.resume':'开广告','ads.update':'改广告','ads.delete':'删广告','rules.read':'看规则','rules.create':'建规则','rules.edit':'改规则','landing.manage':'落地页','assets.manage':'素材库','billing.view':'看账单','billing.manage':'管账单','members.invite':'邀成员','members.manage':'管成员','audit.read':'审计' }
-  return map[key] || key
+  const map = { 'ads.read':'members.perm.adsRead','ads.create':'members.perm.adsCreate','ads.pause':'members.perm.adsPause','ads.resume':'members.perm.adsResume','ads.update':'members.perm.adsUpdate','ads.delete':'members.perm.adsDelete','rules.read':'members.perm.rulesRead','rules.create':'members.perm.rulesCreate','rules.edit':'members.perm.rulesEdit','landing.manage':'members.perm.landingManage','assets.manage':'members.perm.assetsManage','billing.view':'members.perm.billingView','billing.manage':'members.perm.billingManage','members.invite':'members.perm.membersInvite','members.manage':'members.perm.membersManage','audit.read':'members.perm.auditRead' }
+  return map[key] ? t(map[key]) : key
 }
 </script>
 
 <template>
   <div class="page">
     <div class="tabs">
-      <div :class="['tab', { on: tab === 'members' }]" @click="tab = 'members'">团队成员</div>
-      <div :class="['tab', { on: tab === 'roles' }]" @click="tab = 'roles'">角色权限</div>
+      <div :class="['tab', { on: tab === 'members' }]" @click="tab = 'members'">{{ t('members.tabMembers') }}</div>
+      <div :class="['tab', { on: tab === 'roles' }]" @click="tab = 'roles'">{{ t('members.tabRoles') }}</div>
     </div>
 
     <!-- 成员 -->
     <div v-if="tab === 'members'">
       <div class="bar">
-        <span class="bar-l">{{ members.length }} 个成员</span>
-        <button class="btn primary" @click="openInvite">+ 邀请成员</button>
+        <span class="bar-l">{{ t('members.memberCount', { n: members.length }) }}</span>
+        <button class="btn primary" @click="openInvite">+ {{ t('members.inviteMember') }}</button>
       </div>
       <div class="tbl" v-loading="loading">
-        <div class="row head"><div>成员</div><div>角色</div><div>状态</div><div></div></div>
+        <div class="row head"><div>{{ t('members.colMember') }}</div><div>{{ t('members.colRole') }}</div><div>{{ t('common.status') }}</div><div></div></div>
         <div v-for="m in members" :key="m.membership_id" class="row">
-          <div class="nm">{{ m.email }}<span v-if="m.is_you" class="you-tag">你</span></div>
+          <div class="nm">{{ m.email }}<span v-if="m.is_you" class="you-tag">{{ t('members.you') }}</span></div>
           <div>
             <select class="role-sel" :value="m.role" :disabled="m.is_you && m.role === 'owner'"
                     @change="e => changeRole(m, e.target.value)">
-              <option v-for="r in roles" :key="r.id" :value="r.name">{{ roleLabel(r.name) }}（{{ r.permissions.length }}权限）</option>
+              <option v-for="r in roles" :key="r.id" :value="r.name">{{ roleLabel(r.name) }}（{{ t('members.permCount', { n: r.permissions.length }) }}）</option>
             </select>
           </div>
           <div><span class="st" :class="memberStatus(m.status).cls">{{ memberStatus(m.status).label }}</span></div>
           <div class="ops">
-            <button v-if="!m.is_you" class="mb danger" @click="removeMember(m)">移除</button>
+            <button v-if="!m.is_you" class="mb danger" @click="removeMember(m)">{{ t('common.remove') }}</button>
             <span v-else class="muted">—</span>
           </div>
         </div>
@@ -164,24 +166,24 @@ const permLabel = (key) => {
     <!-- 角色 -->
     <div v-if="tab === 'roles'">
       <div class="bar">
-        <span class="bar-l">{{ roles.length }} 个角色</span>
-        <button class="btn primary" @click="openCreateRole">+ 新建角色</button>
+        <span class="bar-l">{{ t('members.roleCount', { n: roles.length }) }}</span>
+        <button class="btn primary" @click="openCreateRole">+ {{ t('members.createRole') }}</button>
       </div>
       <div class="role-list" v-loading="loading">
         <div v-for="r in roles" :key="r.id" class="role-card">
           <div class="role-head">
             <span class="role-name">{{ roleLabel(r.name) }}</span>
-            <span v-if="r.is_system" class="sys-tag">系统</span>
-            <span class="cnt-tag">{{ r.permissions.length }} 个权限</span>
-            <span class="mem-tag">{{ r.member_count }} 人</span>
+            <span v-if="r.is_system" class="sys-tag">{{ t('members.systemTag') }}</span>
+            <span class="cnt-tag">{{ t('members.permCountLabel', { n: r.permissions.length }) }}</span>
+            <span class="mem-tag">{{ t('members.memberCountLabel', { n: r.member_count }) }}</span>
             <div class="role-ops">
-              <button class="mb" @click="openEditRole(r)">编辑权限</button>
-              <button v-if="!r.is_system" class="mb danger" @click="removeRole(r)">删除</button>
+              <button class="mb" @click="openEditRole(r)">{{ t('members.editPerms') }}</button>
+              <button v-if="!r.is_system" class="mb danger" @click="removeRole(r)">{{ t('common.delete') }}</button>
             </div>
           </div>
           <div class="perm-chips">
             <span v-for="p in r.permissions" :key="p" class="perm-chip">{{ permLabel(p) }}</span>
-            <span v-if="!r.permissions.length" class="muted">无权限</span>
+            <span v-if="!r.permissions.length" class="muted">{{ t('members.noPerms') }}</span>
           </div>
           <div v-if="r.description" class="role-desc">{{ r.description }}</div>
         </div>
@@ -191,11 +193,11 @@ const permLabel = (key) => {
     <!-- 角色编辑弹窗 -->
     <div v-if="roleOpen" class="overlay" @click.self="roleOpen=false">
       <div class="modal role-modal">
-        <div class="m-title">{{ editingRole ? '编辑角色' : '新建角色' }}</div>
-        <div class="form-l"><label>角色名</label><input v-model="roleForm.name" class="input" :disabled="editingRole?.is_system" placeholder="如：落地页专员" /></div>
-        <div class="form-l"><label>描述</label><input v-model="roleForm.description" class="input" placeholder="角色说明（可选）" /></div>
+        <div class="m-title">{{ editingRole ? t('members.editRole') : t('members.createRole') }}</div>
+        <div class="form-l"><label>{{ t('members.roleName') }}</label><input v-model="roleForm.name" class="input" :disabled="editingRole?.is_system" :placeholder="t('members.roleNamePlaceholder')" /></div>
+        <div class="form-l"><label>{{ t('members.description') }}</label><input v-model="roleForm.description" class="input" :placeholder="t('members.descriptionPlaceholder')" /></div>
         <div class="perm-section">
-          <div class="perm-title">权限矩阵（勾选该角色可以使用的模块）</div>
+          <div class="perm-title">{{ t('members.permMatrixTitle') }}</div>
           <div v-for="g in permGroups" :key="g.label" class="perm-group">
             <div class="pg-head" @click="() => { const all = g.keys.every(k => hasPerm(k)); g.keys.forEach(k => { if (all) togglePerm(k); else if (!hasPerm(k)) togglePerm(k) }) }">
               <span class="pg-name">{{ g.label }}</span>
@@ -211,9 +213,9 @@ const permLabel = (key) => {
           </div>
         </div>
         <div class="m-foot">
-          <span class="perm-total">已选 {{ roleForm.permissions.length }} 个权限</span>
-          <button class="btn" @click="roleOpen=false">取消</button>
-          <button class="btn primary" @click="saveRole">{{ editingRole ? '保存' : '创建' }}</button>
+          <span class="perm-total">{{ t('members.selectedPerms', { n: roleForm.permissions.length }) }}</span>
+          <button class="btn" @click="roleOpen=false">{{ t('common.cancel') }}</button>
+          <button class="btn primary" @click="saveRole">{{ editingRole ? t('common.save') : t('common.create') }}</button>
         </div>
       </div>
     </div>
@@ -221,15 +223,15 @@ const permLabel = (key) => {
     <!-- 邀请弹窗 -->
     <div v-if="inviteOpen" class="overlay" @click.self="inviteOpen=false">
       <div class="modal">
-        <div class="m-title">邀请成员</div>
-        <div class="form-l"><label>邮箱</label><input v-model="inviteForm.email" class="input" placeholder="新成员邮箱" /></div>
-        <div class="form-l"><label>密码</label><input v-model="inviteForm.password" class="input" type="password" autocomplete="new-password" placeholder="留空=默认 Welcome123!" /></div>
-        <div class="form-l"><label>角色</label>
+        <div class="m-title">{{ t('members.inviteMember') }}</div>
+        <div class="form-l"><label>{{ t('members.email') }}</label><input v-model="inviteForm.email" class="input" :placeholder="t('members.emailPlaceholder')" /></div>
+        <div class="form-l"><label>{{ t('members.password') }}</label><input v-model="inviteForm.password" class="input" type="password" autocomplete="new-password" :placeholder="t('members.passwordPlaceholder')" /></div>
+        <div class="form-l"><label>{{ t('members.colRole') }}</label>
           <select v-model="inviteForm.role" class="input">
-            <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ r.permissions.length }}权限）</option>
+            <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ t('members.permCount', { n: r.permissions.length }) }}）</option>
           </select>
         </div>
-        <div class="m-foot"><button class="btn" @click="inviteOpen=false">取消</button><button class="btn primary" :disabled="inviteSaving" @click="submitInvite">{{ inviteSaving ? '邀请中…' : '邀请' }}</button></div>
+        <div class="m-foot"><button class="btn" @click="inviteOpen=false">{{ t('common.cancel') }}</button><button class="btn primary" :disabled="inviteSaving" @click="submitInvite">{{ inviteSaving ? t('members.inviting') : t('members.invite') }}</button></div>
       </div>
     </div>
   </div>

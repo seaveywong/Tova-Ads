@@ -1,10 +1,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
 import { isSuperadminSync } from '../router'
+const { t } = useI18n()
 const isSuper = isSuperadminSync()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
@@ -52,7 +54,7 @@ const loadImporting = ref(false)
 const load = async () => {
   loading.value = true
   try { tokens.value = await GET('/fb/credentials') }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('tokens.loadFail')) }
   loading.value = false
 }
 const loadSummary = async () => {
@@ -67,8 +69,8 @@ onMounted(() => {
   load(); loadSummary(); loadAtRisk()
   // OAuth 回调处理（FB 授权后 302 回来 ?oauth=ok/fail&msg=）
   const st = route.query.oauth
-  if (st === 'ok') ElMessage.success('Facebook 授权成功，令牌已导入')
-  else if (st === 'fail') ElMessage.error('授权失败：' + (route.query.msg || '未知错误'))
+  if (st === 'ok') ElMessage.success(t('tokens.oauthSuccess'))
+  else if (st === 'fail') ElMessage.error(t('tokens.oauthFail', { msg: route.query.msg || t('common.fail') }))
 })
 
 const statusOrder = (t) => {
@@ -80,55 +82,55 @@ const statusOrder = (t) => {
 }
 const sortedTokens = computed(() => [...tokens.value].sort((a, b) => statusOrder(a) - statusOrder(b)))
 
-const statusMeta = (t) => {
-  const s = t.status, f = t.consecutive_fails || 0
-  if (['expired','revoked','inactive'].includes(s)) return { dot: 'err', label: '失效' }
-  if (['limited'].includes(s) || f >= 3) return { dot: 'warn', label: `限流${f}` }
-  if (s === 'suspended') return { dot: 'warn', label: '待认证' }
-  if (s === 'disabled') return { dot: 'off', label: '停用' }
-  if (f > 0) return { dot: 'warn', label: `异常${f}` }
-  return { dot: 'ok', label: '正常' }
+const statusMeta = (tk) => {
+  const s = tk.status, f = tk.consecutive_fails || 0
+  if (['expired','revoked','inactive'].includes(s)) return { dot: 'err', label: t('status.tokenInvalid') }
+  if (['limited'].includes(s) || f >= 3) return { dot: 'warn', label: t('status.tokenThrottled') + f }
+  if (s === 'suspended') return { dot: 'warn', label: t('status.tokenPending') }
+  if (s === 'disabled') return { dot: 'off', label: t('common.disable') }
+  if (f > 0) return { dot: 'warn', label: t('tokens.abnormal') + f }
+  return { dot: 'ok', label: t('status.tokenValid') }
 }
 const TYPE_META = {
-  operate: { label: '操作', title: '操作号：可写广告 + 读 + 可暂停' },
-  manage:  { label: '管理', title: '管理号：读 + 可暂停，不建新广告' },
-  user:    { label: '只读', title: '只读号：仅查看，不可写/暂停' },
+  operate: { label: t('tokens.typeOperate'), title: t('tokens.typeOperateTitle') },
+  manage:  { label: t('tokens.typeManage'), title: t('tokens.typeManageTitle') },
+  user:    { label: t('tokens.typeUser'), title: t('tokens.typeUserTitle') },
 }
-const typeMeta = (t) => TYPE_META[t] || TYPE_META.user
-const sourceLabel = (s) => ({ manual: '手动', oauth: 'OAuth' }[s] || '—')
+const typeMeta = (tk) => TYPE_META[tk] || TYPE_META.user
+const sourceLabel = (s) => ({ manual: t('tokens.sourceManual'), oauth: 'OAuth' }[s] || '—')
 const fmtTime = (s) => {
   if (!s || s === 'None') return '—'
   const d = new Date(s.endsWith('Z') ? s : s.replace(' ', 'T') + 'Z')
   if (isNaN(d)) return '—'
   const diff = (Date.now() - d.getTime()) / 60000
-  if (diff < 1) return '刚刚'
-  if (diff < 60) return `${Math.floor(diff)}分前`
-  if (diff < 1440) return `${Math.floor(diff/60)}时前`
+  if (diff < 1) return t('tokens.justNow')
+  if (diff < 60) return t('tokens.minutesAgo', { n: Math.floor(diff) })
+  if (diff < 1440) return t('tokens.hoursAgo', { n: Math.floor(diff/60) })
   return d.toLocaleDateString('zh-CN')
 }
 const permCount = (p) => (!p || !p.scopes) ? 0 : p.scopes.length
 
 const accountStatusMeta = (s) => accountStatus(s)
 const SCOPE_LABELS = {
-  ads_management: '广告管理', ads_read: '广告读取',
-  pages_show_list: '主页展示', pages_messaging: '主页消息',
-  pages_manage_metadata: '主页管理元数据', pages_read_engagement: '主页读取互动',
-  pages_manage_posts: '主页管理帖子', pages_read_user_content: '主页读取用户内容',
-  pages_manage_engagement: '主页管理互动', pages_events: '主页事件',
-  business_management: '商务管理平台', read_insights: '读取分析',
-  instagram_basic: 'Instagram 基础', instagram_manage_insights: 'Instagram 管理分析',
-  instagram_manage_comments: 'Instagram 管理评论',
-  public_profile: '公共主页资料', email: '邮箱',
-  attribution_read: '归因读取', catalog_management: '目录管理',
-  whatsapp_business_management: 'WhatsApp 商务管理',
-  leads_retrieval: '潜在客户检索', pages_manage_cta: '主页管理 CTA',
+  ads_management: t('tokens.scopeAdsManagement'), ads_read: t('tokens.scopeAdsRead'),
+  pages_show_list: t('tokens.scopePagesShowList'), pages_messaging: t('tokens.scopePagesMessaging'),
+  pages_manage_metadata: t('tokens.scopePagesManageMetadata'), pages_read_engagement: t('tokens.scopePagesReadEngagement'),
+  pages_manage_posts: t('tokens.scopePagesManagePosts'), pages_read_user_content: t('tokens.scopePagesReadUserContent'),
+  pages_manage_engagement: t('tokens.scopePagesManageEngagement'), pages_events: t('tokens.scopePagesEvents'),
+  business_management: t('tokens.scopeBusinessManagement'), read_insights: t('tokens.scopeReadInsights'),
+  instagram_basic: t('tokens.scopeInstagramBasic'), instagram_manage_insights: t('tokens.scopeInstagramManageInsights'),
+  instagram_manage_comments: t('tokens.scopeInstagramManageComments'),
+  public_profile: t('tokens.scopePublicProfile'), email: t('tokens.scopeEmail'),
+  attribution_read: t('tokens.scopeAttributionRead'), catalog_management: t('tokens.scopeCatalogManagement'),
+  whatsapp_business_management: t('tokens.scopeWhatsappBusinessManagement'),
+  leads_retrieval: t('tokens.scopeLeadsRetrieval'), pages_manage_cta: t('tokens.scopePagesManageCta'),
 }
 const scopeLabel = (s) => SCOPE_LABELS[s] || s
 
 const copyId = async (id) => {
   if (!id) return
-  try { await navigator.clipboard.writeText(id); ElMessage.success('已复制 ' + id) }
-  catch { ElMessage.warning('复制失败，请手动选择') }
+  try { await navigator.clipboard.writeText(id); ElMessage.success(t('tokens.copiedId', { id })) }
+  catch { ElMessage.warning(t('tokens.copyFail')) }
 }
 
 const countOf = (t, kind) => {
@@ -158,73 +160,73 @@ const drawerPages = computed(() => {
   return [...list].sort((a, b) => (b.fan_count || 0) - (a.fan_count || 0))
 })
 
-const refreshAllLabel = ref('刷新全部')
+const refreshAllLabel = ref(t('tokens.refreshAll'))
 const refreshAll = async () => {
   let ok = 0, fail = 0, done = 0
   const total = tokens.value.length
-  for (const t of tokens.value) {
-    refreshAllLabel.value = `检测 ${done}/${total}…`
-    try { const r = await POST(`/fb/credentials/${t.id}/check`, {}); r.now_valid ? ok++ : fail++ }
+  for (const tk of tokens.value) {
+    refreshAllLabel.value = t('tokens.checkingProgress', { done, total })
+    try { const r = await POST(`/fb/credentials/${tk.id}/check`, {}); r.now_valid ? ok++ : fail++ }
     catch { fail++ }
     done++
   }
-  refreshAllLabel.value = '刷新全部'
+  refreshAllLabel.value = t('tokens.refreshAll')
   await load()
   await loadAtRisk()
-  ElMessage[fail ? 'warning' : 'success'](`完成：${ok} 个正常，${fail} 个异常` + (fail ? '（异常已标红，点详情查看）' : ''))
+  ElMessage[fail ? 'warning' : 'success'](t('tokens.refreshAllResult', { ok, fail }) + (fail ? t('tokens.refreshAllResultWarn') : ''))
 }
-const refreshAccounts = async (t) => {
-  try { ElMessage.info('刷新中…'); const r = await POST(`/fb/credentials/${t.id}/refresh-accounts`, {}); delete assetCache.value[t.id]; await loadDrawerAssets(t); ElMessage.success(`已刷新 ${r.updated||0} 个账户`) }
-  catch (e) { ElMessage.error('刷新失败：'+(e.message||'')) }
+const refreshAccounts = async (tk) => {
+  try { ElMessage.info(t('tokens.refreshing')); const r = await POST(`/fb/credentials/${tk.id}/refresh-accounts`, {}); delete assetCache.value[tk.id]; await loadDrawerAssets(tk); ElMessage.success(t('tokens.accountsRefreshed', { n: r.updated||0 })) }
+  catch (e) { ElMessage.error(t('tokens.refreshFail') + (e.message||'')) }
 }
-const handleAction = (cmd, t) => {
-  if (cmd === 'check') checkToken(t)
-  else if (cmd === 'refresh') refreshAccounts(t)
-  else if (cmd === 'delete') deleteToken(t)
-  else if (cmd === 'update_token') updateToken(t)
+const handleAction = (cmd, tk) => {
+  if (cmd === 'check') checkToken(tk)
+  else if (cmd === 'refresh') refreshAccounts(tk)
+  else if (cmd === 'delete') deleteToken(tk)
+  else if (cmd === 'update_token') updateToken(tk)
 }
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
     try {
-      await ElMessageBox.confirm(`取消纳管「${a.name}」？将不再管理此账户（令牌权限不变，FB 上仍存在，可随时重新导入）。`, '确认', {type:'warning'})
+      await ElMessageBox.confirm(t('tokens.unmanageConfirm', { name: a.name }), t('common.confirm'), {type:'warning'})
       await DELETE(`/fb/accounts/${a.account_id}`)
-      ElMessage.success('已取消纳管')
+      ElMessage.success(t('tokens.unmanaged'))
       if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
       await Promise.all([load(), loadSummary(), loadAtRisk()])
     } catch {}
   }
 }
 
-const startEdit = (t) => { editId.value = t.id; editAlias.value = t.alias || '' }
-const saveEdit = async (t) => {
+const startEdit = (tk) => { editId.value = tk.id; editAlias.value = tk.alias || '' }
+const saveEdit = async (tk) => {
   if (editId.value === null) return
   const id = editId.value, val = editAlias.value.trim()
   editId.value = null
-  if (val === (t.alias || '')) return
-  try { await POST(`/fb/credentials/${id}/rename`, { alias: val }); t.alias = val; ElMessage.success('已更新') }
-  catch { ElMessage.error('更新失败') }
+  if (val === (tk.alias || '')) return
+  try { await POST(`/fb/credentials/${id}/rename`, { alias: val }); tk.alias = val; ElMessage.success(t('tokens.updated')) }
+  catch { ElMessage.error(t('tokens.updateFail')) }
 }
 
-const loadDrawerAssets = async (t) => {
+const loadDrawerAssets = async (tk) => {
   assetLoading.value = true
   try {
-    const data = await GET(`/fb/credentials/${t.id}/assets`)
-    assetCache.value[t.id] = { accounts: data.accounts || [], pages: data.pages || [],
+    const data = await GET(`/fb/credentials/${tk.id}/assets`)
+    assetCache.value[tk.id] = { accounts: data.accounts || [], pages: data.pages || [],
                                businesses: data.businesses || [], error: data.error || null }
-    if (data.error) ElMessage.warning(`部分资产读取失败：${data.error}`)
-  } catch (e) { assetCache.value[t.id] = { accounts: [], pages: [], businesses: [], error: e.message || '读取失败' } }
+    if (data.error) ElMessage.warning(t('tokens.assetReadPartial', { msg: data.error }))
+  } catch (e) { assetCache.value[tk.id] = { accounts: [], pages: [], businesses: [], error: e.message || t('tokens.assetReadFail') } }
   assetLoading.value = false
 }
-const openDrawer = async (t) => {
-  drawerToken.value = t
+const openDrawer = async (tk) => {
+  drawerToken.value = tk
   drawerTab.value = 'accounts'
   drawerOpen.value = true
-  if (!assetCache.value[t.id]) await loadDrawerAssets(t)
+  if (!assetCache.value[tk.id]) await loadDrawerAssets(tk)
 }
 const onTabChange = () => {}
 const drawerTitle = computed(() => {
   if (!drawerToken.value) return ''
-  return `${drawerToken.value.fb_user_name || '未知'} · 用户资产`
+  return `${drawerToken.value.fb_user_name || t('tokens.unknown')} · ${t('tokens.userAssets')}`
 })
 
 // 导入账户
@@ -237,7 +239,7 @@ const openLoad = async () => {
   loadSelected.value = {}
   loadLoading.value = true
   try { loadableAccounts.value = await GET('/fb/credentials/loadable-accounts') }
-  catch (e) { ElMessage.error('拉取失败：'+(e.message||'')); loadableAccounts.value = [] }
+  catch (e) { ElMessage.error(t('tokens.fetchFail')+(e.message||'')); loadableAccounts.value = [] }
   loadLoading.value = false
 }
 const filteredLoadable = computed(() => {
@@ -252,25 +254,25 @@ const doImport = async (ids) => {
   loadImporting.value = true
   try {
     const r = await POST('/fb/import', { account_ids: ids })
-    const parts = [`导入 ${r.count}`]
-    if (r.skipped_existing) parts.push(`跳过已存在 ${r.skipped_existing}`)
-    if (r.not_found && r.not_found.length) parts.push(`未找到 ${r.not_found.length}`)
+    const parts = [t('tokens.importedCount', { n: r.count })]
+    if (r.skipped_existing) parts.push(t('tokens.skippedExisting', { n: r.skipped_existing }))
+    if (r.not_found && r.not_found.length) parts.push(t('tokens.notFound', { n: r.not_found.length }))
     ElMessage.success(parts.join(' · '))
     loadOpen.value = false
     await Promise.all([load(), loadSummary(), loadAtRisk()])
     if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
-  } catch (e) { ElMessage.error('导入失败：'+(e.message||'')) }
+  } catch (e) { ElMessage.error(t('tokens.importFail')+(e.message||'')) }
   loadImporting.value = false
 }
 const commitLoadList = async () => {
   const impSet = new Set(loadableAccounts.value.filter(a => a.imported).map(a => a.account_id))
   const ids = Object.keys(loadSelected.value).filter(k => loadSelected.value[k] && !impSet.has(k))
-  if (!ids.length) { ElMessage.warning('勾选未导入的账户'); return }
+  if (!ids.length) { ElMessage.warning(t('tokens.selectUnimported')); return }
   await doImport(ids)
 }
 const commitLoadIds = async () => {
   const ids = loadIdText.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
-  if (!ids.length) { ElMessage.warning('粘贴账户 ID'); return }
+  if (!ids.length) { ElMessage.warning(t('tokens.pasteIds')); return }
   await doImport(ids)
 }
 
@@ -278,47 +280,47 @@ const commitLoadIds = async () => {
 const loadApps = async () => { appLoading.value = true; try { apps.value = await GET('/fb/apps') } catch { apps.value = [] }; appLoading.value = false }
 const openAppConfig = async () => { popOverlay(); appConfigOpen.value = true; await loadApps() }
 const saveApp = async () => {
-  if (!appForm.value.app_id.trim() || !appForm.value.app_secret.trim()) { ElMessage.warning('填 App ID + Secret'); return }
+  if (!appForm.value.app_id.trim() || !appForm.value.app_secret.trim()) { ElMessage.warning(t('tokens.fillAppIdSecret')); return }
   try {
     if (appEditing.value) await POST(`/fb/apps/${appEditing.value}`, { ...appForm.value })
     else await POST('/fb/apps', { ...appForm.value })
-    ElMessage.success('已保存'); appForm.value = { app_id:'', app_secret:'', name:'', is_system:false }; appEditing.value = null; await loadApps()
-  } catch { ElMessage.error('失败') }
+    ElMessage.success(t('common.savedOk')); appForm.value = { app_id:'', app_secret:'', name:'', is_system:false }; appEditing.value = null; await loadApps()
+  } catch { ElMessage.error(t('common.fail')) }
 }
 const editApp = (a) => { appEditing.value = a.id; appForm.value = { app_id: a.app_id, app_secret: '', name: a.name||'', is_system: a.is_system } }
-const deleteApp = async (a) => { try { await ElMessageBox.confirm(`删除「${a.name||a.app_id}」？`, '确认', {type:'warning'}); await DELETE(`/fb/apps/${a.id}`); ElMessage.success('已删'); await loadApps() } catch {} }
+const deleteApp = async (a) => { try { await ElMessageBox.confirm(t('tokens.deleteAppConfirm', { name: a.name||a.app_id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/apps/${a.id}`); ElMessage.success(t('tokens.deleted')); await loadApps() } catch {} }
 const systemApps = computed(() => apps.value.filter(a => a.is_system))
 const myApps = computed(() => apps.value.filter(a => !a.is_system))
 const startOAuth = async (a) => {
   try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); if (r.url) window.location.href = r.url }
-  catch (e) { ElMessage.error('启动授权失败：' + (e.message || '')) }
+  catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')) }
 }
 
 const submitImport = async () => {
-  if (!importForm.value.access_token.trim()) return ElMessage.warning('填 token')
+  if (!importForm.value.access_token.trim()) return ElMessage.warning(t('tokens.fillToken'))
   importing.value = true
-  try { await POST('/fb/credentials', { access_token: importForm.value.access_token.trim(), alias: importForm.value.alias.trim(), token_type: importForm.value.token_type }); ElMessage.success('成功'); importOpen.value = false; importForm.value = { access_token:'', alias:'', token_type:'operate' }; await Promise.all([load(), loadSummary(), loadAtRisk()]) }
-  catch (e) { ElMessage.error('失败：'+(e.message||'')) }
+  try { await POST('/fb/credentials', { access_token: importForm.value.access_token.trim(), alias: importForm.value.alias.trim(), token_type: importForm.value.token_type }); ElMessage.success(t('tokens.importedOk')); importOpen.value = false; importForm.value = { access_token:'', alias:'', token_type:'operate' }; await Promise.all([load(), loadSummary(), loadAtRisk()]) }
+  catch (e) { ElMessage.error(t('tokens.importFail')+(e.message||'')) }
   importing.value = false
 }
-const updateToken = async (t) => {
+const updateToken = async (tk) => {
   try {
-    const { value } = await ElMessageBox.prompt('粘贴新的个人令牌（Access Token）：', `更新密钥 · ${t.alias || t.fb_user_name}`, {
-      confirmButtonText: '更新', cancelButtonText: '取消', inputType: 'password', inputPlaceholder: 'EAA...',
-      inputValidator: (v) => v && v.trim().length > 20 || '令牌太短',
+    const { value } = await ElMessageBox.prompt(t('tokens.updateTokenPrompt'), t('tokens.updateTokenTitle', { name: tk.alias || tk.fb_user_name }), {
+      confirmButtonText: t('tokens.updateBtn'), cancelButtonText: t('common.cancel'), inputType: 'password', inputPlaceholder: 'EAA...',
+      inputValidator: (v) => v && v.trim().length > 20 || t('tokens.tokenTooShort'),
     })
-    const r = await POST(`/fb/credentials/${t.id}/update-token`, { access_token: value.trim() })
-    ElMessage.success(`密钥已更新（${r.fb_user_name}）`)
+    const r = await POST(`/fb/credentials/${tk.id}/update-token`, { access_token: value.trim() })
+    ElMessage.success(t('tokens.tokenUpdated', { name: r.fb_user_name }))
     await load()
-  } catch (e) { if (e === 'cancel') return; ElMessage.error(e.message || '更新失败') }
+  } catch (e) { if (e === 'cancel') return; ElMessage.error(e.message || t('tokens.updateFail')) }
 }
-const checkToken = async (t) => {
-  try { ElMessage.info('检测中…'); const r = await POST(`/fb/credentials/${t.id}/check`, {}); r.now_valid ? ElMessage.success(r.detail||'正常') : ElMessage.warning(r.detail||'异常') }
-  catch { ElMessage.error('检测失败') }
-  delete assetCache.value[t.id]; await load(); await loadAtRisk()
+const checkToken = async (tk) => {
+  try { ElMessage.info(t('tokens.checking')); const r = await POST(`/fb/credentials/${tk.id}/check`, {}); r.now_valid ? ElMessage.success(r.detail||t('status.tokenValid')) : ElMessage.warning(r.detail||t('tokens.abnormal0')) }
+  catch { ElMessage.error(t('tokens.checkFail')) }
+  delete assetCache.value[tk.id]; await load(); await loadAtRisk()
 }
-const deleteToken = async (t) => {
-  try { await ElMessageBox.confirm(`删除「${t.alias||t.fb_user_name||t.id}」？关联账户将解绑。`, '确认', {type:'warning'}); await DELETE(`/fb/credentials/${t.id}`); ElMessage.success('已删'); await Promise.all([load(), loadSummary(), loadAtRisk()]) }
+const deleteToken = async (tk) => {
+  try { await ElMessageBox.confirm(t('tokens.deleteTokenConfirm', { name: tk.alias||tk.fb_user_name||tk.id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/credentials/${tk.id}`); ElMessage.success(t('tokens.deleted')); await Promise.all([load(), loadSummary(), loadAtRisk()]) }
   catch {}
 }
 </script>
@@ -327,204 +329,204 @@ const deleteToken = async (t) => {
   <div class="page">
     <div class="bar">
       <div class="bar-r">
-        <button class="btn primary" @click="importOpen = true">连接 Facebook</button>
-        <button class="btn" @click="openLoad">导入账户</button>
-        <button class="btn" @click="openAppConfig">配置 App</button>
+        <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
+        <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
+        <button class="btn" @click="openAppConfig">{{ t('tokens.configApp') }}</button>
         <button class="btn" @click="refreshAll">{{ refreshAllLabel }}</button>
       </div>
     </div>
 
     <div v-if="atRiskAccounts.length" class="risk-banner" @click="atRiskOpen = !atRiskOpen">
-      <span>⚠ {{ atRiskAccounts.length }} 个账户缺少可用令牌，暂无法读写</span>
-      <span class="risk-toggle">{{ atRiskOpen ? '收起 ▲' : '查看 ▼' }}</span>
+      <span>⚠ {{ t('tokens.atRiskSummary', { n: atRiskAccounts.length }) }}</span>
+      <span class="risk-toggle">{{ atRiskOpen ? t('tokens.collapse') : t('tokens.viewDetail') }}</span>
     </div>
     <div v-if="atRiskOpen && atRiskAccounts.length" class="risk-list">
       <div v-for="a in atRiskAccounts" :key="a.act_id" class="risk-row">
         <span class="ai-name">{{ a.name }}</span>
         <span class="ai-id blue" @click.stop="copyId(a.act_id)">{{ a.act_id }}</span>
-        <span class="ai-meta">{{ a.bound_alias ? ('原绑 ' + a.bound_alias) : '未绑定令牌' }}</span>
-        <span class="st-tag" :class="a.bound_status==='unbound'?'off':'err'">{{ a.bound_status==='unbound'?'未绑定':a.bound_status }}</span>
+        <span class="ai-meta">{{ a.bound_alias ? t('tokens.prevBound', { name: a.bound_alias }) : t('tokens.unboundToken') }}</span>
+        <span class="st-tag" :class="a.bound_status==='unbound'?'off':'err'">{{ a.bound_status==='unbound'?t('tokens.unbound'):a.bound_status }}</span>
       </div>
     </div>
 
     <div class="tbl" v-loading="loading">
       <div class="row head">
-        <span>状态</span><span>名称</span><span>FB 用户</span>
-        <span class="num-h">账户</span><span class="num-h">主页</span><span class="num-h">BM</span>
-        <span>类型</span><span></span>
+        <span>{{ t('common.status') }}</span><span>{{ t('common.name') }}</span><span>{{ t('tokens.fbUser') }}</span>
+        <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>
+        <span>{{ t('tokens.type') }}</span><span></span>
       </div>
       <div v-for="t in sortedTokens" :key="t.id" class="row" :class="statusMeta(t).dot" @click="openDrawer(t)">
         <span class="c-st"><span class="dot" :class="statusMeta(t).dot"></span>{{ statusMeta(t).label }}</span>
         <span class="c-nm" @click.stop>
           <input v-if="editId===t.id" v-model="editAlias" class="inp" @keyup.enter="saveEdit(t)" @blur="saveEdit(t)" />
-          <span v-else class="nm" @click="startEdit(t)">{{ t.alias || '未命名' }}<span class="pen">✎</span></span>
+          <span v-else class="nm" @click="startEdit(t)">{{ t.alias || t('tokens.unnamed') }}<span class="pen">✎</span></span>
         </span>
         <span class="c-fb">
           <span class="fbn">{{ t.fb_user_name || '—' }}</span>
           <span class="fbi" :title="t.fb_user_id">{{ t.fb_user_id?.slice(-10) || '—' }}</span>
         </span>
-        <span class="c-num" :class="{err:summaryError(t)}" :title="summaryError(t)||'已导入账户数'">{{ summaryError(t) ? '!' : countOf(t,'accounts') }}</span>
+        <span class="c-num" :class="{err:summaryError(t)}" :title="summaryError(t)||t('tokens.accountsCountTip')">{{ summaryError(t) ? '!' : countOf(t,'accounts') }}</span>
         <span class="c-num">{{ countOf(t,'pages') }}</span>
         <span class="c-num">{{ countOf(t,'businesses') }}</span>
         <span class="c-ty">
           <span class="tag" :class="t.token_type" :title="typeMeta(t.token_type).title">{{ typeMeta(t.token_type).label }}</span>
-          <span v-if="(t.account_count||0) > 0" class="tag rotate" title="参与多令牌轮换候选池">↻</span>
+          <span v-if="(t.account_count||0) > 0" class="tag rotate" :title="t('tokens.rotatePoolTip')">↻</span>
         </span>
         <span class="c-op" @click.stop>
           <el-dropdown trigger="click" @command="cmd => handleAction(cmd, t)">
             <button class="dots-btn" @click.stop>⋯</button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="check">检测有效性</el-dropdown-item>
-                <el-dropdown-item command="update_token">更新密钥</el-dropdown-item>
-                <el-dropdown-item command="refresh">刷新账户</el-dropdown-item>
-                <el-dropdown-item command="delete" divided>删除令牌</el-dropdown-item>
+                <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
+                <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
+                <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided>{{ t('tokens.deleteToken') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
         </span>
       </div>
       <div v-if="!tokens.length && !loading" class="empty empty-cta">
-        <div class="empty-title">还没有绑定 Facebook 令牌</div>
-        <div class="empty-step">点上方「添加令牌」或「连接 Facebook」开始 —— 绑定后才能载入广告账户、跑巡检止损。</div>
+        <div class="empty-title">{{ t('tokens.emptyTitle') }}</div>
+        <div class="empty-step">{{ t('tokens.emptyStep') }}</div>
       </div>
     </div>
 
     <el-drawer v-model="drawerOpen" :title="drawerTitle" direction="rtl" size="480px" :destroy-on-close="true">
       <div v-if="drawerToken" class="info-sec">
         <div class="info-grid">
-          <div class="info-cell"><label>令牌名称</label><span>{{ drawerToken.alias || '未命名' }}</span></div>
-          <div class="info-cell"><label>类型 / 来源</label><span :title="typeMeta(drawerToken.token_type).title">{{ typeMeta(drawerToken.token_type).label }} · {{ sourceLabel(drawerToken.token_source) }}</span></div>
-          <div class="info-cell"><label>最近检测</label><span>{{ fmtTime(drawerToken.last_verified_at) }}</span></div>
-          <div class="info-cell"><label>连续失败</label><span :class="{warn:(drawerToken.consecutive_fails||0)>=1}">{{ drawerToken.consecutive_fails || 0 }} 次</span></div>
-          <div class="info-cell"><label>关联账户</label><span>{{ drawerToken.account_count ?? 0 }} 个（已导入）</span></div>
-          <div class="info-cell"><label>权限数</label><span>{{ permCount(drawerToken.permission_snapshot) }} 项</span></div>
+          <div class="info-cell"><label>{{ t('tokens.tokenName') }}</label><span>{{ drawerToken.alias || t('tokens.unnamed') }}</span></div>
+          <div class="info-cell"><label>{{ t('tokens.typeSource') }}</label><span :title="typeMeta(drawerToken.token_type).title">{{ typeMeta(drawerToken.token_type).label }} · {{ sourceLabel(drawerToken.token_source) }}</span></div>
+          <div class="info-cell"><label>{{ t('tokens.lastVerified') }}</label><span>{{ fmtTime(drawerToken.last_verified_at) }}</span></div>
+          <div class="info-cell"><label>{{ t('tokens.consecutiveFails') }}</label><span :class="{warn:(drawerToken.consecutive_fails||0)>=1}">{{ drawerToken.consecutive_fails || 0 }} {{ t('tokens.times') }}</span></div>
+          <div class="info-cell"><label>{{ t('tokens.linkedAccounts') }}</label><span>{{ drawerToken.account_count ?? 0 }} {{ t('tokens.importedUnit') }}</span></div>
+          <div class="info-cell"><label>{{ t('tokens.permCount') }}</label><span>{{ permCount(drawerToken.permission_snapshot) }} {{ t('tokens.items') }}</span></div>
         </div>
       </div>
 
       <div class="drawer-tabs">
         <button v-for="tab in ['accounts','pages','businesses','perm']" :key="tab" class="d-tab" :class="{on:drawerTab===tab}" @click="drawerTab=tab;onTabChange()">
-          {{ {accounts:'广告账户',pages:'主页',businesses:'BM',perm:'权限详情'}[tab] }}
+          {{ {accounts:t('tokens.tabAccounts'),pages:t('tokens.tabPages'),businesses:'BM',perm:t('tokens.tabPerm')}[tab] }}
         </button>
       </div>
       <div v-loading="assetLoading">
         <div v-if="drawerTab==='accounts'">
           <div v-if="drawerToken && statusMeta(drawerToken).dot !== 'ok'" class="token-warn">
-            ⚠ 此令牌当前不可用（{{ statusMeta(drawerToken).label }}），名下账户暂无法读写——建议检测令牌，或用可用令牌重新导入绑定。
+            ⚠ {{ t('tokens.tokenWarn', { status: statusMeta(drawerToken).label }) }}
           </div>
-          <div class="add-row"><button class="add-btn" @click="openLoad">+ 添加账户</button></div>
+          <div class="add-row"><button class="add-btn" @click="openLoad">+ {{ t('tokens.addAccount') }}</button></div>
           <div v-if="drawerAccounts.length" class="asset-list">
             <div v-for="a in drawerAccounts" :key="a.account_id" class="asset-item">
               <div class="ai-main">
                 <span class="ai-name">{{ a.name }}</span>
-                <span class="ai-id blue" title="点击复制" @click.stop="copyId(a.account_id)">{{ a.account_id }}</span>
-                <span class="ai-meta" v-if="a.balance_label">可用 · {{ a.balance_label }}</span>
+                <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(a.account_id)">{{ a.account_id }}</span>
+                <span class="ai-meta" v-if="a.balance_label">{{ t('status.accActive') }} · {{ a.balance_label }}</span>
               </div>
               <span class="st-tag" :class="accountStatusMeta(a.account_status).cls">{{ accountStatusMeta(a.account_status).label }}</span>
               <el-dropdown trigger="click" @command="cmd => handleAccountCmd(cmd, a)" @click.stop>
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>发布广告（即将上线）</el-dropdown-item>
-                    <el-dropdown-item disabled>查看数据洞察（即将上线）</el-dropdown-item>
-                    <el-dropdown-item command="unmanage" divided>取消纳管</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.publishAdsSoon') }}</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.viewInsightsSoon') }}</el-dropdown-item>
+                    <el-dropdown-item command="unmanage" divided>{{ t('tokens.unmanage') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
           </div>
-          <div v-else-if="!assetLoading" class="drawer-empty">暂无已导入账户</div>
+          <div v-else-if="!assetLoading" class="drawer-empty">{{ t('tokens.noImportedAccounts') }}</div>
         </div>
         <div v-if="drawerTab==='pages'">
           <div v-if="drawerPages.length" class="asset-list">
             <div v-for="p in drawerPages" :key="p.id" class="asset-item">
               <div class="ai-main">
                 <span class="ai-name">{{ p.name }}</span>
-                <span class="ai-id blue" title="点击复制" @click.stop="copyId(p.id)">{{ p.id }}</span>
+                <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(p.id)">{{ p.id }}</span>
                 <span class="ai-meta" v-if="p.category">{{ p.category }}</span>
-                <span class="ai-meta" v-if="p.fan_count">{{ p.fan_count }} 粉丝</span>
+                <span class="ai-meta" v-if="p.fan_count">{{ p.fan_count }} {{ t('tokens.fans') }}</span>
               </div>
-              <span class="st-tag ok">可用</span>
+              <span class="st-tag ok">{{ t('status.accActive') }}</span>
               <el-dropdown trigger="click" @click.stop>
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>改名（即将上线）</el-dropdown-item>
-                    <el-dropdown-item disabled>修改类型（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.renameSoon') }}</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.changeTypeSoon') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
           </div>
-          <div v-else-if="!assetLoading" class="drawer-empty">无主页</div>
+          <div v-else-if="!assetLoading" class="drawer-empty">{{ t('tokens.noPages') }}</div>
         </div>
         <div v-if="drawerTab==='businesses'">
           <div v-if="drawerBusinesses.length" class="asset-list">
             <div v-for="b in drawerBusinesses" :key="b.id" class="asset-item">
               <div class="ai-main">
                 <span class="ai-name">{{ b.name }}</span>
-                <span class="ai-id blue" title="点击复制" @click.stop="copyId(b.id)">{{ b.id }}</span>
+                <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(b.id)">{{ b.id }}</span>
               </div>
               <span class="st-tag" :class="b.role==='完全'?'ok':'off'">{{ b.role }}</span>
               <el-dropdown trigger="click" @click.stop>
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>查看成员（即将上线）</el-dropdown-item>
-                    <el-dropdown-item disabled>管理资产（即将上线）</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.viewMembersSoon') }}</el-dropdown-item>
+                    <el-dropdown-item disabled>{{ t('tokens.manageAssetsSoon') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
             </div>
           </div>
-          <div v-else-if="!assetLoading" class="drawer-empty">无 BM</div>
+          <div v-else-if="!assetLoading" class="drawer-empty">{{ t('tokens.noBM') }}</div>
         </div>
         <div v-if="drawerTab==='perm' && drawerToken" class="perm-detail">
-          <div class="sec-title">权限（{{ permCount(drawerToken.permission_snapshot) }}）</div>
+          <div class="sec-title">{{ t('tokens.permDetailTitle', { n: permCount(drawerToken.permission_snapshot) }) }}</div>
           <div class="perm-tags"><span v-for="s in (drawerToken.permission_snapshot?.scopes||[])" :key="s" class="tag-mono" :title="s">{{ scopeLabel(s) }}</span></div>
-          <div class="sec-title mt">详情</div>
+          <div class="sec-title mt">{{ t('common.detail') }}</div>
           <div class="kv"><label>App ID</label><code>{{ drawerToken.permission_snapshot?.app_id || '—' }}</code></div>
-          <div class="kv"><label>用户 ID</label><code>{{ drawerToken.fb_user_id || '—' }}</code></div>
-          <div class="kv"><label>状态</label><span>{{ statusMeta(drawerToken).label }}</span></div>
+          <div class="kv"><label>{{ t('tokens.userId') }}</label><code>{{ drawerToken.fb_user_id || '—' }}</code></div>
+          <div class="kv"><label>{{ t('common.status') }}</label><span>{{ statusMeta(drawerToken).label }}</span></div>
         </div>
       </div>
-      <div v-if="drawerToken && assetCache[drawerToken.id]?.error" class="asset-err">部分资产读取失败：{{ assetCache[drawerToken.id].error }}</div>
+      <div v-if="drawerToken && assetCache[drawerToken.id]?.error" class="asset-err">{{ t('tokens.assetReadPartialShort') }}{{ assetCache[drawerToken.id].error }}</div>
     </el-drawer>
 
     <div v-if="loadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="loadOpen=false">
       <div class="modal wide">
-        <div class="m-title">导入账户</div>
+        <div class="m-title">{{ t('tokens.importAccounts') }}</div>
         <div class="m-tabs">
-          <button class="mt-btn" :class="{on:loadTab==='list'}" @click="loadTab='list'">勾选清单</button>
-          <button class="mt-btn" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">ID 导入</button>
+          <button class="mt-btn" :class="{on:loadTab==='list'}" @click="loadTab='list'">{{ t('tokens.tabChecklist') }}</button>
+          <button class="mt-btn" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">{{ t('tokens.tabIdImport') }}</button>
         </div>
         <div v-if="loadTab==='list'">
-          <input v-model="loadSearch" class="input load-search" placeholder="模糊搜索：账户名或 ID" />
-          <div class="load-meta">共 {{ loadableAccounts.length }} 个可管理账户，已选 {{ loadSelectedCount }}</div>
+          <input v-model="loadSearch" class="input load-search" :placeholder="t('tokens.searchAccountPlaceholder')" />
+          <div class="load-meta">{{ t('tokens.loadableMeta', { total: loadableAccounts.length, selected: loadSelectedCount }) }}</div>
           <div v-loading="loadLoading" class="load-list">
             <label v-for="a in filteredLoadable" :key="a.account_id" class="load-row" :class="{off:a.imported}">
               <input type="checkbox" :checked="!!loadSelected[a.account_id]" :disabled="a.imported" @change="loadSelected[a.account_id] = $event.target.checked" />
               <span class="ai-name">{{ a.name }}</span>
               <span class="ai-id blue" @click.stop="copyId(a.account_id)">{{ a.account_id }}</span>
-              <span v-if="a.imported" class="imp-mark">已导入</span>
+              <span v-if="a.imported" class="imp-mark">{{ t('tokens.importedMark') }}</span>
               <span class="st-tag" :class="accountStatusMeta(a.account_status).cls">{{ accountStatusMeta(a.account_status).label }}</span>
               <span class="load-tokens">
-                <span v-for="tk in a.tokens" :key="tk.id" class="tk-badge" :class="{dead:!tk.available}" :title="tk.available?'该令牌可用':'该令牌不可用（冷却/限流）'">{{ tk.alias }}</span>
+                <span v-for="tk in a.tokens" :key="tk.id" class="tk-badge" :class="{dead:!tk.available}" :title="tk.available?t('tokens.tokenAvailable'):t('tokens.tokenUnavailable')">{{ tk.alias }}</span>
               </span>
             </label>
-            <div v-if="!filteredLoadable.length && !loadLoading" class="drawer-empty">无匹配账户</div>
+            <div v-if="!filteredLoadable.length && !loadLoading" class="drawer-empty">{{ t('tokens.noMatchAccounts') }}</div>
           </div>
           <div class="m-foot">
-            <button class="btn" @click="loadOpen=false">取消</button>
-            <button class="btn primary" :disabled="loadImporting" @click="commitLoadList">导入选中</button>
+            <button class="btn" @click="loadOpen=false">{{ t('common.cancel') }}</button>
+            <button class="btn primary" :disabled="loadImporting" @click="commitLoadList">{{ t('tokens.importSelected') }}</button>
           </div>
         </div>
         <div v-if="loadTab==='ids'">
-          <div class="hint-left">粘贴账户 ID，每行一个或用逗号/空格分隔。</div>
+          <div class="hint-left">{{ t('tokens.idImportHint') }}</div>
           <textarea v-model="loadIdText" class="input load-area" placeholder="act_1234567890&#10;9876543210&#10;..."></textarea>
           <div class="m-foot">
-            <button class="btn" @click="loadOpen=false">取消</button>
-            <button class="btn primary" :disabled="loadImporting" @click="commitLoadIds">导入</button>
+            <button class="btn" @click="loadOpen=false">{{ t('common.cancel') }}</button>
+            <button class="btn primary" :disabled="loadImporting" @click="commitLoadIds">{{ t('common.import') }}</button>
           </div>
         </div>
       </div>
@@ -532,53 +534,53 @@ const deleteToken = async (t) => {
 
     <div v-if="importOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="importOpen=false">
       <div class="modal">
-        <div class="m-title">连接 Facebook</div>
-        <div class="m-tabs"><button class="mt-btn" :class="{on:importTab==='oauth'}" @click="importTab='oauth'">OAuth 授权</button><button class="mt-btn" :class="{on:importTab==='manual'}" @click="importTab='manual'">个人令牌</button></div>
+        <div class="m-title">{{ t('tokens.connectFacebook') }}</div>
+        <div class="m-tabs"><button class="mt-btn" :class="{on:importTab==='oauth'}" @click="importTab='oauth'">{{ t('tokens.tabOauth') }}</button><button class="mt-btn" :class="{on:importTab==='manual'}" @click="importTab='manual'">{{ t('tokens.tabManual') }}</button></div>
         <div v-if="importTab==='oauth'" class="m-body">
-          <div v-if="!apps.length" class="hint">先在「配置 App」添加 App。</div>
-          <div v-else><div v-for="a in apps" :key="a.id" class="oauth-app" @click="startOAuth(a)"><span>{{ a.name||a.app_id }}</span><span class="badge" :class="{sys:a.is_system}">{{ a.is_system?'系统':'我的' }}</span><span class="arrow">→</span></div></div>
+          <div v-if="!apps.length" class="hint">{{ t('tokens.oauthHint') }}</div>
+          <div v-else><div v-for="a in apps" :key="a.id" class="oauth-app" @click="startOAuth(a)"><span>{{ a.name||a.app_id }}</span><span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span><span class="arrow">→</span></div></div>
         </div>
         <div v-if="importTab==='manual'" class="m-body">
-          <div class="warn">⚠ 无法自动续期，建议用 OAuth。</div>
-          <input v-model="importForm.access_token" class="input" placeholder="访问令牌（Access Token）" />
-          <input v-model="importForm.alias" class="input" placeholder="名称（可选）" />
+          <div class="warn">⚠ {{ t('tokens.manualWarn') }}</div>
+          <input v-model="importForm.access_token" class="input" :placeholder="t('tokens.accessTokenPlaceholder')" />
+          <input v-model="importForm.alias" class="input" :placeholder="t('tokens.aliasOptional')" />
           <select v-model="importForm.token_type" class="input">
-            <option value="operate">操作号（写广告 + 读 + 可暂停）</option>
-            <option value="manage">管理号（读 + 可暂停，不建新广告）</option>
-            <option value="user">只读号（仅查看，不可暂停）</option>
+            <option value="operate">{{ t('tokens.optOperate') }}</option>
+            <option value="manage">{{ t('tokens.optManage') }}</option>
+            <option value="user">{{ t('tokens.optUser') }}</option>
           </select>
         </div>
-        <div class="m-foot"><button class="btn" @click="importOpen=false">取消</button><button v-if="importTab==='manual'" class="btn primary" :disabled="importing" @click="submitImport">导入</button></div>
+        <div class="m-foot"><button class="btn" @click="importOpen=false">{{ t('common.cancel') }}</button><button v-if="importTab==='manual'" class="btn primary" :disabled="importing" @click="submitImport">{{ t('common.import') }}</button></div>
       </div>
     </div>
 
     <div v-if="appConfigOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="appConfigOpen=false">
       <div class="modal wide">
-        <div class="m-title">App 配置</div>
+        <div class="m-title">{{ t('tokens.appConfigTitle') }}</div>
         <div class="app-list" v-loading="appLoading">
           <div v-for="a in apps" :key="a.id" class="app-row">
             <span class="app-n">{{ a.name || a.app_id }}</span>
-            <span v-if="a.is_system" class="badge sys">系统级</span>
+            <span v-if="a.is_system" class="badge sys">{{ t('tokens.systemLevel') }}</span>
             <span class="app-id">{{ a.app_id }}</span>
-            <div class="app-ops"><button class="mb" @click="editApp(a)">编</button><button class="mb danger" @click="deleteApp(a)">删</button></div>
+            <div class="app-ops"><button class="mb" @click="editApp(a)">{{ t('tokens.editShort') }}</button><button class="mb danger" @click="deleteApp(a)">{{ t('tokens.deleteShort') }}</button></div>
           </div>
-          <div v-if="!apps.length && !appLoading" class="empty">暂无 App</div>
+          <div v-if="!apps.length && !appLoading" class="empty">{{ t('tokens.noApps') }}</div>
         </div>
         <div class="app-form">
           <div class="form-h">
-            {{ appEditing ? '编辑 App' : (appForm.is_system ? '添加系统级 App' : '添加 App') }}
+            {{ appEditing ? t('tokens.editApp') : (appForm.is_system ? t('tokens.addSystemApp') : t('tokens.addApp')) }}
             <a v-if="isSuper && !appEditing" class="sys-toggle" @click="appForm.is_system = !appForm.is_system">
-              {{ appForm.is_system ? '← 改回普通 App' : '添加系统级 App →' }}
+              {{ appForm.is_system ? t('tokens.backToNormalApp') : t('tokens.addSystemAppArrow') }}
             </a>
           </div>
-          <div class="af-row"><label>名称</label><input v-model="appForm.name" class="input" placeholder="可选（备注名）" /></div>
-          <div class="af-row"><label>App ID</label><input v-model="appForm.app_id" class="input" placeholder="必填" /></div>
-          <div class="af-row"><label>Secret</label><input v-model="appForm.app_secret" class="input" type="password" placeholder="必填" /></div>
+          <div class="af-row"><label>{{ t('common.name') }}</label><input v-model="appForm.name" class="input" :placeholder="t('tokens.appNameOptional')" /></div>
+          <div class="af-row"><label>App ID</label><input v-model="appForm.app_id" class="input" :placeholder="t('common.required')" /></div>
+          <div class="af-row"><label>Secret</label><input v-model="appForm.app_secret" class="input" type="password" :placeholder="t('common.required')" /></div>
         </div>
         <div class="m-foot">
-          <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">取消</button>
-          <button class="btn primary" @click="saveApp">{{ appEditing ? '更新' : '添加' }}</button>
-          <button class="btn" @click="appConfigOpen=false">关闭</button>
+          <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">{{ t('common.cancel') }}</button>
+          <button class="btn primary" @click="saveApp">{{ appEditing ? t('tokens.updateBtn') : t('common.add') }}</button>
+          <button class="btn" @click="appConfigOpen=false">{{ t('common.close') }}</button>
         </div>
       </div>
     </div>

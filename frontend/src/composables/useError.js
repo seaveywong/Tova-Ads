@@ -1,6 +1,8 @@
 // 智能错误展示：长错误 / FB·API 错误 → 持久弹窗 + 复制按钮（不自动消失）；短错误 → toast。
 // 用法：catch (e) { showError(e) } 或 showError(e, '部署失败')
 import { ElMessage, ElMessageBox } from 'element-plus'
+import i18n from '../i18n'
+const t = i18n.global.t
 
 const _escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -8,9 +10,9 @@ const _escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
 const _copy = (text) => {
   try {
     navigator.clipboard?.writeText(text)
-    ElMessage.success('已复制错误信息')
+    ElMessage.success(t('error.copiedError'))
   } catch {
-    ElMessage.warning('复制失败，请手动选中')
+    ElMessage.warning(t('error.copyFail'))
   }
 }
 
@@ -22,17 +24,17 @@ const _isHeavy = (msg) => {
   return /Meta App|Facebook|FB API|开发者模式|限流|权限|permission|invalid|error|失败|超时|timeout|500|502|503|504/i.test(msg)
 }
 
-export function showError(e, title = '操作失败') {
+export function showError(e, title) {
   const msg = typeof e === 'string' ? e : (e?.message || String(e || ''))
   if (!msg) return
   if (_isHeavy(msg)) {
     ElMessageBox.alert(
       `<div style="max-height:50vh;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.6;color:var(--t1, #1d1d1f)">${_escapeHtml(msg)}</div>`,
-      title,
+      title || t('error.opFail'),
       {
         dangerouslyUseHTMLString: true,
-        confirmButtonText: '复制',
-        cancelButtonText: '关闭',
+        confirmButtonText: t('error.copyBtn'),
+        cancelButtonText: t('common.close'),
         showCancelButton: true,
         distinguishCancelAndClose: true,
         type: 'error',
@@ -48,13 +50,13 @@ export function showError(e, title = '操作失败') {
 export function installGlobalErrorHandler() {
   window.addEventListener('unhandledrejection', (ev) => {
     const e = ev?.reason
-    const msg = e?.message || String(e || '未知错误')
-    showError(msg, '未捕获的异常')
+    const msg = e?.message || String(e || t('error.unknown'))
+    showError(msg, t('error.uncaptured'))
     // 不阻止控制台报错
   })
   window.addEventListener('error', (ev) => {
     // 资源加载错误 (target=img/link/script) 不弹，太吵
     if (ev?.target && ev.target !== window) return
-    if (ev?.message) showError(ev.message, '页面错误')
+    if (ev?.message) showError(ev.message, t('error.pageError'))
   }, true)
 }

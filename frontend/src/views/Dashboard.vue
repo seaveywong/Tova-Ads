@@ -7,7 +7,9 @@ import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
 import Fuse from 'fuse.js'
 import { ElMessage } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const router = useRouter()
 const loading = ref(true)
 const refreshing = ref(false)
@@ -26,10 +28,10 @@ const convCanvas = ref(null)
 const cpaCanvas = ref(null)
 let _charts = []
 const GRAN_OPTS = [
-  { value: '5min', label: '5分钟' },
-  { value: '30min', label: '30分钟' },
-  { value: 'hour', label: '1小时' },
-  { value: 'day', label: '按天' },
+  { value: '5min', label: t('dashboard.gran5min') },
+  { value: '30min', label: t('dashboard.gran30min') },
+  { value: 'hour', label: t('dashboard.gran1hour') },
+  { value: 'day', label: t('dashboard.granByDay') },
 ]
 // 按看板时间范围自动推荐颗粒度
 const autoGran = () => {
@@ -71,7 +73,7 @@ const renderTrendCharts = () => {
         timeZone: userTz.value, hour12: false,
         month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
       }).formatToParts(dt)
-      const get = (t) => parts.find(p => p.type === t)?.value || ''
+      const get = (tt) => parts.find(p => p.type === tt)?.value || ''
       const md = `${get('month')}-${get('day')}`
       const hm = `${get('hour')}:${get('minute')}`
       if (gran === 'hour') return `${md} ${get('hour')}:00`
@@ -90,9 +92,9 @@ const renderTrendCharts = () => {
         plugins: { legend: { display: false } } },
     }))
   }
-  mk(spendCanvas.value, '消耗', d.spend, 'rgb(10,132,255)')
-  mk(convCanvas.value, '成效', d.conversions, 'rgb(48,209,88)')
-  mk(cpaCanvas.value, 'CPA', d.cpa, 'rgb(245,158,11)')
+  mk(spendCanvas.value, t('dashboard.seriesSpend'), d.spend, 'rgb(10,132,255)')
+  mk(convCanvas.value, t('dashboard.seriesConv'), d.conversions, 'rgb(48,209,88)')
+  mk(cpaCanvas.value, t('dashboard.seriesCpa'), d.cpa, 'rgb(245,158,11)')
 }
 watch(trendData, () => nextTick(renderTrendCharts))
 watch(trendGran, () => loadTrend())
@@ -141,9 +143,9 @@ const lastUpdated = ref('')
 const fmtAgo = (iso) => {
   if (!iso) return ''
   const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前'
-  return Math.floor(diff / 3600000) + ' 小时前'
+  if (diff < 60000) return t('dashboard.justNow')
+  if (diff < 3600000) return t('dashboard.minutesAgo', { n: Math.floor(diff / 60000) })
+  return t('dashboard.hoursAgo', { n: Math.floor(diff / 3600000) })
 }
 const loadDashboard = async (fresh = false) => {
   loading.value = true
@@ -171,23 +173,23 @@ const appLoading = computed(() => loading.value || refreshing.value || landingLo
 
 // ── 落地页数据（访问/通过/屏蔽/CPC，按子码聚合）──
 const landing = ref({ totals: {}, rows: [], block_detail: {} })
-// 屏蔽原因 → 中文（对齐 worker evalProtection 的 check 名）
-const BLOCK_REASON_ZH = {
-  device_block: '设备拦截', required_query: '缺广告参数', country_allow: '地区未放行',
-  country_block: '国家拦截', ua_block: 'UA拦截', referer_block: '来源拦截',
-  query_block: '参数拦截', datacenter_block: '机房/VPN', frequency: '频次超限', dedup: '重复访客',
-  pass: '通过',
+// 屏蔽原因 → i18n key（对齐 worker evalProtection 的 check 名）
+const BLOCK_REASON_KEY = {
+  device_block: 'dashboard.brDeviceBlock', required_query: 'dashboard.brRequiredQuery', country_allow: 'dashboard.brCountryAllow',
+  country_block: 'dashboard.brCountryBlock', ua_block: 'dashboard.brUaBlock', referer_block: 'dashboard.brRefererBlock',
+  query_block: 'dashboard.brQueryBlock', datacenter_block: 'dashboard.brDatacenterBlock', frequency: 'dashboard.brFrequency', dedup: 'dashboard.brDedup',
+  pass: 'dashboard.kpiPass',
 }
-// 国家码 → 中文（CF 给 2 字母 ISO）
-const COUNTRY_ZH = {
-  US:'美国',GB:'英国',CA:'加拿大',AU:'澳大利亚',NZ:'新西兰',IE:'爱尔兰',DE:'德国',FR:'法国',
-  IT:'意大利',ES:'西班牙',PT:'葡萄牙',NL:'荷兰',BE:'比利时',CH:'瑞士',AT:'奥地利',SE:'瑞典',
-  NO:'挪威',DK:'丹麦',FI:'芬兰',PL:'波兰',RU:'俄罗斯',TR:'土耳其',IL:'以色列',AE:'阿联酋',
-  SA:'沙特',IN:'印度',ID:'印尼',TH:'泰国',VN:'越南',PH:'菲律宾',MY:'马来西亚',SG:'新加坡',
-  JP:'日本',KR:'韩国',CN:'中国',HK:'香港',TW:'台湾',BR:'巴西',MX:'墨西哥',
+// 国家码 → i18n key（CF 给 2 字母 ISO）
+const COUNTRY_KEY = {
+  US:'dashboard.cUS',GB:'dashboard.cGB',CA:'dashboard.cCA',AU:'dashboard.cAU',NZ:'dashboard.cNZ',IE:'dashboard.cIE',DE:'dashboard.cDE',FR:'dashboard.cFR',
+  IT:'dashboard.cIT',ES:'dashboard.cES',PT:'dashboard.cPT',NL:'dashboard.cNL',BE:'dashboard.cBE',CH:'dashboard.cCH',AT:'dashboard.cAT',SE:'dashboard.cSE',
+  NO:'dashboard.cNO',DK:'dashboard.cDK',FI:'dashboard.cFI',PL:'dashboard.cPL',RU:'dashboard.cRU',TR:'dashboard.cTR',IL:'dashboard.cIL',AE:'dashboard.cAE',
+  SA:'dashboard.cSA',IN:'dashboard.cIN',ID:'dashboard.cID',TH:'dashboard.cTH',VN:'dashboard.cVN',PH:'dashboard.cPH',MY:'dashboard.cMY',SG:'dashboard.cSG',
+  JP:'dashboard.cJP',KR:'dashboard.cKR',CN:'dashboard.cCN',HK:'dashboard.cHK',TW:'dashboard.cTW',BR:'dashboard.cBR',MX:'dashboard.cMX',
 }
-const blockReasonLabel = (k) => BLOCK_REASON_ZH[k] || k
-const countryLabel = (k) => { const zh = COUNTRY_ZH[String(k||'').toUpperCase()]; return zh ? `${zh} ${k}` : (k || '-') }
+const blockReasonLabel = (k) => { const key = BLOCK_REASON_KEY[k]; return key ? t(key) : k }
+const countryLabel = (k) => { const key = COUNTRY_KEY[String(k||'').toUpperCase()]; return key ? `${t(key)} ${k}` : (k || '-') }
 const landingSearch = ref('')
 const landingFilter = ref('all')  // all / good / waste / watch
 const landingLoading = ref(false)
@@ -200,15 +202,15 @@ const fetchLanding = async () => {
 // 落地页 KPI 卡（可点击展开子码明细，参照广告版 KPI）
 const landingKpiExpanded = ref(null)
 const landingCards = computed(() => {
-  const t = landing.value.totals || {}
+  const tk = landing.value.totals || {}
   return [
-    { label: '访问', value: fmt(t.visits), color: 'blue', mode: 'visits', clickable: true },
-    { label: '通过', value: fmt(t.clicks), color: 'green', mode: 'clicks', clickable: true },
-    { label: '屏蔽', value: fmt(t.blocked), color: 'red', mode: 'blocked', clickable: (t.blocked || 0) > 0 },
-    { label: '通过率', value: fmtPct(t.pass_rate), color: 'cyan', mode: 'pass_rate', clickable: true },
-    { label: '屏蔽率', value: fmtPct(t.block_rate), color: 'orange', mode: 'block_rate', clickable: (t.blocked || 0) > 0 },
-    { label: '消耗', value: fmtUsd(t.spend_usd), color: 'purple', mode: 'spend', clickable: true },
-    { label: '落地CPC', value: t.cpc ? '$'+t.cpc : '—', color: 'teal', mode: 'cpc', clickable: true },
+    { label: t('dashboard.kpiVisits'), value: fmt(tk.visits), color: 'blue', mode: 'visits', clickable: true },
+    { label: t('dashboard.kpiPass'), value: fmt(tk.clicks), color: 'green', mode: 'clicks', clickable: true },
+    { label: t('dashboard.kpiBlocked'), value: fmt(tk.blocked), color: 'red', mode: 'blocked', clickable: (tk.blocked || 0) > 0 },
+    { label: t('dashboard.kpiPassRate'), value: fmtPct(tk.pass_rate), color: 'cyan', mode: 'pass_rate', clickable: true },
+    { label: t('dashboard.kpiBlockRate'), value: fmtPct(tk.block_rate), color: 'orange', mode: 'block_rate', clickable: (tk.blocked || 0) > 0 },
+    { label: t('dashboard.kpiSpend'), value: fmtUsd(tk.spend_usd), color: 'purple', mode: 'spend', clickable: true },
+    { label: t('dashboard.kpiCpc'), value: tk.cpc ? '$'+tk.cpc : '—', color: 'teal', mode: 'cpc', clickable: true },
   ]
 })
 const toggleLandingKpi = (i) => {
@@ -229,7 +231,7 @@ const landingKpiDetail = computed(() => {
   else if (mode === 'block_rate') rows.sort((a, b) => (b.block_rate || 0) - (a.block_rate || 0)) // 高在上
   else if (mode === 'spend') rows.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))  // 高在上
   else if (mode === 'cpc') rows.sort((a, b) => (b.cpc || 0) - (a.cpc || 0))              // 高在上
-  return { mode, title: card.label + ' · 各子码明细', rows }
+  return { mode, title: card.label + ' · ' + t('dashboard.detailBySubcode'), rows }
 })
 const landingFuse = computed(() => new Fuse(landing.value.rows || [], {
   keys: ['slug', 'ad_id', 'domain'], threshold: 0.3, ignoreLocation: true,
@@ -248,7 +250,7 @@ const filteredLanding = computed(() => {
     return so !== 0 ? so : (b.visits || 0) - (a.visits || 0)
   })
 })
-const landingStateLabel = (s) => ({ good: '有效', waste: '空耗', watch: '观察', no_data: '—' }[s] || '—')
+const landingStateLabel = (s) => ({ good: t('dashboard.stateGood'), waste: t('dashboard.stateWaste'), watch: t('dashboard.stateWatch'), no_data: '—' }[s] || '—')
 const barWidth = (count, arr) => {
   const mx = Math.max(...(arr || []).map(a => a.count), 1)
   return Math.max(4, (count / mx * 100)) + '%'
@@ -272,25 +274,25 @@ const expandedCard = ref(null)
 const taskCards = computed(() => {
   const cards = []
   const accs = data.value.accounts
-  const names = (arr) => arr.map(a => (a.name || '').slice(0, 15)).join('、')
+  const names = (arr) => arr.map(a => (a.name || '').slice(0, 15)).join(t('dashboard.nameSep'))
   const _limited = (a) => a.balance_kind === 'limited' && !a.removed  // 已移除账户不进充值提醒（不可操作）
   const critical = accs.filter(a => _limited(a) && a.balance <= 0)
-  if (critical.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: `充值提醒 · ${critical.length} 个已阻断`, desc: `可用额度为 0：${names(critical)}`, detailAccounts: critical, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+  if (critical.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskRechargeCritical', { n: critical.length }), desc: t('dashboard.taskRechargeCriticalDesc', { names: names(critical) }), detailAccounts: critical, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   const recharge = accs.filter(a => _limited(a) && a.balance > 0 && a.balance <= 100)
-  if (recharge.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: `建议充值 · ${recharge.length} 个账户`, desc: `可用额度低于 $100：${names(recharge)}`, detailAccounts: recharge, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+  if (recharge.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: t('dashboard.taskRechargeAdvice', { n: recharge.length }), desc: t('dashboard.taskRechargeAdviceDesc', { names: names(recharge) }), detailAccounts: recharge, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   if (!critical.length && !recharge.length) {
     const low = accs.filter(a => _limited(a) && a.balance > 100 && a.balance <= 300)
-    if (low.length) cards.push({ kind: 'info', icon: 'InfoFilled', title: `额度偏低 · ${low.length} 个账户`, desc: `可用额度低于 $300：${names(low)}`, detailAccounts: low, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+    if (low.length) cards.push({ kind: 'info', icon: 'InfoFilled', title: t('dashboard.taskBalanceLow', { n: low.length }), desc: t('dashboard.taskBalanceLowDesc', { names: names(low) }), detailAccounts: low, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   }
   // 真拉取异常（排除已分类的巡检未覆盖/跨时区/无数据）
   const fetchErrors = accs.filter(a => a.error && !a.error.includes('无数据') && !a.error.includes('巡检未覆盖') && !a.error.includes('跨时区'))
-  if (fetchErrors.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: `数据拉取异常 · ${fetchErrors.length} 个账户`, desc: `${names(fetchErrors)}：${fetchErrors[0]?.error || ''}`, detailAccounts: fetchErrors, detailColumns: ['name', 'error'] })
+  if (fetchErrors.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskFetchError', { n: fetchErrors.length }), desc: t('dashboard.taskFetchErrorDesc', { names: names(fetchErrors), msg: fetchErrors[0]?.error || '' }), detailAccounts: fetchErrors, detailColumns: ['name', 'error'] })
   // 巡检未覆盖（同日但无快照，需关注：可能 token 失效/巡检漏/新账户未跑到）
   const uncovered = accs.filter(a => a.error && a.error.includes('巡检未覆盖'))
-  if (uncovered.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: `巡检未覆盖 · ${uncovered.length} 个账户`, desc: `今日无快照（可能 token 失效/巡检未跑到），点击展开账户列表`, detailAccounts: uncovered, detailColumns: ['name', 'error'] })
+  if (uncovered.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: t('dashboard.taskUncovered', { n: uncovered.length }), desc: t('dashboard.taskUncoveredDesc'), detailAccounts: uncovered, detailColumns: ['name', 'error'] })
   const bleeding = accs.filter(a => !a.error && a.spend_usd > 5 && a.conversions === 0)
-  if (bleeding.length) cards.push({ kind: 'warn', icon: 'TrendCharts', title: `空耗预警 · ${bleeding.length} 个账户`, desc: `${names(bleeding)}：花了 ${fmtUsd(bleeding.reduce((s, a) => s + a.spend_usd, 0))} 无转化，点击查看明细`, detailAccounts: bleeding, detailColumns: ['name', 'spend_usd', 'conversions', 'act_id'] })
-  if (!cards.length) cards.push({ kind: 'ok', icon: 'CircleCheckFilled', title: '今日任务清爽', desc: '无充值、权限、状态或数据拉取风险', detailAccounts: [], detailColumns: [] })
+  if (bleeding.length) cards.push({ kind: 'warn', icon: 'TrendCharts', title: t('dashboard.taskBleeding', { n: bleeding.length }), desc: t('dashboard.taskBleedingDesc', { names: names(bleeding), spend: fmtUsd(bleeding.reduce((s, a) => s + a.spend_usd, 0)) }), detailAccounts: bleeding, detailColumns: ['name', 'spend_usd', 'conversions', 'act_id'] })
+  if (!cards.length) cards.push({ kind: 'ok', icon: 'CircleCheckFilled', title: t('dashboard.taskClean'), desc: t('dashboard.taskCleanDesc'), detailAccounts: [], detailColumns: [] })
   return cards.slice(0, 8)
 })
 const toggleCard = (i) => {
@@ -298,12 +300,20 @@ const toggleCard = (i) => {
   if (!card.detailAccounts?.length) return
   expandedCard.value = expandedCard.value === i ? null : i
 }
-const columnLabels = { name: '账户', balance: '可用', amount_spent_usd: '已用', spend_cap_usd: '上限', spend_usd: '消耗 (USD)', conversions: '转化', error: '错误' }
-// rule_type 英文 → 中文（自动止损明细 col2 中文化）
-const RULE_TYPE_LABEL = {
-  bleed_abs: '空耗止血', cpa_exceed: 'CPA超标', click_no_conv: '点击无转化',
-  low_ctr_no_conv: '低CTR无转化', reach_no_conv: '触达无转化', trend_drop: '趋势下滑',
-  budget_burn_fast: '预算猛烧', consecutive_bad: '连续超标',
+const columnLabel = (col) => ({
+  name: t('dashboard.colAccount'),
+  balance: t('dashboard.colAvailable'),
+  amount_spent_usd: t('dashboard.colUsed'),
+  spend_cap_usd: t('dashboard.colCap'),
+  spend_usd: t('dashboard.colSpendUsd'),
+  conversions: t('dashboard.colConversions'),
+  error: t('dashboard.colError'),
+}[col] || col)
+// rule_type 英文 → i18n（自动止损明细 col2 中文化）
+const RULE_TYPE_LABEL_KEY = {
+  bleed_abs: 'dashboard.ruleBleedAbs', cpa_exceed: 'dashboard.ruleCpaExceed', click_no_conv: 'dashboard.ruleClickNoConv',
+  low_ctr_no_conv: 'dashboard.ruleLowCtrNoConv', reach_no_conv: 'dashboard.ruleReachNoConv', trend_drop: 'dashboard.ruleTrendDrop',
+  budget_burn_fast: 'dashboard.ruleBudgetBurnFast', consecutive_bad: 'dashboard.ruleConsecutiveBad',
 }
 const columnFmt = (col, acc) => {
   if (col === 'name') return acc.name
@@ -336,21 +346,21 @@ const forceRefresh = async () => {
   const now = Math.floor(Date.now() / 1000)
   const left = 60 - (now - lastForceTs.value)
   if (lastForceTs.value && left > 0) {
-    return ElMessage.warning(`刚采集过，${left}s 后再强采（防 FB 限流）`)
+    return ElMessage.warning(t('dashboard.forceCooldown', { n: left }))
   }
   try {
-    await ElMessageBox.confirm('立即采集会直接调 Facebook API 拉最新数据（跳过冷却），频繁触发可能被 FB 限流。继续？', '强制采集',
-      { type: 'warning', confirmButtonText: '继续采集', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(t('dashboard.forceConfirmMsg'), t('dashboard.forceConfirmTitle'),
+      { type: 'warning', confirmButtonText: t('dashboard.forceConfirmBtn'), cancelButtonText: t('common.cancel') })
   } catch { return }
   refreshing.value = true
   lastForceTs.value = now
   try {
     await POST('/guard/inspect?force=true')
-    ElMessage.success('数据已刷新')
+    ElMessage.success(t('dashboard.forceSuccess'))
     await loadDashboard()
     loadTrend()
   } catch (e) {
-    ElMessage.error('刷新失败：' + e.message)
+    ElMessage.error(t('dashboard.forceFail') + e.message)
   } finally {
     refreshing.value = false
   }
@@ -359,14 +369,14 @@ const forceRefresh = async () => {
 // KPI 卡点击展开
 const kpiExpanded = ref(null)
 const cards = computed(() => [
-  { label: '总消耗 (USD)', value: fmtUsd(data.value.total_spend), color: 'blue', mode: 'spend', clickable: true },
-  { label: '总转化', value: fmt(data.value.total_conversions), color: 'green', mode: 'conv', clickable: true },
-  { label: '平均 CPA', value: fmtUsd(data.value.total_cpa), color: 'orange', mode: 'cpa', clickable: true },
-  { label: '平均 ROAS', value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'purple', mode: 'roas', clickable: true },
-  { label: '自动止损', value: fmt(data.value.pause_count), color: 'red', mode: 'pause', clickable: data.value.pause_count > 0 },
-  { label: '今日放行', value: fmt(data.value.allowance_count), color: 'cyan', mode: 'allowance', clickable: data.value.allowance_count > 0 },
-  { label: '可用额度 (USD)', value: fmtUsd(data.value.total_balance), color: 'teal', mode: 'balance', clickable: true },
-  { label: '巡检覆盖', value: `${(data.value.accounts || []).filter(a => !a.error || (a.error && a.error.includes('跨时区'))).length}/${(data.value.accounts || []).length}`, sub: `令牌 ${activeTokens.value}可用·${totalTokens.value - activeTokens.value}停用`, color: 'indigo', mode: 'coverage', clickable: true },
+  { label: t('dashboard.kpiTotalSpend'), value: fmtUsd(data.value.total_spend), color: 'blue', mode: 'spend', clickable: true },
+  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), color: 'green', mode: 'conv', clickable: true },
+  { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), color: 'orange', mode: 'cpa', clickable: true },
+  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'purple', mode: 'roas', clickable: true },
+  { label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), color: 'red', mode: 'pause', clickable: data.value.pause_count > 0 },
+  { label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count), color: 'cyan', mode: 'allowance', clickable: data.value.allowance_count > 0 },
+  { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), color: 'teal', mode: 'balance', clickable: true },
+  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || (a.error && a.error.includes('跨时区'))).length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'indigo', mode: 'coverage', clickable: true },
 ])
 const kpiDetail = computed(() => {
   if (kpiExpanded.value === null) return null
@@ -378,34 +388,34 @@ const kpiDetail = computed(() => {
   if (mode === 'pause') {
     const logs = data.value.pause_details || []
     return {
-      mode, title: card.label + ' · 明细',
+      mode, title: card.label + ' · ' + t('dashboard.detailTitle'),
       type: 'logs',
       logs: logs.map(l => ({
         col1: l.target_id || '—',
-        col2: RULE_TYPE_LABEL[l.trigger_type] || l.trigger_type || '—',
+        col2: (RULE_TYPE_LABEL_KEY[l.trigger_type] ? t(RULE_TYPE_LABEL_KEY[l.trigger_type]) : (l.trigger_type || '—')),
         col3: l.detail || '',
         col4: fmtTime(l.time),
         act_id: l.act_id || '',
         ad_id: l.target_id || '',
       })),
-      headers: ['广告 ID', '触发规则', '详情', '时间'],
+      headers: [t('dashboard.colAdId'), t('dashboard.colTriggerRule'), t('common.detail'), t('dashboard.colTime')],
     }
   }
   // 放行明细
   if (mode === 'allowance') {
     const logs = data.value.allowance_details || []
     return {
-      mode, title: card.label + ' · 明细',
+      mode, title: card.label + ' · ' + t('dashboard.detailTitle'),
       type: 'logs',
       logs: logs.map(l => ({
         col1: l.account_name || l.act_id || '—',
         col2: l.act_id || '—',
         col3: l.ad_id || '—',
-        col4: l.is_cross_tz ? `跨时区（${l.allowance_date}）` : '生效中',
+        col4: l.is_cross_tz ? t('dashboard.allowanceCrossTz', { date: l.allowance_date }) : t('dashboard.allowanceActive'),
         act_id: l.act_id || '',
         ad_id: l.ad_id || '',
       })),
-      headers: ['账户', '账户 ID', '广告 ID', '状态'],
+      headers: [t('dashboard.colAccount'), t('dashboard.colAccountId'), t('dashboard.colAdId'), t('common.status')],
     }
   }
 
@@ -413,11 +423,11 @@ const kpiDetail = computed(() => {
     const statusOrder = (a) => (a.error && a.error.includes('巡检未覆盖')) ? 0 : (a.error ? 1 : 2)  // 巡检未覆盖在上（紧急）→跨时区→可巡检
     const accs = [...(data.value.accounts || [])].sort((a, b) => statusOrder(a) - statusOrder(b) || (a.name || '').localeCompare(b.name || ''))
     return {
-      mode, title: '巡检覆盖 · 账户明细', type: 'accounts', accs,
+      mode, title: t('dashboard.kpiCoverage') + ' · ' + t('dashboard.coverageByAccount'), type: 'accounts', accs,
       cols: [
-        { key: 'name', label: '账户', left: true },
-        { key: 'tz', label: '本地时间', fmt: (v, a) => (a.error && a.error.includes('跨时区') ? '🕐 ' : '') + localTime(a.timezone) + ' ' + tzOffset(a.timezone) },
-        { key: 'cov', label: '巡检状态', fmt: (v, a) => (a.error && a.error.includes('巡检未覆盖')) ? '❌ 巡检未覆盖' : '✅ 可巡检' },
+        { key: 'name', label: t('dashboard.colAccount'), left: true },
+        { key: 'tz', label: t('dashboard.colLocalTime'), fmt: (v, a) => (a.error && a.error.includes('跨时区') ? '🕐 ' : '') + localTime(a.timezone) + ' ' + tzOffset(a.timezone) },
+        { key: 'cov', label: t('dashboard.colInspectStatus'), fmt: (v, a) => (a.error && a.error.includes('巡检未覆盖')) ? '❌ ' + t('dashboard.covUncovered') : '✅ ' + t('dashboard.covOk') },
       ],
     }
   }
@@ -438,16 +448,16 @@ const kpiDetail = computed(() => {
     return av - bv
   })
   let cols = mode === 'balance'
-    ? [{ key: 'name', label: '账户', left: true }, { key: 'balance', label: '可用', fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : '不限' }, { key: 'amount_spent_usd', label: '已用', fmt: fmtUsd }, { key: 'spend_cap_usd', label: '上限', fmt: fmtUsd }, { key: 'urgency', label: '紧急度', fmt: (v, a) => urgencyLabel(a) }]
+    ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }]
     : [
-        { key: 'name', label: '账户', left: true, bold: mode === 'spend' },
-        { key: 'spend_dual', label: '消耗', fmt: (v, a) => fmtSpendDual(a.spend, a.spend_usd, a.currency).native, bold: mode === 'spend' },
-        { key: 'spend_usd', label: 'USD', fmt: fmtUsd, bold: mode === 'spend' },
-        { key: 'conversions', label: '转化', fmt: fmt, bold: mode === 'conv' },
-        { key: 'cpa', label: 'CPA', fmt: fmtUsd, bold: mode === 'cpa' },
-        { key: 'roas', label: 'ROAS', fmt: (v) => v ? v + '×' : '—', bold: mode === 'roas' },
+        { key: 'name', label: t('dashboard.colAccount'), left: true, bold: mode === 'spend' },
+        { key: 'spend_dual', label: t('dashboard.colSpend'), fmt: (v, a) => fmtSpendDual(a.spend, a.spend_usd, a.currency).native, bold: mode === 'spend' },
+        { key: 'spend_usd', label: t('dashboard.colUsd'), fmt: fmtUsd, bold: mode === 'spend' },
+        { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt, bold: mode === 'conv' },
+        { key: 'cpa', label: t('dashboard.colCpa'), fmt: fmtUsd, bold: mode === 'cpa' },
+        { key: 'roas', label: t('dashboard.colRoas'), fmt: (v) => v ? v + '×' : '—', bold: mode === 'roas' },
       ]
-  return { mode, accs, cols, title: card.label + ' · 各账户明细', type: 'accounts' }
+  return { mode, accs, cols, title: card.label + ' · ' + t('dashboard.detailByAccount'), type: 'accounts' }
 })
 const toggleKpi = (i) => {
   if (!cards.value[i]?.clickable) return
@@ -479,7 +489,7 @@ const notifField = (key) => {
   return row ? row.val : ''
 }
 // 抽屉标题：动作 + 具体账户 + 广告（让用户一眼看到哪个账户哪个广告出问题、采取了什么动作）
-const notifTitle = computed(() => activeNotif.value?.title || '告警详情')
+const notifTitle = computed(() => activeNotif.value?.title || t('dashboard.notifDetail'))
 // body 结构化：解析 "key：value" 行，key 突出 label，value 正文（无 key 行整行做 value）
 const parseBody = (body) => {
   if (!body) return []
@@ -493,24 +503,24 @@ const copyText = (text) => {
   if (!text) return
   const ids = String(text).match(/\d{10,}/g)
   const copy = ids ? ids[0] : String(text)
-  navigator.clipboard?.writeText(copy).then(() => ElMessage.success('已复制: ' + copy)).catch(() => {})
+  navigator.clipboard?.writeText(copy).then(() => ElMessage.success(t('dashboard.copiedVal', { val: copy }))).catch(() => {})
 }
 // 充值紧急度（4 档 + 建议，对齐 taskCards 阈值）
 const urgencyLabel = (a) => {
-  if (a.removed) return '— 已移除'
-  if (a.balance_kind !== 'limited') return '🟢 不限'
+  if (a.removed) return '— ' + t('dashboard.urgencyRemoved')
+  if (a.balance_kind !== 'limited') return '🟢 ' + t('dashboard.urgencyUnlimited')
   const b = a.balance || 0
-  if (b <= 0) return '🔴 已阻断（立即充值）'
-  if (b <= 100) return '🟠 紧急（尽快充值）'
-  if (b <= 300) return '🟡 偏低（建议充值）'
-  return '🟢 充足'
+  if (b <= 0) return '🔴 ' + t('dashboard.urgencyBlocked')
+  if (b <= 100) return '🟠 ' + t('dashboard.urgencyUrgent')
+  if (b <= 300) return '🟡 ' + t('dashboard.urgencyLow')
+  return '🟢 ' + t('dashboard.urgencySufficient')
 }
 // 复制有消耗的账户 ID（当前日期范围）
 const copySpendActIds = () => {
   const accs = (data.value.accounts || []).filter(a => (a.spend_usd || 0) > 0)
   const ids = accs.map(a => a.act_id).filter(Boolean).join('\n')
-  if (!ids) { ElMessage.info('当前日期范围无有消耗的账户'); return }
-  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(`已复制 ${accs.length} 个有消耗账户 ID`)).catch(() => {})
+  if (!ids) { ElMessage.info(t('dashboard.noSpendAccounts')); return }
+  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(t('dashboard.copiedSpendIds', { n: accs.length }))).catch(() => {})
 }
 // 复选框选中（充值/余额明细用：勾选账户 → 复制选中 ID）
 const selectedIds = ref(new Set())
@@ -522,8 +532,8 @@ const toggleSelect = (act_id) => {
 }
 const copySelected = () => {
   const ids = [...selectedIds.value].filter(Boolean).join('\n')
-  if (!ids) { ElMessage.info('未勾选任何账户'); return }
-  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(`已复制 ${selectedIds.value.size} 个选中 ID`)).catch(() => {})
+  if (!ids) { ElMessage.info(t('dashboard.noSelection')); return }
+  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(t('dashboard.copiedSelected', { n: selectedIds.value.size }))).catch(() => {})
 }
 const localTime = (tz) => {
   if (!tz) return '—'
@@ -544,12 +554,12 @@ const ackNotif = async (id) => {
   const n = (recentNotifs.value || []).find(x => x.id === id)
   if (!n || n.read) return  // 防重入：已确认/不存在不重复 POST
   n.read = true  // 乐观：立即 UI 反馈，不等 POST
-  ElMessage.success('已确认')
+  ElMessage.success(t('dashboard.acked'))
   try {
     await POST('/notifications/read', { ids: [id] })
   } catch (e) {
     if (n) n.read = false  // 回滚
-    ElMessage.error('确认失败：' + e.message)
+    ElMessage.error(t('dashboard.ackFail') + e.message)
   }
 }
 const notifFilter = ref('all')  // all / critical / warning
@@ -563,17 +573,17 @@ const ackAllNotifs = async () => {
   try {
     await POST('/notifications/read', {})
     ;(recentNotifs.value || []).forEach(n => { n.read = true })
-    ElMessage.success('全部已读')
-  } catch (e) { ElMessage.error('操作失败：' + (e.message || '')) }
+    ElMessage.success(t('dashboard.allRead'))
+  } catch (e) { ElMessage.error(t('common.opFail') + (e.message || '')) }
 }
-const NOTIF_EVENT_LABEL = {
-  rule_pause: '止损', coverage_lost: '覆盖丢失', account_permission_error: '权限',
-  token_expired: '令牌失效', token_invalid: '令牌失效', token_expiring: '令牌将过期',
-  token_rate_limited: '限流', orphan_account: '失联', inspection_stalled: '巡检停滞',
-  budget_progress_50: '预算', budget_progress_75: '预算', budget_progress_90: '预算', budget_progress_98: '预算',
-  account_status_change: '状态变更', sentinel_pause: '哨兵', landing_blocked: '落地页封禁',
+const NOTIF_EVENT_LABEL_KEY = {
+  rule_pause: 'dashboard.evPause', coverage_lost: 'dashboard.evCoverageLost', account_permission_error: 'dashboard.evPermission',
+  token_expired: 'dashboard.evTokenInvalid', token_invalid: 'dashboard.evTokenInvalid', token_expiring: 'dashboard.evTokenExpiring',
+  token_rate_limited: 'dashboard.evThrottled', orphan_account: 'dashboard.evOrphan', inspection_stalled: 'dashboard.evInspectStalled',
+  budget_progress_50: 'dashboard.evBudget', budget_progress_75: 'dashboard.evBudget', budget_progress_90: 'dashboard.evBudget', budget_progress_98: 'dashboard.evBudget',
+  account_status_change: 'dashboard.evStatusChange', sentinel_pause: 'dashboard.evSentinel', landing_blocked: 'dashboard.evLandingBlocked',
 }
-const notifEventLabel = (et) => NOTIF_EVENT_LABEL[et] || ''
+const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
 
 // 自定义日期
 const showCustom = ref(false)
@@ -618,24 +628,24 @@ const countdown = ref('')
 // 最近巡检时间（取所有账户中最新的 last_inspected_at）
 const lastInspectedDisplay = computed(() => {
   const accs = data.value.accounts || []
-  const times = accs.map(a => a.last_inspected_at).filter(Boolean).map(t => new Date(t.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(t) ? t : t + 'Z').getTime()).filter(n => !isNaN(n))
+  const times = accs.map(a => a.last_inspected_at).filter(Boolean).map(iso => new Date(iso.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z').getTime()).filter(n => !isNaN(n))
   if (!times.length) return ''
   const latest = new Date(Math.max(...times))
   return fmtTime(latest.toISOString())
 })
 const updateCountdown = () => {
   const state = inspectState.value
-  if (state === 'idle') { countdown.value = '等待首次巡检'; return }
-  if (state === 'running') { countdown.value = '巡检正常'; return }
+  if (state === 'idle') { countdown.value = t('dashboard.cdWaitingFirst'); return }
+  if (state === 'running') { countdown.value = t('dashboard.cdNormal'); return }
   const hb = data.value.last_heartbeat
   const hbT = hb && new Date(hb.endsWith('Z') || /[+-]\d{2}:?\d{2}$/.test(hb) ? hb : hb + 'Z').getTime()
   if (state === 'waiting' && hbT) {
     const ms = (hbT + INSPECT_INTERVAL_MS) - Date.now()
-    if (ms > 0) { const m = Math.floor(ms / 60000); const s = Math.floor((ms % 60000) / 1000); countdown.value = `下次巡检 ${m}分${s}秒`; return }
+    if (ms > 0) { const m = Math.floor(ms / 60000); const s = Math.floor((ms % 60000) / 1000); countdown.value = t('dashboard.cdNext', { m, s }); return }
   }
   if (state === 'stalled' && hbT) {
     const min = Math.floor((Date.now() - hbT) / 60000)
-    countdown.value = `巡检停滞 · ${min}min`
+    countdown.value = t('dashboard.cdStalled', { n: min })
     return
   }
   countdown.value = ''
@@ -654,23 +664,23 @@ let _timer = null
 let _refreshTimer = null
 let _sectionObserver = null
 const addAllowance = async (log) => {
-  if (!log.act_id || !log.ad_id) return ElMessage.warning('缺少账户/广告 ID')
+  if (!log.act_id || !log.ad_id) return ElMessage.warning(t('dashboard.missingActAdId'))
   try {
     await POST('/guard/allowance', { act_id: log.act_id, ad_id: log.ad_id })
-    ElMessage.success('已放行，今日不再止损该广告')
+    ElMessage.success(t('dashboard.allowanceAdded'))
     await loadDashboard(true)
     loadTrend()
     kpiExpanded.value = null
-  } catch (e) { ElMessage.error('放行失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('dashboard.allowanceAddFail') + (e.message || '')) }
 }
 const removeAllowance = async (log) => {
   try {
     await DELETE(`/guard/allowance?act_id=${log.act_id}&ad_id=${log.ad_id}`)
-    ElMessage.success('已解除放行')
+    ElMessage.success(t('dashboard.allowanceRemoved'))
     await loadDashboard(true)
     loadTrend()
     kpiExpanded.value = null
-  } catch (e) { ElMessage.error('解除失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('dashboard.allowanceRemoveFail') + (e.message || '')) }
 }
 
 onMounted(() => {
@@ -703,43 +713,43 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <div class="date-bar">
         <button v-for="opt in dateOptions" :key="opt.value" class="date-btn" :class="{ active: datePreset === opt.value && !showCustom }"
                 @click="showCustom = false; datePreset = opt.value; loadDashboard()">{{ opt.label }}</button>
-        <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">自定义</button>
+        <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('dashboard.custom') }}</button>
         <div v-if="showCustom" class="custom-range">
           <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
           <input type="date" v-model="customTo" class="date-input" />
-          <button class="date-btn apply" @click="applyCustom">查询</button>
+          <button class="date-btn apply" @click="applyCustom">{{ t('dashboard.query') }}</button>
         </div>
         <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
-                   title="转化分类筛选（只统计符合 KPI 类型的广告）">
-          <el-option value="all" label="全部成效" />
-          <el-option value="shopping" label="购物" />
-          <el-option value="messaging" label="私信" />
-          <el-option value="leads" label="线索" />
-          <el-option value="engagement" label="互动" />
-          <el-option value="traffic" label="流量" />
+                   :title="t('dashboard.convCatTitle')">
+          <el-option value="all" :label="t('dashboard.convAll')" />
+          <el-option value="shopping" :label="t('dashboard.convShopping')" />
+          <el-option value="messaging" :label="t('dashboard.convMessaging')" />
+          <el-option value="leads" :label="t('dashboard.convLeads')" />
+          <el-option value="engagement" :label="t('dashboard.convEngagement')" />
+          <el-option value="traffic" :label="t('dashboard.convTraffic')" />
         </el-select>
         <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
                    @change="loadDashboard()" size="small" class="filter-select act-filter"
-                   placeholder="全部账户" title="账户筛选（多选，模糊搜索）">
+                   :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
           <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="a.name" />
         </el-select>
         <div class="sys-info">
-          <span v-if="lastUpdated" class="sync-time">数据更新 {{ fmtAgo(lastUpdated) }}</span>
-          <span v-if="lastInspectedDisplay" class="sync-time">上次巡检 {{ lastInspectedDisplay }}</span>
+          <span v-if="lastUpdated" class="sync-time">{{ t('dashboard.dataUpdated') }} {{ fmtAgo(lastUpdated) }}</span>
+          <span v-if="lastInspectedDisplay" class="sync-time">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
           <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
-          <button class="refresh-btn" :disabled="loading" @click="refreshData" title="只读库（最新缓存），不调 FB">{{ loading ? '刷新中' : '刷新' }}</button>
-          <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" title="⚠ 直接调 Facebook API 强采，频繁会触发限流">{{ refreshing ? '采集中…' : '立即采集' }}</button>
-          <button class="refresh-btn" @click="copySpendActIds" title="复制当前日期范围内有消耗的账户 ID（每行一个）">📋 复制消耗账户</button>
+          <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</button>
+          <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
+          <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">📋 {{ t('dashboard.copySpendBtn') }}</button>
         </div>
       </div>
     <div class="anchor-strip">
-      <button class="anchor-btn" :class="{ active: activeSection === 'ads' }" @click="scrollToSection('ads')">广告数据</button>
-      <button class="anchor-btn" :class="{ active: activeSection === 'landing' }" @click="scrollToSection('landing')">落地页数据</button>
+      <button class="anchor-btn" :class="{ active: activeSection === 'ads' }" @click="scrollToSection('ads')">{{ t('dashboard.secAds') }}</button>
+      <button class="anchor-btn" :class="{ active: activeSection === 'landing' }" @click="scrollToSection('landing')">{{ t('dashboard.secLanding') }}</button>
     </div>
     </div>
 
     <section id="ads" class="dash-section ads">
-      <div class="dash-head"><span class="dash-title">广告数据</span><span class="dash-sub">消耗 · 转化 · 守护</span></div>
+      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secAds') }}</span><span class="dash-sub">{{ t('dashboard.secAdsSub') }}</span></div>
       <div class="stat-grid" v-loading="loading">
         <div v-for="(card, i) in cards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: kpiExpanded === i }]" @click="toggleKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
@@ -752,9 +762,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         <div class="detail-header">
           <span>{{ kpiDetail.title }}</span>
           <div class="detail-tools">
-            <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" placeholder="搜索..." />
-            <button v-if="kpiDetail.mode === 'spend'" class="copy-ids-btn" @click="copyIds(filteredKpiAccs.filter(a => (a.spend_usd || 0) > 0), '有消耗 ID')">复制有消耗 ID</button>
-            <button v-if="kpiDetail.mode === 'balance'" class="copy-ids-btn" @click="copySelected()">复制选中 ({{ selectedIds.size }})</button>
+            <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
+            <button v-if="kpiDetail.mode === 'spend'" class="copy-ids-btn" @click="copyIds(filteredKpiAccs.filter(a => (a.spend_usd || 0) > 0), '有消耗 ID')">{{ t('dashboard.copySpendIdBtn') }}</button>
+            <button v-if="kpiDetail.mode === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
             <el-icon class="detail-close" @click="kpiExpanded = null"><Close /></el-icon>
           </div>
         </div>
@@ -764,48 +774,48 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <tbody>
               <tr v-for="acc in filteredKpiAccs" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (kpiDetail.mode === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
                 <td v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
-                  <template v-if="col.key === 'name'">{{ acc.removed ? `（已移除）${acc.act_id}` : acc.name }}</template>
+                  <template v-if="col.key === 'name'">{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
                   <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="!filteredKpiAccs.length" class="empty">未找到匹配</div>
+          <div v-if="!filteredKpiAccs.length" class="empty">{{ t('dashboard.noMatch') }}</div>
         </div>
         <div v-else class="table-scroll">
           <table class="detail-table">
             <thead><tr>
               <th v-for="(h, i) in kpiDetail.headers" :key="i" :class="i === 0 ? 'left' : 'right'">{{ h }}</th>
-              <th v-if="['pause','allowance'].includes(kpiDetail.mode)" class="right">操作</th>
+              <th v-if="['pause','allowance'].includes(kpiDetail.mode)" class="right">{{ t('common.operation') }}</th>
             </tr></thead>
             <tbody>
               <tr v-for="(log, i) in kpiDetail.logs" :key="i">
                 <td class="left mono">{{ log.col1 }}</td>
                 <td v-for="j in kpiDetail.headers.length - 1" :key="j" class="right mono">{{ log['col' + (j + 1)] }}</td>
-                <td v-if="kpiDetail.mode === 'pause'" class="right"><button class="allow-btn" @click="addAllowance(log)">今日放行</button></td>
-                <td v-if="kpiDetail.mode === 'allowance'" class="right"><button class="allow-btn remove" @click="removeAllowance(log)">解除放行</button></td>
+                <td v-if="kpiDetail.mode === 'pause'" class="right"><button class="allow-btn" @click="addAllowance(log)">{{ t('dashboard.allowToday') }}</button></td>
+                <td v-if="kpiDetail.mode === 'allowance'" class="right"><button class="allow-btn remove" @click="removeAllowance(log)">{{ t('dashboard.removeAllowance') }}</button></td>
               </tr>
             </tbody>
           </table>
-          <div v-if="!kpiDetail.logs.length" class="empty">暂无记录</div>
+          <div v-if="!kpiDetail.logs.length" class="empty">{{ t('dashboard.noRecords') }}</div>
         </div>
       </div>
       <div class="trend-section">
         <div class="trend-bar">
-          <span class="trend-title">趋势</span>
+          <span class="trend-title">{{ t('dashboard.trend') }}</span>
           <div class="trend-presets">
             <button v-for="o in GRAN_OPTS" :key="o.value" class="tp-btn" :class="{on:trendGran===o.value}" @click="trendGran=o.value">{{ o.label }}</button>
           </div>
         </div>
         <div class="trend-grid" v-if="trendData.labels?.length">
-          <div class="trend-card"><div class="tc-label">消耗 $</div><div class="tc-canvas"><canvas ref="spendCanvas"></canvas></div></div>
-          <div class="trend-card"><div class="tc-label">成效</div><div class="tc-canvas"><canvas ref="convCanvas"></canvas></div></div>
-          <div class="trend-card"><div class="tc-label">CPA $</div><div class="tc-canvas"><canvas ref="cpaCanvas"></canvas></div></div>
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcSpend') }} $</div><div class="tc-canvas"><canvas ref="spendCanvas"></canvas></div></div>
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcConv') }}</div><div class="tc-canvas"><canvas ref="convCanvas"></canvas></div></div>
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcCpa') }} $</div><div class="tc-canvas"><canvas ref="cpaCanvas"></canvas></div></div>
         </div>
-        <div v-else class="trend-empty">所选范围暂无数据</div>
+        <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
       </div>
       <div v-show="!loading" class="task-block">
-        <div class="block-title">待处理事项</div>
+        <div class="block-title">{{ t('dashboard.todoTitle') }}</div>
         <div class="task-grid">
           <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length }]" @click="toggleCard(i)">
             <div class="task-icon-wrap"><el-icon class="task-icon"><component :is="card.icon" /></el-icon></div>
@@ -814,9 +824,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           </div>
         </div>
         <div v-if="expandedCard !== null && taskCards[expandedCard]?.detailAccounts?.length" class="detail-panel">
-          <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · 明细</span><div class="detail-tools"><button class="copy-ids-btn" @click="copySelected()">复制选中 ({{ selectedIds.size }})</button><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
+          <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · {{ t('dashboard.detailTitle') }}</span><div class="detail-tools"><button class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
           <table class="detail-table">
-            <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabels[col] }}</th></tr></thead>
+            <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabel(col) }}</th></tr></thead>
             <tbody>
               <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id) }" @click="toggleSelect(acc.act_id)">
                 <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono">{{ columnFmt(col, acc) }}</td>
@@ -827,13 +837,13 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
       <div class="card notif-card">
         <div class="card-header">
-          <span class="card-title">最近告警 <span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
+          <span class="card-title">{{ t('dashboard.recentNotifs') }} <span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
           <div class="status-tabs">
-            <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">全部</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">严重</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">警告</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">信息</button>
-            <button v-if="unreadNotifCount" class="status-tab ack-all" @click="ackAllNotifs">全部已读</button>
+            <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }}</button>
+            <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }}</button>
+            <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }}</button>
+            <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }}</button>
+            <button v-if="unreadNotifCount" class="status-tab ack-all" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
           </div>
         </div>
         <div class="notif-list">
@@ -844,11 +854,11 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
                 <div class="notif-text"><span v-if="notifEventLabel(n.event_type)" class="notif-etype" :class="n.level">{{ notifEventLabel(n.event_type) }}</span>{{ n.title }}</div>
                 <div class="notif-meta">{{ fmtTime(n.created_at) }}</div>
               </div>
-              <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">确认</button>
-              <span v-else class="acked-tag">已确认</span>
+              <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
+              <span v-else class="acked-tag">{{ t('dashboard.ackedTag') }}</span>
             </div>
           </div>
-          <div v-if="!filteredNotifs.length" class="empty">{{ notifFilter === 'all' ? '暂无告警' : '无该级别告警' }}</div>
+          <div v-if="!filteredNotifs.length" class="empty">{{ notifFilter === 'all' ? t('dashboard.noNotifs') : t('dashboard.noNotifsLevel') }}</div>
         </div>
       </div>
     </section>
@@ -856,22 +866,22 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <el-drawer v-model="notifDrawerOpen" :title="notifTitle" direction="rtl" size="480px" :destroy-on-close="true">
       <div v-if="activeNotif" class="notif-drawer">
         <div class="nd-head">
-          <span class="nd-level" :class="activeNotif.level">{{ ({critical:'严重',warning:'警告',info:'信息'})[activeNotif.level] || '通知' }}</span>
-          <span v-if="activeNotif.event_type" class="nd-event">{{ ({rule_pause:'自动止损',account_permission_error:'权限不足',token_expired:'令牌失效',token_rate_limited:'令牌限流',orphan_account:'账户失联',inspection_stalled:'巡检停滞',coverage_lost:'覆盖丢失',budget_progress_50:'预算进度',budget_progress_75:'预算进度',budget_progress_90:'预算进度',budget_progress_98:'预算进度',account_status_change:'账户状态变更',sentinel_pause:'哨兵暂停'})[activeNotif.event_type] || activeNotif.event_type }}</span>
+          <span class="nd-level" :class="activeNotif.level">{{ ({critical:t('dashboard.levelCritical'),warning:t('dashboard.levelWarning'),info:t('dashboard.levelInfo')})[activeNotif.level] || t('dashboard.levelNotice') }}</span>
+          <span v-if="activeNotif.event_type" class="nd-event">{{ ({rule_pause:t('dashboard.evAutoPause'),account_permission_error:t('dashboard.evPermissionDenied'),token_expired:t('dashboard.evTokenInvalid'),token_rate_limited:t('dashboard.evTokenThrottled'),orphan_account:t('dashboard.evAccountOrphan'),inspection_stalled:t('dashboard.evInspectStalled'),coverage_lost:t('dashboard.evCoverageLost'),budget_progress_50:t('dashboard.evBudgetProgress'),budget_progress_75:t('dashboard.evBudgetProgress'),budget_progress_90:t('dashboard.evBudgetProgress'),budget_progress_98:t('dashboard.evBudgetProgress'),account_status_change:t('dashboard.evAccountStatusChange'),sentinel_pause:t('dashboard.evSentinelPause')})[activeNotif.event_type] || activeNotif.event_type }}</span>
           <span class="nd-time">{{ fmtTime(activeNotif.created_at) }}</span>
         </div>
         <div class="nd-body">
           <div v-for="(row, i) in parseBody(activeNotif.body)" :key="i" class="nd-body-row">
             <span v-if="row.key" class="nd-body-key">{{ row.key }}</span>
-            <span class="nd-body-val" @click="copyText(row.val)" title="点击复制">{{ row.val }}</span>
+            <span class="nd-body-val" @click="copyText(row.val)" :title="t('dashboard.clickToCopy')">{{ row.val }}</span>
           </div>
-          <div v-if="!activeNotif.body" class="nd-body-empty">（无详情内容）</div>
+          <div v-if="!activeNotif.body" class="nd-body-empty">（{{ t('dashboard.noDetailContent') }}）</div>
         </div>
       </div>
     </el-drawer>
 
     <section id="landing" class="dash-section landing">
-      <div class="dash-head"><span class="dash-title">落地页数据</span><span class="dash-sub">访问 · 通过 · 屏蔽</span></div>
+      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span></div>
       <div v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
         <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" @click="toggleLandingKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
@@ -890,9 +900,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         <div class="table-scroll">
           <table class="detail-table">
             <thead><tr>
-              <th class="left">子码</th><th class="left">域名</th>
-              <th class="right">访问</th><th class="right">通过</th><th class="right">屏蔽</th>
-              <th class="right">消耗</th><th class="right">CPC</th><th class="center">状态</th>
+              <th class="left">{{ t('dashboard.colSubcode') }}</th><th class="left">{{ t('dashboard.colDomain') }}</th>
+              <th class="right">{{ t('dashboard.kpiVisits') }}</th><th class="right">{{ t('dashboard.kpiPass') }}</th><th class="right">{{ t('dashboard.kpiBlocked') }}</th>
+              <th class="right">{{ t('dashboard.colSpend') }}</th><th class="right">{{ t('dashboard.colCpc') }}</th><th class="center">{{ t('common.status') }}</th>
             </tr></thead>
             <tbody>
               <tr v-for="r in landingKpiDetail.rows" :key="(r.slug||'')+(r.ad_id||'')">
@@ -908,28 +918,28 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             </tbody>
           </table>
         </div>
-        <div v-if="!landingKpiDetail.rows.length" class="empty">暂无子码数据</div>
+        <div v-if="!landingKpiDetail.rows.length" class="empty">{{ t('dashboard.noSubcodeData') }}</div>
       </div>
-      <div class="trend-placeholder"><el-icon><TrendCharts /></el-icon><span>访问 / 屏蔽 趋势折线 · 即将上线</span></div>
+      <div class="trend-placeholder"><el-icon><TrendCharts /></el-icon><span>{{ t('dashboard.landingTrendSoon') }}</span></div>
       <div class="card" v-loading="landingLoading">
         <div class="card-header">
-          <span class="card-title">子码表现</span>
+          <span class="card-title">{{ t('dashboard.subcodePerformance') }}</span>
           <div class="table-tools">
-            <input v-model="landingSearch" class="search-input" placeholder="搜索子码 / 广告ID / 域名..." />
+            <input v-model="landingSearch" class="search-input" :placeholder="t('dashboard.searchLandingPh')" />
             <div class="status-tabs">
-              <button class="status-tab" :class="{ active: landingFilter === 'all' }" @click="landingFilter = 'all'">全部 {{ (landing.rows || []).length }}</button>
-              <button class="status-tab" :class="{ active: landingFilter === 'good' }" @click="landingFilter = 'good'">有效</button>
-              <button class="status-tab" :class="{ active: landingFilter === 'waste' }" @click="landingFilter = 'waste'">空耗</button>
-              <button class="status-tab" :class="{ active: landingFilter === 'watch' }" @click="landingFilter = 'watch'">观察</button>
+              <button class="status-tab" :class="{ active: landingFilter === 'all' }" @click="landingFilter = 'all'">{{ t('common.all') }} {{ (landing.rows || []).length }}</button>
+              <button class="status-tab" :class="{ active: landingFilter === 'good' }" @click="landingFilter = 'good'">{{ t('dashboard.stateGood') }}</button>
+              <button class="status-tab" :class="{ active: landingFilter === 'waste' }" @click="landingFilter = 'waste'">{{ t('dashboard.stateWaste') }}</button>
+              <button class="status-tab" :class="{ active: landingFilter === 'watch' }" @click="landingFilter = 'watch'">{{ t('dashboard.stateWatch') }}</button>
             </div>
           </div>
         </div>
         <div class="table-scroll">
           <table class="acc-table">
             <thead><tr>
-              <th class="left">子码</th><th class="left">账户</th><th class="left">域名</th>
-              <th class="right">访问</th><th class="right">通过</th><th class="right">屏蔽</th>
-              <th class="right">通过率</th><th class="right">消耗</th><th class="right">CPC</th><th class="right">CVR</th><th class="center">状态</th>
+              <th class="left">{{ t('dashboard.colSubcode') }}</th><th class="left">{{ t('dashboard.colAccount') }}</th><th class="left">{{ t('dashboard.colDomain') }}</th>
+              <th class="right">{{ t('dashboard.kpiVisits') }}</th><th class="right">{{ t('dashboard.kpiPass') }}</th><th class="right">{{ t('dashboard.kpiBlocked') }}</th>
+              <th class="right">{{ t('dashboard.kpiPassRate') }}</th><th class="right">{{ t('dashboard.colSpend') }}</th><th class="right">{{ t('dashboard.colCpc') }}</th><th class="right">CVR</th><th class="center">{{ t('common.status') }}</th>
             </tr></thead>
             <tbody>
               <tr v-for="r in filteredLanding" :key="(r.slug || '') + (r.ad_id || '')">
@@ -948,13 +958,13 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             </tbody>
           </table>
         </div>
-        <div v-if="!filteredLanding.length" class="empty">暂无落地页访问数据</div>
+        <div v-if="!filteredLanding.length" class="empty">{{ t('dashboard.noLandingData') }}</div>
       </div>
       <div v-if="landing.totals && landing.totals.blocked > 0" class="card block-detail">
-        <div class="card-header"><span class="card-title">屏蔽分布</span></div>
+        <div class="card-header"><span class="card-title">{{ t('dashboard.blockDist') }}</span></div>
         <div class="block-grid">
           <div class="block-col">
-            <div class="block-col-title">按原因</div>
+            <div class="block-col-title">{{ t('dashboard.byReason') }}</div>
             <div v-for="b in (landing.block_detail.by_reason || [])" :key="'r' + b.key" class="bar-row">
               <span class="bar-label" :title="b.key">{{ blockReasonLabel(b.key) }}</span>
               <div class="bar-track"><div class="bar-fill danger" :style="{ width: barWidth(b.count, landing.block_detail.by_reason) }"></div></div>
@@ -962,7 +972,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             </div>
           </div>
           <div class="block-col">
-            <div class="block-col-title">按国家 Top8</div>
+            <div class="block-col-title">{{ t('dashboard.byCountry') }}</div>
             <div v-for="b in (landing.block_detail.by_country || [])" :key="'c' + b.key" class="bar-row">
               <span class="bar-label" :title="b.key">{{ countryLabel(b.key) }}</span>
               <div class="bar-track"><div class="bar-fill danger" :style="{ width: barWidth(b.count, landing.block_detail.by_country) }"></div></div>
@@ -970,7 +980,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             </div>
           </div>
           <div class="block-col">
-            <div class="block-col-title">按平台</div>
+            <div class="block-col-title">{{ t('dashboard.byPlatform') }}</div>
             <div v-for="b in (landing.block_detail.by_platform || [])" :key="'p' + b.key" class="bar-row">
               <span class="bar-label" :title="b.key">{{ b.key }}</span>
               <div class="bar-track"><div class="bar-fill danger" :style="{ width: barWidth(b.count, landing.block_detail.by_platform) }"></div></div>

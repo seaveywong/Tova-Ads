@@ -1,7 +1,10 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, PUT } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+
+const { t } = useI18n()
 
 const mapping = ref(null)
 const loading = ref(true)
@@ -10,7 +13,7 @@ const tab = ref('matrix')
 const load = async () => {
   loading.value = true
   try { mapping.value = await GET('/kpi/mapping') }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('kpi.loadFail')) }
   loading.value = false
 }
 onMounted(load)
@@ -32,9 +35,9 @@ watch(() => mapping.value, () => { if (mapping.value) refreshGroups() })
 
 const resetDefault = async () => {
   try {
-    await ElMessageBox.confirm('恢复全部映射为系统默认值？当前自定义配置将被覆盖。', '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('kpi.resetConfirm'), t('common.confirm'), { type: 'warning' })
     await PUT('/kpi/mapping', { matrix: {}, by_objective: {}, fallback_priority: [], poor_fallback_types: [], field_labels: {} })
-    ElMessage.success('已恢复默认')
+    ElMessage.success(t('kpi.resetDone'))
     await load()
   } catch {}
 }
@@ -43,11 +46,11 @@ const resetDefault = async () => {
 <template>
   <div class="page">
     <div class="tabs">
-      <button v-for="t in ['matrix','objective','fallback','poor','labels']" :key="t"
-        class="tab" :class="{on:tab===t}" @click="tab=t">
-        {{ {matrix:'映射矩阵',objective:'Objective 兜底',fallback:'兜底优先级',poor:'劣质字段',labels:'字段标签'}[t] }}
+      <button v-for="tabKey in ['matrix','objective','fallback','poor','labels']" :key="tabKey"
+        class="tab" :class="{on:tab===tabKey}" @click="tab=tabKey">
+        {{ {matrix:t('kpi.tabMatrix'),objective:t('kpi.tabObjective'),fallback:t('kpi.tabFallback'),poor:t('kpi.tabPoor'),labels:t('kpi.tabLabels')}[tabKey] }}
       </button>
-      <button class="reset-btn" @click="resetDefault">恢复默认</button>
+      <button class="reset-btn" @click="resetDefault">{{ t('kpi.resetDefault') }}</button>
     </div>
 
     <div v-loading="loading">
@@ -73,7 +76,7 @@ const resetDefault = async () => {
       </div>
 
       <div v-if="tab==='fallback'" class="tab-content">
-        <div class="hint">L5 语义兜底时按此优先级找第一个非零转化</div>
+        <div class="hint">{{ t('kpi.fallbackHint') }}</div>
         <div v-for="(f, i) in mapping?.fallback_priority" :key="i" class="list-item">
           <span class="num">{{ i + 1 }}</span>
           <span class="field">{{ f }}</span>
@@ -82,14 +85,14 @@ const resetDefault = async () => {
       </div>
 
       <div v-if="tab==='poor'" class="tab-content">
-        <div class="hint">以下字段不作为转化（浏览/点击/互动类），兜底时跳过</div>
+        <div class="hint">{{ t('kpi.poorHint') }}</div>
         <div class="tag-cloud">
           <span v-for="f in mapping?.poor_fallback_types" :key="f" class="poor-tag">{{ f }}</span>
         </div>
       </div>
 
       <div v-if="tab==='labels'" class="tab-content">
-        <div class="hint">转化字段 → 中文显示标签</div>
+        <div class="hint">{{ t('kpi.labelsHint') }}</div>
         <div v-for="(v, k) in mapping?.field_labels" :key="k" class="kv-readonly">
           <code class="kv-key">{{ k }}</code>
           <span class="arrow">→</span>

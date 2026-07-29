@@ -1,10 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, PATCH, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tenantStatus } from '../composables/useStatus'
 
-const ROLE_ZH = { owner: '管理员', operator: '操作员', finance: '财务' }
+const { t } = useI18n()
+
+const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance' }
 const statusLabel = (s) => tenantStatus(s).label
 
 const teams = ref([])
@@ -12,7 +15,7 @@ const loading = ref(false)
 const load = async () => {
   loading.value = true
   try { teams.value = await GET('/admin/tenants/detail') }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('teams.loadFail')) }
   loading.value = false
 }
 onMounted(load)
@@ -23,8 +26,8 @@ const createForm = ref({ name: '', owner_email: '', owner_password: '' })
 const createSaving = ref(false)
 const openCreate = () => { createForm.value = { name: '', owner_email: '', owner_password: '' }; createOpen.value = true }
 const submitCreate = async () => {
-  if (!createForm.value.name.trim()) return ElMessage.warning('填团队名')
-  if (createForm.value.owner_email.trim() && !createForm.value.owner_email.includes('@')) return ElMessage.warning('管理员邮箱格式不对')
+  if (!createForm.value.name.trim()) return ElMessage.warning(t('teams.nameRequired'))
+  if (createForm.value.owner_email.trim() && !createForm.value.owner_email.includes('@')) return ElMessage.warning(t('teams.ownerEmailInvalid'))
   createSaving.value = true
   try {
     const r = await POST('/admin/tenants', {
@@ -32,44 +35,44 @@ const submitCreate = async () => {
       owner_email: createForm.value.owner_email.trim(),
       owner_password: createForm.value.owner_password.trim(),
     })
-    let msg = `团队「${r.name}」已创建`
-    if (r.owner_email && r.owner_existing) msg += `，已指定现有用户 ${r.owner_email} 为管理员`
-    else if (r.owner_email) msg += `，管理员 ${r.owner_email} 初始密码：${r.owner_password}（请告知对方首次登录后修改）`
-    else msg += '（空团队，稍后可加成员）'
+    let msg = t('teams.createdTeam', { name: r.name })
+    if (r.owner_email && r.owner_existing) msg += t('teams.ownerExisting', { email: r.owner_email })
+    else if (r.owner_email) msg += t('teams.ownerNew', { email: r.owner_email, password: r.owner_password })
+    else msg += t('teams.emptyTeam')
     createOpen.value = false
     load()
-    await ElMessageBox.alert(msg, '团队已创建', { confirmButtonText: '知道了', type: 'success' })
-  } catch (e) { ElMessage.error(e.message || '创建失败') }
+    await ElMessageBox.alert(msg, t('teams.createdTitle'), { confirmButtonText: t('common.ok'), type: 'success' })
+  } catch (e) { ElMessage.error(e.message || t('teams.createFail')) }
   createSaving.value = false
 }
 
 // 改名
-const rename = async (t) => {
+const rename = async (row) => {
   try {
-    const { value } = await ElMessageBox.prompt('新团队名', `改名 · ${t.name}`, {
-      inputValue: t.name, confirmButtonText: '保存', cancelButtonText: '取消',
-      inputValidator: (v) => (v && v.trim()) ? true : '不能为空',
+    const { value } = await ElMessageBox.prompt(t('teams.newName'), t('teams.renameTitle', { name: row.name }), {
+      inputValue: row.name, confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
+      inputValidator: (v) => (v && v.trim()) ? true : t('teams.cannotEmpty'),
     })
-    await PUT(`/admin/tenants/${t.id}`, { name: value.trim() })
-    ElMessage.success('已改名')
+    await PUT(`/admin/tenants/${row.id}`, { name: value.trim() })
+    ElMessage.success(t('teams.renamed'))
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
 // 状态变更
-const setStatus = async (t, status) => {
+const setStatus = async (row, status) => {
   const word = statusLabel(status)
   try {
-    await ElMessageBox.confirm(`确定将「${t.name}」设为${word}？`, '确认',
-      { type: status === 'archived' ? 'warning' : 'info', confirmButtonText: '确认', cancelButtonText: '取消' })
-    await PATCH(`/admin/tenants/${t.id}/status`, { status })
-    ElMessage.success('已更新')
+    await ElMessageBox.confirm(t('teams.confirmStatus', { name: row.name, status: word }), t('common.confirm'),
+      { type: status === 'archived' ? 'warning' : 'info', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+    await PATCH(`/admin/tenants/${row.id}/status`, { status })
+    ElMessage.success(t('teams.statusUpdated'))
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
-const handleOp = (cmd, t) => {
+const handleOp = (cmd, row) => {
   const map = { suspend: 'suspended', activate: 'active', archive: 'archived', restore: 'active' }
-  setStatus(t, map[cmd])
+  setStatus(row, map[cmd])
 }
 const hasMore = (row) => {
   if (row.id === 1) return false
@@ -87,9 +90,9 @@ const memberList = ref([])
 const memberLoading = ref(false)
 const memberAdd = ref({ email: '', role: 'operator', password: '' })
 const memberAddSaving = ref(false)
-const openMembers = async (t) => {
-  membersTid.value = t.id
-  membersName.value = t.name
+const openMembers = async (row) => {
+  membersTid.value = row.id
+  membersName.value = row.name
   memberAdd.value = { email: '', role: 'operator', password: '' }
   memberOpen.value = true
   await loadMembers()
@@ -97,30 +100,30 @@ const openMembers = async (t) => {
 const loadMembers = async () => {
   memberLoading.value = true
   try { memberList.value = await GET(`/admin/tenants/${membersTid.value}/members`) }
-  catch (e) { ElMessage.error(e.message || '加载成员失败') }
+  catch (e) { ElMessage.error(e.message || t('teams.loadMembersFail')) }
   memberLoading.value = false
 }
 const changeMemberRole = async (m, role) => {
   if (role === m.role) return
   try {
     await PUT(`/admin/tenants/${membersTid.value}/members/${m.membership_id}/role`, { role })
-    ElMessage.success(`${m.email} 角色改为${ROLE_ZH[role] || role}`)
+    ElMessage.success(t('teams.roleChanged', { email: m.email, role: t(ROLE_KEY[role] || role) }))
     m.role = role
-  } catch (e) { ElMessage.error(e.message || '改角色失败'); await loadMembers() }
+  } catch (e) { ElMessage.error(e.message || t('teams.changeRoleFail')); await loadMembers() }
 }
 const removeMemberRow = async (m) => {
   try {
-    await ElMessageBox.confirm(`移除成员「${m.email}」？（用户账号保留，只移出本团队）`, '确认',
-      { type: 'warning', confirmButtonText: '移除', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(t('teams.removeMemberConfirm', { email: m.email }), t('common.confirm'),
+      { type: 'warning', confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel') })
     await DELETE(`/admin/tenants/${membersTid.value}/members/${m.membership_id}`)
-    ElMessage.success(`已移除 ${m.email}`)
+    ElMessage.success(t('teams.memberRemoved', { email: m.email }))
     memberList.value = memberList.value.filter(x => x.membership_id !== m.membership_id)
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const submitMemberAdd = async () => {
-  if (!memberAdd.value.email.trim()) return ElMessage.warning('填邮箱')
-  if (!memberAdd.value.email.includes('@')) return ElMessage.warning('邮箱格式不对')
+  if (!memberAdd.value.email.trim()) return ElMessage.warning(t('teams.emailRequired'))
+  if (!memberAdd.value.email.includes('@')) return ElMessage.warning(t('teams.emailInvalid'))
   memberAddSaving.value = true
   try {
     const r = await POST(`/admin/tenants/${membersTid.value}/members`, {
@@ -129,13 +132,13 @@ const submitMemberAdd = async () => {
       password: memberAdd.value.password.trim(),
     })
     const addMsg = r.existing_user
-      ? `已把现有用户 ${r.email} 加入`
-      : `已创建 ${r.email}，初始密码：${r.password}（请告知对方首次登录后修改）`
+      ? t('teams.addedExisting', { email: r.email })
+      : t('teams.addedNew', { email: r.email, password: r.password })
     memberAdd.value = { email: '', role: 'operator', password: '' }
     await loadMembers()
     load()
-    await ElMessageBox.alert(addMsg, '添加成功', { confirmButtonText: '知道了', type: 'success' })
-  } catch (e) { ElMessage.error(e.message || '添加失败') }
+    await ElMessageBox.alert(addMsg, t('teams.addSuccess'), { confirmButtonText: t('common.ok'), type: 'success' })
+  } catch (e) { ElMessage.error(e.message || t('teams.addFail')) }
   memberAddSaving.value = false
 }
 </script>
@@ -145,50 +148,50 @@ const submitMemberAdd = async () => {
     <div class="card">
       <div class="head">
         <div class="head-text">
-          <div class="t">团队管理</div>
-          <div class="d">平台所有团队（租户）。建团队时自动创建 3 个系统角色，可指定首任管理员。归档后团队隐藏但数据保留。</div>
+          <div class="t">{{ t('teams.title') }}</div>
+          <div class="d">{{ t('teams.desc') }}</div>
         </div>
-        <button class="btn primary" @click="openCreate"><span class="plus">+</span> 建团队</button>
+        <button class="btn primary" @click="openCreate"><span class="plus">+</span> {{ t('teams.createTeam') }}</button>
       </div>
 
-      <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" empty-text="暂无团队" row-key="id">
+      <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" :empty-text="t('teams.noTeams')" row-key="id">
         <el-table-column prop="id" label="ID" width="56" align="center" />
-        <el-table-column label="团队名" min-width="180">
+        <el-table-column :label="t('teams.teamName')" min-width="180">
           <template #default="{ row }">
             <span class="name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="96">
+        <el-table-column :label="t('common.status')" width="96">
           <template #default="{ row }">
             <span :class="['status', row.status]"><i class="sdot"></i>{{ statusLabel(row.status) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="成员" width="68" align="center">
+        <el-table-column :label="t('teams.members')" width="68" align="center">
           <template #default="{ row }">
             <span :class="['num', { zero: row.members === 0 }]">{{ row.members }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="广告账户" width="88" align="center">
+        <el-table-column :label="t('teams.adAccounts')" width="88" align="center">
           <template #default="{ row }">
             <span :class="['num', { zero: row.accounts === 0 }]">{{ row.accounts }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="160">
+        <el-table-column :label="t('teams.createdAt')" width="160">
           <template #default="{ row }"><span class="mute">{{ (row.created_at || '').slice(0,16).replace('T',' ') }}</span></template>
         </el-table-column>
-        <el-table-column label="操作" width="172" fixed="right">
+        <el-table-column :label="t('common.operation')" width="172" fixed="right">
           <template #default="{ row }">
             <div class="ops">
-              <button class="op primary" @click="openMembers(row)">成员</button>
-              <button class="op" @click="rename(row)">改名</button>
+              <button class="op primary" @click="openMembers(row)">{{ t('teams.members') }}</button>
+              <button class="op" @click="rename(row)">{{ t('teams.rename') }}</button>
               <el-dropdown v-if="hasMore(row)" trigger="click" @command="c => handleOp(c, row)">
-                <button class="op more" title="更多">⋯</button>
+                <button class="op more" :title="t('common.more')">⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item v-if="row.status === 'active'" command="suspend">停用</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status === 'suspended'" command="activate">激活</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">归档</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status === 'archived'" command="restore">恢复</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status === 'active'" command="suspend">{{ t('teams.suspend') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status === 'suspended'" command="activate">{{ t('teams.activate') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">{{ t('teams.archive') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status === 'archived'" command="restore">{{ t('teams.restore') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -199,44 +202,44 @@ const submitMemberAdd = async () => {
     </div>
 
     <!-- 建团队弹窗 -->
-    <el-dialog v-model="createOpen" title="建团队" width="460px">
-      <div class="dlg-d">建团队同时创建 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。</div>
-      <div class="form-l"><label>团队名</label><input v-model="createForm.name" class="input" placeholder="如：客户A 投放团队" /></div>
-      <div class="form-l"><label>管理员邮箱</label><input v-model="createForm.owner_email" class="input" placeholder="选填，留空 = 先建空团队" /></div>
-      <div class="form-l"><label>管理员密码</label><input v-model="createForm.owner_password" class="input" type="password" autocomplete="new-password" placeholder="选填，留空 = 系统随机生成" /></div>
+    <el-dialog v-model="createOpen" :title="t('teams.createTeam')" width="460px">
+      <div class="dlg-d">{{ t('teams.createDesc') }}</div>
+      <div class="form-l"><label>{{ t('teams.teamName') }}</label><input v-model="createForm.name" class="input" :placeholder="t('teams.teamNamePlaceholder')" /></div>
+      <div class="form-l"><label>{{ t('teams.ownerEmail') }}</label><input v-model="createForm.owner_email" class="input" :placeholder="t('teams.ownerEmailPlaceholder')" /></div>
+      <div class="form-l"><label>{{ t('teams.ownerPassword') }}</label><input v-model="createForm.owner_password" class="input" type="password" autocomplete="new-password" :placeholder="t('teams.ownerPasswordPlaceholder')" /></div>
       <template #footer>
-        <button class="btn" @click="createOpen = false">取消</button>
-        <button class="btn primary" :disabled="createSaving" @click="submitCreate">{{ createSaving ? '创建中…' : '创建' }}</button>
+        <button class="btn" @click="createOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="createSaving" @click="submitCreate">{{ createSaving ? t('teams.creating') : t('common.create') }}</button>
       </template>
     </el-dialog>
 
     <!-- 成员管理弹窗 -->
-    <el-dialog v-model="memberOpen" :title="`成员管理 · ${membersName}`" width="560px">
+    <el-dialog v-model="memberOpen" :title="t('teams.memberManageTitle', { name: membersName })" width="560px">
       <div v-loading="memberLoading">
-        <div class="mem-section-title">当前成员（{{ memberList.length }}）</div>
+        <div class="mem-section-title">{{ t('teams.currentMembers', { n: memberList.length }) }}</div>
         <div class="mem-list">
           <div v-for="m in memberList" :key="m.membership_id" class="mem-row">
-            <span class="mem-email">{{ m.email }}<span v-if="m.is_you" class="mem-you">你</span></span>
+            <span class="mem-email">{{ m.email }}<span v-if="m.is_you" class="mem-you">{{ t('teams.you') }}</span></span>
             <select class="mem-role-sel" :value="m.role" :disabled="m.is_you && m.role === 'owner'"
                     @change="e => changeMemberRole(m, e.target.value)">
-              <option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k">{{ zh }}</option>
+              <option v-for="(rk, k) in ROLE_KEY" :key="k" :value="k">{{ t(rk) }}</option>
             </select>
-            <button v-if="!m.is_you" class="mem-rm" @click="removeMemberRow(m)">移除</button>
+            <button v-if="!m.is_you" class="mem-rm" @click="removeMemberRow(m)">{{ t('common.remove') }}</button>
             <span v-else class="mem-self">—</span>
           </div>
-          <div v-if="!memberList.length && !memberLoading" class="mem-empty">暂无成员</div>
+          <div v-if="!memberList.length && !memberLoading" class="mem-empty">{{ t('teams.noMembers') }}</div>
         </div>
 
         <div class="mem-divider"></div>
-        <div class="mem-section-title">添加新成员</div>
-        <div class="form-l"><label>邮箱</label><input v-model="memberAdd.email" class="input" placeholder="新成员邮箱（已存在则直接加入）" /></div>
-        <div class="form-l"><label>角色</label>
+        <div class="mem-section-title">{{ t('teams.addNewMember') }}</div>
+        <div class="form-l"><label>{{ t('teams.email') }}</label><input v-model="memberAdd.email" class="input" :placeholder="t('teams.memberEmailPlaceholder')" /></div>
+        <div class="form-l"><label>{{ t('teams.role') }}</label>
           <select v-model="memberAdd.role" class="input">
-            <option v-for="(zh, k) in ROLE_ZH" :key="k" :value="k">{{ zh }}</option>
+            <option v-for="(rk, k) in ROLE_KEY" :key="k" :value="k">{{ t(rk) }}</option>
           </select>
         </div>
-        <div class="form-l"><label>密码</label><input v-model="memberAdd.password" class="input" type="password" autocomplete="new-password" placeholder="留空 = 系统随机生成" /></div>
-        <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? '添加中…' : '添加成员' }}</button>
+        <div class="form-l"><label>{{ t('teams.password') }}</label><input v-model="memberAdd.password" class="input" type="password" autocomplete="new-password" :placeholder="t('teams.memberPasswordPlaceholder')" /></div>
+        <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? t('teams.adding') : t('teams.addMember') }}</button>
       </div>
     </el-dialog>
   </div>

@@ -1,18 +1,20 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { lpStatus, subcodeStatus } from '../composables/useStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 
+const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 
 // 落地页 内部 tab：管理 / 日志（日志归纳进来，不再是独立侧栏项）
 const tab = ref(route.query.tab === 'logs' ? 'logs' : 'manage')
-watch(() => route.query.tab, (t) => { if (t === 'logs' || t === 'manage') tab.value = t })
+watch(() => route.query.tab, (tv) => { if (tv === 'logs' || tv === 'manage') tab.value = tv })
 
 // ── 落地页列表 ──
 const pages = ref([])
@@ -30,7 +32,7 @@ const sortedPages = computed(() => {
 const loadPages = async () => {
   loading.value = true
   try { pages.value = await GET('/landing/pages') }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
   finally { loading.value = false }
 }
 
@@ -60,24 +62,24 @@ const emptyForm = () => ({
 })
 const form = ref(emptyForm())
 const tplDesc = computed(() => {
-  const t = templates.value.find(x => x.key === form.value.template_key)
-  return t?.desc || ''
+  const tpl = templates.value.find(x => x.key === form.value.template_key)
+  return tpl?.desc || ''
 })
-const convEventOptions = [
-  { v: 'Purchase', l: '购买 (Purchase)' },
-  { v: 'Contact', l: '联系 (Contact)' },
-  { v: 'Lead', l: '潜在客户 (Lead)' },
-  { v: 'AddToCart', l: '加入购物车 (AddToCart)' },
-  { v: 'ViewContent', l: '查看内容 (ViewContent)' },
-  { v: 'InitiateCheckout', l: '开始结账 (InitiateCheckout)' },
-  { v: 'Subscribe', l: '订阅 (Subscribe)' },
-  { v: 'CompleteRegistration', l: '完成注册 (CompleteRegistration)' },
-]
-const rotationOptions = [
-  { v: 'first', l: '首个（first）' },
-  { v: 'random', l: '随机（random）' },
-  { v: 'sequential', l: '轮询（sequential）' },
-]
+const convEventOptions = computed(() => [
+  { v: 'Purchase', l: t('landing.convPurchase') },
+  { v: 'Contact', l: t('landing.convContact') },
+  { v: 'Lead', l: t('landing.convLead') },
+  { v: 'AddToCart', l: t('landing.convAddToCart') },
+  { v: 'ViewContent', l: t('landing.convViewContent') },
+  { v: 'InitiateCheckout', l: t('landing.convInitiateCheckout') },
+  { v: 'Subscribe', l: t('landing.convSubscribe') },
+  { v: 'CompleteRegistration', l: t('landing.convCompleteRegistration') },
+])
+const rotationOptions = computed(() => [
+  { v: 'first', l: t('landing.rotFirst') },
+  { v: 'random', l: t('landing.rotRandom') },
+  { v: 'sequential', l: t('landing.rotSequential') },
+])
 const openCreate = () => {
   editingId.value = null
   form.value = emptyForm()
@@ -110,7 +112,7 @@ const openEdit = async (p) => {
       template_id: detail.template_id || null,
     }
     drawerOpen.value = true
-  } catch (e) { ElMessage.error(e.message || '加载失败') }
+  } catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
 }
 
 // ── 防护规则编辑器（快速 toggle + 高级自定义）──
@@ -127,13 +129,13 @@ const loadAsnBlocklist = async () => {
 }
 const showAdvanced = ref(false)
 const QUICK_GUARDS = computed(() => [
-  { key: 'bots', label: '屏蔽常见爬虫', rules: { ua_block: ['bot','crawler','spider','googlebot','bingbot','slurp','duckduckbot','baiduspider','yandexbot','facebookexternalhit','preview','debug'] } },
-  { key: 'datacenter', label: '屏蔽机房/VPN', rules: { datacenter_block: datacenterAsns.value.map(d => d.asn) } },
-  { key: 'us_only', label: '仅美国', rules: { country_allow: ['US'] } },
-  { key: 'block_desktop', label: '屏蔽桌面', rules: { device_block: ['desktop'] } },
-  { key: 'block_tablet', label: '屏蔽平板', rules: { device_block: ['tablet'] } },
-  { key: 'block_preview', label: '拒预览/调试', rules: { referer_block: ['preview','debug'], query_block: ['preview','debug'] } },
-  { key: 'require_ad', label: '必带广告参数', rules: { required_query: ['ad'] } },
+  { key: 'bots', label: t('landing.guardBots'), rules: { ua_block: ['bot','crawler','spider','googlebot','bingbot','slurp','duckduckbot','baiduspider','yandexbot','facebookexternalhit','preview','debug'] } },
+  { key: 'datacenter', label: t('landing.guardDatacenter'), rules: { datacenter_block: datacenterAsns.value.map(d => d.asn) } },
+  { key: 'us_only', label: t('landing.guardUsOnly'), rules: { country_allow: ['US'] } },
+  { key: 'block_desktop', label: t('landing.guardBlockDesktop'), rules: { device_block: ['desktop'] } },
+  { key: 'block_tablet', label: t('landing.guardBlockTablet'), rules: { device_block: ['tablet'] } },
+  { key: 'block_preview', label: t('landing.guardBlockPreview'), rules: { referer_block: ['preview','debug'], query_block: ['preview','debug'] } },
+  { key: 'require_ad', label: t('landing.guardRequireAd'), rules: { required_query: ['ad'] } },
 ])
 const guardActive = (g) => Object.entries(g.rules).every(([k, vals]) => {
   const cur = form.value.protection_rules[k] || []
@@ -156,15 +158,15 @@ const toggleGuard = (g) => {
 const guardSummary = computed(() => {
   const r = form.value.protection_rules
   const parts = []
-  if (r.ua_block?.length) parts.push(`爬虫${r.ua_block.length}词`)
-  if (r.datacenter_block?.length) parts.push(`机房/VPN ${r.datacenter_block.length}段`)
-  if (r.country_allow?.length) parts.push(`仅${r.country_allow.join('/')}`)
-  if (r.country_block?.length) parts.push(`拒${r.country_block.join('/')}`)
-  if (r.device_block?.length) parts.push(`拒${r.device_block.join('/')}`)
-  if (r.source_block?.length) parts.push(`拒来源${r.source_block.join('/')}`)
-  if (r.referer_block?.length) parts.push(`拒referer`)
-  if (r.query_block?.length) parts.push(`拒query`)
-  if (r.required_query?.length) parts.push(`必带${r.required_query.join(',')}`)
+  if (r.ua_block?.length) parts.push(t('landing.sumBots', { n: r.ua_block.length }))
+  if (r.datacenter_block?.length) parts.push(t('landing.sumDatacenter', { n: r.datacenter_block.length }))
+  if (r.country_allow?.length) parts.push(t('landing.sumCountryAllow', { v: r.country_allow.join('/') }))
+  if (r.country_block?.length) parts.push(t('landing.sumCountryBlock', { v: r.country_block.join('/') }))
+  if (r.device_block?.length) parts.push(t('landing.sumDeviceBlock', { v: r.device_block.join('/') }))
+  if (r.source_block?.length) parts.push(t('landing.sumSourceBlock', { v: r.source_block.join('/') }))
+  if (r.referer_block?.length) parts.push(t('landing.sumReferer'))
+  if (r.query_block?.length) parts.push(t('landing.sumQuery'))
+  if (r.required_query?.length) parts.push(t('landing.sumRequired', { v: r.required_query.join(',') }))
   return parts.length ? parts.join(' · ') : ''
 })
 const ruleVal = (k) => form.value.protection_rules[k] || []
@@ -175,16 +177,16 @@ const setRule = (k, v) => {
 }
 
 const save = async () => {
-  if (!form.value.title.trim()) return ElMessage.warning('填标题')
-  if (!form.value.custom_domains.length) return ElMessage.warning('请选择根域名（自动生成子域名，不能用根域名直接投放）')
+  if (!form.value.title.trim()) return ElMessage.warning(t('landing.warnTitle'))
+  if (!form.value.custom_domains.length) return ElMessage.warning(t('landing.warnDomain'))
   if (form.value.redirect_mode === 'redirect' && !form.value.target_urls.length) {
-    return ElMessage.warning('填跳转地址')
+    return ElMessage.warning(t('landing.warnRedirectUrl'))
   }
   if (form.value.redirect_mode === 'display' && !form.value.target_urls.length) {
-    return ElMessage.warning('填至少一个目标 URL')
+    return ElMessage.warning(t('landing.warnTargetUrl'))
   }
   if (form.value.block_enabled && !form.value.block_target && !form.value.block_html) {
-    return ElMessage.warning('防护已开启，必须配置屏蔽跳转链接或屏蔽页 HTML')
+    return ElMessage.warning(t('landing.warnBlockConfig'))
   }
   saving.value = true
   const rules = { ...form.value.protection_rules }
@@ -204,22 +206,22 @@ const save = async () => {
     let resp
     if (editingId.value) {
       resp = await PUT(`/landing/pages/${editingId.value}`, body)
-      ElMessage.success('已更新')
+      ElMessage.success(t('common.saved'))
     } else {
       resp = await POST('/landing/publish', body)
-      ElMessage.success('已发布')
+      ElMessage.success(t('landing.published'))
     }
     drawerOpen.value = false
     await loadPages()
-    if (resp && resp.self_check) showSelfCheck(resp.self_check, '发布后自检')
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    if (resp && resp.self_check) showSelfCheck(resp.self_check, t('landing.scPostPublishTitle'))
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   saving.value = false
 }
 
 const archive = async (p) => {
   try {
-    await ElMessageBox.confirm(`归档「${p.title}」？归档后不再显示，已发布页面保留。`, '确认', { type: 'warning' })
-    await DELETE(`/landing/pages/${p.id}`); ElMessage.success('已归档'); await loadPages()
+    await ElMessageBox.confirm(t('landing.archiveConfirm', { title: p.title }), t('common.confirm'), { type: 'warning' })
+    await DELETE(`/landing/pages/${p.id}`); ElMessage.success(t('landing.archived')); await loadPages()
   } catch {}
 }
 
@@ -236,9 +238,9 @@ const showSelfCheck = (r, title) => {
     // detail 含用户可控的域名/目标URL，必须转义防 XSS
     return `<div style="margin:6px 0;line-height:1.5"><span style="color:${col};font-weight:600">${ic}</span> <b>${_esc(c.label)}</b>：<span style="color:var(--t3)">${_esc(c.detail)}</span></div>`
   }).join('')
-  const overallTxt = r.overall === 'pass' ? '✅ 全部通过' : (r.overall === 'fail' ? '❌ 有致命项（需处理）' : '⚠️ 有警告（可忽略若是配置选择）')
-  const note = title === '发布后自检' ? '<div style="font-size:11px;color:var(--t3);margin-bottom:8px">发布后即时自检（域名/Worker/FB 用「自检」按钮完整重检）</div>' : ''
-  ElMessageBox.alert(note + (lines || '无检查项'), `${title} · ${overallTxt}`, { dangerouslyUseHTMLString: true, confirmButtonText: '知道了', customClass: 'sc-alert' })
+  const overallTxt = r.overall === 'pass' ? t('landing.scOverallPass') : (r.overall === 'fail' ? t('landing.scOverallFail') : t('landing.scOverallWarn'))
+  const note = title === t('landing.scPostPublishTitle') ? `<div style="font-size:11px;color:var(--t3);margin-bottom:8px">${t('landing.scPostPublishNote')}</div>` : ''
+  ElMessageBox.alert(note + (lines || t('landing.scNoChecks')), `${title} · ${overallTxt}`, { dangerouslyUseHTMLString: true, confirmButtonText: t('landing.gotIt'), customClass: 'sc-alert' })
 }
 const checkHealth = async (p) => {
   healthCheckingId.value = p.id
@@ -246,8 +248,8 @@ const checkHealth = async (p) => {
     const r = await GET(`/landing/pages/${p.id}/health`)
     healthResult.value = r
     await loadPages()
-    showSelfCheck(r, '自检')
-  } catch (e) { ElMessage.error('自检失败：' + (e.message || '')) }
+    showSelfCheck(r, t('landing.scTitle'))
+  } catch (e) { ElMessage.error(t('landing.scFail') + '：' + (e.message || '')) }
   healthCheckingId.value = null
 }
 const protTestResult = ref(null)
@@ -257,7 +259,7 @@ const runProtTest = async () => {
   try {
     const r = await POST('/landing/protection-test', { rules: form.value.protection_rules })
     protTestResult.value = r
-  } catch (e) { ElMessage.error('测试失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('landing.testFail') + '：' + (e.message || '')) }
   protTesting.value = false
 }
 
@@ -285,24 +287,24 @@ const loadSubcodes = async (pid) => {
     subcodes.value = r.items || []
     subCounts.value = r.counts || {}
   }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
   finally { subLoading.value = false }
 }
 const setSubStatus = (s) => { subStatus.value = s; loadSubcodes(subPage.value.id) }
 const onSubSearch = () => loadSubcodes(subPage.value.id)
 const archiveSub = async (s) => {
-  try { await ElMessageBox.confirm(`归档子码 /a/${s.slug}？回收站可恢复。`, '确认归档', { type: 'warning' })
-    await DELETE(`/subcodes/${s.id}`); ElMessage.success('已归档'); await loadSubcodes(subPage.value.id)
-  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error('归档失败：' + e.message) }
+  try { await ElMessageBox.confirm(t('landing.subArchiveConfirm', { slug: s.slug }), t('landing.subArchiveTitle'), { type: 'warning' })
+    await DELETE(`/subcodes/${s.id}`); ElMessage.success(t('landing.archived')); await loadSubcodes(subPage.value.id)
+  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('landing.archiveFail') + '：' + e.message) }
 }
 const restoreSub = async (s) => {
-  try { await POST(`/subcodes/${s.id}/restore`); ElMessage.success('已恢复'); await loadSubcodes(subPage.value.id) }
-  catch (e) { ElMessage.error('恢复失败：' + (e.message || '')) }
+  try { await POST(`/subcodes/${s.id}/restore`); ElMessage.success(t('landing.restored')); await loadSubcodes(subPage.value.id) }
+  catch (e) { ElMessage.error(t('landing.restoreFail') + '：' + (e.message || '')) }
 }
 const hardDeleteSub = async (s) => {
-  try { await ElMessageBox.confirm(`永久删除 /a/${s.slug}？将清空其配置（恢复后回退页级跳转）。`, '永久删除', { type: 'warning', confirmButtonText: '永久删除', confirmButtonClass: 'el-button--danger' })
-    await DELETE(`/subcodes/${s.id}?hard=1`); ElMessage.success('已永久删除（回收站仍可恢复）'); await loadSubcodes(subPage.value.id)
-  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error('删除失败：' + e.message) }
+  try { await ElMessageBox.confirm(t('landing.subHardDeleteConfirm', { slug: s.slug }), t('landing.hardDelete'), { type: 'warning', confirmButtonText: t('landing.hardDelete'), confirmButtonClass: 'el-button--danger' })
+    await DELETE(`/subcodes/${s.id}?hard=1`); ElMessage.success(t('landing.hardDeleted')); await loadSubcodes(subPage.value.id)
+  } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('landing.deleteFail') + '：' + e.message) }
 }
 const subGenerating = ref(false)
 const genSubcode = async () => {
@@ -313,8 +315,8 @@ const genSubcode = async () => {
     for (let i = 0; i < count; i++) {
       await POST('/subcodes/generate', { page_id: subPage.value.id })
     }
-    ElMessage.success(`已生成 ${count} 条`); newSubCount.value = 1; await loadSubcodes(subPage.value.id)
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    ElMessage.success(t('landing.subGenerated', { n: count })); newSubCount.value = 1; await loadSubcodes(subPage.value.id)
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   subGenerating.value = false
 }
 const subTargetEdit = ref({})
@@ -322,19 +324,19 @@ const startEditTarget = (s) => { subTargetEdit.value = { [s.id]: s.target_urls |
 const saveSubTarget = async (s) => {
   try {
     await PUT(`/subcodes/${s.id}`, { target_urls: subTargetEdit.value[s.id] || '' })
-    ElMessage.success('已设置专属跳转'); delete subTargetEdit.value[s.id]; await loadSubcodes(subPage.value.id)
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    ElMessage.success(t('landing.subTargetSet')); delete subTargetEdit.value[s.id]; await loadSubcodes(subPage.value.id)
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const copyUrl = (slug) => {
   // custom_domain = 该页绑定的子域名公开地址（如 gocal75.marketbriefnow.xyz）；
   // custom_domains = 根域名列表（仅兜底）。优先用子域名，避免投放到根域。
   const base = (subPage.value?.custom_domain || subPage.value?.custom_domains?.[0] || '').replace(/^https?:\/\//, '')
-  if (!base) { ElMessage.warning('该落地页未绑定域名，请先绑定域名'); return }
+  if (!base) { ElMessage.warning(t('landing.copyUrlNoDomain')); return }
   const url = `https://${base}/a/${slug}?ad={{ad.id}}`
   navigator.clipboard?.writeText(url)
   // 引导：说明 {{ad.id}} 占位符——FB 广告层级 URL 参数会自动替换成实际广告 ID，用于子码自动绑定
   ElMessage({
-    message: `已复制：<code>${_esc(url)}</code><br><span style="opacity:.75;font-size:11px">投放时在广告「URL 参数」里填这个链接，FB 会把 <code>{{ad.id}}</code> 自动换成实际广告 ID（用于子码自动绑定/通过量统计）</span>`,
+    message: t('landing.copiedHtml', { url: _esc(url) }),
     dangerouslyUseHTMLString: true, type: 'success', duration: 6000,
   })
 }
@@ -345,23 +347,23 @@ const checkSubFb = async (s) => {
   try {
     const r = await POST('/subcodes/fb-check', { page_id: subPage.value.id, slug: s.slug })
     subFbStatus.value[s.slug] = { status: r.status, detail: r.detail }
-    if (r.status === 'fail') ElMessage.error(`/a/${s.slug} 被 FB 封禁`)
-    else if (r.status === 'pass') ElMessage.success(`/a/${s.slug} FB 正常`)
-    else ElMessage.warning(`/a/${s.slug}：${r.detail}`)
-  } catch (e) { subFbStatus.value[s.slug] = { status: 'warn', detail: e.message || '失败' }; ElMessage.error('检测失败') }
+    if (r.status === 'fail') ElMessage.error(t('landing.fbBlockedMsg', { slug: s.slug }))
+    else if (r.status === 'pass') ElMessage.success(t('landing.fbNormal', { slug: s.slug }))
+    else ElMessage.warning(t('landing.fbResult', { slug: s.slug, detail: r.detail }))
+  } catch (e) { subFbStatus.value[s.slug] = { status: 'warn', detail: e.message || t('common.fail') }; ElMessage.error(t('landing.fbCheckFail')) }
 }
 const subFbBatchLoading = ref(false)
 const checkAllSubFb = async () => {
-  if (!subcodes.value.length) return ElMessage.warning('无子码')
+  if (!subcodes.value.length) return ElMessage.warning(t('landing.noSubcodes'))
   subFbBatchLoading.value = true
   try {
     const r = await POST('/subcodes/fb-check-batch', { page_id: subPage.value.id })
     const m = {}
     for (const item of r.results) m[item.slug] = { status: item.status, detail: item.detail }
     subFbStatus.value = m
-    if (r.blocked > 0) ElMessage.error(`${r.blocked}/${r.total} 个子码被 FB 封禁`)
-    else ElMessage.success(`${r.total} 个子码全部 FB 正常`)
-  } catch (e) { ElMessage.error('批量检测失败：' + (e.message || '')) }
+    if (r.blocked > 0) ElMessage.error(t('landing.fbBatchBlocked', { blocked: r.blocked, total: r.total }))
+    else ElMessage.success(t('landing.fbBatchAllNormal', { total: r.total }))
+  } catch (e) { ElMessage.error(t('landing.fbBatchFail') + '：' + (e.message || '')) }
   subFbBatchLoading.value = false
 }
 const subEvents = ref([])
@@ -370,7 +372,7 @@ const subEventsLoading = ref(false)
 const openSubEvents = async (s) => {
   subEventsOpen.value = true; subEventsLoading.value = true
   try { subEvents.value = await GET(`/subcodes/${subPage.value.id}/events?slug=${s.slug}&limit=200`) }
-  catch (e) { ElMessage.error('加载失败') }
+  catch (e) { ElMessage.error(t('landing.loadFail')) }
   subEventsLoading.value = false
 }
 // 联动：子码 → 落地页日志 tab（预筛该子码 + 所属页）
@@ -379,11 +381,11 @@ const goSubLogs = (s) => {
   tab.value = 'logs'
   router.replace({ name: 'landing', query: { tab: 'logs', slug: s.slug, page_id: subPage.value ? subPage.value.id : '' } })
 }
-const setTab = (t) => {
-  tab.value = t
-  router.replace({ name: 'landing', query: t === 'manage' ? {} : { tab: 'logs' } })
+const setTab = (tv) => {
+  tab.value = tv
+  router.replace({ name: 'landing', query: tv === 'manage' ? {} : { tab: 'logs' } })
 }
-const copyText = (t, msg) => { navigator.clipboard?.writeText(t); ElMessage.success(msg || '已复制') }
+const copyText = (txt, msg) => { navigator.clipboard?.writeText(txt); ElMessage.success(msg || t('common.copied')) }
 const randomPrefix = () => 'go' + Math.random().toString(36).slice(2, 7)
 const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : h }
 const subdomainStatus = ref('')
@@ -409,29 +411,29 @@ const syncing = ref(false)
 const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '' } }
 const syncPixels = async () => {
   syncing.value = true
-  try { const r = await POST('/landing-lib/pixels/sync', {}); ElMessage.success(`同步新增 ${r.added || 0} 个`); await loadLib() }
-  catch (e) { ElMessage.error('同步失败：' + (e.message || '')) }
+  try { const r = await POST('/landing-lib/pixels/sync', {}); ElMessage.success(t('landing.pixelSynced', { n: r.added || 0 })); await loadLib() }
+  catch (e) { ElMessage.error(t('landing.syncFail') + '：' + (e.message || '')) }
   syncing.value = false
 }
 const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '' } }
 const delPixel = async (p) => {
-  try { await ElMessageBox.confirm(`删除像素 ${p.pixel_id}？`, '确认', { type: 'warning' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success('已删'); await loadLib() }
+  try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
   catch {}
 }
 const savePixel = async () => {
-  if (!pixelForm.value.pixel_id.trim()) return ElMessage.warning('填像素 ID')
+  if (!pixelForm.value.pixel_id.trim()) return ElMessage.warning(t('landing.warnPixelId'))
   pixelSaving.value = true
   try {
     if (pixelForm.value.id) {
       await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note })
-      ElMessage.success('已更新')
+      ElMessage.success(t('common.saved'))
     } else {
       await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note })
-      ElMessage.success('已添加')
+      ElMessage.success(t('common.done'))
     }
     await loadLib()
     pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '' }
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   pixelSaving.value = false
 }
 
@@ -450,24 +452,24 @@ const loadLandingTemplates = async () => { try { landingTemplates.value = await 
 const openLandingTemplates = () => { tplOpen.value = true; loadLandingTemplates() }
 const onTplFile = (e) => { tplForm.value.file = e.target.files[0] }
 const uploadLandingTpl = async () => {
-  if (!tplForm.value.name.trim()) return ElMessage.warning('填模板名')
-  if (!tplForm.value.file) return ElMessage.warning('选 zip 文件')
+  if (!tplForm.value.name.trim()) return ElMessage.warning(t('landing.warnTplName'))
+  if (!tplForm.value.file) return ElMessage.warning(t('landing.warnZipFile'))
   tplUploading.value = true
   try {
     const fd = new FormData()
     fd.append('name', tplForm.value.name.trim()); fd.append('description', tplForm.value.description); fd.append('file', tplForm.value.file)
     const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
     const r = await fetch(BASE + '/landing-lib/templates/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') }, body: fd })
-    if (r.status === 401) { localStorage.removeItem('tova_token'); location.hash = '#/login'; throw new Error('未登录，请重新登录') }
+    if (r.status === 401) { localStorage.removeItem('tova_token'); location.hash = '#/login'; throw new Error(t('landing.notLoggedIn')) }
     const text = await r.text(); let data = {}; try { data = JSON.parse(text) } catch {}
-    if (!r.ok) throw new Error(data.detail || '上传失败')
-    ElMessage.success(`上传成功（${data.validation?.resources || 0} 资源）`)
+    if (!r.ok) throw new Error(data.detail || t('landing.uploadFail'))
+    ElMessage.success(t('landing.uploadOk', { n: data.validation?.resources || 0 }))
     tplForm.value = { name: '', description: '', file: null }; if (tplFileInput.value) tplFileInput.value.value = ''; await loadLandingTemplates()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   tplUploading.value = false
 }
-const delLandingTpl = async (t) => {
-  try { await ElMessageBox.confirm(`删除模板「${t.name}」？`, '确认', { type: 'warning' }); await DELETE(`/landing-lib/templates/${t.id}`); ElMessage.success('已删'); await loadLandingTemplates() } catch {}
+const delLandingTpl = async (tpl) => {
+  try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
 }
 const downloadTplRef = () => {
   const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
@@ -479,20 +481,20 @@ const filteredZones = computed(() => { const k = zoneFilter.value.trim().toLower
 const openDomains = async () => {
   domainOpen.value = true; zonesLoading.value = true; zoneFilter.value = ''
   try { cfZones.value = (await GET('/landing-lib/cf-zones')).map(z => ({ ...z, _checked: false })) }
-  catch (e) { ElMessage.error(e.message || '加载失败') }
+  catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
   finally { zonesLoading.value = false }
 }
 const importZones = async () => {
   const toImport = cfZones.value.filter(z => z._checked && !z.imported).map(z => z.name)
-  if (!toImport.length) return ElMessage.warning('勾选要导入的域名')
+  if (!toImport.length) return ElMessage.warning(t('landing.warnCheckDomain'))
   try {
     const r = await POST('/landing-lib/domains/import', { domains: toImport })
-    ElMessage.success(`已导入 ${r.added} 个`); await loadLib(); await openDomains()
-  } catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+    ElMessage.success(t('landing.imported', { n: r.added })); await loadLib(); await openDomains()
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const delDomain = async (d) => {
-  try { await DELETE(`/landing-lib/domains/${d.id}`); ElMessage.success('已删'); await loadLib(); await openDomains() }
-  catch (e) { ElMessage.error('失败：' + (e.message || '')) }
+  try { await DELETE(`/landing-lib/domains/${d.id}`); ElMessage.success(t('common.done')); await loadLib(); await openDomains() }
+  catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 
 const init = async () => {
@@ -509,18 +511,18 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 <template>
   <div class="page">
     <div class="lp-tabs">
-      <div :class="['lp-tab', { on: tab === 'manage' }]" @click="setTab('manage')">落地页管理</div>
-      <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">落地页日志</div>
+      <div :class="['lp-tab', { on: tab === 'manage' }]" @click="setTab('manage')">{{ t('landing.tabManage') }}</div>
+      <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">{{ t('landing.tabLogs') }}</div>
     </div>
     <div v-show="tab === 'manage'">
     <div class="bar">
-      <div class="bar-l">共 {{ pages.length }} 个落地页</div>
+      <div class="bar-l">{{ t('landing.totalPages', { n: pages.length }) }}</div>
       <div class="bar-r">
-        <button class="btn" @click="router.push('/dashboard')">查看数据</button>
-        <button class="btn" @click="openPixels">像素库</button>
-        <button v-if="isSuper" class="btn" @click="openDomains">域名管理</button>
-        <button class="btn" @click="openLandingTemplates">模板</button>
-        <button class="btn primary" @click="openCreate">+ 新建投放链接</button>
+        <button class="btn" @click="router.push('/dashboard')">{{ t('landing.viewData') }}</button>
+        <button class="btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
+        <button v-if="isSuper" class="btn" @click="openDomains">{{ t('landing.domainMgmt') }}</button>
+        <button class="btn" @click="openLandingTemplates">{{ t('landing.templates') }}</button>
+        <button class="btn primary" @click="openCreate">+ {{ t('landing.newLink') }}</button>
       </div>
     </div>
 
@@ -529,106 +531,106 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div class="lp-head">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-title">{{ p.title }}</span>
-          <span v-if="p.last_fb_status==='fail'" class="tag" style="background:var(--error);color:#fff" :title="'被 Facebook 屏蔽（自动探测）· ' + (p.last_health_summary||'')">FB屏蔽</span>
-          <span v-else-if="p.last_fb_status==='warn'" class="tag" style="background:var(--warning);color:#fff" :title="p.last_health_summary||'FB探测异常，需复查'">FB待查</span>
-          <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} 域名</span>
-          <span class="tag">{{ (p.pixel_ids||[]).length }} 像素</span>
+          <span v-if="p.last_fb_status==='fail'" class="tag" style="background:var(--error);color:#fff" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">{{ t('landing.fbBlocked') }}</span>
+          <span v-else-if="p.last_fb_status==='warn'" class="tag" style="background:var(--warning);color:#fff" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
+          <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} {{ t('landing.domainsUnit') }}</span>
+          <span class="tag">{{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
           <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
         </div>
         <div class="lp-body">
-          {{ p.subcode_count }} 子码 · {{ p.visit_count||0 }} 访问 · {{ p.click_count||0 }} 转化 · <span :style="{ color: (p.pass_rate||0) < 10 && (p.visit_count||0) >= 10 ? 'var(--error)' : 'var(--t3)' }">通过 {{ p.pass_rate||0 }}%</span><span v-if="(p.block_count||0) > 0" style="color:var(--warning);margin-left:4px">屏蔽{{ p.block_count }}</span>
+          {{ t('landing.cardStats', { sub: p.subcode_count, visit: p.visit_count||0, click: p.click_count||0, rate: p.pass_rate||0 }) }}<span v-if="(p.block_count||0) > 0" style="color:var(--warning);margin-left:4px">{{ t('landing.blockedCount', { n: p.block_count }) }}</span>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.custom_domain">
           <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
-          <button class="mb" @click="copyText(p.custom_domain, '公开链接已复制')">复制</button>
-          <a class="mb" :href="p.custom_domain" target="_blank" rel="noopener">打开↗</a>
+          <button class="mb" @click="copyText(p.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
+          <a class="mb" :href="p.custom_domain" target="_blank" rel="noopener">{{ t('landing.open') }}↗</a>
         </div>
         <div class="lp-foot">
-          <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">预览</a>
-          <button class="mb" @click="openSubcodes(p)">子码</button>
-          <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? '自检中…' : '自检' }}</button>
-          <button class="mb" @click="openEdit(p)">编辑</button>
-          <button class="mb danger" @click="archive(p)">归档</button>
+          <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">{{ t('common.preview') }}</a>
+          <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
+          <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</button>
+          <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
+          <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
         </div>
       </div>
-      <div v-if="!pages.length && !loading" class="empty">暂无投放链接，点「+ 新建投放链接」创建。</div>
+      <div v-if="!pages.length && !loading" class="empty">{{ t('landing.emptyCreate') }}</div>
     </div>
 
-    <el-drawer v-model="drawerOpen" :title="editingId ? '编辑投放链接' : '新建投放链接'" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-text="saving ? '正在部署到云端...' : ''">
-      <div class="form-l"><label>标题</label><input v-model="form.title" class="input" placeholder="落地页标题" /></div>
-      <div class="form-l"><label>访问模式</label>
+    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-text="saving ? t('landing.deployingCloud') : ''">
+      <div class="form-l"><label>{{ t('landing.fTitle') }}</label><input v-model="form.title" class="input" :placeholder="t('landing.fTitlePh')" /></div>
+      <div class="form-l"><label>{{ t('landing.accessMode') }}</label>
         <el-radio-group v-model="form.redirect_mode">
-          <el-radio value="display">落地页模式（展示页面内容）</el-radio>
-          <el-radio value="redirect">跳转模式（直接跳转目标）</el-radio>
+          <el-radio value="display">{{ t('landing.modeDisplay') }}</el-radio>
+          <el-radio value="redirect">{{ t('landing.modeRedirect') }}</el-radio>
         </el-radio-group>
       </div>
-      <div class="mode-hint" v-if="form.redirect_mode === 'display'">访客看到落地页内容，点击按钮再跳转目标地址</div>
-      <div class="mode-hint" v-else>访客直接跳到目标地址，不展示落地页（适合第三方链接）</div>
+      <div class="mode-hint" v-if="form.redirect_mode === 'display'">{{ t('landing.modeHintDisplay') }}</div>
+      <div class="mode-hint" v-else>{{ t('landing.modeHintRedirect') }}</div>
 
-      <div class="form-l"><label>{{ form.redirect_mode === 'redirect' ? '跳转地址' : '目标 URL' }}</label>
+      <div class="form-l"><label>{{ form.redirect_mode === 'redirect' ? t('landing.fRedirectUrl') : t('landing.fTargetUrl') }}</label>
         <el-select v-model="form.target_urls" multiple filterable allow-create default-first-option
-          :placeholder="form.redirect_mode === 'redirect' ? '填第三方链接（如 WhatsApp/Shopify）' : '可填多个（轮换），回车添加'" style="flex:1" />
+          :placeholder="form.redirect_mode === 'redirect' ? t('landing.fRedirectUrlPh') : t('landing.fTargetUrlPh')" style="flex:1" />
       </div>
-      <div class="form-l"><label>轮换模式</label>
+      <div class="form-l"><label>{{ t('landing.fRotation') }}</label>
         <select v-model="form.rotation_mode" class="input">
           <option v-for="o in rotationOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
         </select>
       </div>
-      <div class="form-l" v-if="form.custom_domain"><label>公开链接</label>
+      <div class="form-l" v-if="form.custom_domain"><label>{{ t('landing.fPublicUrl') }}</label>
         <span class="url-text" style="flex:1">🔗 {{ form.custom_domain }}</span>
-        <button class="mb" @click="copyText(form.custom_domain, '公开链接已复制')">复制</button>
+        <button class="mb" @click="copyText(form.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
       </div>
-      <div class="form-l"><label>域名</label>
+      <div class="form-l"><label>{{ t('landing.fDomain') }}</label>
         <el-select v-model="form.custom_domains" multiple filterable allow-create default-first-option
-          placeholder="可多选（一页绑多域），回车添加" style="flex:1">
+          :placeholder="t('landing.fDomainPh')" style="flex:1">
           <el-option v-for="d in domains" :key="d.id" :value="d.domain" :label="d.domain + (d.label ? ' ('+d.label+')' : '')" />
         </el-select>
       </div>
-      <div class="form-l"><label>子域名前缀</label>
-        <input v-model="form.subdomain_prefix" class="input" placeholder="留空=自动 lp{编号}，或自定义（go/abc）" style="flex:1" />
-        <button class="mb" type="button" @click="form.subdomain_prefix = randomPrefix()">🎲 随机</button>
+      <div class="form-l"><label>{{ t('landing.fSubdomainPrefix') }}</label>
+        <input v-model="form.subdomain_prefix" class="input" :placeholder="t('landing.fSubdomainPrefixPh')" style="flex:1" />
+        <button class="mb" type="button" @click="form.subdomain_prefix = randomPrefix()">🎲 {{ t('landing.random') }}</button>
       </div>
-      <div class="pixel-hint" v-if="form.custom_domains.length">预览：{{ form.subdomain_prefix || 'lp{编号}' }}.{{ rootOf(form.custom_domains[0]) }}<span v-if="subdomainStatus==='ok'" style="color:var(--success)"> ✓ 可用</span><span v-else-if="subdomainStatus==='taken'" style="color:var(--error)"> ✗ 已被占用</span></div>
+      <div class="pixel-hint" v-if="form.custom_domains.length">{{ t('landing.previewLabel') }}：{{ form.subdomain_prefix || t('landing.subdomainAuto') }}.{{ rootOf(form.custom_domains[0]) }}<span v-if="subdomainStatus==='ok'" style="color:var(--success)"> ✓ {{ t('landing.available') }}</span><span v-else-if="subdomainStatus==='taken'" style="color:var(--error)"> ✗ {{ t('landing.taken') }}</span></div>
 
       <template v-if="form.redirect_mode === 'display'">
-        <div class="form-l"><label>像素</label>
+        <div class="form-l"><label>{{ t('landing.fPixel') }}</label>
           <el-select v-model="form.pixel_ids" multiple filterable collapse-tags collapse-tags-tooltip
-            placeholder="可选。不填则自动用子码所属账户的像素" style="flex:1">
+            :placeholder="t('landing.fPixelPh')" style="flex:1">
             <el-option v-for="p in pixels" :key="p.id" :value="p.pixel_id"
               :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
           </el-select>
         </div>
-        <div class="pixel-hint">可选。不填则自动用子码所属账户的像素（推荐）。</div>
-        <div class="form-l"><label>转化事件</label>
+        <div class="pixel-hint">{{ t('landing.pixelHint') }}</div>
+        <div class="form-l"><label>{{ t('landing.fConversionEvent') }}</label>
           <el-select v-model="form.conversion_events" multiple filterable allow-create default-first-option
-            placeholder="CTA 点击时触发（可多选），留空=只 PageView" style="flex:1">
+            :placeholder="t('landing.fConversionEventPh')" style="flex:1">
             <el-option v-for="o in convEventOptions" :key="o.v" :value="o.v" :label="o.l" />
           </el-select>
         </div>
-        <div class="form-l"><label>落地页模板</label>
+        <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
           <select v-model="form.template_id" class="input">
-            <option :value="null">默认模板</option>
-            <option v-for="t in landingTemplates" :key="t.id" :value="t.id">{{ t.name }}</option>
+            <option :value="null">{{ t('landing.defaultTpl') }}</option>
+            <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
           </select>
         </div>
       </template>
 
-      <div class="sec-title">防重复访客 <el-switch v-model="form.dedup_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
+      <div class="sec-title">{{ t('landing.dedup') }} <el-switch v-model="form.dedup_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
       <template v-if="form.dedup_enabled">
-        <div class="form-l"><label>时间窗（小时）</label>
+        <div class="form-l"><label>{{ t('landing.fDedupWindow') }}</label>
           <input v-model.number="form.dedup_window_hours" type="number" min="1" class="input" style="flex:1" />
         </div>
       </template>
-      <div class="sec-title">防护规则 <el-switch v-model="form.block_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
-      <div class="form-l" v-if="form.block_enabled"><label>预览模式</label>
+      <div class="sec-title">{{ t('landing.protectionRules') }} <el-switch v-model="form.block_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
+      <div class="form-l" v-if="form.block_enabled"><label>{{ t('landing.fPreviewMode') }}</label>
         <el-switch v-model="form.preview_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
-        <span class="hint" style="margin-left:8px">开启后用预览链接跳过防护看真实页（关闭即失效）</span>
+        <span class="hint" style="margin-left:8px">{{ t('landing.previewModeHint') }}</span>
       </div>
       <div class="lp-url" v-if="form.preview_enabled && form.preview_url">
         <span class="url-text" :title="form.preview_url">👁 {{ form.preview_url }}</span>
-        <button class="mb" @click="copyText(form.preview_url, '预览链接已复制')">复制预览链接</button>
-        <a class="mb" :href="form.preview_url" target="_blank" rel="noopener">打开↗</a>
+        <button class="mb" @click="copyText(form.preview_url, t('landing.previewUrlCopied'))">{{ t('landing.copyPreviewUrl') }}</button>
+        <a class="mb" :href="form.preview_url" target="_blank" rel="noopener">{{ t('landing.open') }}↗</a>
       </div>
       <template v-if="form.block_enabled">
         <div class="guard-grid">
@@ -636,119 +638,119 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             class="guard-btn" :class="{ on: guardActive(g) }"
             @click="toggleGuard(g)">{{ g.label }}</button>
         </div>
-        <div v-if="guardSummary" class="guard-summary">当前生效：{{ guardSummary }}</div>
+        <div v-if="guardSummary" class="guard-summary">{{ t('landing.activeNow') }}：{{ guardSummary }}</div>
         <div class="prot-test">
-          <button class="btn sm" :disabled="protTesting" @click="runProtTest">{{ protTesting ? '测试中...' : '防护模拟测试' }}</button>
+          <button class="btn sm" :disabled="protTesting" @click="runProtTest">{{ protTesting ? t('landing.testing') : t('landing.protSimTest') }}</button>
           <span v-if="protTestResult" class="prot-test-summary">
-            拦截 {{ protTestResult.blocked_count }} / 放行 {{ protTestResult.pass_count }}
+            {{ t('landing.protBlocked', { n: protTestResult.blocked_count }) }} / {{ t('landing.protPassed', { n: protTestResult.pass_count }) }}
           </span>
         </div>
         <div v-if="protTestResult" class="prot-test-result">
           <div v-for="(r, i) in protTestResult.profiles" :key="i" class="prot-profile">
             <span class="prot-label">{{ r.label }}</span>
-            <span class="st-tag" :class="r.blocked ? 'warn' : 'ok'">{{ r.blocked ? '✗ 拦截' : '✓ 放行' }}</span>
+            <span class="st-tag" :class="r.blocked ? 'warn' : 'ok'">{{ r.blocked ? t('landing.protBlockedTag') : t('landing.protPassedTag') }}</span>
             <span v-if="r.reason" class="prot-reason">{{ r.reason }}</span>
           </div>
         </div>
         <div class="adv-toggle" @click="showAdvanced = !showAdvanced">
-          {{ showAdvanced ? '▲ 收起高级' : '▼ 高级自定义' }}
+          {{ showAdvanced ? t('landing.collapseAdvanced') : t('landing.advancedCustom') }}
         </div>
         <div v-if="showAdvanced" class="rules-grid">
-          <div class="rule-row"><label>国家白名单</label>
-            <el-select :model-value="ruleVal('country_allow')" @update:model-value="v=>setRule('country_allow',v)" multiple filterable allow-create default-first-option placeholder="输入国家代码，回车添加" style="flex:1"><el-option v-for="c in COUNTRIES" :key="c" :value="c" :label="c" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.ruleCountryAllow') }}</label>
+            <el-select :model-value="ruleVal('country_allow')" @update:model-value="v=>setRule('country_allow',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phCountryCode')" style="flex:1"><el-option v-for="c in COUNTRIES" :key="c" :value="c" :label="c" /></el-select>
           </div>
-          <div class="rule-row"><label>国家黑名单</label>
-            <el-select :model-value="ruleVal('country_block')" @update:model-value="v=>setRule('country_block',v)" multiple filterable allow-create default-first-option placeholder="输入国家代码，回车添加" style="flex:1"><el-option v-for="c in COUNTRIES" :key="c" :value="c" :label="c" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.ruleCountryBlock') }}</label>
+            <el-select :model-value="ruleVal('country_block')" @update:model-value="v=>setRule('country_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phCountryCode')" style="flex:1"><el-option v-for="c in COUNTRIES" :key="c" :value="c" :label="c" /></el-select>
           </div>
-          <div class="rule-row"><label>来源白名单</label>
-            <el-select :model-value="ruleVal('source_allow')" @update:model-value="v=>setRule('source_allow',v)" multiple allow-create default-first-option placeholder="输入来源，回车添加" style="flex:1"><el-option v-for="s in SOURCES" :key="s" :value="s" :label="s" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.ruleSourceAllow') }}</label>
+            <el-select :model-value="ruleVal('source_allow')" @update:model-value="v=>setRule('source_allow',v)" multiple allow-create default-first-option :placeholder="t('landing.phSource')" style="flex:1"><el-option v-for="s in SOURCES" :key="s" :value="s" :label="s" /></el-select>
           </div>
-          <div class="rule-row"><label>来源黑名单</label>
-            <el-select :model-value="ruleVal('source_block')" @update:model-value="v=>setRule('source_block',v)" multiple allow-create default-first-option placeholder="输入来源，回车添加" style="flex:1"><el-option v-for="s in SOURCES" :key="s" :value="s" :label="s" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.ruleSourceBlock') }}</label>
+            <el-select :model-value="ruleVal('source_block')" @update:model-value="v=>setRule('source_block',v)" multiple allow-create default-first-option :placeholder="t('landing.phSource')" style="flex:1"><el-option v-for="s in SOURCES" :key="s" :value="s" :label="s" /></el-select>
           </div>
-          <div class="rule-row"><label>设备黑名单</label>
-            <el-select :model-value="ruleVal('device_block')" @update:model-value="v=>setRule('device_block',v)" multiple allow-create default-first-option placeholder="输入设备类型，回车添加" style="flex:1"><el-option v-for="d in DEVICES" :key="d" :value="d" :label="d" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.ruleDeviceBlock') }}</label>
+            <el-select :model-value="ruleVal('device_block')" @update:model-value="v=>setRule('device_block',v)" multiple allow-create default-first-option :placeholder="t('landing.phDevice')" style="flex:1"><el-option v-for="d in DEVICES" :key="d" :value="d" :label="d" /></el-select>
           </div>
-          <div class="rule-row"><label>平台黑名单</label>
-            <el-select :model-value="ruleVal('platform_block')" @update:model-value="v=>setRule('platform_block',v)" multiple filterable allow-create default-first-option placeholder="输入平台/系统/浏览器，回车添加" style="flex:1"><el-option v-for="p in PLATFORMS" :key="p" :value="p" :label="p" /></el-select>
+          <div class="rule-row"><label>{{ t('landing.rulePlatformBlock') }}</label>
+            <el-select :model-value="ruleVal('platform_block')" @update:model-value="v=>setRule('platform_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phPlatform')" style="flex:1"><el-option v-for="p in PLATFORMS" :key="p" :value="p" :label="p" /></el-select>
           </div>
-          <div class="rule-row"><label>UA 关键词</label>
-            <el-select :model-value="ruleVal('ua_block')" @update:model-value="v=>setRule('ua_block',v)" multiple filterable allow-create default-first-option placeholder="如 bot/crawler，回车添加" style="flex:1" />
+          <div class="rule-row"><label>{{ t('landing.ruleUaBlock') }}</label>
+            <el-select :model-value="ruleVal('ua_block')" @update:model-value="v=>setRule('ua_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phUa')" style="flex:1" />
           </div>
-          <div class="rule-row"><label>机房/VPN（ASN）</label>
-            <el-select :model-value="ruleVal('datacenter_block')" @update:model-value="v=>setRule('datacenter_block',v)" multiple filterable allow-create default-first-option placeholder="选主流机房或输 ASN 数字，回车添加" style="flex:1">
+          <div class="rule-row"><label>{{ t('landing.ruleDatacenterBlock') }}</label>
+            <el-select :model-value="ruleVal('datacenter_block')" @update:model-value="v=>setRule('datacenter_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phDatacenter')" style="flex:1">
               <el-option v-for="d in datacenterAsns" :key="d.asn" :value="d.asn" :label="`${d.asn} · ${d.label}`" />
             </el-select>
           </div>
-          <div class="rule-row"><label>Referer 词</label>
-            <el-select :model-value="ruleVal('referer_block')" @update:model-value="v=>setRule('referer_block',v)" multiple filterable allow-create default-first-option placeholder="如 preview，回车添加" style="flex:1" />
+          <div class="rule-row"><label>{{ t('landing.ruleRefererBlock') }}</label>
+            <el-select :model-value="ruleVal('referer_block')" @update:model-value="v=>setRule('referer_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phReferer')" style="flex:1" />
           </div>
-          <div class="rule-row"><label>Query 词</label>
-            <el-select :model-value="ruleVal('query_block')" @update:model-value="v=>setRule('query_block',v)" multiple filterable allow-create default-first-option placeholder="回车添加" style="flex:1" />
+          <div class="rule-row"><label>{{ t('landing.ruleQueryBlock') }}</label>
+            <el-select :model-value="ruleVal('query_block')" @update:model-value="v=>setRule('query_block',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phEnterAdd')" style="flex:1" />
           </div>
-          <div class="rule-row"><label>必带参数</label>
-            <el-select :model-value="ruleVal('required_query')" @update:model-value="v=>setRule('required_query',v)" multiple filterable allow-create default-first-option placeholder="如 ad，回车添加" style="flex:1" />
+          <div class="rule-row"><label>{{ t('landing.ruleRequiredQuery') }}</label>
+            <el-select :model-value="ruleVal('required_query')" @update:model-value="v=>setRule('required_query',v)" multiple filterable allow-create default-first-option :placeholder="t('landing.phRequiredQuery')" style="flex:1" />
           </div>
         </div>
-        <div class="sec-title">屏蔽后处理（必填一项）</div>
-        <div class="form-l"><label>屏蔽跳转</label><input v-model="form.block_target" class="input" placeholder="被屏蔽的访客跳转到此 URL" /></div>
-        <div class="form-l"><label>屏蔽页 HTML</label><textarea v-model="form.block_html" class="input" rows="2" placeholder="可选：被屏蔽时显示的自定义 HTML（与屏蔽跳转二选一）"></textarea></div>
+        <div class="sec-title">{{ t('landing.blockHandlerTitle') }}</div>
+        <div class="form-l"><label>{{ t('landing.fBlockRedirect') }}</label><input v-model="form.block_target" class="input" :placeholder="t('landing.fBlockRedirectPh')" /></div>
+        <div class="form-l"><label>{{ t('landing.fBlockHtml') }}</label><textarea v-model="form.block_html" class="input" rows="2" :placeholder="t('landing.fBlockHtmlPh')"></textarea></div>
       </template>
-      <div v-else class="block-off-hint">防护已关闭，所有访客放行</div>
+      <div v-else class="block-off-hint">{{ t('landing.protectionOff') }}</div>
 
       <template #footer>
-        <button class="btn" @click="drawerOpen=false">取消</button>
-        <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '部署中…' : (editingId ? '保存' : '发布') }}</button>
+        <button class="btn" @click="drawerOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="saving" @click="save">{{ saving ? t('landing.deploying') : (editingId ? t('common.save') : t('landing.publish')) }}</button>
       </template>
     </el-drawer>
 
-    <el-drawer v-model="subOpen" :title="`子码 · ${subPage?.title||''}`" direction="rtl" size="520px" :destroy-on-close="true" :close-on-click-modal="false">
+    <el-drawer v-model="subOpen" :title="t('landing.subDrawerTitle', { title: subPage?.title || '' })" direction="rtl" size="520px" :destroy-on-close="true" :close-on-click-modal="false">
       <div class="sub-gen">
-        <span class="sub-gen-lab">生成</span>
+        <span class="sub-gen-lab">{{ t('landing.subGen') }}</span>
         <input v-model.number="newSubCount" type="number" min="1" max="50" class="sub-gen-input" />
-        <span class="sub-gen-lab">个子码</span>
-        <button class="btn primary" style="margin-left:auto" :disabled="subGenerating" @click="genSubcode">{{ subGenerating ? '生成中…' : '批量生成' }}</button>
+        <span class="sub-gen-lab">{{ t('landing.subGenUnit') }}</span>
+        <button class="btn primary" style="margin-left:auto" :disabled="subGenerating" @click="genSubcode">{{ subGenerating ? t('landing.subGenerating') : t('landing.subBatchGen') }}</button>
       </div>
       <div class="sub-tabs">
         <div class="sub-tab-row">
-          <span :class="['sub-tab', { on: subStatus === 'all' }]" @click="setSubStatus('all')">全部 <i>{{ subCounts.all || 0 }}</i></span>
-          <span :class="['sub-tab', { on: subStatus === 'unbound' }]" @click="setSubStatus('unbound')">未绑 <i>{{ subCounts.unbound || 0 }}</i></span>
-          <span :class="['sub-tab', { on: subStatus === 'active' }]" @click="setSubStatus('active')">投放中 <i>{{ subCounts.active || 0 }}</i></span>
-          <span :class="['sub-tab trash', { on: subStatus === 'trash' }]" @click="setSubStatus('trash')">回收站 <i>{{ (subCounts.archived || 0) + (subCounts.deleted || 0) }}</i></span>
+          <span :class="['sub-tab', { on: subStatus === 'all' }]" @click="setSubStatus('all')">{{ t('common.all') }} <i>{{ subCounts.all || 0 }}</i></span>
+          <span :class="['sub-tab', { on: subStatus === 'unbound' }]" @click="setSubStatus('unbound')">{{ t('landing.subUnbound') }} <i>{{ subCounts.unbound || 0 }}</i></span>
+          <span :class="['sub-tab', { on: subStatus === 'active' }]" @click="setSubStatus('active')">{{ t('landing.subActive') }} <i>{{ subCounts.active || 0 }}</i></span>
+          <span :class="['sub-tab trash', { on: subStatus === 'trash' }]" @click="setSubStatus('trash')">{{ t('landing.subTrash') }} <i>{{ (subCounts.archived || 0) + (subCounts.deleted || 0) }}</i></span>
         </div>
         <div class="sub-filter-row">
-          <input v-model="subQ" class="input sub-search" placeholder="搜 slug / 广告ID" @keyup.enter="onSubSearch" />
+          <input v-model="subQ" class="input sub-search" :placeholder="t('landing.subSearchPh')" @keyup.enter="onSubSearch" />
           <select v-model="subSort" class="sub-sort" @change="onSubSearch">
-            <option value="created">按创建</option>
-            <option value="visits">按访问</option>
+            <option value="created">{{ t('landing.subSortCreated') }}</option>
+            <option value="visits">{{ t('landing.subSortVisits') }}</option>
           </select>
-          <button v-if="subStatus !== 'trash'" class="btn sm" :disabled="subFbBatchLoading" @click="checkAllSubFb" title="检测所有子码 URL 在 FB 是否被封">{{ subFbBatchLoading ? '检测中…' : '批量FB检测' }}</button>
+          <button v-if="subStatus !== 'trash'" class="btn sm" :disabled="subFbBatchLoading" @click="checkAllSubFb" :title="t('landing.subFbBatchTip')">{{ subFbBatchLoading ? t('landing.subFbChecking') : t('landing.subFbBatch') }}</button>
         </div>
       </div>
       <div class="sub-list" v-loading="subLoading">
         <div v-for="s in subcodes" :key="s.id" class="sub-item">
           <div class="sub-row">
             <code class="sub-slug">/a/{{ s.slug }}</code>
-            <span class="sub-ad">{{ s.ad_count > 0 ? (s.ad_count + ' 广告' + (s.act_count > 1 ? ' · ' + s.act_count + ' 账户' : '')) : '未绑广告' }}</span>
-            <span class="sub-pass" v-if="s.click_count > 0">{{ s.click_count }} 通过</span>
+            <span class="sub-ad">{{ s.ad_count > 0 ? t('landing.subAds', { ads: s.ad_count, acts: s.act_count }) : t('landing.subUnboundAd') }}</span>
+            <span class="sub-pass" v-if="s.click_count > 0">{{ t('landing.subPassed', { n: s.click_count }) }}</span>
             <span class="st-tag" :class="subcodeStatus(s.status).cls">{{ subcodeStatus(s.status).label }}</span>
-            <span class="sub-stat">{{ s.visit_count||0 }}访/{{ s.click_count||0 }}转</span>
-            <span v-if="subFbStatus[s.slug] && !subFbStatus[s.slug].loading" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? 'FB正常' : (subFbStatus[s.slug].status === 'fail' ? 'FB封禁' : 'FB未知') }}</span>
+            <span class="sub-stat">{{ t('landing.subStat', { visit: s.visit_count||0, click: s.click_count||0 }) }}</span>
+            <span v-if="subFbStatus[s.slug] && !subFbStatus[s.slug].loading" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? t('landing.fbOk') : (subFbStatus[s.slug].status === 'fail' ? t('landing.fbBanned') : t('landing.fbUnknown')) }}</span>
             <template v-if="subStatus !== 'trash'">
               <div class="sub-ops">
-                <button class="mb" @click="goSubLogs(s)">日志</button>
-                <button class="mb" @click="copyUrl(s.slug)">复制</button>
+                <button class="mb" @click="goSubLogs(s)">{{ t('landing.logsBtn') }}</button>
+                <button class="mb" @click="copyUrl(s.slug)">{{ t('common.copy') }}</button>
                 <el-dropdown trigger="click" @command="cmd => {
                   if (cmd === 'fb') checkSubFb(s)
                   else if (cmd === 'ad') router.push({ name: 'ad-manager', query: { act: s.act_id || '' } })
                   else if (cmd === 'archive') archiveSub(s)
                 }">
-                  <button class="mb" :class="{ spin: subFbStatus[s.slug]?.loading }" title="更多操作">⋯</button>
+                  <button class="mb" :class="{ spin: subFbStatus[s.slug]?.loading }" :title="t('landing.moreOps')">⋯</button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="fb" :disabled="subFbStatus[s.slug]?.loading">{{ subFbStatus[s.slug]?.loading ? 'FB检测中…' : 'FB封禁检测' }}</el-dropdown-item>
-                      <el-dropdown-item command="ad">广告管理</el-dropdown-item>
-                      <el-dropdown-item command="archive" divided>归档</el-dropdown-item>
+                      <el-dropdown-item command="fb" :disabled="subFbStatus[s.slug]?.loading">{{ subFbStatus[s.slug]?.loading ? t('landing.fbChecking') : t('landing.fbBanCheck') }}</el-dropdown-item>
+                      <el-dropdown-item command="ad">{{ t('landing.adMgmt') }}</el-dropdown-item>
+                      <el-dropdown-item command="archive" divided>{{ t('landing.archive') }}</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -756,26 +758,26 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             </template>
             <template v-else>
               <div class="sub-ops">
-                <button class="mb" @click="restoreSub(s)">恢复</button>
-                <button class="mb danger" @click="hardDeleteSub(s)">永久删除</button>
+                <button class="mb" @click="restoreSub(s)">{{ t('landing.restore') }}</button>
+                <button class="mb danger" @click="hardDeleteSub(s)">{{ t('landing.hardDelete') }}</button>
               </div>
             </template>
           </div>
           <div class="sub-target" v-if="subTargetEdit[s.id] !== undefined">
-            <input v-model="subTargetEdit[s.id]" class="input sub-target-input" placeholder="专属跳转 URL（留空=用落地页默认）" />
-            <button class="mb" @click="saveSubTarget(s)">保存</button>
-            <button class="mb" @click="delete subTargetEdit[s.id]">取消</button>
+            <input v-model="subTargetEdit[s.id]" class="input sub-target-input" :placeholder="t('landing.subTargetPh')" />
+            <button class="mb" @click="saveSubTarget(s)">{{ t('common.save') }}</button>
+            <button class="mb" @click="delete subTargetEdit[s.id]">{{ t('common.cancel') }}</button>
           </div>
           <div class="sub-target-show" v-else-if="s.target_urls" @click="startEditTarget(s)">
-            专属跳转：{{ s.target_urls }} <span class="edit-hint">点击修改</span>
+            {{ t('landing.subTargetShow') }}：{{ s.target_urls }} <span class="edit-hint">{{ t('landing.clickToEdit') }}</span>
           </div>
-          <div class="sub-target-add" v-else-if="subStatus !== 'trash'" @click="startEditTarget(s)">+ 设置专属跳转</div>
+          <div class="sub-target-add" v-else-if="subStatus !== 'trash'" @click="startEditTarget(s)">+ {{ t('landing.subTargetAdd') }}</div>
         </div>
-        <div v-if="!subcodes.length && !subLoading" class="empty">{{ subStatus === 'trash' ? '回收站为空' : '暂无子码，填数量生成' }}</div>
+        <div v-if="!subcodes.length && !subLoading" class="empty">{{ subStatus === 'trash' ? t('landing.trashEmpty') : t('landing.subEmpty') }}</div>
       </div>
     </el-drawer>
 
-    <el-dialog v-model="subEventsOpen" title="子码访问日志" width="640px">
+    <el-dialog v-model="subEventsOpen" :title="t('landing.subEventsTitle')" width="640px">
       <div v-loading="subEventsLoading" class="sub-list">
         <div v-for="e in subEvents" :key="e.id" class="sub-row" style="flex-wrap:wrap;gap:6px">
           <span class="st-tag" :class="e.event_type==='visit'?'ok':(e.event_type==='block'?'warn':'off')">{{ e.event_type }}</span>
@@ -783,68 +785,68 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <span style="color:var(--t3);font-size:11px">{{ e.created_at }}</span>
           <span v-if="e.reason" style="color:var(--error);font-size:11px">{{ e.reason }}</span>
         </div>
-        <div v-if="!subEvents.length && !subEventsLoading" class="empty">暂无日志</div>
+        <div v-if="!subEvents.length && !subEventsLoading" class="empty">{{ t('landing.noLogs') }}</div>
       </div>
     </el-dialog>
 
-    <el-drawer v-model="pixelOpen" title="像素库" direction="rtl" size="480px" :destroy-on-close="true" append-to-body>
-      <button class="btn" :disabled="syncing" @click="syncPixels" style="margin-bottom:14px">{{ syncing ? '同步中...' : '从账户同步像素' }}</button>
-      <div class="sec-title">{{ pixelForm.id ? '编辑像素' : '添加像素' }}</div>
-      <div class="form-l"><label>像素 ID</label><input v-model="pixelForm.pixel_id" class="input" placeholder="FB 像素 ID" :disabled="!!pixelForm.id" /></div>
-      <div class="form-l"><label>名称</label><input v-model="pixelForm.pixel_name" class="input" placeholder="备注名" /></div>
-      <button class="btn primary" :disabled="pixelSaving" @click="savePixel">{{ pixelForm.id ? '保存' : '添加' }}</button>
-      <div class="sec-title">像素列表</div>
+    <el-drawer v-model="pixelOpen" :title="t('landing.pixelLibTitle')" direction="rtl" size="480px" :destroy-on-close="true" append-to-body>
+      <button class="btn" :disabled="syncing" @click="syncPixels" style="margin-bottom:14px">{{ syncing ? t('landing.pixelSyncing') : t('landing.pixelSync') }}</button>
+      <div class="sec-title">{{ pixelForm.id ? t('landing.pixelEdit') : t('landing.pixelAdd') }}</div>
+      <div class="form-l"><label>{{ t('landing.fPixelId') }}</label><input v-model="pixelForm.pixel_id" class="input" :placeholder="t('landing.fPixelIdPh')" :disabled="!!pixelForm.id" /></div>
+      <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>
+      <button class="btn primary" :disabled="pixelSaving" @click="savePixel">{{ pixelForm.id ? t('common.save') : t('common.add') }}</button>
+      <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">
         <div v-for="p in pixels" :key="p.id" class="sub-row">
           <code>{{ p.pixel_id }}</code>
           <span v-if="p.act_id" class="tag">{{ String(p.act_id).slice(-6) }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
-          <span class="tag">{{ p.usage_count }} 页</span>
-          <button class="mb" style="margin-left:auto" @click="editPixel(p)">编辑</button>
-          <button class="mb danger" @click="delPixel(p)">删除</button>
+          <span class="tag">{{ t('landing.pixelPages', { n: p.usage_count }) }}</span>
+          <button class="mb" style="margin-left:auto" @click="editPixel(p)">{{ t('common.edit') }}</button>
+          <button class="mb danger" @click="delPixel(p)">{{ t('common.delete') }}</button>
         </div>
-        <div v-if="!pixels.length" class="empty">暂无像素，点上方同步或手动添加</div>
+        <div v-if="!pixels.length" class="empty">{{ t('landing.pixelEmpty') }}</div>
       </div>
     </el-drawer>
 
-    <el-drawer v-if="isSuper" v-model="domainOpen" title="域名管理" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
-      <div class="sec-title">可导入域名</div>
-      <input v-model="zoneFilter" class="input" placeholder="搜索域名..." style="margin-bottom:8px;width:100%;box-sizing:border-box" />
+    <el-drawer v-if="isSuper" v-model="domainOpen" :title="t('landing.domainMgmt')" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
+      <div class="sec-title">{{ t('landing.importableDomains') }}</div>
+      <input v-model="zoneFilter" class="input" :placeholder="t('landing.searchDomains')" style="margin-bottom:8px;width:100%;box-sizing:border-box" />
       <div class="sub-list" v-loading="zonesLoading">
         <div v-for="z in filteredZones" :key="z.name" class="sub-row">
           <input type="checkbox" v-model="z._checked" :disabled="z.imported" style="margin-right:6px" />
           <code>{{ z.name }}</code>
-          <span class="st-tag" :class="z.imported?'off':'ok'">{{ z.imported ? '已导入' : ({available:'可注册', taken:'已被占', error:'查询失败'})[z.status] || '—' }}</span>
+          <span class="st-tag" :class="z.imported?'off':'ok'">{{ z.imported ? t('landing.zoneImported') : (z.status === 'available' ? t('landing.zoneAvailable') : (z.status === 'taken' ? t('landing.zoneTaken') : (z.status === 'error' ? t('landing.zoneQueryFail') : '—'))) }}</span>
         </div>
-        <div v-if="!cfZones.length && !zonesLoading" class="empty">无可导入域名</div>
+        <div v-if="!cfZones.length && !zonesLoading" class="empty">{{ t('landing.noImportableDomains') }}</div>
       </div>
-      <button class="btn primary" style="margin-top:12px" @click="importZones">导入选中</button>
-      <div class="sec-title">已导入域名</div>
+      <button class="btn primary" style="margin-top:12px" @click="importZones">{{ t('landing.importSelected') }}</button>
+      <div class="sec-title">{{ t('landing.importedDomains') }}</div>
       <div class="sub-list">
         <div v-for="d in domains" :key="d.id" class="sub-row">
           <code>{{ d.domain }}</code>
           <span class="sub-ad">{{ d.label || d.source }}</span>
-          <button class="mb danger" @click="delDomain(d)">删除</button>
+          <button class="mb danger" @click="delDomain(d)">{{ t('common.delete') }}</button>
         </div>
-        <div v-if="!domains.length" class="empty">尚未导入域名</div>
+        <div v-if="!domains.length" class="empty">{{ t('landing.noDomainsImported') }}</div>
       </div>
     </el-drawer>
 
-    <el-drawer v-model="tplOpen" title="落地页模板" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
-      <button class="btn" @click="downloadTplRef" style="margin-bottom:14px">下载参考模板 zip</button>
-      <div class="sec-title">上传新模板（zip）</div>
-      <div class="form-l"><label>模板名</label><input v-model="tplForm.name" class="input" placeholder="如：简洁购买页" /></div>
-      <div class="form-l"><label>说明</label><input v-model="tplForm.description" class="input" placeholder="可选" /></div>
-      <div class="form-l"><label>zip 文件</label><input ref="tplFileInput" type="file" accept=".zip" @change="onTplFile" class="input" /></div>
-      <button class="btn primary" :disabled="tplUploading" @click="uploadLandingTpl">{{ tplUploading ? '上传中...' : '上传并检测' }}</button>
-      <div class="sec-title">已上传模板</div>
+    <el-drawer v-model="tplOpen" :title="t('landing.tplDrawerTitle')" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
+      <button class="btn" @click="downloadTplRef" style="margin-bottom:14px">{{ t('landing.downloadRefTpl') }}</button>
+      <div class="sec-title">{{ t('landing.uploadNewTpl') }}</div>
+      <div class="form-l"><label>{{ t('landing.fTplName') }}</label><input v-model="tplForm.name" class="input" :placeholder="t('landing.fTplNamePh')" /></div>
+      <div class="form-l"><label>{{ t('landing.fTplDesc') }}</label><input v-model="tplForm.description" class="input" :placeholder="t('common.optional')" /></div>
+      <div class="form-l"><label>{{ t('landing.fZipFile') }}</label><input ref="tplFileInput" type="file" accept=".zip" @change="onTplFile" class="input" /></div>
+      <button class="btn primary" :disabled="tplUploading" @click="uploadLandingTpl">{{ tplUploading ? t('landing.uploading') : t('landing.uploadAndCheck') }}</button>
+      <div class="sec-title">{{ t('landing.uploadedTpls') }}</div>
       <div class="sub-list">
-        <div v-for="t in landingTemplates" :key="t.id" class="sub-row">
-          <code>{{ t.name }}</code>
-          <span v-if="t.has_resources" class="tag">多文件</span>
-          <button class="mb danger" style="margin-left:auto" @click="delLandingTpl(t)">删除</button>
+        <div v-for="tpl in landingTemplates" :key="tpl.id" class="sub-row">
+          <code>{{ tpl.name }}</code>
+          <span v-if="tpl.has_resources" class="tag">{{ t('landing.multiFile') }}</span>
+          <button class="mb danger" style="margin-left:auto" @click="delLandingTpl(tpl)">{{ t('common.delete') }}</button>
         </div>
-        <div v-if="!landingTemplates.length" class="empty">暂无模板，下载参考改后上传</div>
+        <div v-if="!landingTemplates.length" class="empty">{{ t('landing.tplEmpty') }}</div>
       </div>
     </el-drawer>
     </div>
