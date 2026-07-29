@@ -5,12 +5,13 @@ GET /landing/pages → 列已发布的落地页
 """
 import os
 import re
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
 from ..core.config import settings
+from ..core.i18n import req_locale, tenant_locale, L
 from ..core.log_utils import write_log, new_trace_id
 from pydantic import BaseModel
 
@@ -233,8 +234,9 @@ def _emit_landing_alert(project_name: str, msg: str, tenant_id: int = 1):
         from datetime import datetime, timezone
         db = SuperSessionLocal()
         try:
+            _loc = tenant_locale(db, tenant_id)
             db.add(Notification(tenant_id=tenant_id, level="critical", event_type="landing_worker_error",
-                                title=f"落地页 worker 异常 · {project_name}", body=msg,
+                                title=L(_loc, "landing.workerError", project=project_name), body=msg,
                                 created_at=datetime.now(timezone.utc)))
             db.commit()
         finally:
@@ -847,14 +849,21 @@ _PROTECTION_PROFILES = [
 @router.post("/protection-test")
 def protection_test(
     body: dict,
+    request: Request,
     user: CurrentUser = Depends(require_permission("ads.read")),
 ):
     """防护规则测试：6 类画像本地模拟（0 网络开销，瞬时返回）。"""
+    loc = req_locale(request)
+    # profile label → i18n code（_PROTECTION_PROFILES 顺序固定：桌面/移动/Googlebot/非允许国/调试参数/调试来源）
+    _label_codes = [
+        "landing.protSampleDesktop", "landing.protSampleMobile", "landing.protSampleGooglebot",
+        "landing.protSampleBlockedCountry", "landing.protSampleDebugQuery", "landing.protSampleDebugReferer",
+    ]
     rules = body.get("rules") or {}
     results = []
-    for p in _PROTECTION_PROFILES:
+    for idx, p in enumerate(_PROTECTION_PROFILES):
         v = _eval_protection_py(rules, ua=p["ua"], country=p["country"], referer=p["referer"], query=p["query"])
-        results.append({"label": p["label"], "blocked": v["blocked"], "reason": v["reason"]})
+        results.append({"label": L(loc, _label_codes[idx]), "blocked": v["blocked"], "reason": v["reason"]})
     blocked_count = sum(1 for r in results if r["blocked"])
     return {"profiles": results, "blocked_count": blocked_count, "pass_count": len(results) - blocked_count}
 
@@ -921,7 +930,7 @@ def check_subdomain(prefix: str = "", root: str = "", pid: int = 0,
     return {"available": not clash, "subdomain": sub, "clash_with": (clash.title if clash else "")}
 
 
-def _run_self_check(db, p, include_fb=True, live_probe=True):
+def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     """落地页全功能自检矩阵。返回 {overall, summary, checks:[{key,label,status,detail}]}。
 
     status 三级：pass / warn(配置选择,可见不拦) / fail(真坏:worker/域名/SSL/目标死链)。
@@ -948,11 +957,11 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
     if not base:
         base = f"https://tovaads-landing-{p.id}.pages.dev"
     # 1. 发布状态
-    checks.append({"key": "status", "label": "发布状态",
+    checks.append({"key": "status", "label": L(loc, "landing.scStatus"),
                    "status": "pass" if p.status == "published" else "warn",
                    "detail": p.status or "draft"})
     # 2. 公开链接
-    checks.append({"key": "url", "label": "公开链接", "status": "pass", "detail": base})
+    checks.append({"key": "url", "label": L(loc, "landing.scUrl"), "status": "pass", "detail": base})
     # 3. 域名+SSL 可达（curl 根域，follow_redirects）—— live_probe=False 时跳过（发布后 CF 传播未完成会误报）
     if live_probe:
         try:
@@ -960,22 +969,22 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
                               headers={"User-Agent": "TovaHealthCheck/1.0"})
             ssl_ok = str(resp.url).startswith("https://")
             ok = resp.status_code < 500 and ssl_ok
-            checks.append({"key": "domain", "label": "域名+SSL",
+            checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
                            "detail": f"HTTP {resp.status_code}" + ("" if ssl_ok else " · SSL无效")})
         except Exception as e:
-            checks.append({"key": "domain", "label": "域名+SSL", "status": "fail",
+            checks.append({"key": "domain", "label": L(loc, "landing.scDomain"), "status": "fail",
                            "detail": f"不可达: {str(e)[:60]}"})
     # 4. Worker 存活（/__health 无条件 200）—— live_probe=False 时跳过（已被发布 smoke 门验过）
     if live_probe:
         try:
             resp = _httpx.get(base.rstrip("/") + "/__health", timeout=6, follow_redirects=False,
                               headers={"User-Agent": "TovaHealthCheck/1.0"})
-            checks.append({"key": "worker", "label": "Worker存活",
+            checks.append({"key": "worker", "label": L(loc, "landing.scWorker"),
                            "status": "pass" if resp.status_code == 200 else "fail",
                            "detail": f"HTTP {resp.status_code}"})
         except Exception as e:
-            checks.append({"key": "worker", "label": "Worker存活", "status": "fail",
+            checks.append({"key": "worker", "label": L(loc, "landing.scWorker"), "status": "fail",
                            "detail": f"无响应: {str(e)[:60]}"})
     # 取一个真实绑的广告（测 route_next 全链路像素解析；无则用 __smoke__ 占位）
     sample_slug, sample_ad = "", ""
@@ -999,31 +1008,31 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
         rd = None
     # 5. 像素（display 才查；redirect 模式设计上无像素=正常）
     if (p.redirect_mode or "display") == "redirect":
-        checks.append({"key": "pixel", "label": "像素配置", "status": "pass",
+        checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "pass",
                        "detail": "redirect 模式（无像素，正常）"})
     else:
         px = ((rd or {}).get("pixel_ids")) or []
         if px:
             _samp = f"（以广告 {sample_ad} 为样本）" if sample_ad else ""
-            checks.append({"key": "pixel", "label": "像素配置", "status": "pass",
+            checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "pass",
                            "detail": f"{len(px)} 个{_samp}：{','.join(str(x) for x in px)[:50]}"})
         else:
-            checks.append({"key": "pixel", "label": "像素配置", "status": "warn",
+            checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "warn",
                            "detail": "display 未解析到像素（页面不会 fire 转化；有意不带像素可忽略）"})
     # 6. 跳转目标（route_next 返回 + 可达性 HEAD）
     tgt = ((rd or {}).get("target_url")) or ""
     if not tgt:
-        checks.append({"key": "target", "label": "跳转目标", "status": "fail", "detail": "未配置目标 URL"})
+        checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "fail", "detail": "未配置目标 URL"})
     else:
         try:
             tr = _httpx.head(tgt, timeout=5, follow_redirects=True)
             # 401/403/405 = 服务器有响应只是拒绝 HEAD（很多目标站这样）→ 算可达 pass
             reachable = tr.status_code < 400 or tr.status_code in (401, 403, 405)
-            checks.append({"key": "target", "label": "跳转目标",
+            checks.append({"key": "target", "label": L(loc, "landing.scTarget"),
                            "status": "pass" if reachable else "warn",
                            "detail": f"{tgt[:40]} · HTTP {tr.status_code}"})
         except Exception as e:
-            checks.append({"key": "target", "label": "跳转目标", "status": "warn",
+            checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "warn",
                            "detail": f"{tgt[:40]} · 不可达: {str(e)[:30]}"})
     # 7. 防护规则（数 worker 真评估/拦截的项；block_target=跳转目标不算，block_html=worker不渲染不算）
     if p.block_enabled:
@@ -1039,15 +1048,15 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
             n += 1
         if p.dedup_enabled:
             n += 1
-        checks.append({"key": "protection", "label": "防护规则",
+        checks.append({"key": "protection", "label": L(loc, "landing.scProtection"),
                        "status": "pass" if n else "warn",
                        "detail": f"已开 · {n} 条规则" if n else "已开但无规则"})
     else:
-        checks.append({"key": "protection", "label": "防护规则", "status": "warn", "detail": "未开启"})
+        checks.append({"key": "protection", "label": L(loc, "landing.scProtection"), "status": "warn", "detail": "未开启"})
     # 8. FB 平台封禁（慢，发布时跳过）——域名级 + 子码级
     if include_fb:
         fb_status, fb_detail = _fb_ban_probe(db, p.tenant_id, base)
-        checks.append({"key": "fb_ban", "label": "FB域名封禁", "status": fb_status, "detail": fb_detail})
+        checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
         # 子码级 FB 封禁检测（扫描所有 active 子码）
         from ..models.launch import LandingAdLink
         _active_links = db.query(LandingAdLink).filter(
@@ -1062,15 +1071,15 @@ def _run_self_check(db, p, include_fb=True, live_probe=True):
                 if _st == "fail":
                     _blocked_slugs.append(_link.slug)
             if _blocked_slugs:
-                checks.append({"key": "fb_subcode", "label": "子码FB封禁",
+                checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "fail",
                                "detail": f"{len(_blocked_slugs)}/{len(_active_links)} 个子码被封：{','.join(_blocked_slugs[:5])}"})
             else:
-                checks.append({"key": "fb_subcode", "label": "子码FB封禁",
+                checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "pass",
                                "detail": f"{len(_active_links)} 个子码全部正常"})
     # 9. 预览模式（关=正常运营 pass；开=提醒审核完关掉 warn，避免每页都黄）
-    checks.append({"key": "preview", "label": "预览模式",
+    checks.append({"key": "preview", "label": L(loc, "landing.scPreview"),
                    "status": "warn" if p.preview_enabled else "pass",
                    "detail": "已启用（审核/测试完记得关）" if p.preview_enabled else "未启用"})
     # 聚合
@@ -1132,6 +1141,7 @@ def _emit_health_alert(db, p, res):
 @router.get("/pages/{pid}/health")
 def health_check(
     pid: int,
+    request: Request,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -1142,7 +1152,7 @@ def health_check(
         LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
-    res = _run_self_check(db, p, include_fb=True)
+    res = _run_self_check(db, p, include_fb=True, loc=req_locale(request))
     p.last_health_status = res["overall"]
     p.last_health_summary = res["summary"]
     p.last_health_checked_at = _dt.now(_tz.utc)

@@ -4,12 +4,13 @@
 """
 import json
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
+from ..core.i18n import req_locale, L
 from ..core.fb_tokens import client_for_account
 from ..core.fb_client import FbApiError
 from ..models.perf import PerfSnapshot
@@ -418,10 +419,12 @@ def reset_redirects(
 @router.get("/{ad_id}/diagnose")
 def diagnose_ad(
     ad_id: str,
+    request: Request,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
     """广告诊断：实时拉 FB 数据 + 落地数据 + 规则评估 + 冷却状态，返回完整诊断面板数据。"""
+    loc = req_locale(request)
     from ..core.fb_tokens import client_for_account
     from ..core.fb_client import FbClient
     from ..core.encryption import decrypt
@@ -476,7 +479,7 @@ def diagnose_ad(
     # 3. 拉 FB 实时数据
     fb = client_for_account(db, user.tenant_id, _act_id, "read")
     if not fb:
-        result["fb_error"] = "该账户的令牌不可用（过期/限流/未绑定），无法读取 FB 实时数据。诊断基于缓存+落地数据。"
+        result["fb_error"] = L(loc, "ads.fbTokenUnavailable")
 
     tz = ZoneInfo(acc.timezone_name or "UTC")
     acc_today = datetime.now(tz).strftime("%Y-%m-%d")

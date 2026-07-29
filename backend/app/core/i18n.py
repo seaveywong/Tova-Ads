@@ -127,3 +127,66 @@ def notify_text(locale: str, code: str, **params) -> tuple[str, str]:
     except Exception:
         pass
     return (title, body)
+
+
+def req_locale(request) -> str:
+    """从请求 X-Locale 头取语言（en/zh，默认 zh）。"""
+    try:
+        loc = (request.headers.get("x-locale") or "").lower()
+    except Exception:
+        loc = ""
+    return "en" if loc.startswith("en") else "zh"
+
+
+# 数据字段译表：code -> {zh, en}。值用 {param} 占位（str.format）。
+DATA = {
+    # ── ads.py ──
+    "ads.fbTokenUnavailable": {
+        "zh": "该账户的令牌不可用（过期/限流/未绑定），无法读取 FB 实时数据。诊断基于缓存+落地数据。",
+        "en": "This account's token is unavailable (expired/throttled/unbound); cannot read live FB data. Diagnosis is based on cache + landing data.",
+    },
+    # ── fb.py ──
+    "fb.checkOk": {
+        "zh": "正常 · 权限: {scopes}",
+        "en": "OK · scopes: {scopes}",
+    },
+    "fb.checkInvalid": {
+        "zh": "FB 标记无效",
+        "en": "FB marked invalid",
+    },
+    # ── landing.py：worker 部署异常 ──
+    "landing.workerError": {
+        "zh": "落地页 worker 异常 · {project}",
+        "en": "Landing worker error · {project}",
+    },
+    # ── landing.py：自检 checks[].label ──
+    "landing.scStatus": {"zh": "发布状态", "en": "Publish status"},
+    "landing.scUrl": {"zh": "公开链接", "en": "Public URL"},
+    "landing.scDomain": {"zh": "域名+SSL", "en": "Domain + SSL"},
+    "landing.scWorker": {"zh": "Worker存活", "en": "Worker alive"},
+    "landing.scPixel": {"zh": "像素配置", "en": "Pixel config"},
+    "landing.scTarget": {"zh": "跳转目标", "en": "Redirect target"},
+    "landing.scProtection": {"zh": "防护规则", "en": "Protection rules"},
+    "landing.scFbBan": {"zh": "FB域名封禁", "en": "FB domain ban"},
+    "landing.scFbSubcode": {"zh": "子码FB封禁", "en": "Subcode FB ban"},
+    "landing.scPreview": {"zh": "预览模式", "en": "Preview mode"},
+    # ── landing.py：防护测试画像 label ──
+    "landing.protSampleDesktop": {"zh": "桌面浏览器（美国）", "en": "Desktop browser (US)"},
+    "landing.protSampleMobile": {"zh": "移动端（美国）", "en": "Mobile (US)"},
+    "landing.protSampleGooglebot": {"zh": "Googlebot 爬虫", "en": "Googlebot crawler"},
+    "landing.protSampleBlockedCountry": {"zh": "非允许国（中国）", "en": "Non-allowed country (China)"},
+    "landing.protSampleDebugQuery": {"zh": "带调试参数", "en": "With debug param"},
+    "landing.protSampleDebugReferer": {"zh": "调试来源 Referer", "en": "Debug source Referer"},
+}
+
+
+def L(locale: str, code: str, **params) -> str:
+    """数据字段按 locale 渲染。未知 code 回退原 code。"""
+    e = DATA.get(code)
+    if not e:
+        return code
+    s = e.get(locale) or e.get("zh") or code
+    try:
+        return s.format(**params) if params else s
+    except Exception:
+        return s

@@ -5,10 +5,11 @@
 import json
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
+from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..models.fb import FbCredential, Account, AccountFbCredential
@@ -227,10 +228,12 @@ def update_credential_token(
 @router.post("/credentials/{cred_id}/check")
 def check_credential(
     cred_id: int,
+    request: Request,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
     """手动检测令牌有效性（debug_token + /me）→ 更新 status + permission_snapshot + last_verified_at。"""
+    loc = req_locale(request)
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
@@ -257,11 +260,11 @@ def check_credential(
         if is_valid:
             cred.status = "active"
             result["now_valid"] = True
-            result["detail"] = f"正常 · 权限: {', '.join(scopes[:3])}"
+            result["detail"] = L(loc, "fb.checkOk", scopes=", ".join(scopes[:3]))
         else:
             cred.status = "expired"
             result["now_valid"] = False
-            result["detail"] = "FB 标记无效"
+            result["detail"] = L(loc, "fb.checkInvalid")
 
         db.commit()
     except FbApiError as e:
