@@ -6,7 +6,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 
 const EVENT_TYPES = [
@@ -204,7 +204,7 @@ const next = () => { if (offset.value + limit < total.value) { offset.value += l
 
 const fmtTime = (iso) => {
   if (!iso) return '-'
-  try { return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }
+  try { return new Date(iso).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }
   catch (e) { return iso }
 }
 const goSlug = (slug) => { fSlug.value = slug; offset.value = 0; load() }

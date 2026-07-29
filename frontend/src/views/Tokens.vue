@@ -6,7 +6,7 @@ import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
 import { isSuperadminSync } from '../router'
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const isSuper = isSuperadminSync()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
@@ -91,12 +91,14 @@ const statusMeta = (tk) => {
   if (f > 0) return { dot: 'warn', label: t('tokens.abnormal') + f }
   return { dot: 'ok', label: t('status.tokenValid') }
 }
-const TYPE_META = {
-  operate: { label: t('tokens.typeOperate'), title: t('tokens.typeOperateTitle') },
-  manage:  { label: t('tokens.typeManage'), title: t('tokens.typeManageTitle') },
-  user:    { label: t('tokens.typeUser'), title: t('tokens.typeUserTitle') },
+const typeMeta = (tk) => {
+  const m = {
+    operate: { label: t('tokens.typeOperate'), title: t('tokens.typeOperateTitle') },
+    manage:  { label: t('tokens.typeManage'), title: t('tokens.typeManageTitle') },
+    user:    { label: t('tokens.typeUser'), title: t('tokens.typeUserTitle') },
+  }
+  return m[tk] || m.user
 }
-const typeMeta = (tk) => TYPE_META[tk] || TYPE_META.user
 const sourceLabel = (s) => ({ manual: t('tokens.sourceManual'), oauth: 'OAuth' }[s] || '—')
 const fmtTime = (s) => {
   if (!s || s === 'None') return '—'
@@ -106,12 +108,12 @@ const fmtTime = (s) => {
   if (diff < 1) return t('tokens.justNow')
   if (diff < 60) return t('tokens.minutesAgo', { n: Math.floor(diff) })
   if (diff < 1440) return t('tokens.hoursAgo', { n: Math.floor(diff/60) })
-  return d.toLocaleDateString('zh-CN')
+  return d.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'zh-CN')
 }
 const permCount = (p) => (!p || !p.scopes) ? 0 : p.scopes.length
 
 const accountStatusMeta = (s) => accountStatus(s)
-const SCOPE_LABELS = {
+const scopeLabel = (s) => ({
   ads_management: t('tokens.scopeAdsManagement'), ads_read: t('tokens.scopeAdsRead'),
   pages_show_list: t('tokens.scopePagesShowList'), pages_messaging: t('tokens.scopePagesMessaging'),
   pages_manage_metadata: t('tokens.scopePagesManageMetadata'), pages_read_engagement: t('tokens.scopePagesReadEngagement'),
@@ -124,8 +126,7 @@ const SCOPE_LABELS = {
   attribution_read: t('tokens.scopeAttributionRead'), catalog_management: t('tokens.scopeCatalogManagement'),
   whatsapp_business_management: t('tokens.scopeWhatsappBusinessManagement'),
   leads_retrieval: t('tokens.scopeLeadsRetrieval'), pages_manage_cta: t('tokens.scopePagesManageCta'),
-}
-const scopeLabel = (s) => SCOPE_LABELS[s] || s
+}[s]) || s
 
 const copyId = async (id) => {
   if (!id) return

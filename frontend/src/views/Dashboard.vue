@@ -594,7 +594,7 @@ const applyCustom = () => {
   loadDashboard()  // showCustom=true，rangeQuery 自动用 custom 范围
 }
 
-const dateOptions = DATE_PRESETS.map(p => ({ label: p.label, value: p.key }))
+const dateOptions = computed(() => DATE_PRESETS.map(p => ({ label: p.label, value: p.key })))
 
 // ── 下次巡检倒计时（前端三态机，随时间自动切换）──
 // 巡检状态：用后端 inspection_heartbeat（action_logs）判断是否在跑。
