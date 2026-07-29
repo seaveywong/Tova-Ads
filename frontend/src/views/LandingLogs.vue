@@ -26,29 +26,29 @@ const REASON_LABEL = {
 }
 const reasonLabel = (r) => REASON_LABEL[r] || r || ''
 
-// 国家码 → 中文（CF 给的是 2 字母 ISO 码）
-const COUNTRY_ZH = {
-  US: '美国', GB: '英国', CA: '加拿大', AU: '澳大利亚', NZ: '新西兰', IE: '爱尔兰',
-  DE: '德国', FR: '法国', IT: '意大利', ES: '西班牙', PT: '葡萄牙', NL: '荷兰', BE: '比利时',
-  CH: '瑞士', AT: '奥地利', SE: '瑞典', NO: '挪威', DK: '丹麦', FI: '芬兰', PL: '波兰',
-  RO: '罗马尼亚', GR: '希腊', CZ: '捷克', HU: '匈牙利', BG: '保加利亚', RU: '俄罗斯', UA: '乌克兰',
-  TR: '土耳其', IL: '以色列', AE: '阿联酋', SA: '沙特', QA: '卡塔尔', KW: '科威特', EG: '埃及',
-  ZA: '南非', NG: '尼日利亚', KE: '肯尼亚', GH: '加纳', MA: '摩洛哥',
-  BR: '巴西', MX: '墨西哥', AR: '阿根廷', CL: '智利', CO: '哥伦比亚', PE: '秘鲁', VE: '委内瑞拉',
-  IN: '印度', PK: '巴基斯坦', BD: '孟加拉', LK: '斯里兰卡', NP: '尼泊尔',
-  ID: '印尼', TH: '泰国', VN: '越南', PH: '菲律宾', MY: '马来西亚', SG: '新加坡', KH: '柬埔寨',
-  MM: '缅甸', LA: '老挝', JP: '日本', KR: '韩国', CN: '中国', HK: '香港', TW: '台湾', MO: '澳门',
+// 国家码 → 国名（CF 给的是 2 字母 ISO 码；国名英文通用，zh/en 共用）
+const COUNTRY = {
+  US: 'United States', GB: 'United Kingdom', CA: 'Canada', AU: 'Australia', NZ: 'New Zealand', IE: 'Ireland',
+  DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', PT: 'Portugal', NL: 'Netherlands', BE: 'Belgium',
+  CH: 'Switzerland', AT: 'Austria', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland',
+  RO: 'Romania', GR: 'Greece', CZ: 'Czechia', HU: 'Hungary', BG: 'Bulgaria', RU: 'Russia', UA: 'Ukraine',
+  TR: 'Turkey', IL: 'Israel', AE: 'UAE', SA: 'Saudi Arabia', QA: 'Qatar', KW: 'Kuwait', EG: 'Egypt',
+  ZA: 'South Africa', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', MA: 'Morocco',
+  BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CL: 'Chile', CO: 'Colombia', PE: 'Peru', VE: 'Venezuela',
+  IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', LK: 'Sri Lanka', NP: 'Nepal',
+  ID: 'Indonesia', TH: 'Thailand', VN: 'Vietnam', PH: 'Philippines', MY: 'Malaysia', SG: 'Singapore', KH: 'Cambodia',
+  MM: 'Myanmar', LA: 'Laos', JP: 'Japan', KR: 'South Korea', CN: 'China', HK: 'Hong Kong', TW: 'Taiwan', MO: 'Macao',
 }
 const countryLabel = (c) => {
   if (!c) return ''
-  const zh = COUNTRY_ZH[String(c).toUpperCase()]
-  return zh ? `${zh} ${c}` : c
+  const name = COUNTRY[String(c).toUpperCase()]
+  return name ? `${name} ${c}` : c
 }
-// 设备类型 → 中文
-const DEVICE_ZH = { desktop: '桌面', tablet: '平板', mobile: '手机' }
+// 设备类型（英文通用）
+const DEVICE = { desktop: 'Desktop', tablet: 'Tablet', mobile: 'Mobile' }
 const PLATFORM_ZH = { android: 'Android', ios: 'iOS', windows: 'Win', mac: 'Mac', linux: 'Linux', chrome: 'ChromeOS' }
 const deviceLabel = (e) => {
-  const dev = DEVICE_ZH[e.device_type] || e.device_type || ''
+  const dev = DEVICE[e.device_type] || e.device_type || ''
   const pf = PLATFORM_ZH[(e.platform || '').toLowerCase()] || e.platform || ''
   const br = e.browser || ''
   const parts = [dev, pf, br].filter(Boolean)
