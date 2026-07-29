@@ -77,6 +77,7 @@ export default {
     uncaptured: 'Uncaptured exception',
     pageError: 'Page error',
     unauthorized: 'Not logged in or session expired, please sign in again',
+    timeout: 'Request timed out',
   },
   role: {
     owner: 'Owner',

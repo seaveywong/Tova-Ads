@@ -142,14 +142,14 @@ def emit_token_expired_if_due(db: Session, tenant_id: int, alias: str = "",
     ).first()
     if recent:
         return False
+    from .i18n import tenant_locale, notify_text
     trace_id = f"tok-{tenant_id}-{int(datetime.now(timezone.utc).timestamp())}"
-    title = "令牌失效"
-    body = (f"令牌：<b>{_esc(alias or '未命名')}</b>\n"
-            f"状态：已失效，所有 Facebook 操作暂停\n"
-            f"处理：请在 Facebook 授权页重新绑定令牌")
+    _loc = tenant_locale(db, tenant_id)
+    _title, _body = notify_text(_loc, "token_expired",
+                                alias=_esc(alias or '未命名'))
     emit_notification(db, tenant_id=tenant_id, level="critical",
                       event_type="token_expired", trace_id=trace_id,
-                      title=title, body=body, send_tg=True)
+                      title=_title, body=_body, send_tg=True)
     # action_logs 记录（dedup 用 + 超管系统日志）
     from .log_utils import write_log, new_trace_id
     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
@@ -186,13 +186,13 @@ def emit_orphan_account_alerts(db: Session, tenant_id: int,
         if recent:
             continue
         trace_id = new_trace_id()
-        title = "账户所有令牌失效"
-        body = (f"账户：<b>{_esc(acc.get('name') or act_id)}</b>（act_{act_id}）\n"
-                f"状态：没有任何可用令牌覆盖，无法读取或操作\n"
-                f"处理：请重新绑定令牌，或载入一个能管理该账户的令牌")
+        from .i18n import tenant_locale, notify_text
+        _loc = tenant_locale(db, tenant_id)
+        _title, _body = notify_text(_loc, "orphan_account",
+                                    name=_esc(acc.get('name') or act_id), act_id=act_id)
         emit_notification(db, tenant_id=tenant_id, level="critical",
                           event_type="orphan_account", trace_id=trace_id,
-                          title=title, body=body,
+                          title=_title, body=_body,
                           target_type="account", target_id=act_id, send_tg=True)
         write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                   target_type="account", target_id=act_id,

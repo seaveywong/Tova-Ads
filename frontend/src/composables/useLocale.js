@@ -22,7 +22,16 @@ document.documentElement.setAttribute('lang', locale.value === 'zh' ? 'zh-CN' : 
 
 export function useLocale() {
   const epLocale = computed(() => EP[locale.value] || EP.zh)
-  function setLocale(l) { if (EP[l]) apply(l) }
-  function toggle() { apply(locale.value === 'zh' ? 'en' : 'zh') }
+  function setLocale(l) {
+    if (!EP[l]) return
+    apply(l)
+    // 持久化到后端用户档案（登录态才发；通知按租户 owner 的 locale 渲染）
+    try {
+      if (localStorage.getItem('tova_token')) {
+        import('../api').then(({ PATCH }) => PATCH('/auth/me', { locale: l }).catch(() => {}))
+      }
+    } catch {}
+  }
+  function toggle() { setLocale(locale.value === 'zh' ? 'en' : 'zh') }
   return { locale, epLocale, setLocale, toggle }
 }

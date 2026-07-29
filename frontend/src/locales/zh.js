@@ -79,6 +79,7 @@ export default {
     uncaptured: '未捕获的异常',
     pageError: '页面错误',
     unauthorized: '未登录或登录已过期，请重新登录',
+    timeout: '请求超时',
   },
   role: {
     owner: '管理员',

@@ -14,6 +14,7 @@ from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..core.log_utils import write_log, new_trace_id
 from ..core.notify_utils import emit_notification, emit_token_expired_if_due, dedup_recent
+from ..core.i18n import tenant_locale, notify_text
 from ..services.kpi_resolver import resolve_kpi, SOURCE_LABELS
 from ..core.fb_tokens import client_for_account, cred_for_account_op, mark_cred_cooldown
 from ..models.ads_cache import AdsCache
@@ -328,13 +329,13 @@ def run_inspection():
                     elif e.category in ("permissions", "permission"):
                         # 权限不足告警（交接包 §6.2：分级告警）。dedup 6h/账户，避免每轮巡检 spam
                         if not dedup_recent(db, tenant_id, "account_permission_error", acc.act_id, 360):
+                            _loc = tenant_locale(db, tenant_id)
+                            _title, _body = notify_text(_loc, "account_permission_error",
+                                name=_esc(acc.name), act_id=acc.act_id,
+                                alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
                             emit_notification(db, tenant_id=tenant_id, level="critical",
                                 event_type="account_permission_error",
-                                title=f"权限不足 · {_esc(acc.name)}",
-                                body=f"账户：{_esc(acc.name)}（<code>{acc.act_id}</code>）\n"
-                                     f"令牌：{_esc(_alias or '未命名')}\n"
-                                     f"读取失败：<b>{_esc(e.friendly)}</b>\n"
-                                     f"该令牌可能缺少广告读取权限，请重新授权。")
+                                title=_title, body=_body)
                             write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                                 target_type="account", target_id=acc.act_id,
                                 action_type="account_permission_error", source="guard",
@@ -348,11 +349,13 @@ def run_inspection():
                         if not dedup_recent(db, tenant_id, "token_rate_limited", _rid, 60):
                             _affected = [a.name for a in db.query(Account).filter(
                                 Account.fb_credential_id == cred.id).all()] if cred else []
+                            _loc = tenant_locale(db, tenant_id)
+                            _t_rl, _b_rl = notify_text(_loc, "token_rate_limited",
+                                alias=_esc(_alias or acc.act_id),
+                                affected=_esc('、'.join(_affected[:10]) or '无'))
                             emit_notification(db, tenant_id=tenant_id, level="warning",
                                 event_type="token_rate_limited",
-                                title=f"令牌限流 · {_esc(_alias or acc.act_id)}",
-                                body=f"令牌：<b>{_esc(_alias or '未命名')}</b>\n读取被限流，30 分钟后自动恢复，或换其他令牌\n"
-                                     f"影响账户：{_esc('、'.join(_affected[:10]) or '无')}")
+                                title=_t_rl, body=_b_rl)
                             write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                                 target_type="fb_credential", target_id=_rid,
                                 action_type="token_rate_limited", source="guard",
@@ -614,19 +617,19 @@ def run_inspection():
 
                         # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
                         if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):
+                            _loc = tenant_locale(db, tenant_id)
+                            _t_rp, _b_rp = notify_text(_loc, "rule_pause",
+                                category=_esc(category), name=_esc(acc.name),
+                                act_id=acc.act_id, ad_name=_esc(ad_name), ad_id=ad_id,
+                                adset_id=(adset_id or '-'), campaign_id=(campaign_id or '-'),
+                                rule_name=_esc(rule.name), detail=_esc(detail),
+                                spend=fmt_spend(spend, acc.currency), conv=conv,
+                                kpi_label=_esc(kpi.get('kpi_label') or '-'),
+                                source_label=_esc(SOURCE_LABELS.get(kpi.get('source'), kpi.get('source') or '-')))
                             emit_notification(
                                 db, tenant_id=tenant_id, level="warning",
                                 event_type="rule_pause", trace_id=trace_id,
-                                title=f"止损【{_esc(category)}】· {_esc(acc.name)}",
-                                body=f"账户：{_esc(acc.name)}（<code>{acc.act_id}</code>）\n"
-                                     f"广告：{_esc(ad_name)}（<code>{ad_id}</code>）\n"
-                                     f"广告组：<code>{adset_id or '-'}</code>\n"
-                                     f"系列：<code>{campaign_id or '-'}</code>\n"
-                                     f"规则：{_esc(rule.name)}\n"
-                                     f"触发：<b>{_esc(detail)}</b>\n"
-                                     f"消耗：<b>{fmt_spend(spend, acc.currency)}</b> ｜ 转化：<b>{conv}</b>\n"
-                                     f"KPI：{_esc(kpi.get('kpi_label') or '-')}"
-                                     f"（{_esc(SOURCE_LABELS.get(kpi.get('source'), kpi.get('source') or '-'))}）",
+                                title=_t_rp, body=_b_rp,
                                 target_type="ad", target_id=ad_id,
                                 reply_markup={"inline_keyboard": [[
                                     {"text": "🛲 加白今日", "callback_data": f"allow|{tenant_id}|{acc.act_id}|{ad_id}"}
@@ -718,11 +721,12 @@ def run_inspection():
                           actor_type="system", target_type="ad", target_id="*",
                           action_type="coverage_lost", source="guard", result="success",
                           trigger_detail=f"skipped={total_skipped_spend}")
+                _loc = tenant_locale(db, tenant_id)
+                _t_cl, _b_cl = notify_text(_loc, "coverage_lost", n=total_skipped_spend)
                 emit_notification(
                     db, tenant_id=tenant_id, level="warning",
                     event_type="coverage_lost", trace_id=trace_id,
-                    title=f"巡检覆盖丢失：{total_skipped_spend} 条有消耗广告未被评估",
-                    body=f"本轮有 {total_skipped_spend} 条今日有消耗的广告被排除在巡检外（active_ids 拉取失败/ads_cache 为空），止损规则对它们失效，请检查令牌/同步。",
+                    title=_t_cl, body=_b_cl,
                 )
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
@@ -904,11 +908,11 @@ def run_watchdog():
                 ActionLog.created_at >= since_alert,
             ).first()
             if not already:
+                _loc = tenant_locale(db, 1)
+                _t_is, _b_is = notify_text(_loc, "inspection_stalled", minutes=INSPECTION_STALL_MIN)
                 emit_notification(db, tenant_id=1, level="critical",
                                   event_type="inspection_stalled", trace_id=trace_id,
-                                  title="🚨 巡检引擎停滞",
-                                  body=(f"超过 {INSPECTION_STALL_MIN} 分钟无成功巡检心跳。\n"
-                                        "守护引擎可能挂了——止损/预算告警失效，请立即排查 toveads 服务。"))
+                                  title=_t_is, body=_b_is)
                 write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                           target_type="scheduler", action_type="inspection_stalled_alert",
                           source="watchdog", result="success",
@@ -936,10 +940,11 @@ def run_watchdog():
                 logger.warning(f"[Watchdog] token debug 失败 alias={c.alias}: {e}")
                 continue
             if not dt.get("is_valid", True):
+                _loc = tenant_locale(db, c.tenant_id)
+                _t_ti, _b_ti = notify_text(_loc, "token_invalid", alias=(c.alias or c.id))
                 emit_notification(db, tenant_id=c.tenant_id, level="critical",
                                   event_type="token_invalid", trace_id=trace_id,
-                                  title="🔴 FB Token 无效",
-                                  body=f"Token[{c.alias or c.id}] debug_token 显示无效，请重新绑定。")
+                                  title=_t_ti, body=_b_ti)
                 write_log(db, tenant_id=c.tenant_id, trace_id=trace_id, actor_type="system",
                           target_type="fb_credential", target_id=str(c.id),
                           action_type="token_health_warn", source="watchdog", result="fail")
@@ -951,10 +956,12 @@ def run_watchdog():
                 try:
                     remaining = datetime.fromtimestamp(int(exp), tz=timezone.utc) - datetime.now(timezone.utc)
                     if remaining.days <= TOKEN_EXPIRY_WARN_DAYS:
+                        _loc = tenant_locale(db, c.tenant_id)
+                        _t_te, _b_te = notify_text(_loc, "token_expiring_soon",
+                                                   alias=(c.alias or c.id), days=remaining.days)
                         emit_notification(db, tenant_id=c.tenant_id, level="warning",
                                           event_type="token_expiring_soon", trace_id=trace_id,
-                                          title="🟡 FB Token 即将过期",
-                                          body=f"Token[{c.alias or c.id}] 剩余 {remaining.days} 天，请提前续期。")
+                                          title=_t_te, body=_b_te)
                         write_log(db, tenant_id=c.tenant_id, trace_id=trace_id, actor_type="system",
                                   target_type="fb_credential", target_id=str(c.id),
                                   action_type="token_health_warn", source="watchdog", result="success",
@@ -1129,11 +1136,13 @@ def run_sentinel_patrol():
                               action_type="pause", source="sentinel_patrol", result="success",
                               trigger_type="sentinel",
                               trigger_detail=f"sentinel armed, campaign {camp.get('name','')} 直接停")
+                    _loc = tenant_locale(db, acc.tenant_id)
+                    _t_sp, _b_sp = notify_text(_loc, "sentinel_pause",
+                        name=acc.name, act_id=acc.act_id,
+                        camp_name=camp.get('name',''), camp_id=camp_id)
                     emit_notification(db, tenant_id=acc.tenant_id, level="critical",
                                       event_type="sentinel_pause", trace_id=trace_id,
-                                      title=f"哨兵暂停系列",
-                                      body=f"账户：{acc.name}（{acc.act_id}）\n系列：{camp.get('name','')}（{camp_id}）\n"
-                                           f"哨兵已 arm，ACTIVE 系列直接停。")
+                                      title=_t_sp, body=_b_sp)
                     db.commit()
                 except FbApiError as e:
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
@@ -1270,10 +1279,11 @@ def run_subcode_cleanup():
             # 每租户一条 info 通知（站内信，不打 TG）
             for tid, slugs in notify_by_tenant.items():
                 try:
+                    _loc = tenant_locale(db, tid)
+                    _t_sc, _b_sc = notify_text(_loc, "subcode_cleanup", n=len(slugs))
                     emit_notification(db, tenant_id=tid, level="info", send_tg=False,
                         event_type="subcode_cleanup",
-                        title="闲置子码已清理",
-                        body=f"自动归档/硬删 {len(slugs)} 个闲置子码（14天未用→归档，30天→硬删）。回收站可恢复。")
+                        title=_t_sc, body=_b_sc)
                 except Exception:
                     pass
             db.commit()

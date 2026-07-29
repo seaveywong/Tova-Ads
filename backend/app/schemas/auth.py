@@ -28,6 +28,7 @@ class UserOut(BaseModel):
     tenant_id: int | None = None
     is_superadmin: bool = False
     timezone: str = "Asia/Shanghai"
+    locale: str = "zh"
     permissions: list[str] = []
     must_change_password: bool = False
     tenant_name: str = ""
@@ -35,7 +36,8 @@ class UserOut(BaseModel):
 
 
 class UpdateTimezoneIn(BaseModel):
-    timezone: str
+    timezone: str | None = None
+    locale: str | None = None
 
 
 class UpdateEmailIn(BaseModel):

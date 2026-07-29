@@ -146,6 +146,7 @@ def me(user: CurrentUser = Depends(get_current_user),
         id=user.id, email=user.email, role=user.role,
         tenant_id=user.tenant_id, is_superadmin=user.is_superadmin,
         timezone=user.timezone or "Asia/Shanghai",
+        locale=(u.locale if u and u.locale in ("zh", "en") else "zh"),
         permissions=sorted(user.permissions),
         must_change_password=(u.status == "must_change_password") if u else False,
         tenant_name=_tenant_name_of(db, user.tenant_id) if user.tenant_id else "",
@@ -156,13 +157,21 @@ def me(user: CurrentUser = Depends(get_current_user),
 @router.patch("/me")
 def update_me(body: UpdateTimezoneIn, user: CurrentUser = Depends(get_current_user),
               db: Session = Depends(get_system_db)):
-    """更新当前用户的显示时区（仅前端展示用，不影响广告账户本地时区）。"""
-    tz = (body.timezone or "").strip() or "Asia/Shanghai"
+    """更新当前用户的显示时区 / 界面语言（仅前端展示用，不影响广告账户本地时区）。"""
     u = db.query(User).filter(User.id == user.id).first()
+    tz = None
+    if body.timezone is not None:
+        tz = (body.timezone or "").strip() or "Asia/Shanghai"
+        if u:
+            u.timezone = tz
+    if body.locale is not None:
+        loc = (body.locale or "").strip().lower()
+        if loc in ("zh", "en") and u:
+            u.locale = loc
     if u:
-        u.timezone = tz
         db.commit()
-    return {"timezone": tz}
+    return {"timezone": tz or (u.timezone if u else "Asia/Shanghai"),
+            "locale": (u.locale if u else "zh")}
 
 
 @router.patch("/me/email")

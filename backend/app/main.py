@@ -82,6 +82,26 @@ async def sliding_renew_middleware(request: Request, call_next):
 
 app.add_middleware(TraceIdMiddleware)
 
+
+# ── 报错 i18n：en-locale 请求把中文 HTTPException detail 译成英文（不动各 router）──
+from fastapi import HTTPException as _HTTPException
+from fastapi.responses import JSONResponse as _JSONResponse
+
+@app.exception_handler(_HTTPException)
+async def _i18n_http_exception_handler(request, exc: _HTTPException):
+    detail = exc.detail
+    if isinstance(detail, str):
+        try:
+            from .core.error_i18n import translate_error
+            detail = translate_error(detail, (request.headers.get("x-locale") or "").lower())
+        except Exception:
+            pass
+    return _JSONResponse(
+        status_code=exc.status_code,
+        headers=getattr(exc, "headers", None),
+        content={"detail": detail},
+    )
+
 app.include_router(auth_router)
 app.include_router(fb_router)
 app.include_router(subcodes_router)

@@ -23,6 +23,7 @@ class User(Base):
     status = Column(Text, nullable=False, default="active")
     is_superadmin = Column(Boolean, default=False, nullable=False)  # 平台超管（域名分配等）
     timezone = Column(Text, default="Asia/Shanghai")  # 用户显示时区（仅前端展示，不影响广告账户）
+    locale = Column(Text, default="zh", nullable=False)  # 界面语言 'zh'/'en'（通知渲染 + 报错翻译用）
     last_active_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..core.fb_client import FbClient, FbApiError
 from ..core.log_utils import write_log, new_trace_id
 from ..core.notify_utils import emit_notification, emit_token_expired_if_due
+from ..core.i18n import tenant_locale, notify_text
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.encryption import decrypt
 from ..core.fb_tokens import client_for_account
@@ -100,10 +101,10 @@ def check_account_budget_progress(
 
             # 触发告警
             remaining = budget - spend
-            title = f"预算进度 {progress:.0f}%（{tier}% 档）"
-            body = (f"广告组[{adset_name}]\n账户：{acc.name}\n"
-                    f"日预算 {budget:.0f} {acc.currency} / 已消耗 {spend:.0f} ({progress:.0f}%)\n"
-                    f"剩余 {remaining:.0f} {acc.currency}")
+            _loc = tenant_locale(db, tenant_id)
+            _title, _body = notify_text(_loc, "budget_progress",
+                progress=progress, tier=tier, adset_name=adset_name, acc_name=acc.name,
+                budget=budget, currency=acc.currency, spend=spend, remaining=remaining)
             write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                       target_type="adset", target_id=adset_id,
                       action_type="budget_progress_alert", source="scheduled", result="success",
@@ -112,7 +113,7 @@ def check_account_budget_progress(
                                 "spend": spend, "budget": budget})
             emit_notification(db, tenant_id=tenant_id, level="warning",
                               event_type=f"budget_progress_{tier}", trace_id=trace_id,
-                              title=title, body=body,
+                              title=_title, body=_body,
                               target_type="adset", target_id=adset_id)
             alerts.append({"adset_id": adset_id, "tier": tier,
                            "progress": round(progress, 1), "spend": spend, "budget": budget})
