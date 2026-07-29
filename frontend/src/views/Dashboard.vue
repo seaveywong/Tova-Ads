@@ -9,7 +9,7 @@ import Fuse from 'fuse.js'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(true)
 const refreshing = ref(false)
@@ -27,12 +27,12 @@ const spendCanvas = ref(null)
 const convCanvas = ref(null)
 const cpaCanvas = ref(null)
 let _charts = []
-const GRAN_OPTS = [
+const GRAN_OPTS = computed(() => [
   { value: '5min', label: t('dashboard.gran5min') },
   { value: '30min', label: t('dashboard.gran30min') },
   { value: 'hour', label: t('dashboard.gran1hour') },
   { value: 'day', label: t('dashboard.granByDay') },
-]
+])
 // 按看板时间范围自动推荐颗粒度
 const autoGran = () => {
   const p = showCustom.value ? 'custom' : datePreset.value
@@ -69,7 +69,7 @@ const renderTrendCharts = () => {
       const dt = new Date(iso)
       if (isNaN(dt)) return iso
       // 按用户时区取各部分
-      const parts = new Intl.DateTimeFormat('zh-CN', {
+      const parts = new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'zh-CN', {
         timeZone: userTz.value, hour12: false,
         month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
       }).formatToParts(dt)

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -40,11 +40,11 @@ const LOCALES = [
   {v:'vi_VN',l:'Tiếng Việt'},{v:'th_TH',l:'ภาษาไทย'},{v:'id_ID',l:'Bahasa Indonesia'},
   {v:'ja_JP',l:'日本語'},{v:'ko_KR',l:'한국어'},{v:'es_ES',l:'Español'},{v:'pt_BR',l:'Português'},
 ]
-const CONTACT_FIELDS = [
+const CONTACT_FIELDS = computed(() => [
   {v:'EMAIL',l:t('formtpl.contact.email')},{v:'PHONE',l:t('formtpl.contact.phone')},{v:'CITY',l:t('formtpl.contact.city')},{v:'STATE',l:t('formtpl.contact.state')},
   {v:'ZIP_CODE',l:t('formtpl.contact.zip')},{v:'COUNTRY',l:t('formtpl.contact.country')},{v:'DATE_OF_BIRTH',l:t('formtpl.contact.dob')},{v:'GENDER',l:t('formtpl.contact.gender')},
   {v:'MARITAL_STATUS',l:t('formtpl.contact.marital')},{v:'LAST_NAME',l:t('formtpl.contact.lastName')},
-]
+])
 
 const load = async () => {
   loading.value = true

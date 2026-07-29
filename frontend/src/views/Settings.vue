@@ -9,7 +9,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const { t } = useI18n()
 
 // 时区
-const TZ_OPTIONS = [
+const TZ_OPTIONS = computed(() => [
   { tz: 'Asia/Shanghai', label: t('settings.tzShanghai') }, { tz: 'Asia/Hong_Kong', label: t('settings.tzHongKong') },
   { tz: 'Asia/Taipei', label: t('settings.tzTaipei') }, { tz: 'Asia/Tokyo', label: t('settings.tzTokyo') },
   { tz: 'Asia/Seoul', label: t('settings.tzSeoul') }, { tz: 'Asia/Singapore', label: t('settings.tzSingapore') },
@@ -18,7 +18,7 @@ const TZ_OPTIONS = [
   { tz: 'America/New_York', label: t('settings.tzNewYork') }, { tz: 'America/Sao_Paulo', label: t('settings.tzSaoPaulo') },
   { tz: 'Europe/London', label: t('settings.tzLondon') }, { tz: 'Europe/Paris', label: t('settings.tzParis') },
   { tz: 'Australia/Sydney', label: t('settings.tzSydney') }, { tz: 'UTC', label: 'UTC' },
-]
+])
 const tz = ref(userTz.value)
 const saving = ref(false)
 const pick = async (z) => {

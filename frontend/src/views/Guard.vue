@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const { t } = useI18n()
 
 // 规则类型元数据：label + 默认分类 + 参数 schema（key/label/默认/单位）
-const RULE_TYPES = {
+const RULE_TYPES = computed(() => ({
   bleed_abs: { label: t('guard.rt.bleed_abs'), category: t('guard.cat.bleed'), params: [
     { key: 'spend_threshold', label: t('guard.param.spend_gte'), def: 20, unit: 'USD' },
   ]},
@@ -38,7 +38,7 @@ const RULE_TYPES = {
   budget_burn_fast: { label: t('guard.rt.budget_burn_fast'), category: t('guard.cat.bleed'), params: [
     { key: 'threshold_abs', label: t('guard.param.delta_gte'), def: 20, unit: 'USD' },
   ]},
-}
+}))
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
 const LANDING_METRIC = computed(() => ({ pass: t('guard.lm.pass_short'), visit: t('guard.lm.visit_short') }))
@@ -61,9 +61,9 @@ const load = async () => {
 }
 onMounted(load)
 
-const currentSchema = computed(() => RULE_TYPES[form.value.rule_type] || { params: [] })
+const currentSchema = computed(() => RULE_TYPES.value[form.value.rule_type] || { params: [] })
 const paramsSummary = (r) => {
-  const schema = RULE_TYPES[r.rule_type]
+  const schema = RULE_TYPES.value[r.rule_type]
   if (!schema) return ''
   return schema.params.map(sp => `${sp.label}${r.params?.[sp.key] ?? sp.def}${sp.unit ? ' ' + sp.unit : ''}`).join('  ·  ')
 }
@@ -95,7 +95,7 @@ const hitLabel = (r) => {
 }
 
 const onTypeChange = () => {
-  const schema = RULE_TYPES[form.value.rule_type]
+  const schema = RULE_TYPES.value[form.value.rule_type]
   form.value.params = {}  // 不预填：输入框留空，空值=用后端默认（避免预埋值误导）
   if (schema) form.value.category = schema.category
 }

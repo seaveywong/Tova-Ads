@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
@@ -9,22 +9,22 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 const { t, locale } = useI18n()
 const route = useRoute()
 
-const EVENT_TYPES = [
+const EVENT_TYPES = computed(() => [
   { v: '', l: t('lplogs.actionAll') }, { v: 'visit', l: t('lplogs.actionVisit') }, { v: 'click', l: t('lplogs.actionClick') },
   { v: 'submit', l: t('lplogs.actionSubmit') }, { v: 'redirect', l: t('lplogs.actionRedirect') }, { v: 'block', l: t('lplogs.actionBlock') },
   { v: 'pass', l: t('lplogs.actionPass') }, { v: 'error', l: t('lplogs.actionError') },
-]
-const DECISIONS = [
+])
+const DECISIONS = computed(() => [
   { v: '', l: t('lplogs.resultAll') }, { v: 'allow', l: t('lplogs.actionPass') },
   { v: 'block', l: t('lplogs.actionBlock') }, { v: 'redirect', l: t('lplogs.actionRedirect') },
-]
+])
 
 // 原因 → 中文
-const REASON_LABEL = {
+const REASON_LABEL = computed(() => ({
   pass: t('lplogs.reasonPass'), device_block: t('lplogs.reasonDeviceBlock'), ua_block: t('lplogs.reasonUaBlock'),
   country_block: t('lplogs.reasonCountryBlock'), country_allow: t('lplogs.reasonCountryAllow'), dedup: t('lplogs.reasonDedup'),
-}
-const reasonLabel = (r) => REASON_LABEL[r] || r || ''
+}))
+const reasonLabel = (r) => REASON_LABEL.value[r] || r || ''
 
 // 国家码 → 国名（CF 给的是 2 字母 ISO 码；国名英文通用，zh/en 共用）
 const COUNTRY = {
@@ -152,13 +152,13 @@ const buildParams = () => {
 }
 // 来源分布统计（chip 条）：受控/外部/爬虫/占位符/未知 + 机房数。点 chip 即筛选
 const stats = ref(null)
-const statChips = [
+const statChips = computed(() => [
   { key: 'controlled', label: t('lplogs.srcControlled'), cls: 'src-ok' },
   { key: 'external', label: t('lplogs.srcExternal'), cls: 'src-bad' },
   { key: 'crawler', label: t('lplogs.srcCrawlerShort'), cls: 'src-bot' },
   { key: 'placeholder', label: t('lplogs.srcPlaceholder'), cls: 'src-warn' },
   { key: 'unknown', label: t('lplogs.direct'), cls: 'muted' },
-]
+])
 const buildStatsParams = () => {
   const p = {}
   if (fPage.value) p.page_id = fPage.value
@@ -224,8 +224,8 @@ const saveRedirect = async () => {
     ElMessage.success(redirectInput.value.trim() ? t('lplogs.redirectSet') : t('lplogs.redirectReset')); redirectDialog.value = false
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
-const eventLabel = (v) => EVENT_TYPES.find(x => x.v === v)?.l || v || '-'
-const decisionLabel = (v) => DECISIONS.find(x => x.v === v)?.l || v || ''
+const eventLabel = (v) => EVENT_TYPES.value.find(x => x.v === v)?.l || v || '-'
+const decisionLabel = (v) => DECISIONS.value.find(x => x.v === v)?.l || v || ''
 const decisionClass = (d, et) => d === 'block' || et === 'block' ? 'err' : (d === 'allow' || et === 'visit' ? 'ok' : 'warn')
 const pageTitle = () => {
   const p = pages.value.find(x => String(x.id) === String(fPage.value))
