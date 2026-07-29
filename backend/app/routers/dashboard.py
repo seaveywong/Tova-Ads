@@ -276,11 +276,11 @@ def dashboard(
             if acc.account_status != 1:
                 err = None  # 禁用/异常账户本就不巡检，不算巡检未覆盖（避免误报停滞）
             elif acc_local != today:
-                err = f"跨时区（账户本地 {acc_local}，看板查 {today}）"
+                err = "cross_tz"  # 跨时区（账户本地日≠北京业务日）—— code，前端按 locale 显示
             elif _recent:
                 err = None  # 已巡检但无活跃广告 = 正常，不算异常
             else:
-                err = "巡检未覆盖"
+                err = "uncovered"  # 巡检未覆盖——code，前端按 locale 显示
             account_details.append({
                 "act_id": acc.act_id, "name": acc.name, "currency": acc.currency or "USD", "timezone": acc.timezone_name or "",
                 "account_status": acc.account_status, "is_managed": acc.is_managed if acc.is_managed is not None else True,

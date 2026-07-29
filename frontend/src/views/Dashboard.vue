@@ -147,6 +147,9 @@ const fmtAgo = (iso) => {
   if (diff < 3600000) return t('dashboard.minutesAgo', { n: Math.floor(diff / 60000) })
   return t('dashboard.hoursAgo', { n: Math.floor(diff / 3600000) })
 }
+// 账户 error：后端返 code（uncovered/cross_tz），按 locale 映射显示；其余（FB 错误等）原样
+const ERR_LABEL = { uncovered: 'dashboard.covUncovered', cross_tz: 'dashboard.covCrossTz' }
+const mapErr = (e) => (e && ERR_LABEL[e]) ? t(ERR_LABEL[e]) : (e || '')
 const loadDashboard = async (fresh = false) => {
   loading.value = true
   try {
@@ -285,10 +288,10 @@ const taskCards = computed(() => {
     if (low.length) cards.push({ kind: 'info', icon: 'InfoFilled', title: t('dashboard.taskBalanceLow', { n: low.length }), desc: t('dashboard.taskBalanceLowDesc', { names: names(low) }), detailAccounts: low, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   }
   // 真拉取异常（排除已分类的巡检未覆盖/跨时区/无数据）
-  const fetchErrors = accs.filter(a => a.error && !a.error.includes('无数据') && !a.error.includes('巡检未覆盖') && !a.error.includes('跨时区'))
+  const fetchErrors = accs.filter(a => a.error && a.error !== 'uncovered' && a.error !== 'cross_tz' && a.error !== '无数据')
   if (fetchErrors.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskFetchError', { n: fetchErrors.length }), desc: t('dashboard.taskFetchErrorDesc', { names: names(fetchErrors), msg: fetchErrors[0]?.error || '' }), detailAccounts: fetchErrors, detailColumns: ['name', 'error'] })
   // 巡检未覆盖（同日但无快照，需关注：可能 token 失效/巡检漏/新账户未跑到）
-  const uncovered = accs.filter(a => a.error && a.error.includes('巡检未覆盖'))
+  const uncovered = accs.filter(a => a.error && a.error === 'uncovered')
   if (uncovered.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: t('dashboard.taskUncovered', { n: uncovered.length }), desc: t('dashboard.taskUncoveredDesc'), detailAccounts: uncovered, detailColumns: ['name', 'error'] })
   const bleeding = accs.filter(a => !a.error && a.spend_usd > 5 && a.conversions === 0)
   if (bleeding.length) cards.push({ kind: 'warn', icon: 'TrendCharts', title: t('dashboard.taskBleeding', { n: bleeding.length }), desc: t('dashboard.taskBleedingDesc', { names: names(bleeding), spend: fmtUsd(bleeding.reduce((s, a) => s + a.spend_usd, 0)) }), detailAccounts: bleeding, detailColumns: ['name', 'spend_usd', 'conversions', 'act_id'] })
@@ -322,7 +325,7 @@ const columnFmt = (col, acc) => {
   if (col === 'spend_cap_usd') return fmtUsd(acc.spend_cap_usd)
   if (col === 'spend_usd') return fmtUsd(acc.spend_usd)
   if (col === 'conversions') return fmt(acc.conversions)
-  if (col === 'error') return acc.error
+  if (col === 'error') return mapErr(acc.error)
   return acc[col]
 }
 
@@ -376,7 +379,7 @@ const cards = computed(() => [
   { label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), color: 'red', mode: 'pause', clickable: data.value.pause_count > 0 },
   { label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count), color: 'cyan', mode: 'allowance', clickable: data.value.allowance_count > 0 },
   { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), color: 'teal', mode: 'balance', clickable: true },
-  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || (a.error && a.error.includes('跨时区'))).length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'indigo', mode: 'coverage', clickable: true },
+  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || a.error === 'cross_tz').length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'indigo', mode: 'coverage', clickable: true },
 ])
 const kpiDetail = computed(() => {
   if (kpiExpanded.value === null) return null
@@ -420,14 +423,14 @@ const kpiDetail = computed(() => {
   }
 
   if (mode === 'coverage') {
-    const statusOrder = (a) => (a.error && a.error.includes('巡检未覆盖')) ? 0 : (a.error ? 1 : 2)  // 巡检未覆盖在上（紧急）→跨时区→可巡检
+    const statusOrder = (a) => (a.error === 'uncovered') ? 0 : (a.error ? 1 : 2)  // 巡检未覆盖在上（紧急）→跨时区→可巡检
     const accs = [...(data.value.accounts || [])].sort((a, b) => statusOrder(a) - statusOrder(b) || (a.name || '').localeCompare(b.name || ''))
     return {
       mode, title: t('dashboard.kpiCoverage') + ' · ' + t('dashboard.coverageByAccount'), type: 'accounts', accs,
       cols: [
         { key: 'name', label: t('dashboard.colAccount'), left: true },
-        { key: 'tz', label: t('dashboard.colLocalTime'), fmt: (v, a) => (a.error && a.error.includes('跨时区') ? '🕐 ' : '') + localTime(a.timezone) + ' ' + tzOffset(a.timezone) },
-        { key: 'cov', label: t('dashboard.colInspectStatus'), fmt: (v, a) => (a.error && a.error.includes('巡检未覆盖')) ? '❌ ' + t('dashboard.covUncovered') : '✅ ' + t('dashboard.covOk') },
+        { key: 'tz', label: t('dashboard.colLocalTime'), fmt: (v, a) => (a.error === 'cross_tz' ? '🕐 ' : '') + localTime(a.timezone) + ' ' + tzOffset(a.timezone) },
+        { key: 'cov', label: t('dashboard.colInspectStatus'), fmt: (v, a) => (a.error === 'uncovered') ? '❌ ' + t('dashboard.covUncovered') : '✅ ' + t('dashboard.covOk') },
       ],
     }
   }
