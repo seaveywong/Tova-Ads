@@ -1297,6 +1297,15 @@ def run_subcode_cleanup():
         release_run_lock(lock, 108)
 
 
+def _ka_rollback(fb, ids):
+    """建保活任一步失败时回滚已建的 campaign/adset/creative，避免 orphan 系列卡住去重（下次跳过）。"""
+    for oid in reversed(ids):
+        try:
+            fb._request("DELETE", oid)
+        except Exception:
+            pass
+
+
 def run_keepalive():
     """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $5 lifetime Page Like。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
@@ -1340,6 +1349,7 @@ def run_keepalive():
 
         created = skipped = failed = 0
         for acc in warming:
+            built = []
             try:
                 # 该账户所属租户的保活配置（没配的用默认值）
                 cfg = tenant_cfgs.get(acc.tenant_id) or dict(DEFAULT_KEEPALIVE)
@@ -1403,34 +1413,39 @@ def run_keepalive():
                 image_hash = ensure_image_hash_for_account(fb, db, asset, acc.act_id, filepath)
                 db.commit()
 
-                # 6. 建 $5 lifetime Page Like（直接 FB API，不走 deploy_one_account——避免改共享代码）
+                # 6. 建 Page Like（campaign→adset→creative→ad；任一步失败 _ka_rollback 回滚已建对象，避免 orphan 卡去重）
                 camp = fb.post(f"act_{acc.act_id}/campaigns", {
                     "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
                     "status": "ACTIVE", "buying_type": "AUCTION", "special_ad_categories": [],
+                    "is_adset_budget_sharing_enabled": False,
                 })
                 camp_id = camp.get("id")
                 if not camp_id:
                     raise Exception(f"FB 未返回 campaign_id: {str(camp)[:200]}")
+                built.append(camp_id)
                 adset = fb.post(f"act_{acc.act_id}/adsets", {
                     "name": f"{prefix} AdSet", "campaign_id": camp_id, "status": "ACTIVE",
                     "optimization_goal": "PAGE_LIKES", "billing_event": "IMPRESSIONS",
+                    "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
                     "promoted_object": json.dumps({"page_id": page_id}),
                     "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                    "lifetime_budget": str(budget),
+                    "daily_budget": str(budget),
                 })
                 adset_id = adset.get("id")
                 if not adset_id:
                     raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
+                built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
                     "name": f"{prefix} Creative", "page_id": page_id,
                     "object_story_spec": json.dumps({
                         "page_id": page_id,
-                        "link_data": {"link": f"https://facebook.com/{page_id}", "picture": asset.public_url, "message": "Follow us!"},
+                        "link_data": {"link": f"https://facebook.com/{page_id}", "image_hash": image_hash, "message": "Follow us!"},
                     }),
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
                     raise Exception(f"FB 未返回 creative_id: {str(creative)[:200]}")
+                built.append(creative_id)
                 ad = fb.post(f"act_{acc.act_id}/ads", {
                     "name": f"{prefix} Ad", "adset_id": adset_id,
                     "creative": json.dumps({"creative_id": creative_id}), "status": "ACTIVE",
@@ -1452,9 +1467,11 @@ def run_keepalive():
                           result="fail", friendly_error=e.friendly[:200],
                           metadata={"act_id": acc.act_id})
                 db.commit()
+                _ka_rollback(fb, built)
             except Exception as e:
                 failed += 1
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 异常: {e}")
+                _ka_rollback(fb, built)
         if created:
             logger.info(f"[Keepalive] 检查 {len(warming)} 个 warming 账户，建 {created} 条保活，跳过 {skipped}，失败 {failed}")
         return {"checked": len(warming), "created": created, "skipped": skipped, "failed": failed}
