@@ -171,17 +171,23 @@ def set_user_tg_binding(
 ):
     """用户绑自己的 TG（决策③）。告警按角色推到对应用户的绑定。"""
     from ..models.notify import UserTgBinding
+    # 占位 bot '__use_tenant_bot__' → 解析成租户真 bot（否则发送时 token 无效，绑了也收不到告警）
+    real_bot = body.bot_token
+    if real_bot == '__use_tenant_bot__':
+        tb = db.query(TenantTgBinding).filter(
+            TenantTgBinding.tenant_id == user.tenant_id).first()
+        real_bot = decrypt(tb.bot_token_enc) if tb else body.bot_token
     existing = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
     ).first()
     if existing:
-        existing.bot_token_enc = encrypt(body.bot_token)
+        existing.bot_token_enc = encrypt(real_bot)
         existing.chat_id = body.chat_id
         existing.verified_at = None
     else:
         db.add(UserTgBinding(tenant_id=user.tenant_id, user_id=user.id,
-                             bot_token_enc=encrypt(body.bot_token), chat_id=body.chat_id))
+                             bot_token_enc=encrypt(real_bot), chat_id=body.chat_id))
     db.commit()
     return {"status": "saved", "user_id": user.id}
 

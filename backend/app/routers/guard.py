@@ -421,3 +421,12 @@ def manual_watchdog(user: CurrentUser = Depends(require_permission("rules.read")
     """手动触发系统看门狗（06_附录 §四）：巡检停滞检测 + token 主动健康检查。"""
     from ..services.guard_engine import run_watchdog
     return run_watchdog()
+
+
+@router.post("/keepalive/run")
+def manual_keepalive(user: CurrentUser = Depends(require_permission("ads.pause"))):
+    """手动触发保活扫描（不等每日 02:17 cron）。
+    检查 warming/团队开关账户连续 idle_days 天无消耗 → 建 $5 主页赞。
+    返回 {checked, created, skipped, failed}。"""
+    from ..services.guard_engine import run_keepalive
+    return run_keepalive()

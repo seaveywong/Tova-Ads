@@ -588,6 +588,7 @@ export default {
     retentionSaved: 'Retention policy saved (auto cleanup daily at 4:33)',
     retentionCleanItem: '{table}: {n} deleted', retentionCleanDone: 'Cleanup done · {detail}', cleanFail: 'Cleanup failed: {msg}',
     keepaliveEnabled: 'Keepalive enabled globally',
+    kaRunNow: 'Scan now', kaRunResult: 'Checked {checked} accounts, created {created} keepalive ads (skipped {skipped}, failed {failed})',
     accountTitle: 'Account',
     accountDesc: 'Login username (email) and password. After changing the password you must log in again with the new one.',
     username: 'Username', loginEmailPh: 'Login email', saveUsername: 'Save username',

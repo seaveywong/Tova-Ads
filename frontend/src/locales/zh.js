@@ -599,6 +599,7 @@ export default {
     retentionSaved: '保留策略已保存（每日 4:33 自动清理）',
     retentionCleanItem: '{table}:{n}删', retentionCleanDone: '清理完成 · {detail}', cleanFail: '清理失败：{msg}',
     keepaliveEnabled: '保活已全局开启',
+    kaRunNow: '立即扫描一次', kaRunResult: '检查 {checked} 个账户，建 {created} 条保活（跳过 {skipped}，失败 {failed}）',
     accountTitle: '账户',
     accountDesc: '登录用户名（邮箱）和密码。修改密码后需用新密码重新登录。',
     username: '用户名', loginEmailPh: '登录邮箱', saveUsername: '保存用户名',

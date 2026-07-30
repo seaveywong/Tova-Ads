@@ -356,6 +356,15 @@ const saveKeepalive = async () => {
   } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   kaSaving.value = false
 }
+const kaRunning = ref(false)
+const runKeepaliveNow = async () => {
+  kaRunning.value = true
+  try {
+    const r = await POST('/guard/keepalive/run')
+    ElMessage.success(t('settings.kaRunResult', { checked: r.checked || 0, created: r.created || 0, skipped: r.skipped || 0, failed: r.failed || 0 }))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  kaRunning.value = false
+}
 </script>
 
 <template>
@@ -519,6 +528,7 @@ const saveKeepalive = async () => {
       </div>
       <div class="ka-actions">
         <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? t('settings.saving') : t('common.save') }}</button>
+        <button class="btn" :disabled="kaRunning" @click="runKeepaliveNow">{{ kaRunning ? t('common.loading') : t('settings.kaRunNow') }}</button>
       </div>
     </div>
   </div>
