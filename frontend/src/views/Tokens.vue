@@ -296,24 +296,22 @@ const editApp = (a) => { appEditing.value = a.id; appForm.value = { app_id: a.ap
 const deleteApp = async (a) => { try { await ElMessageBox.confirm(t('tokens.deleteAppConfirm', { name: a.name||a.app_id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/apps/${a.id}`); ElMessage.success(t('tokens.deleted')); await loadApps() } catch {} }
 const systemApps = computed(() => apps.value.filter(a => a.is_system))
 const myApps = computed(() => apps.value.filter(a => !a.is_system))
-const startOAuth = async (a) => {
-  // 同步先开新标签占弹窗名额（防浏览器拦截），拿到 URL 后再引导过去；同时复制链接备用
-  const win = window.open('about:blank', '_blank')
-  let url = ''
-  try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); url = r.url || '' }
-  catch (e) { if (win) win.close(); ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return }
-  if (!url) { if (win) win.close(); return }
-  let copied = false
-  try { await navigator.clipboard.writeText(url); copied = true } catch {}
-  importOpen.value = false  // 关掉"连接 Facebook"弹窗，避免遮住后续提示
-  if (win) {
-    win.location.href = url
-    ElMessage.success(copied ? t('tokens.oauthOpenedCopied') : t('tokens.oauthOpened'))
-  } else {
-    // 浏览器拦截了新标签 → 显示 URL 供手动复制/打开
-    ElMessageBox.alert(url, t('tokens.oauthUrlTitle'),
-      { confirmButtonText: t('tokens.openOAuth'), cancelButtonText: t('common.close'), showCancelButton: true }
-    ).then(() => window.open(url, '_blank')).catch(() => {})
+const _oauthUrl = async (a) => {
+  try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); return r.url || '' }
+  catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return '' }
+}
+const startOAuth = async (a) => {  // → 在本浏览器打开（当前页跳转 FB 授权）
+  const url = await _oauthUrl(a)
+  if (url) window.location.href = url
+}
+const copyOAuth = async (a) => {  // 复制授权链接（到其他设备/已登录 FB 的浏览器打开）
+  const url = await _oauthUrl(a)
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    ElMessage.success(t('tokens.oauthLinkCopied'))
+  } catch {
+    ElMessageBox.alert(url, t('tokens.oauthUrlTitle'), { confirmButtonText: t('common.close') }).catch(() => {})
   }
 }
 
@@ -561,7 +559,14 @@ const deleteToken = async (tk) => {
           <div v-if="!apps.length" class="hint">{{ t('tokens.oauthHint') }}</div>
           <div v-else>
             <div class="oauth-step">{{ t('tokens.oauthPickHint') }}</div>
-            <div v-for="a in apps" :key="a.id" class="oauth-app" @click="startOAuth(a)"><span>{{ a.name||a.app_id }}</span><span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span><span class="arrow">→</span></div>
+            <div v-for="a in apps" :key="a.id" class="oauth-app">
+              <span class="oa-name">{{ a.name||a.app_id }}</span>
+              <span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span>
+              <span class="oa-actions">
+                <button class="oa-btn ghost" @click="copyOAuth(a)">{{ t('tokens.copyOAuthUrl') }}</button>
+                <button class="oa-btn" @click="startOAuth(a)">{{ t('tokens.openInBrowser') }} →</button>
+              </span>
+            </div>
           </div>
         </div>
         <div v-if="importTab==='manual'" class="m-body">
@@ -735,8 +740,12 @@ const deleteToken = async (tk) => {
 .warn{padding:8px;background:rgba(255,214,10,.08);border:1px solid rgba(255,214,10,.2);border-radius:6px;font-size:12px;color:var(--warning)}
 .hint{text-align:center;color:var(--t3);padding:16px;font-size:13px}
 .oauth-step{font-size:12px;color:var(--t3);line-height:1.6;padding:2px 2px 10px;text-align:left}
-.oauth-app{display:flex;align-items:center;gap:8px;padding:9px;background:var(--bg3);border-radius:6px;cursor:pointer}.oauth-app:hover{background:var(--bgh)}
-.arrow{margin-left:auto;color:var(--ac)}
+.oauth-app{display:flex;align-items:center;gap:8px;padding:9px;background:var(--bg3);border-radius:6px}.oauth-app:hover{background:var(--bgh)}
+.oa-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--t1)}
+.oa-actions{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
+.oa-btn{padding:4px 10px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.oa-btn:hover{border-color:var(--ac);color:var(--ac)}
+.oa-btn.ghost{background:transparent;color:var(--t3)}
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .badge{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--acg);color:var(--ac)}.badge.sys{background:rgba(48,209,88,.12);color:var(--success)}
 
