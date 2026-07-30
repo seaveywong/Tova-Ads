@@ -107,7 +107,7 @@ def gen_copy(body: GenCopyIn, user: CurrentUser = Depends(require_permission("ad
     try:
         data = ai.chat_json(
             [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}],
-            max_tokens=800, temperature=0.8,
+            max_tokens=2048, temperature=0.8,
         )
     except AiError as e:
         raise HTTPException(400, f"AI 生成失败：{e.message}")

@@ -283,7 +283,7 @@ def ai_generate_form(body: AiGenerateFormIn,
     try:
         data = ai.chat_json(
             [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
-            temperature=0.7, max_tokens=2048,
+            temperature=0.7, max_tokens=4096,
         )
     except AiError as e:
         raise HTTPException(400, f"AI 生成失败：{e.message}")
@@ -337,7 +337,7 @@ def ai_generate_message(body: AiGenerateMsgIn,
     try:
         data = ai.chat_json(
             [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
-            temperature=0.8, max_tokens=1536,
+            temperature=0.8, max_tokens=3072,
         )
     except AiError as e:
         raise HTTPException(400, f"AI 生成失败：{e.message}")

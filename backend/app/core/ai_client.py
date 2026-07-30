@@ -20,15 +20,34 @@ logger = logging.getLogger("toveads.ai")
 
 # 去掉模型可能裹的 ```json ... ``` 代码块（锚定首尾三反引号，内部单反引号不影响）
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"^```[a-zA-Z0-9]*\s*\n?")
 
 
 def _strip_json_fence(raw: str) -> str:
-    """去 markdown 代码块包裹，返回可 json.loads 的字符串。"""
+    """去 markdown 代码块包裹。容忍缺尾围栏（被 max_tokens 截断时只去开头 ```json 行）。"""
     raw = (raw or "").strip()
     m = _JSON_FENCE_RE.match(raw)
     if m:
-        raw = m.group(1).strip()
+        return m.group(1).strip()
+    if raw.startswith("```"):                      # 缺尾围栏：去开头 ```json 行
+        return _FENCE_OPEN_RE.sub("", raw, count=1).strip()
     return raw
+
+
+def _extract_json(raw: str):
+    """解析模型 JSON 输出：先去围栏，json.loads 失败则兜底截取首个 {...}/[...]（容忍前后散文/尾部截断）。"""
+    raw = _strip_json_fence((raw or "").strip())
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        for oc, cc in (("{", "}"), ("[", "]")):
+            i, j = raw.find(oc), raw.rfind(cc)
+            if i != -1 and j > i:
+                try:
+                    return json.loads(raw[i:j + 1])
+                except json.JSONDecodeError:
+                    continue
+        raise
 
 
 class AiError(Exception):
@@ -86,9 +105,8 @@ class AiClient:
                   max_tokens: int = 1024, timeout: int = 60) -> dict | list:
         """chat 并解析 JSON 输出（防幻觉：要求模型只返 JSON；解析失败 raise）。"""
         raw = self.chat(messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
-        raw = _strip_json_fence(raw)
         try:
-            return json.loads(raw)
+            return _extract_json(raw)
         except json.JSONDecodeError as e:
             raise AiError(f"AI 输出非合法 JSON: {e}; raw={raw[:200]}")
 
@@ -134,8 +152,7 @@ def chat_with_images_json(text_prompt: str, image_b64_list: list[str],
     """视觉看图 + 解析 JSON 输出（同 chat_json 的去 markdown 包裹逻辑）。"""
     raw = chat_with_images(text_prompt, image_b64_list, mime=mime, system_prompt=system_prompt,
                            temperature=temperature, max_tokens=max_tokens, timeout=timeout)
-    raw = _strip_json_fence(raw)
     try:
-        return json.loads(raw)
+        return _extract_json(raw)
     except json.JSONDecodeError as e:
         raise AiError(f"视觉 AI 输出非合法 JSON: {e}; raw={raw[:200]}")
