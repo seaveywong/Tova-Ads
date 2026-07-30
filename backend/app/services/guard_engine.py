@@ -1406,7 +1406,7 @@ def run_keepalive():
                 # 6. 建 $5 lifetime Page Like（直接 FB API，不走 deploy_one_account——避免改共享代码）
                 camp = fb.post(f"act_{acc.act_id}/campaigns", {
                     "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
-                    "status": "ACTIVE", "buying_type": "AUCTION", "lifetime_budget": str(budget),
+                    "status": "ACTIVE", "buying_type": "AUCTION", "special_ad_categories": [],
                 })
                 camp_id = camp.get("id")
                 if not camp_id:
@@ -1415,7 +1415,7 @@ def run_keepalive():
                     "name": f"{prefix} AdSet", "campaign_id": camp_id, "status": "ACTIVE",
                     "optimization_goal": "PAGE_LIKES", "billing_event": "IMPRESSIONS",
                     "promoted_object": json.dumps({"page_id": page_id}),
-                    "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "page": acc.act_id}),
+                    "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
                     "lifetime_budget": str(budget),
                 })
                 adset_id = adset.get("id")
@@ -1424,8 +1424,8 @@ def run_keepalive():
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
                     "name": f"{prefix} Creative", "page_id": page_id,
                     "object_story_spec": json.dumps({
-                        "link_data": {"picture": asset.public_url, "message": "Follow us!"},
-                        "link": f"https://facebook.com/{page_id}",
+                        "page_id": page_id,
+                        "link_data": {"link": f"https://facebook.com/{page_id}", "picture": asset.public_url, "message": "Follow us!"},
                     }),
                 })
                 creative_id = creative.get("id")
