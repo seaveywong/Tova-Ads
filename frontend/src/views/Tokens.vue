@@ -174,6 +174,10 @@ const refreshAll = async () => {
   refreshAllLabel.value = t('tokens.refreshAll')
   await load()
   await loadAtRisk()
+  // 刷新令牌=状态+资产都新：清资产缓存（下次开抽屉重拉最新主页/账户/BM）、刷新汇总计数、开着的抽屉也重拉
+  assetCache.value = {}
+  await loadSummary()
+  if (drawerOpen.value && drawerToken.value) await loadDrawerAssets(drawerToken.value)
   ElMessage[fail ? 'warning' : 'success'](t('tokens.refreshAllResult', { ok, fail }) + (fail ? t('tokens.refreshAllResultWarn') : ''))
 }
 const refreshAccounts = async (tk) => {

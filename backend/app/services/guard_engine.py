@@ -27,6 +27,7 @@ from ..models.guard import GuardRule, GuardAllowance
 from ..models.fb import FbCredential, Account
 from ..models.log import ActionLog
 from ..models.perf import PerfSnapshot, PerfSnapshotTick
+from ..models.system import SystemSetting
 
 # 告警/暂停冷却（分钟）—— 同一 ad+rule 在冷却内不重复告警/暂停（防通知 spam）
 COOLDOWN_MIN = 60
@@ -1301,7 +1302,7 @@ def run_keepalive():
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
     """
     import os, random
-    from ..core.keepalive_config import get_keepalive_config
+    from ..core.keepalive_config import get_keepalive_config, DEFAULT_KEEPALIVE
     from ..core.fb_tokens import client_for_account
     from ..core.ad_ops import ensure_image_hash_for_account
     from ..models.launch import Asset
@@ -1342,7 +1343,6 @@ def run_keepalive():
             try:
                 # 该账户所属租户的保活配置（没配的用默认值）
                 cfg = tenant_cfgs.get(acc.tenant_id) or dict(DEFAULT_KEEPALIVE)
-                from ..core.keepalive_config import DEFAULT_KEEPALIVE
                 for dk, dv in DEFAULT_KEEPALIVE.items():
                     cfg.setdefault(dk, dv)
                 prefix = cfg["campaign_prefix"]
