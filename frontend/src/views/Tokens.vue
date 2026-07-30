@@ -66,7 +66,7 @@ const loadAtRisk = async () => {
   catch { atRiskAccounts.value = [] }
 }
 onMounted(() => {
-  load(); loadSummary(); loadAtRisk()
+  load(); loadSummary(); loadAtRisk(); loadApps()
   // OAuth 回调处理（FB 授权后 302 回来 ?oauth=ok/fail&msg=）
   const st = route.query.oauth
   if (st === 'ok') ElMessage.success(t('tokens.oauthSuccess'))
@@ -297,8 +297,18 @@ const deleteApp = async (a) => { try { await ElMessageBox.confirm(t('tokens.dele
 const systemApps = computed(() => apps.value.filter(a => a.is_system))
 const myApps = computed(() => apps.value.filter(a => !a.is_system))
 const startOAuth = async (a) => {
-  try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); if (r.url) window.location.href = r.url }
-  catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')) }
+  let url = ''
+  try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); url = r.url || '' }
+  catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return }
+  if (!url) return
+  // 复制链接到剪贴板（便于在其他设备/已登录 FB 的浏览器授权）；再弹窗显示 URL + "打开"按钮
+  let copied = false
+  try { await navigator.clipboard.writeText(url); copied = true } catch {}
+  ElMessageBox.alert(
+    (copied ? t('tokens.oauthUrlCopied') : t('tokens.oauthUrlManual')) + '\n\n' + url,
+    t('tokens.oauthUrlTitle'),
+    { confirmButtonText: t('tokens.openOAuth'), cancelButtonText: t('common.close'), showCancelButton: true }
+  ).then(() => window.open(url, '_blank')).catch(() => {})
 }
 
 const submitImport = async () => {
