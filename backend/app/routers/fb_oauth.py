@@ -20,8 +20,9 @@ from .fb_apps import FbApp
 
 router = APIRouter(prefix="/fb/oauth", tags=["fb-oauth"])
 
-# 申请的 scope（必须与 FB App Review 提交一致）。pages_manage_posts：建广告 creative 用 object_story_spec 底层建主页帖，必须此权限。
-OAUTH_SCOPES = "ads_management,ads_read,read_insights,business_management,pages_show_list,pages_manage_ads,pages_manage_posts,pages_read_engagement,pages_manage_metadata"
+# 申请的 scope。read_insights 非 OAuth 登录 scope（FB 报 Invalid Scopes 直接拒授权）已去掉——广告成效由 ads_read 覆盖。
+# pages_manage_posts：建广告 creative 用 object_story_spec 底层建主页帖，必须此权限。
+OAUTH_SCOPES = "ads_management,ads_read,business_management,pages_show_list,pages_manage_ads,pages_manage_posts,pages_read_engagement,pages_manage_metadata"
 STATE_TTL = 600  # state 有效期 10 分钟
 FRONTEND_URL = "https://tovaads.com"
 

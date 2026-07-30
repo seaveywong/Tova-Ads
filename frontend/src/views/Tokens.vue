@@ -297,18 +297,24 @@ const deleteApp = async (a) => { try { await ElMessageBox.confirm(t('tokens.dele
 const systemApps = computed(() => apps.value.filter(a => a.is_system))
 const myApps = computed(() => apps.value.filter(a => !a.is_system))
 const startOAuth = async (a) => {
+  // 同步先开新标签占弹窗名额（防浏览器拦截），拿到 URL 后再引导过去；同时复制链接备用
+  const win = window.open('about:blank', '_blank')
   let url = ''
   try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); url = r.url || '' }
-  catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return }
-  if (!url) return
-  // 复制链接到剪贴板（便于在其他设备/已登录 FB 的浏览器授权）；再弹窗显示 URL + "打开"按钮
+  catch (e) { if (win) win.close(); ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return }
+  if (!url) { if (win) win.close(); return }
   let copied = false
   try { await navigator.clipboard.writeText(url); copied = true } catch {}
-  ElMessageBox.alert(
-    (copied ? t('tokens.oauthUrlCopied') : t('tokens.oauthUrlManual')) + '\n\n' + url,
-    t('tokens.oauthUrlTitle'),
-    { confirmButtonText: t('tokens.openOAuth'), cancelButtonText: t('common.close'), showCancelButton: true }
-  ).then(() => window.open(url, '_blank')).catch(() => {})
+  importOpen.value = false  // 关掉"连接 Facebook"弹窗，避免遮住后续提示
+  if (win) {
+    win.location.href = url
+    ElMessage.success(copied ? t('tokens.oauthOpenedCopied') : t('tokens.oauthOpened'))
+  } else {
+    // 浏览器拦截了新标签 → 显示 URL 供手动复制/打开
+    ElMessageBox.alert(url, t('tokens.oauthUrlTitle'),
+      { confirmButtonText: t('tokens.openOAuth'), cancelButtonText: t('common.close'), showCancelButton: true }
+    ).then(() => window.open(url, '_blank')).catch(() => {})
+  }
 }
 
 const submitImport = async () => {
@@ -553,7 +559,10 @@ const deleteToken = async (tk) => {
         <div class="m-tabs"><button class="mt-btn" :class="{on:importTab==='oauth'}" @click="importTab='oauth'">{{ t('tokens.tabOauth') }}</button><button class="mt-btn" :class="{on:importTab==='manual'}" @click="importTab='manual'">{{ t('tokens.tabManual') }}</button></div>
         <div v-if="importTab==='oauth'" class="m-body">
           <div v-if="!apps.length" class="hint">{{ t('tokens.oauthHint') }}</div>
-          <div v-else><div v-for="a in apps" :key="a.id" class="oauth-app" @click="startOAuth(a)"><span>{{ a.name||a.app_id }}</span><span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span><span class="arrow">→</span></div></div>
+          <div v-else>
+            <div class="oauth-step">{{ t('tokens.oauthPickHint') }}</div>
+            <div v-for="a in apps" :key="a.id" class="oauth-app" @click="startOAuth(a)"><span>{{ a.name||a.app_id }}</span><span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span><span class="arrow">→</span></div>
+          </div>
         </div>
         <div v-if="importTab==='manual'" class="m-body">
           <div class="warn">⚠ {{ t('tokens.manualWarn') }}</div>
@@ -725,6 +734,7 @@ const deleteToken = async (tk) => {
 .input:focus{border-color:var(--ac);outline:none}
 .warn{padding:8px;background:rgba(255,214,10,.08);border:1px solid rgba(255,214,10,.2);border-radius:6px;font-size:12px;color:var(--warning)}
 .hint{text-align:center;color:var(--t3);padding:16px;font-size:13px}
+.oauth-step{font-size:12px;color:var(--t3);line-height:1.6;padding:2px 2px 10px;text-align:left}
 .oauth-app{display:flex;align-items:center;gap:8px;padding:9px;background:var(--bg3);border-radius:6px;cursor:pointer}.oauth-app:hover{background:var(--bgh)}
 .arrow{margin-left:auto;color:var(--ac)}
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
