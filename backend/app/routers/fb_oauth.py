@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode, quote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..core.database import get_db, SuperSessionLocal
@@ -55,10 +55,28 @@ def _verify_state(state: str) -> dict | None:
         return None
 
 
-def _redirect(ok: bool, msg: str = ""):
-    status = "ok" if ok else "fail"
-    q = f"oauth={status}" + (f"&msg={quote(msg, safe='')}" if msg else "")
-    return RedirectResponse(f"{FRONTEND_URL}/#/tokens?{q}", status_code=302)
+def _done_page(ok: bool, msg: str = ""):
+    """OAuth 完成页（公开、免登录）：显示成功/失败 + "可关闭此页"。
+    不再 302 跳前端（前端需登录 → 未登录会落到登录页，体验差）。令牌已在回调里建好，用户关页即可。"""
+    import html
+    icon, color = ("✓", "#30d488") if ok else ("✗", "#ff5757")
+    title = "授权成功" if ok else "授权失败"
+    detail = "令牌已导入，可以关闭此页面。" if ok else (msg or "请重试。")
+    css = ("body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1117;"
+           "font-family:-apple-system,system-ui,sans-serif;color:#e6e6e6}"
+           ".c{background:#1a1d24;border:1px solid #2a2d34;border-radius:12px;padding:36px 44px;text-align:center;max-width:420px}"
+           ".i{font-size:42px;color:" + color + ";margin-bottom:10px}"
+           "h1{font-size:18px;margin:0 0 8px;font-weight:600}"
+           ".d{color:#9aa0a6;font-size:14px;line-height:1.6;margin:0 0 18px;word-break:break-word}"
+           ".a{color:#0a84ff;font-size:13px;text-decoration:none}.a:hover{text-decoration:underline}")
+    return HTMLResponse(
+        "<!doctype html><html lang='zh'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Facebook " + title + "</title><style>" + css + "</style></head><body>"
+        "<div class='c'><div class='i'>" + icon + "</div><h1>" + title + "</h1>"
+        "<p class='d'>" + html.escape(detail) + "</p>"
+        "<a class='a' href='" + FRONTEND_URL + "/#/tokens'>返回令牌管理 →</a></div></body></html>"
+    )
 
 
 @router.get("/start")
@@ -89,18 +107,18 @@ def oauth_callback(request: Request):
     """FB 授权后回调（公开，无 JWT）。验 state → 换 code→short→long → 建凭证 → 跳前端。"""
     p = request.query_params
     if p.get("error"):
-        return _redirect(False, p.get("error_description", p.get("error", "denied")))
+        return _done_page(False, p.get("error_description", p.get("error", "denied")))
     code, state_str = p.get("code", ""), p.get("state", "")
     state = _verify_state(state_str)
     if not code or not state:
-        return _redirect(False, "state 无效或过期，请重试")
+        return _done_page(False, "state 无效或过期，请重试")
 
     tenant_id, app_pk = state["tid"], state["apk"]
     db = SuperSessionLocal()
     try:
         app = db.query(FbApp).filter(FbApp.id == app_pk, FbApp.status == "active").first()
         if not app:
-            return _redirect(False, "App 不存在")
+            return _done_page(False, "App 不存在")
         app_secret = decrypt(app.app_secret_enc)
         redirect_uri = f"{settings.public_base_url}/fb/oauth/callback"
 
@@ -112,7 +130,7 @@ def oauth_callback(request: Request):
         j1 = r1.json()
         short_tok = j1.get("access_token") if r1.status_code == 200 else None
         if not short_tok:
-            return _redirect(False, j1.get("error", {}).get("message", "code 交换失败"))
+            return _done_page(False, j1.get("error", {}).get("message", "code 交换失败"))
 
         # short → long-lived（~60 天）。换不到就退回 short
         r2 = httpx.get(f"{GRAPH_BASE}/oauth/access_token", params={
@@ -126,7 +144,7 @@ def oauth_callback(request: Request):
         try:
             me = fb.me()
         except Exception:
-            return _redirect(False, "令牌无效（/me 失败）")
+            return _done_page(False, "令牌无效（/me 失败）")
         perm_snapshot = None
         try:
             debug = fb.debug_token()
@@ -166,8 +184,8 @@ def oauth_callback(request: Request):
             db.commit()
         except Exception:
             pass
-        return _redirect(True)
+        return _done_page(True)
     except Exception as e:
-        return _redirect(False, str(e)[:80])
+        return _done_page(False, str(e)[:80])
     finally:
         db.close()
