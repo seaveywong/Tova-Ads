@@ -215,11 +215,13 @@ def resolve_language_code(language: str, country: str) -> str:
 
 
 def build_analysis_prompt(*, purpose: str, depth: str, style: str,
-                          language: str, country: str, video_frame_count: int) -> str:
+                          language: str, country: str, video_frame_count: int,
+                          goal: str = "") -> str:
     """组装完整分析 prompt（不含图片，图片由调用方以 image_url 形式附上）。"""
     depth_cfg = ANALYSIS_DEPTH_CONFIG.get(depth, ANALYSIS_DEPTH_CONFIG["standard"])
     copy_count = depth_cfg["copy_count"]
     purpose_prompt = resolve_purpose_prompt(purpose)
+    goal_hint = f"\n【用户的具体目的】请重点围绕以下目的生成文案与受众：{goal.strip()}" if goal and goal.strip() else ""
     style_guide = STYLE_GUIDES.get(style, STYLE_GUIDES["standard"])
     compliance_guide = "" if style == "aggressive" else COMPLIANCE_GUIDE
     lang_code = resolve_language_code(language, country)
@@ -231,7 +233,7 @@ def build_analysis_prompt(*, purpose: str, depth: str, style: str,
         if video_frame_count > 1 else ""
     )
     analysis_len = "50字以内" if depth == "fast" else "100字以内"
-    return f"""{purpose_prompt}{video_hint}
+    return f"""{purpose_prompt}{goal_hint}{video_hint}
 
 {style_guide}
 

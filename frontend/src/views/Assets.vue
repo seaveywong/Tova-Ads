@@ -194,7 +194,17 @@ const editTags = async (a) => {
 }
 
 // AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
+const _lastGoal = ref('')  // 记上次目的，批量分析同目的省得重输
 const analyze = async (a) => {
+  // 先问用户的具体目的（可选）→ 注入 AI prompt，让文案/受众更贴合意图
+  let goal = _lastGoal.value || ''
+  try {
+    const g = await ElMessageBox.prompt(t('assets.goalPrompt'), t('assets.goalTitle'), {
+      confirmButtonText: t('assets.analyze'), cancelButtonText: t('assets.analyzeNoGoal'),
+      inputType: 'textarea', inputValue: _lastGoal.value, inputPlaceholder: t('assets.goalPlaceholder'),
+    })
+    goal = (g.value || '').trim(); _lastGoal.value = goal
+  } catch { /* 点"直接分析"= 用上次目的或空 */ }
   analyzingIds.value.add(a.id)
   analyzeElapsed.value[a.id] = 0
   if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
@@ -206,7 +216,7 @@ const analyze = async (a) => {
     const r = await fetch(BASE + '/assets/' + a.id + '/analyze', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ purpose: purp, depth: aiDepth.value, style: aiStyle.value }),
+      body: JSON.stringify({ purpose: purp, depth: aiDepth.value, style: aiStyle.value, goal }),
     })
     const text = await r.text()
     const data = JSON.parse(text)

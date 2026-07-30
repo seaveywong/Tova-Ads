@@ -272,6 +272,7 @@ class AnalyzeIn(BaseModel):
     depth: str = "standard"    # fast/standard/deep
     style: str = "standard"    # conservative/standard/aggressive
     language: str = ""         # 空 → 按 country 推导
+    goal: str = ""             # 用户的具体目的描述（可选，注入 prompt 让生成更贴合意图）
 
 
 @router.post("/{aid}/analyze")
@@ -314,7 +315,7 @@ def analyze_asset(aid: int, body: AnalyzeIn,
             mime = "image/jpeg"
             medium = f"视频（{len(frames)} 个关键帧）"
         prompt, lang_code = build_analysis_prompt(
-            purpose=body.purpose, depth=body.depth, style=body.style,
+            purpose=body.purpose, depth=body.depth, style=body.style, goal=body.goal,
             language=body.language or a.language or "",
             country=a.country or "",
             video_frame_count=frame_count if a.type == "video" else 0,
