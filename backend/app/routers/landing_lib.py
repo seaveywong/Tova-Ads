@@ -199,9 +199,17 @@ def sync_pixels_for_act(db: Session, fb, tenant_id: int, act_id: str) -> int:
                 existing.pixel_name = px.get("name") or existing.pixel_name
                 existing.source = "sync"
             else:
-                db.add(LandingPixel(tenant_id=tenant_id, act_id=act_id, pixel_id=pid,
-                                    pixel_name=px.get("name"), source="sync", status="active"))
-                added += 1
+                # savepoint 隔离单条插入：多 cred 覆盖同账户时，查重看不到同事务内未 flush 的待插行，
+                # 会在 commit 时违反 uq_landing_pixels_tenant_pixel_act → 整个 account_sync 事务回滚（余额/状态全没更新）。
+                # 用 begin_nested 把冲突限制在这一条，回滚它即可，外层事务正常提交。
+                try:
+                    with db.begin_nested():
+                        db.add(LandingPixel(tenant_id=tenant_id, act_id=act_id, pixel_id=pid,
+                                            pixel_name=px.get("name"), source="sync", status="active"))
+                        db.flush()
+                    added += 1
+                except Exception:
+                    pass  # (tenant,pixel,act) 已存在（竞态/多cred），跳过
     except Exception as e:
         log.warning(f"[PixelSync] act {act_id} 失败: {e}")
     return added
