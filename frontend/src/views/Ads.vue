@@ -179,7 +179,7 @@ onMounted(async () => {
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
         <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
-          <div class="acc-name">{{ a.name }}</div>
+          <div class="acc-name">{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
         </div>
         <div>{{ fmtMoney(a.balance, a.currency) }}<span v-if="a.balance_usd != null && a.currency !== 'USD'" class="sub"> ≈${{ a.balance_usd }}</span></div>

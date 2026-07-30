@@ -322,7 +322,7 @@ const checkToken = async (tk) => {
 }
 const deleteToken = async (tk) => {
   try { await ElMessageBox.confirm(t('tokens.deleteTokenConfirm', { name: tk.alias||tk.fb_user_name||tk.id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/credentials/${tk.id}`); ElMessage.success(t('tokens.deleted')); await Promise.all([load(), loadSummary(), loadAtRisk()]) }
-  catch {}
+  catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 </script>
 

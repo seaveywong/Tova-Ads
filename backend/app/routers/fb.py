@@ -170,6 +170,10 @@ def delete_credential(
         Account.tenant_id == user.tenant_id,
         Account.fb_credential_id == cred_id,
     ).update({Account.fb_credential_id: None}, synchronize_session="fetch")
+    # 删多令牌关联行（否则 FK 阻止删 FbCredential —— 这是"移除令牌不生效"的根因）
+    db.query(AccountFbCredential).filter(
+        AccountFbCredential.fb_credential_id == cred_id,
+    ).delete(synchronize_session="fetch")
     db.delete(cred)
     db.commit()
     # token-delete: 即时重绑孤儿到其他可用 token（不等 2h watchdog）
@@ -625,7 +629,7 @@ def import_accounts(
                 tenant_id=user.tenant_id,
                 fb_credential_id=cred.id,
                 act_id=aid,
-                name=acc.get("name", aid),
+                name=acc.get("name") or "",
                 currency=acc.get("currency", "USD"),
                 timezone_name=acc.get("timezone_name", "UTC"),
                 owner_user_id=user.id,
