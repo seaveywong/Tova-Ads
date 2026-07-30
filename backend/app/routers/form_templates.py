@@ -2,7 +2,7 @@
 
 表单模板：存完整配置 JSON → 部署时 build_lead_form_payload → 建到 FB → 存 fb_form_id 复用。
 消息模板：存 welcome_text + ice_breakers → 部署时 parse_message_template → 传创意。
-AI：从素材 AI 文案生成表单问题（DeepSeek 文本模型）。
+AI：从素材 AI 文案（headlines/bodies/受众）生成表单问题与 Messenger 消息（文本模型）。
 """
 import json
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +16,7 @@ from ..core.fb_tokens import first_client
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload, _CONTACT_FIELD_TYPES, default_contact_field
 from ..core.ai_client import AiClient, AiError
+from ..core.ai_purposes import AI_LANGUAGE_NAMES
 from ..models.lead_form_template import LeadFormTemplate, MessageTemplate
 from ..models.launch import Asset
 
@@ -226,6 +227,14 @@ def delete_message(mid: int, user: CurrentUser = Depends(require_permission("ads
     return {"id": mid, "archived": True}
 
 
+# locale → 展示语言名（表单/消息 AI 生成的输出语言）
+_LOCALE_LANG = {
+    "en_US": "English", "en_GB": "English (UK)", "zh_TW": "繁體中文", "zh_CN": "简体中文",
+    "vi_VN": "Tiếng Việt", "th_TH": "ภาษาไทย", "id_ID": "Bahasa Indonesia",
+    "ja_JP": "日本語", "ko_KR": "한국어", "es_ES": "Español", "pt_BR": "Português",
+}
+
+
 # ── AI 生成表单 ──
 class AiGenerateFormIn(BaseModel):
     asset_id: int
@@ -238,7 +247,7 @@ class AiGenerateFormIn(BaseModel):
 def ai_generate_form(body: AiGenerateFormIn,
                      user: CurrentUser = Depends(require_permission("ads.create")),
                      db: Session = Depends(get_db)):
-    """AI 从素材文案生成 Instant Form 问题 + 感谢页文案（DeepSeek 文本模型）。"""
+    """AI 从素材文案生成 Instant Form 问题 + 感谢页文案（文本模型）。"""
     ai = AiClient()
     if not ai.is_configured():
         raise HTTPException(400, "AI 未配置（缺 ai_api_key）")
@@ -248,27 +257,28 @@ def ai_generate_form(body: AiGenerateFormIn,
     if asset.ai_copy_json:
         try: copy = json.loads(asset.ai_copy_json)
         except: copy = {}
+    audience = {}
+    if asset.ai_audience_json:
+        try: audience = json.loads(asset.ai_audience_json)
+        except: audience = {}
     headlines = copy.get("headlines", [])
     bodies = copy.get("bodies", [])
+    audience_note = audience.get("audience_note", "")
+    interests = audience.get("interests", [])
     lang_note = f"目标投放国家：{body.country or '未指定'}" if body.country else ""
-    # 按 locale 决定表单输出语言（不再固定中文）
-    LOCALE_LANG = {
-        "en_US": "English", "en_GB": "English (UK)", "zh_TW": "繁體中文", "zh_CN": "简体中文",
-        "vi_VN": "Tiếng Việt", "th_TH": "ภาษาไทย", "id_ID": "Bahasa Indonesia",
-        "ja_JP": "日本語", "ko_KR": "한국어", "es_ES": "Español", "pt_BR": "Português",
-    }
-    out_lang = LOCALE_LANG.get(body.locale, "English")
+    out_lang = _LOCALE_LANG.get(body.locale, "English")
     sys_msg = ("你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。"
                "严格只返回 JSON，不要解释。")
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n"
+        f"目标受众：{audience_note or '（从素材推断）'}\n兴趣词：{interests[:8]}\n"
         f"{lang_note}\n产品描述：{body.product_desc or '（从广告素材推断）'}\n\n"
         f"**表单所有内容（标题/描述/问题/选项/感谢页）必须用 {out_lang} 输出。**\n\n"
         "生成 Instant Form 配置 JSON：\n"
         '{"form_title":"","description":"","custom_questions":[],'
         '"extra_contact_fields":["EMAIL","PHONE"],"thank_you_title":"","thank_you_body":""}\n'
         "生成 2-4 个通用商业问题（联系方式偏好/预算/紧迫度/需求描述），"
-        "不要和具体产品细节绑定。所有文本用指定语言输出。"
+        "问题要贴合该素材的目标受众，不要和具体产品细节绑定。所有文本用指定语言输出。"
     )
     try:
         data = ai.chat_json(
@@ -278,3 +288,67 @@ def ai_generate_form(body: AiGenerateFormIn,
     except AiError as e:
         raise HTTPException(400, f"AI 生成失败：{e.message}")
     return {"config": data}
+
+
+# ── AI 生成 Messenger 消息 ──
+class AiGenerateMsgIn(BaseModel):
+    asset_id: int
+    product_desc: str = ""
+
+
+@router.post("/messages/ai-generate")
+def ai_generate_message(body: AiGenerateMsgIn,
+                        user: CurrentUser = Depends(require_permission("ads.create")),
+                        db: Session = Depends(get_db)):
+    """AI 从素材文案生成 Messenger welcome_text + ice_breakers（文本模型）。
+
+    输出语言跟随素材分析语言（asset.ai_language），让消息贴合该素材的文案语言。
+    """
+    ai = AiClient()
+    if not ai.is_configured():
+        raise HTTPException(400, "AI 未配置（缺 ai_api_key）")
+    asset = db.query(Asset).filter(Asset.id == body.asset_id).first()
+    if not asset: raise HTTPException(404, "素材不存在")
+    copy = {}
+    if asset.ai_copy_json:
+        try: copy = json.loads(asset.ai_copy_json)
+        except: copy = {}
+    audience = {}
+    if asset.ai_audience_json:
+        try: audience = json.loads(asset.ai_audience_json)
+        except: audience = {}
+    headlines = copy.get("headlines", [])
+    bodies = copy.get("bodies", [])
+    audience_note = audience.get("audience_note", "")
+    lang_code = (asset.ai_language or "").strip().lower().replace("_", "-")
+    out_lang = AI_LANGUAGE_NAMES.get(lang_code, "English")
+    sys_msg = ("你是 FB Messenger 营销话术专家。根据广告素材文案设计 Messenger 欢迎语与快捷提问。"
+               "严格只返回 JSON，不要解释。")
+    prompt = (
+        f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n"
+        f"目标受众：{audience_note or '（从素材推断）'}\n产品描述：{body.product_desc or '（从素材推断）'}\n\n"
+        f"**所有文案必须用 {out_lang} 输出，语气与广告素材保持一致。**\n\n"
+        "生成 Messenger 配置 JSON：\n"
+        '{"welcome_text":"（1 段第一人称开场白，亲切简短，承接广告承诺并引导用户继续对话）",'
+        '"ice_breakers":[{"title":"（≤20 字的快捷按钮）","response":"（点该按钮后机器人的回复，≤80 字）"}, ...共 3-4 条]}\n'
+        "ice_breakers 的 title 覆盖用户最可能的几个意图（如：了解更多 / 怎么参加 / 价格 / 联系方式），"
+        "response 要具体、贴合素材主题，不要空泛。"
+    )
+    try:
+        data = ai.chat_json(
+            [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+            temperature=0.8, max_tokens=1536,
+        )
+    except AiError as e:
+        raise HTTPException(400, f"AI 生成失败：{e.message}")
+    welcome_text = str(data.get("welcome_text", "")).strip()
+    ice_breakers = []
+    raw_ibs = data.get("ice_breakers", [])
+    if isinstance(raw_ibs, list):
+        for ib in raw_ibs:
+            if isinstance(ib, dict):
+                title = str(ib.get("title", "")).strip()
+                response = str(ib.get("response", "")).strip()
+                if title and response:
+                    ice_breakers.append({"title": title[:40], "response": response[:300]})
+    return {"welcome_text": welcome_text, "ice_breakers": ice_breakers}

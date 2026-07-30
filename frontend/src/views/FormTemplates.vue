@@ -93,13 +93,15 @@ const removeForm = async (t) => {
 }
 const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.config || {}; previewOpen.value = true }
 
-// ── AI 生成 ──
-const openAssetPicker = () => { assetPickerOpen.value = true; loadAssets() }
+// ── AI 生成（表单/消息都从素材文案生成）──
+const pickerMode = ref('form')  // 'form' | 'msg'：素材选择器服务哪个抽屉
+const openAssetPicker = (mode) => { pickerMode.value = mode || 'form'; assetPickerOpen.value = true; loadAssets() }
 const loadAssets = async () => { try { pickerAssets.value = await GET('/assets') } catch {} }
+const pickAsset = (a) => { pickerMode.value === 'msg' ? aiGenerateMsg(a) : aiGenerate(a) }
 const aiGenerate = async (a) => {
   assetPickerOpen.value = false; aiLoading.value = true
   try {
-    const r = await POST('/form-templates/forms/ai-generate', { asset_id: a.id, country: (fCfg.value.target_countries||[])[0] || '' })
+    const r = await POST('/form-templates/forms/ai-generate', { asset_id: a.id, country: (fCfg.value.target_countries||[])[0] || '', locale: fMeta.value.locale || 'en_US' })
     const cfg = r.config || {}
     if (cfg.form_title) fCfg.value.form_title = cfg.form_title
     if (cfg.description) fCfg.value.description = cfg.description
@@ -107,6 +109,16 @@ const aiGenerate = async (a) => {
     if (cfg.extra_contact_fields) fCfg.value.extra_contact_fields = cfg.extra_contact_fields
     if (cfg.thank_you_title) fCfg.value.thank_you_title = cfg.thank_you_title
     if (cfg.thank_you_body) fCfg.value.thank_you_body = cfg.thank_you_body
+    ElMessage.success(t('formtpl.aiGenerated'))
+  } catch (e) { showError(e, t('formtpl.aiFail')) }
+  aiLoading.value = false
+}
+const aiGenerateMsg = async (a) => {
+  assetPickerOpen.value = false; aiLoading.value = true
+  try {
+    const r = await POST('/form-templates/messages/ai-generate', { asset_id: a.id })
+    if (r.welcome_text) mCfg.value.welcome_text = r.welcome_text
+    if (r.ice_breakers && r.ice_breakers.length) mCfg.value.ice_breakers = r.ice_breakers
     ElMessage.success(t('formtpl.aiGenerated'))
   } catch (e) { showError(e, t('formtpl.aiFail')) }
   aiLoading.value = false
@@ -210,7 +222,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         </div>
         <hr class="sep" />
         <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secCustomQuestions') }}</span><button class="btn sm" @click="addQuestion">{{ t('formtpl.addQuestion') }}</button>
-          <button class="btn sm ghost" @click="openAssetPicker" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button>
+          <button class="btn sm ghost" @click="openAssetPicker('form')" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button>
         </div>
         <div v-for="(q,i) in fCfg.custom_questions" :key="i" class="question-block">
           <div class="qb-head"><span>{{ t('formtpl.questionN', { n: i+1 }) }}</span><button class="del-btn" @click="removeQuestion(i)">✕</button></div>
@@ -248,7 +260,8 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         <div class="sec-title">{{ t('formtpl.secWelcome') }}</div>
         <div class="row"><label>{{ t('formtpl.mainText') }}</label><textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" :placeholder="t('formtpl.welcomeTextPh')"></textarea></div>
         <hr class="sep" />
-        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button></div>
+        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button>
+          <button class="btn sm ghost" @click="openAssetPicker('msg')" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button></div>
         <div v-for="(ib,i) in mCfg.ice_breakers" :key="i" class="ib-block">
           <div class="qb-head"><span>{{ t('formtpl.quickReplyN', { n: i+1 }) }}</span><button class="del-btn" @click="removeIB(i)">✕</button></div>
           <input v-model="ib.title" class="inp" :placeholder="t('formtpl.ibButtonTextPh')" />
@@ -266,7 +279,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     <el-drawer v-model="assetPickerOpen" :title="t('formtpl.pickerTitle')" direction="rtl" size="520px" append-to-body>
       <div class="hint" style="margin-bottom:10px">{{ t('formtpl.pickerHint') }}</div>
       <div class="picker-grid">
-        <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="aiGenerate(a)">
+        <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
           <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
           <span class="picker-name">{{ a.name }}</span>

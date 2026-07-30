@@ -16,8 +16,7 @@ from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.ai_client import chat_with_images_json, vision_client, AiError
 from ..core.media_util import image_dimensions, video_duration, extract_keyframes, file_as_b64, is_video
-from ..core.ai_purposes import (AI_PURPOSES, AI_LANGUAGE_NAMES, ANALYSIS_DEPTH_CONFIG,
-                                STYLE_GUIDES, build_analysis_prompt)
+from ..core.ai_purposes import ANALYSIS_DEPTH_CONFIG, build_analysis_prompt
 from ..models.launch import Asset
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -102,14 +101,13 @@ def list_assets(
     return [_asset_dict(a) for a in rows]
 
 
-@router.get("/ai-purposes")
-def get_ai_purposes(user: CurrentUser = Depends(require_permission("assets.manage"))):
-    """返回 AI 分析的用途/深度/风格选项（前端下拉用）。
+@router.get("/ai-options")
+def get_ai_options(user: CurrentUser = Depends(require_permission("assets.manage"))):
+    """返回 AI 分析的深度/风格选项（前端分段按钮用）。
 
-    ⚠ 必须注册在 GET /{aid} 之前，否则 /ai-purposes 被 {aid} 路由吃掉（int 解析失败 422）。
+    ⚠ 必须注册在 GET /{aid} 之前，否则 /ai-options 被 {aid} 路由吃掉（int 解析失败 422）。
     """
     return {
-        "purposes": AI_PURPOSES,
         "depths": [
             {"value": k, "label": v["label"], "copy_count": v["copy_count"], "video_frames": v["video_frames"]}
             for k, v in ANALYSIS_DEPTH_CONFIG.items()
@@ -268,22 +266,21 @@ def fb_upload_image(aid: int, body: FbUploadIn,
 
 
 class AnalyzeIn(BaseModel):
-    purpose: str = "general"   # 13 之一 或 custom:xxx
+    purpose: str = ""          # 自由文本「投放目的」（可选；空 → 模型按画面自判）
     depth: str = "standard"    # fast/standard/deep
     style: str = "standard"    # conservative/standard/aggressive
     language: str = ""         # 空 → 按 country 推导
-    goal: str = ""             # 用户的具体目的描述（可选，注入 prompt 让生成更贴合意图）
 
 
 @router.post("/{aid}/analyze")
 def analyze_asset(aid: int, body: AnalyzeIn,
                   user: CurrentUser = Depends(require_permission("assets.manage")),
                   db: Session = Depends(get_db)):
-    """AI 分析素材 → 用途驱动生成富文案 + 受众建议（analysis/headlines[]/bodies[]/interests[]/audience_note）。
+    """AI 分析素材 → 按「投放目的」生成富文案 + 受众建议（analysis/headlines[]/bodies[]/interests[]/audience_note）。
 
     图片：读文件 base64 → 视觉模型看图。
     视频：ffmpeg 抽关键帧（深度驱动帧数）→ 视觉模型多图看。
-    purpose 选 13 用途之一（或 custom:xxx），depth/style 控制条数与合规松紧。
+    purpose 为自由文本「投放目的」（可空），depth/style 控制条数与合规松紧。
     """
     a = db.query(Asset).filter(Asset.id == aid, Asset.tenant_id == user.tenant_id).first()
     if not a:
@@ -315,7 +312,7 @@ def analyze_asset(aid: int, body: AnalyzeIn,
             mime = "image/jpeg"
             medium = f"视频（{len(frames)} 个关键帧）"
         prompt, lang_code = build_analysis_prompt(
-            purpose=body.purpose, depth=body.depth, style=body.style, goal=body.goal,
+            purpose=body.purpose, depth=body.depth, style=body.style,
             language=body.language or a.language or "",
             country=a.country or "",
             video_frame_count=frame_count if a.type == "video" else 0,
@@ -343,7 +340,7 @@ def analyze_asset(aid: int, body: AnalyzeIn,
         }
         a.ai_copy_json = json.dumps(copy_obj, ensure_ascii=False)
         a.ai_audience_json = json.dumps(aud_obj, ensure_ascii=False)
-        a.ai_purpose = body.purpose
+        a.ai_purpose = (body.purpose or "").strip()[:500]
         a.ai_language = lang_code
         a.ai_status = "done"
         a.ai_error = None
@@ -353,7 +350,7 @@ def analyze_asset(aid: int, body: AnalyzeIn,
                   actor_user_id=user.id, target_type="asset", target_id=str(aid),
                   action_type="ai_analyze", source="ai_vision", result="success",
                   metadata={"medium": medium, "country": a.country,
-                            "purpose": body.purpose, "depth": body.depth, "style": body.style})
+                            "purpose": (body.purpose or "")[:200], "depth": body.depth, "style": body.style})
         out = _asset_dict(a)  # 先序列化（避免后续异常回退 done→failed）
         db.commit()
         return out

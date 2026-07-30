@@ -59,17 +59,17 @@ const selAll = () => {
 }
 const clearSel = () => { selected.value = new Set() }
 
-// AI 选项（用途/深度/风格，从后端拉）+ 当前选择
-const aiOpts = ref({ purposes: [], depths: [], styles: [] })
-const aiPurpose = ref('general')
-const aiDepth = ref('standard')
-const aiStyle = ref('standard')
-const PURPOSE_KEYS = new Set(['general','attract_male','attract_female','attract_investors','promote_clothing','promote_beauty','promote_health','promote_app','promote_course','promote_finance','ecommerce','lead_gen','brand_awareness'])
-const purposeLabel = (v) => {
+// AI 选项（深度/风格，从后端拉）+ 当前选择（深度/风格持久化为默认，新素材按此生成）
+const aiOpts = ref({ depths: [], styles: [] })
+const aiDepth = ref(localStorage.getItem('tova_ai_depth') || 'standard')
+const aiStyle = ref(localStorage.getItem('tova_ai_style') || 'standard')
+const setDepth = (v) => { aiDepth.value = v; localStorage.setItem('tova_ai_depth', v) }
+const setStyle = (v) => { aiStyle.value = v; localStorage.setItem('tova_ai_style', v) }
+// 投放目的展示（自由文本；兼容旧数据 custom: 前缀）
+const purposeText = (v) => {
   if (!v) return ''
-  if (String(v).startsWith('custom:')) return t('assets.customPurpose', { v: v.slice(7) })
-  const p = aiOpts.value.purposes.find(x => x.value === v)
-  return p ? p.label : v
+  const s = String(v)
+  return s.startsWith('custom:') ? s.slice(7) : s
 }
 
 // AI 富文案编辑弹窗（多 variant）
@@ -102,7 +102,7 @@ const load = async () => {
 }
 onMounted(async () => {
   load()
-  try { aiOpts.value = await GET('/assets/ai-purposes') } catch {}
+  try { aiOpts.value = await GET('/assets/ai-options') } catch {}
 })
 
 const typeChips = computed(() => [
@@ -194,29 +194,25 @@ const editTags = async (a) => {
 }
 
 // AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
-const _lastGoal = ref('')  // 记上次目的，批量分析同目的省得重输
+const _lastPurpose = ref('')  // 记上次投放目的，批量分析同目的省得重输
 const analyze = async (a) => {
-  // 先问用户的具体目的（可选）→ 注入 AI prompt，让文案/受众更贴合意图
-  let goal = _lastGoal.value || ''
+  // 先问投放目的（自由文本，可选）→ 注入 AI prompt；重新分析时回填该素材上次的目的
+  let purpose = a.ai_purpose || _lastPurpose.value || ''
   try {
-    const g = await ElMessageBox.prompt(t('assets.goalPrompt'), t('assets.goalTitle'), {
+    const g = await ElMessageBox.prompt(t('assets.purposePrompt'), t('assets.purposeTitle'), {
       confirmButtonText: t('assets.analyze'), cancelButtonText: t('assets.analyzeNoGoal'),
-      inputType: 'textarea', inputValue: _lastGoal.value, inputPlaceholder: t('assets.goalPlaceholder'),
+      inputType: 'textarea', inputValue: purpose, inputPlaceholder: t('assets.purposePlaceholder'),
     })
-    goal = (g.value || '').trim(); _lastGoal.value = goal
-  } catch { /* 点"直接分析"= 用上次目的或空 */ }
+    purpose = (g.value || '').trim(); _lastPurpose.value = purpose
+  } catch { /* 点"直接分析"= 用回填/上次目的或空 */ }
   analyzingIds.value.add(a.id)
   analyzeElapsed.value[a.id] = 0
   if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
-  // 自定义用途（不在已知 13 里）→ 拼 custom:xxx
-  const purp = aiPurpose.value && !PURPOSE_KEYS.has(aiPurpose.value)
-    ? 'custom:' + aiPurpose.value
-    : aiPurpose.value
   try {
     const r = await fetch(BASE + '/assets/' + a.id + '/analyze', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ purpose: purp, depth: aiDepth.value, style: aiStyle.value, goal }),
+      body: JSON.stringify({ purpose, depth: aiDepth.value, style: aiStyle.value }),
     })
     const text = await r.text()
     const data = JSON.parse(text)
@@ -398,24 +394,18 @@ const countryLabel = (code) => {
     <!-- AI 分析参数（aiOn 时显示，作用于卡片 AI分析 按钮） -->
     <div v-if="aiOn" class="ai-bar">
       <div class="ai-field">
-        <span class="ai-field-label">{{ t('assets.purpose') }}</span>
-        <el-select v-model="aiPurpose" filterable allow-create default-first-option size="small" style="width:220px">
-          <el-option v-for="p in aiOpts.purposes" :key="p.value" :value="p.value" :label="p.label" />
-        </el-select>
-      </div>
-      <div class="ai-field">
         <span class="ai-field-label">{{ t('assets.depth') }}</span>
         <div class="seg-grp">
           <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg2', { on: aiDepth === d.value }]"
                   :title="t('assets.depthTitle', { copy: d.copy_count, frames: d.video_frames })"
-                  @click="aiDepth = d.value">{{ d.label }}</button>
+                  @click="setDepth(d.value)">{{ d.label }}</button>
         </div>
       </div>
       <div class="ai-field">
         <span class="ai-field-label">{{ t('assets.style') }}</span>
         <div class="seg-grp">
           <button v-for="s in aiOpts.styles" :key="s.value" :class="['seg2', { on: aiStyle === s.value, warn: s.value === 'aggressive' }]"
-                  :title="s.hint" @click="aiStyle = s.value">{{ s.label }}</button>
+                  :title="s.hint" @click="setStyle(s.value)">{{ s.label }}</button>
         </div>
       </div>
     </div>
@@ -458,7 +448,7 @@ const countryLabel = (code) => {
             <span v-for="tg in (a.tags || []).slice(0,2)" :key="tg" class="tag-chip">{{ tg }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
             <span v-if="a.fb_image_hash" class="fb-mark" :title="t('assets.fbUploaded')">FB</span>
-            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="t('assets.aiAnalyzed', { p: purposeLabel(a.ai_purpose) })">AI{{ a.ai_purpose && a.ai_purpose !== 'general' ? '·' + purposeLabel(a.ai_purpose) : '' }}</span>
+            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="t('assets.aiAnalyzed', { p: purposeText(a.ai_purpose) })">AI{{ a.ai_purpose ? '·' + purposeText(a.ai_purpose).slice(0, 14) : '' }}</span>
           </div>
           <div class="card-meta">
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
@@ -469,7 +459,7 @@ const countryLabel = (code) => {
         </div>
         <div class="card-ops">
           <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
-            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : t('assets.aiAnalyze') }}
+            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
           </button>
           <button class="op" @click="openEdit(a)">{{ t('assets.copyAudience') }}</button>
           <button class="op" @click="startRename(a)">{{ t('assets.rename') }}</button>
@@ -584,7 +574,7 @@ const countryLabel = (code) => {
           <span class="meta-info">#{{ previewAsset.id }}</span>
         </div>
         <div v-if="previewAsset.ai_status === 'done'" class="preview-ai">
-          <div class="preview-ai-title">{{ t('assets.aiCopyTitle', { p: purposeLabel(previewAsset.ai_purpose) }) }}</div>
+          <div class="preview-ai-title">{{ t('assets.aiCopyTitle', { p: purposeText(previewAsset.ai_purpose) }) }}</div>
           <div v-if="previewAsset.ai_copy?.analysis" class="preview-ai-line preview-ai-analysis">{{ previewAsset.ai_copy.analysis }}</div>
           <div v-for="(h, i) in (previewAsset.ai_copy?.headlines || [])" :key="'ph'+i" class="preview-ai-line"><b>H{{ i+1 }}：</b>{{ h }}</div>
           <div v-for="(b, i) in (previewAsset.ai_copy?.bodies || [])" :key="'pb'+i" class="preview-ai-line"><b>B{{ i+1 }}：</b>{{ b }}</div>

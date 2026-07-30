@@ -21,11 +21,12 @@ class Settings(BaseSettings):
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
 
-    # AI 全局配置（无损切换厂商：OpenAI/DeepSeek/Grok/Gemini，均 OpenAI 兼容）
+    # AI 全局配置（无损切换厂商：Gemini/OpenAI/DeepSeek/Grok，均 OpenAI 兼容）
     # 切换 = 改 base_url + key + model，不改代码（审计"AI 厂商无损切换"）
-    ai_base_url: str = "https://api.deepseek.com/v1"
+    # 默认 Gemini：文案/KPI/表单生成都走 Gemini，视觉另配 ai_vision_*（同为 Gemini）。
+    ai_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     ai_api_key: str = ""
-    ai_model: str = "deepseek-chat"
+    ai_model: str = "gemini-2.5-flash"
 
     # AI 视觉模型（素材识别看图用；DeepSeek 纯文本不能看图，单独配 Gemini 等视觉模型）
     # 与文案配置独立：文案/KPI 走 ai_*（DeepSeek），素材看图走 ai_vision_*（Gemini）
