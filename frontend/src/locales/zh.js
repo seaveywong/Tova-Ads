@@ -237,7 +237,7 @@ export default {
     activeToken: '生效令牌',
     custom: '自定义',
     query: '查询',
-    loadAccounts: '载入账户',
+    loadAccounts: '载入账户', syncCampaigns: '采集广告', synced: '广告采集完成',
     selected: '已选 {n}',
     batchSync: '批量同步',
     batchRemove: '批量移除',

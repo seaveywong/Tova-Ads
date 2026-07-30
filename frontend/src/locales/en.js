@@ -226,7 +226,7 @@ export default {
     activeToken: 'Active Token',
     custom: 'Custom',
     query: 'Query',
-    loadAccounts: 'Load Accounts',
+    loadAccounts: 'Load Accounts', syncCampaigns: 'Sync Ads', synced: 'Ad sync complete',
     selected: '{n} selected',
     batchSync: 'Batch Sync',
     batchRemove: 'Batch Remove',

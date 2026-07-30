@@ -140,6 +140,14 @@ const batchWarmup = async (arm) => {
   selectedAccs.value.clear()
 }
 
+const syncing = ref(false)
+const syncCampaigns = async () => {
+  syncing.value = true
+  try { await POST('/ads/sync-cache'); ElMessage.success(t('ads.synced')); await load() }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  syncing.value = false
+}
+
 onMounted(async () => {
   await load()
   try { const me = await GET('/auth/me'); isSuper.value = !!me.is_superadmin; localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0') } catch(e) {}
@@ -160,6 +168,7 @@ onMounted(async () => {
         <button class="date-btn apply" @click="load">{{ t('ads.query') }}</button>
       </div>
       <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
+      <button class="refresh-btn" :disabled="syncing" @click="syncCampaigns">{{ syncing ? t('common.loading') : t('ads.syncCampaigns') }}</button>
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>

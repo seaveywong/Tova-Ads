@@ -453,7 +453,7 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) 
         return ""
 
 
-def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page_id: str) -> str:
+def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page_id: str, body: str = "") -> str:
     """dev app 走 object_story_id：建/复用主页帖 → 返 page_post_id。
     standard app（access_level=standard）返空（deploy_one_account 走 object_story_spec）。
     跟帖(reuse+reuse_post_ref)直接引用；否则建帖(link=落地页, 图=素材, 文案=body)。"""
@@ -468,7 +468,7 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
         return ""
     if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:
         return tpl.reuse_post_ref
-    return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, tpl.body or "", tpl.landing_url or "", asset.public_url or "")
+    return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, body or tpl.body or "", tpl.landing_url or "", asset.public_url or "")
 
 
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
@@ -524,14 +524,19 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                             message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
                     except Exception:
                         pass
-                page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id)
+                # 随机组合素材 AI 文案+标题（每账户不同，增多样性）
+                from ..core.ad_ops import pick_random_copy
+                _rh, _rb = pick_random_copy(asset)
+                _headline = _rh or (tpl.headline or "")
+                _body = _rb or (tpl.body or "")
+                page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
                 if page_post_id:
                     sdb.commit()  # 持久化 page_posts 缓存
                 r = deploy_one_account(
                     fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
                     daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
-                    name_prefix=tpl.name_prefix, headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type,
+                    name_prefix=tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
                     image_hash=image_hash, subcode_slug=tpl.subcode_slug, subcode_link=link,
                     targeting=targeting, ad_language=tpl.ad_language,
                     dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
@@ -675,7 +680,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
-            page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, _page_id)
+            from ..core.ad_ops import pick_random_copy
+            _rh, _rb = pick_random_copy(asset)
+            _headline = _rh or (tpl.headline or "")
+            _body = _rb or (tpl.body or "")
+            page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, _page_id, body=_body)
             if page_post_id:
                 sdb.commit()
             r = deploy_one_account(
@@ -683,7 +692,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
                 landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
-                headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
+                headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
                 subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                 optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",

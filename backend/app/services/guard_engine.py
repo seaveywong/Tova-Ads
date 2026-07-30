@@ -1417,16 +1417,11 @@ def run_keepalive():
                 if not os.path.exists(filepath):
                     failed += 1; results.append(_ka_res(acc, "fail", "asset_missing", "素材文件丢失"))
                     continue
-                # 保活跟帖：复用该账户种子帖，或建一次（YR 素材 + 该素材的 AI 文案）→ object_story_id
+                # 保活跟帖：复用该账户种子帖，或建一次（YR 素材 + 随机 AI 文案）→ object_story_id
                 from ..core.page_post import get_or_create_page_post
-                _ka_msg = "Follow us!"
-                try:
-                    _ac = json.loads(asset.ai_copy_json) if asset.ai_copy_json else {}
-                    _bodies = _ac.get("bodies") or []
-                    if _bodies and str(_bodies[0]).strip():
-                        _ka_msg = str(_bodies[0]).strip()[:500]
-                except Exception:
-                    pass
+                from ..core.ad_ops import pick_random_copy
+                _rh, _rb = pick_random_copy(asset)
+                _ka_msg = _rb or "Follow us!"
                 if acc.keepalive_post_id:
                     post_id = acc.keepalive_post_id
                 else:

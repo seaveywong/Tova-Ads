@@ -57,6 +57,23 @@ def ensure_image_hash_for_account(fb: FbClient, db, asset, act_id: str, filepath
     return h
 
 
+def pick_random_copy(asset) -> tuple[str, str]:
+    """从素材 AI 文案随机挑 (headline, body) 组合。无 AI 文案→("", "")。
+    投放/保活每条广告随机组合素材库的标题+文案，增加多样性。"""
+    import random
+    try:
+        ac = json.loads(asset.ai_copy_json) if asset.ai_copy_json else {}
+    except Exception:
+        ac = {}
+    hs = [str(h).strip() for h in (ac.get("headlines") or []) if str(h).strip()
+          and str(h).strip().lower() not in ("none", "null")]
+    bs = [str(b).strip() for b in (ac.get("bodies") or []) if str(b).strip()
+          and str(b).strip().lower() not in ("none", "null")]
+    h = random.choice(hs)[:200] if hs else ""
+    b = random.choice(bs)[:500] if bs else ""
+    return h, b
+
+
 def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_goal: str,
                        page_id: str, pixel_id: str, landing_url: str,
                        daily_budget: int, budget_mode: str, bid_strategy: str,
