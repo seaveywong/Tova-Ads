@@ -564,7 +564,7 @@ const deleteToken = async (tk) => {
               <span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span>
               <span class="oa-actions">
                 <button class="oa-btn ghost" @click="copyOAuth(a)">{{ t('tokens.copyOAuthUrl') }}</button>
-                <button class="oa-btn" @click="startOAuth(a)">{{ t('tokens.openInBrowser') }} →</button>
+                <button class="oa-btn" @click="startOAuth(a)">{{ t('tokens.openInBrowser') }}</button>
               </span>
             </div>
           </div>
