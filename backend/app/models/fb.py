@@ -58,6 +58,7 @@ class Account(Base):
     sentinel_armed = Column(Boolean, default=False)
     sentinel_auto_armed = Column(Boolean, default=False)
     last_inspected_at = Column(DateTime(timezone=True))
+    keepalive_post_id = Column(Text)  # 保活种子帖 id（per 账户复用；跟帖模式 object_story_id 引用）
     is_managed = Column(Boolean, nullable=False, default=True)  # false=已取消纳管（软删：保留行+名字+历史消耗）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

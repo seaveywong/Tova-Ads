@@ -26,6 +26,7 @@ class FbApp(Base):
     app_secret_enc = Column(Text, nullable=False)
     is_system = Column(Boolean, default=False)
     status = Column(Text, default="active")
+    access_level = Column(Text, default="dev")  # standard/dev：dev=走建帖(object_story_id)；standard=走 object_story_spec
     created_by = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

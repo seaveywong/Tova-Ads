@@ -175,6 +175,14 @@ class FbClient:
             "fields": "id,name,category,can_post,fan_count,tasks",
         })
 
+    def get_page_access_token(self, page_id: str) -> str:
+        """取指定主页的 page access token（用当前 user token 派生：me/accounts?fields=id,access_token）。
+        建主页帖(/{page}/photos|feed) 需 page token（user token 不行，code200）。无→空串。"""
+        for p in self.get_paged("me/accounts", {"fields": "id,access_token"}):
+            if str(p.get("id")) == str(page_id):
+                return p.get("access_token") or ""
+        return ""
+
     def get_pixels(self, act_id: str) -> list[dict]:
         """拉取广告账户下的像素（全量分页）。"""
         return self.get_paged(f"act_{act_id}/adspixels", {

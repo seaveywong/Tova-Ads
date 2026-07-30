@@ -453,6 +453,24 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) 
         return ""
 
 
+def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page_id: str) -> str:
+    """dev app 走 object_story_id：建/复用主页帖 → 返 page_post_id。
+    standard app（access_level=standard）返空（deploy_one_account 走 object_story_spec）。
+    跟帖(reuse+reuse_post_ref)直接引用；否则建帖(link=落地页, 图=素材, 文案=body)。"""
+    from ..routers.fb_apps import FbApp
+    from ..core.page_post import get_or_create_page_post
+    app = sdb.query(FbApp).filter(FbApp.tenant_id == tenant_id, FbApp.status == "active").first()
+    if not app:
+        app = sdb.query(FbApp).filter(FbApp.tenant_id.is_(None), FbApp.status == "active").first()
+    if (getattr(app, "access_level", "dev") or "dev").lower() != "dev":
+        return ""
+    if not (page_id and asset and asset.type == "image"):
+        return ""
+    if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:
+        return tpl.reuse_post_ref
+    return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, tpl.body or "", tpl.landing_url or "", asset.public_url or "")
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -506,6 +524,9 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                             message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
                     except Exception:
                         pass
+                page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id)
+                if page_post_id:
+                    sdb.commit()  # 持久化 page_posts 缓存
                 r = deploy_one_account(
                     fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
@@ -516,10 +537,12 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                     optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                     destination_type_override=tpl.destination_type or "",
+                    page_post_id=page_post_id,
                     advanced_config=advanced,
                     lead_form_id=lead_form_id, message_template=message_template,
                 )
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
+                item.page_post_id = r.get("page_post_id") or page_post_id
                 item.status = "success"; item.error = None
                 job.succeeded = (job.succeeded or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
@@ -650,9 +673,13 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 filepath = os.path.join(ASSET_DIR, asset.storage_key)
                 image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
+            _page_id = it.page_id or tpl.page_id
+            page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, _page_id)
+            if page_post_id:
+                sdb.commit()
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-                page_id=it.page_id or tpl.page_id, pixel_id=it.pixel_id or tpl.pixel_id,
+                page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
                 landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=tpl.headline, body=tpl.body, cta_type=tpl.cta_type, image_hash=image_hash,
@@ -660,10 +687,12 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                 optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                 destination_type_override=tpl.destination_type or "",
+                page_post_id=page_post_id,
                 advanced_config=advanced,
                 lead_form_id=tpl.lead_form_id or "", message_template=tpl.message_template or "",
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
+            it.page_post_id = r.get("page_post_id") or page_post_id
             it.status = "success"; it.error = None
             if job:
                 job.succeeded = (job.succeeded or 0) + 1

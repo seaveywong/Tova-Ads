@@ -68,10 +68,12 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        dsa_beneficiary: str = "", dsa_payor: str = "",
                        optimization_goal: str = "", billing_event: str = "",
                        destination_type_override: str = "",
+                       page_post_id: str = "",
                        advanced_config: dict | None = None) -> dict:
-    """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id}。失败 raise FbApiError。
+    """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id, page_post_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
+    page_post_id：dev app 走 object_story_id（调用方已建/复用主页帖传入）；空=走 object_story_spec（standard app）。
     """
     from .ad_builder import parse_message_template  # 局部 import 避免循环
     act = f"act_{act_id}"
@@ -135,9 +137,21 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         image_hash=image_hash, cta_type=cta_type, video_id=video_id,
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
     )
-    ad = fb.post(f"{act}/ads", {
-        "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "PAUSED", "creative": creative,
-    })
+    if page_post_id:
+        # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id
+        cr = fb.post(f"{act}/adcreatives", {"name": f"{name_prefix} creative", "object_story_id": page_post_id})
+        creative_id = cr.get("id")
+        if not creative_id:
+            raise FbApiError(f"建 creative(object_story_id) 未返回 id：{str(cr)[:200]}", 0)
+        ad = fb.post(f"{act}/ads", {
+            "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "PAUSED",
+            "creative": {"creative_id": creative_id},
+        })
+    else:
+        # standard app：object_story_spec 内联（creative dict 由 fb 自动 json 编码）
+        ad = fb.post(f"{act}/ads", {
+            "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "PAUSED", "creative": creative,
+        })
     ad_id = ad.get("id")
     if not ad_id:
         raise FbApiError(f"FB 创建 ad 未返回 id（响应：{str(ad)[:200]}）", 0)
@@ -151,4 +165,4 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         subcode_link.ad_id = ad_id
         subcode_link.status = "active"
 
-    return {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id}
+    return {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id, "page_post_id": page_post_id}

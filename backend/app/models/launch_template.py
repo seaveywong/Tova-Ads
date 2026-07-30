@@ -49,6 +49,9 @@ class LaunchTemplate(Base):
     # 受益人/付款人披露（EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制；FB adset 的 dsa_beneficiary/dsa_payor）
     beneficiary = Column(Text)
     payer = Column(Text)
+    # 跟帖模式（Phase 2 UI）：new=每素材建帖 / reuse=复用已有帖
+    post_source = Column(Text, default="new")
+    reuse_post_ref = Column(Text)   # 跟帖引用的 post_id
     status = Column(Text, default="draft")             # draft/active/archived
     deploy_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -84,6 +87,7 @@ class LaunchJobItem(Base):
     campaign_id = Column(Text)
     adset_id = Column(Text)
     ad_id = Column(Text)
+    page_post_id = Column(Text)     # 部署后存的帖 id（object_story_id 用的主页帖）
     subcode_slug = Column(Text)
     error = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1410,8 +1410,14 @@ def run_keepalive():
                 if not os.path.exists(filepath):
                     failed += 1
                     continue
-                image_hash = ensure_image_hash_for_account(fb, db, asset, acc.act_id, filepath)
-                db.commit()
+                # 保活跟帖：复用该账户种子帖，或建一次（YR 素材+"Follow us!" 照片帖）→ object_story_id
+                from ..core.page_post import get_or_create_page_post
+                if acc.keepalive_post_id:
+                    post_id = acc.keepalive_post_id
+                else:
+                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, "Follow us!", "", asset.public_url)
+                    acc.keepalive_post_id = post_id
+                    db.commit()
 
                 # 6. 建 Page Like（campaign→adset→creative→ad；任一步失败 _ka_rollback 回滚已建对象，避免 orphan 卡去重）
                 camp = fb.post(f"act_{acc.act_id}/campaigns", {
@@ -1436,11 +1442,7 @@ def run_keepalive():
                     raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
                 built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
-                    "name": f"{prefix} Creative", "page_id": page_id,
-                    "object_story_spec": json.dumps({
-                        "page_id": page_id,
-                        "link_data": {"link": f"https://facebook.com/{page_id}", "image_hash": image_hash, "message": "Follow us!"},
-                    }),
+                    "name": f"{prefix} Creative", "object_story_id": post_id,
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
