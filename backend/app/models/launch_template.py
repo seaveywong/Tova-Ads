@@ -88,6 +88,7 @@ class LaunchJobItem(Base):
     adset_id = Column(Text)
     ad_id = Column(Text)
     page_post_id = Column(Text)     # 部署后存的帖 id（object_story_id 用的主页帖）
+    error_code = Column(Text)       # 失败原因 category（cert_required/invalid_param/... 供前端 i18n）
     subcode_slug = Column(Text)
     error = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

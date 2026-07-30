@@ -551,7 +551,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                           metadata={"act_id": item.act_id, "campaign_id": r.get("campaign_id"),
                                     "adset_id": r.get("adset_id"), "template_id": template_id})
             except FbApiError as e:
-                item.status = "fail"; item.error = (e.friendly or str(e))[:300]
+                item.status = "fail"; item.error = (e.friendly or str(e))[:300]; item.error_code = e.category
                 job.failed = (job.failed or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id="",
@@ -559,7 +559,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                           friendly_error=(e.friendly or str(e))[:200],
                           metadata={"act_id": item.act_id, "template_id": template_id})
             except Exception as e:
-                item.status = "fail"; item.error = str(e)[:300]
+                item.status = "fail"; item.error = str(e)[:300]; item.error_code = "error"
                 job.failed = (job.failed or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id="",
@@ -588,6 +588,7 @@ def _item_dict(it: LaunchJobItem) -> dict:
         "id": it.id, "act_id": it.act_id, "page_id": it.page_id or "", "pixel_id": it.pixel_id or "",
         "status": it.status, "campaign_id": it.campaign_id or "", "adset_id": it.adset_id or "",
         "ad_id": it.ad_id or "", "subcode_slug": it.subcode_slug or "", "error": it.error or "",
+        "error_code": it.error_code or "", "page_post_id": it.page_post_id or "",
     }
 
 
@@ -702,9 +703,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     job.status = "partial_failed" if job.failed else "completed"
                     job.finished_at = datetime.now(timezone.utc)
         except FbApiError as e:
-            it.status = "fail"; it.error = (e.friendly or str(e))[:300]
+            it.status = "fail"; it.error = (e.friendly or str(e))[:300]; it.error_code = e.category
         except Exception as e:
-            it.status = "fail"; it.error = str(e)[:300]
+            it.status = "fail"; it.error = str(e)[:300]; it.error_code = "error"
         sdb.commit()
     finally:
         sdb.close()

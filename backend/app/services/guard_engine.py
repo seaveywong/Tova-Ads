@@ -1306,6 +1306,12 @@ def _ka_rollback(fb, ids):
             pass
 
 
+def _ka_res(acc, result, category, reason=""):
+    """保活每账户结果条目（result=success/skip/fail + category 供前端 i18n 翻译原因）。"""
+    return {"act_id": acc.act_id, "name": acc.name or acc.act_id,
+            "result": result, "category": category, "reason": reason}
+
+
 def run_keepalive():
     """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $5 lifetime Page Like。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
@@ -1348,8 +1354,10 @@ def run_keepalive():
         warming = warming_q.all()
 
         created = skipped = failed = 0
+        results = []  # 每账户结果（success/skip/fail + category），供前端结果弹窗
         for acc in warming:
             built = []
+            fb = None
             try:
                 # 该账户所属租户的保活配置（没配的用默认值）
                 cfg = tenant_cfgs.get(acc.tenant_id) or dict(DEFAULT_KEEPALIVE)
@@ -1368,12 +1376,13 @@ def run_keepalive():
                     PerfSnapshot.snapshot_date >= cutoff,
                 ).scalar() or 0
                 if float(spend) > 0:
-                    continue  # 有消耗，不需保活
+                    results.append(_ka_res(acc, "skip", "has_spend", "近期有消耗，无需保活")); skipped += 1
+                    continue
 
                 # 2. 写令牌
                 fb = client_for_account(db, acc.tenant_id, acc.act_id, "write")
                 if not fb:
-                    logger.warning(f"[Keepalive] 账户 {acc.act_id} 无写令牌，跳过")
+                    results.append(_ka_res(acc, "skip", "no_write_token", "无写令牌")); skipped += 1
                     continue
 
                 # 3. 已有保活系列？(ACTIVE/PAUSED/PENDING 都算=建过了)
@@ -1386,14 +1395,13 @@ def run_keepalive():
                     for c in (camps.get("data") or [])
                 )
                 if has_keepalive:
-                    skipped += 1
+                    skipped += 1; results.append(_ka_res(acc, "skip", "has_keepalive", "已有保活广告"))
                     continue
 
                 # 4. 获取主页
                 pages = fb.get_pages()
                 if not pages:
-                    logger.warning(f"[Keepalive] 账户 {acc.act_id} 无可用主页")
-                    failed += 1
+                    failed += 1; results.append(_ka_res(acc, "fail", "no_page", "无可用主页"))
                     continue
                 page_id = pages[0].get("id")
 
@@ -1402,13 +1410,12 @@ def run_keepalive():
                     Asset.name.like(f"{asset_prefix}%"), Asset.type == "image",
                 ).all()
                 if not assets_q:
-                    logger.warning(f"[Keepalive] 无 {asset_prefix} 前缀保活素材")
-                    failed += 1
+                    failed += 1; results.append(_ka_res(acc, "fail", "no_asset", f"无 {asset_prefix} 保活素材"))
                     continue
                 asset = random.choice(assets_q)
                 filepath = os.path.join(asset_dir, asset.storage_key)
                 if not os.path.exists(filepath):
-                    failed += 1
+                    failed += 1; results.append(_ka_res(acc, "fail", "asset_missing", "素材文件丢失"))
                     continue
                 # 保活跟帖：复用该账户种子帖，或建一次（YR 素材+"Follow us!" 照片帖）→ object_story_id
                 from ..core.page_post import get_or_create_page_post
@@ -1454,6 +1461,7 @@ def run_keepalive():
                 })
                 ad_id = ad.get("id") or ""
                 created += 1
+                results.append(_ka_res(acc, "success", "ok"))
                 write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                           actor_type="system", target_type="ad", target_id=str(ad_id),
                           action_type="keepalive", source="keepalive", result="success",
@@ -1462,7 +1470,7 @@ def run_keepalive():
                 db.commit()
                 logger.info(f"[Keepalive] 账户 {acc.act_id} 建保活 {camp_id}/{ad_id}")
             except FbApiError as e:
-                failed += 1
+                failed += 1; results.append(_ka_res(acc, "fail", e.category, e.friendly))
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 失败: {e.friendly}")
                 write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                           actor_type="system", action_type="keepalive", source="keepalive",
@@ -1471,12 +1479,12 @@ def run_keepalive():
                 db.commit()
                 _ka_rollback(fb, built)
             except Exception as e:
-                failed += 1
+                failed += 1; results.append(_ka_res(acc, "fail", "error", str(e)[:120]))
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 异常: {e}")
                 _ka_rollback(fb, built)
         if created:
             logger.info(f"[Keepalive] 检查 {len(warming)} 个 warming 账户，建 {created} 条保活，跳过 {skipped}，失败 {failed}")
-        return {"checked": len(warming), "created": created, "skipped": skipped, "failed": failed}
+        return {"checked": len(warming), "created": created, "skipped": skipped, "failed": failed, "results": results}
     except Exception as e:
         logger.error(f"[Keepalive] 异常: {e}", exc_info=True)
         return {"error": str(e)}

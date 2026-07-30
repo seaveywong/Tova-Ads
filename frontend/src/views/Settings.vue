@@ -5,6 +5,7 @@ import { GET, PATCH, PUT, POST } from '../api'
 import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { fbErrorText } from '../composables/useFbError'
 
 const { t } = useI18n()
 
@@ -357,11 +358,19 @@ const saveKeepalive = async () => {
   kaSaving.value = false
 }
 const kaRunning = ref(false)
+const kaResultOpen = ref(false)
+const kaResult = ref(null)
+const kaResMeta = (r) => ({
+  success: { cls: 'ok', label: t('settings.kaSuccess') },
+  skip: { cls: 'off', label: t('settings.kaSkip') },
+  fail: { cls: 'err', label: t('settings.kaFail') },
+}[r] || { cls: 'off', label: r })
 const runKeepaliveNow = async () => {
   kaRunning.value = true
   try {
     const r = await POST('/guard/keepalive/run')
-    ElMessage.success(t('settings.kaRunResult', { checked: r.checked || 0, created: r.created || 0, skipped: r.skipped || 0, failed: r.failed || 0 }))
+    kaResult.value = r
+    kaResultOpen.value = true
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   kaRunning.value = false
 }
@@ -531,6 +540,29 @@ const runKeepaliveNow = async () => {
         <button class="btn" :disabled="kaRunning" @click="runKeepaliveNow">{{ kaRunning ? t('common.loading') : t('settings.kaRunNow') }}</button>
       </div>
     </div>
+
+    <!-- 保活扫描结果弹窗（每账户 success/skip/fail + 翻译原因） -->
+    <el-dialog v-model="kaResultOpen" :title="t('settings.kaResultTitle')" width="560px" append-to-body>
+      <div v-if="kaResult" class="ka-result">
+        <div class="ka-summary">
+          <span class="ok">✓ {{ t('settings.kaBuilt') }} {{ kaResult.created || 0 }}</span>
+          <span class="off">⊘ {{ t('settings.kaSkipped') }} {{ kaResult.skipped || 0 }}</span>
+          <span class="err">✗ {{ t('settings.kaFailed') }} {{ kaResult.failed || 0 }}</span>
+        </div>
+        <div class="ka-list">
+          <div v-for="r in (kaResult.results || [])" :key="r.act_id" class="ka-row">
+            <span class="ka-dot" :class="kaResMeta(r.result).cls"></span>
+            <span class="ka-name" :title="r.name">{{ r.name }}</span>
+            <span class="ka-st" :class="kaResMeta(r.result).cls">{{ kaResMeta(r.result).label }}</span>
+            <span v-if="r.result !== 'success'" class="ka-reason" :title="fbErrorText(r.category) || r.reason">{{ fbErrorText(r.category) || r.reason }}</span>
+          </div>
+          <div v-if="!(kaResult.results||[]).length" class="ka-empty">{{ t('settings.kaNoAccounts') }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn primary" @click="kaResultOpen=false">{{ t('common.close') }}</button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -604,4 +636,19 @@ const runKeepaliveNow = async () => {
 .tg-verify{margin-top:10px;padding-top:10px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tg-verify .btn{margin-top:0}
 .tg-verify-hint{font-size:11px;color:var(--t3)}
+/* 保活结果弹窗 */
+.ka-result{display:flex;flex-direction:column;gap:10px}
+.ka-summary{display:flex;gap:14px;font-size:13px;font-weight:600}
+.ka-summary .ok{color:var(--success)}.ka-summary .off{color:var(--t3)}.ka-summary .err{color:var(--error)}
+.ka-list{display:flex;flex-direction:column;gap:4px;max-height:340px;overflow-y:auto}
+.ka-row{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border-radius:6px;font-size:12px}
+.ka-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ka-dot.ok{background:var(--success)}.ka-dot.off{background:var(--t3)}.ka-dot.err{background:var(--error)}
+.ka-name{color:var(--t1);flex-shrink:0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ka-st{font-size:11px;padding:1px 7px;border-radius:8px;flex-shrink:0}
+.ka-st.ok{background:rgba(48,209,88,.13);color:var(--success)}
+.ka-st.off{background:var(--bg2);color:var(--t3)}
+.ka-st.err{background:rgba(255,69,58,.13);color:var(--error)}
+.ka-reason{color:var(--t3);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ka-empty{text-align:center;color:var(--t3);padding:20px;font-size:13px}
 </style>

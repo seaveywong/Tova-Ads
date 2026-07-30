@@ -5,6 +5,7 @@ import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { jobStatus, itemStatus } from '../composables/useStatus'
+import { fbErrorText } from '../composables/useFbError'
 
 const { t } = useI18n()
 
@@ -1070,7 +1071,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="pi-act">{{ it.act_id }}</span>
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
             <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">{{ t('launch.fbAds') }}→</a>
-            <span v-if="it.error" class="pi-err" :title="it.error">{{ it.error.slice(0,50) }}</span>
+            <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,60) }}</span>
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
           </div>
         </div>
