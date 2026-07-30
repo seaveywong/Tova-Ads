@@ -545,8 +545,8 @@ def loadable_accounts(
         try:
             for a in fb.get_ad_accounts():
                 aid = a.get("account_id", "")
-                if not aid:
-                    continue
+                if not aid or not a.get("name"):
+                    continue  # 无 ID 或 FB 未返回 name（管不了/无意义）→ 不进载入列表
                 if aid not in merged:
                     merged[aid] = {
                         "account_id": aid, "name": a.get("name", aid),
