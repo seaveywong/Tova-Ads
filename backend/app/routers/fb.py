@@ -401,6 +401,7 @@ def credentials_assets_summary(
     for c in creds:
         acct_count = db.query(Account).filter(
             Account.tenant_id == c.tenant_id, Account.fb_credential_id == c.id,
+            Account.is_managed == True,  # noqa: E712  只数已纳管账户（与抽屉/广告账户页口径一致）
         ).count()
         fb = FbClient(decrypt(c.access_token_enc))
         try:
@@ -431,6 +432,7 @@ def get_credential_assets(
     accounts = []
     for a in db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.fb_credential_id == cred_id,
+        Account.is_managed == True,  # noqa: E712  抽屉只列已纳管账户（与"已导入"口径一致；未导入的不显示）
     ).all():
         avail_usd, kind = calc_available_balance(a.spend_cap, a.amount_spent, a.currency or "USD")
         if kind == "limited":
