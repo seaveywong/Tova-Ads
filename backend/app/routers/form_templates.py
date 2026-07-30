@@ -241,6 +241,7 @@ class AiGenerateFormIn(BaseModel):
     country: str = ""
     product_desc: str = ""
     locale: str = "en_US"  # 表单语言（en_US=英文, zh_TW=繁中, vi_VN=越南...）
+    purpose: str = ""      # 自由文本「投放目的」（可选，定向生成）
 
 
 @router.post("/forms/ai-generate")
@@ -266,13 +267,14 @@ def ai_generate_form(body: AiGenerateFormIn,
     audience_note = audience.get("audience_note", "")
     interests = audience.get("interests", [])
     lang_note = f"目标投放国家：{body.country or '未指定'}" if body.country else ""
+    purpose_note = f"\n投放目的：{body.purpose.strip()}" if body.purpose and body.purpose.strip() else ""
     out_lang = _LOCALE_LANG.get(body.locale, "English")
     sys_msg = ("你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。"
                "严格只返回 JSON，不要解释。")
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n"
         f"目标受众：{audience_note or '（从素材推断）'}\n兴趣词：{interests[:8]}\n"
-        f"{lang_note}\n产品描述：{body.product_desc or '（从广告素材推断）'}\n\n"
+        f"{lang_note}\n产品描述：{body.product_desc or '（从广告素材推断）'}{purpose_note}\n\n"
         f"**表单所有内容（标题/描述/问题/选项/感谢页）必须用 {out_lang} 输出。**\n\n"
         "生成 Instant Form 配置 JSON：\n"
         '{"form_title":"","description":"","custom_questions":[],'
@@ -294,6 +296,7 @@ def ai_generate_form(body: AiGenerateFormIn,
 class AiGenerateMsgIn(BaseModel):
     asset_id: int
     product_desc: str = ""
+    purpose: str = ""      # 自由文本「投放目的」（可选，定向生成）
 
 
 @router.post("/messages/ai-generate")
@@ -320,13 +323,14 @@ def ai_generate_message(body: AiGenerateMsgIn,
     headlines = copy.get("headlines", [])
     bodies = copy.get("bodies", [])
     audience_note = audience.get("audience_note", "")
+    purpose_note = f"\n投放目的：{body.purpose.strip()}" if body.purpose and body.purpose.strip() else ""
     lang_code = (asset.ai_language or "").strip().lower().replace("_", "-")
     out_lang = AI_LANGUAGE_NAMES.get(lang_code, "English")
     sys_msg = ("你是 FB Messenger 营销话术专家。根据广告素材文案设计 Messenger 欢迎语与快捷提问。"
                "严格只返回 JSON，不要解释。")
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n"
-        f"目标受众：{audience_note or '（从素材推断）'}\n产品描述：{body.product_desc or '（从素材推断）'}\n\n"
+        f"目标受众：{audience_note or '（从素材推断）'}\n产品描述：{body.product_desc or '（从素材推断）'}{purpose_note}\n\n"
         f"**所有文案必须用 {out_lang} 输出，语气与广告素材保持一致。**\n\n"
         "生成 Messenger 配置 JSON：\n"
         '{"welcome_text":"（1 段第一人称开场白，亲切简短，承接广告承诺并引导用户继续对话）",'

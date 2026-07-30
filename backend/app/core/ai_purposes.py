@@ -121,7 +121,8 @@ def build_analysis_prompt(*, depth: str, style: str,
     compliance_guide = "" if style == "aggressive" else COMPLIANCE_GUIDE
     lang_code = resolve_language_code(language, country)
     lang_name = AI_LANGUAGE_NAMES.get(lang_code, "English")
-    lang_instruction = f"输出语言：{lang_name}。"
+    lang_instruction = (f"输出语言：所有内容（analysis / headlines / bodies / audience_note）"
+                        f"必须统一用 {lang_name} 输出，不得混用其他语言。")
     video_hint = (
         f"\n【注意】以下 {video_frame_count} 张图片是同一段视频按时间顺序均匀截取的帧，"
         "请综合理解视频的完整内容、故事线和广告意图后生成文案，不要只描述单帧画面。"

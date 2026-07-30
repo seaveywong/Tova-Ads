@@ -328,9 +328,18 @@ def analyze_asset(aid: int, body: AnalyzeIn,
                 return []
             return [str(x).strip() for x in v if str(x).strip()
                     and str(x).strip().lower() not in ("none", "null", "n/a", "未指定")]
+        def _trunc40(s):  # FB headline 硬上限 40 字符；尽量在词边界截断
+            s = s.strip()
+            if len(s) <= 40:
+                return s
+            cut = s[:40]
+            sp = cut.rfind(' ')
+            if sp > 20:
+                cut = cut[:sp]
+            return cut.rstrip(' .,!?:;…')
         copy_obj = {
             "analysis": str(data.get("analysis", "")).strip(),
-            "headlines": _to_str_list(data.get("headlines")),
+            "headlines": [_trunc40(h) for h in _to_str_list(data.get("headlines"))],
             "bodies": _to_str_list(data.get("bodies")),
         }
         aud_obj = {

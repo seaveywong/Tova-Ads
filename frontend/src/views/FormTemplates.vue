@@ -95,13 +95,27 @@ const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.c
 
 // ── AI 生成（表单/消息都从素材文案生成）──
 const pickerMode = ref('form')  // 'form' | 'msg'：素材选择器服务哪个抽屉
-const openAssetPicker = (mode) => { pickerMode.value = mode || 'form'; assetPickerOpen.value = true; loadAssets() }
+const aiPurposeInput = ref('')  // 本次 AI 生成的「投放目的」（可选，像素材分析那样定向）
+const openAssetPicker = async (mode) => {
+  let purpose = ''
+  try {
+    const g = await ElMessageBox.prompt(t('formtpl.aiPurposePrompt'), t('formtpl.aiPurposeTitle'), {
+      confirmButtonText: t('formtpl.aiPickAsset'), cancelButtonText: t('formtpl.aiPurposeSkip'),
+      inputType: 'textarea', inputPlaceholder: t('formtpl.aiPurposePh'),
+    })
+    purpose = (g.value || '').trim()
+  } catch { /* 跳过：不带目的直接生成 */ }
+  aiPurposeInput.value = purpose
+  pickerMode.value = mode || 'form'
+  assetPickerOpen.value = true
+  loadAssets()
+}
 const loadAssets = async () => { try { pickerAssets.value = await GET('/assets') } catch {} }
 const pickAsset = (a) => { pickerMode.value === 'msg' ? aiGenerateMsg(a) : aiGenerate(a) }
 const aiGenerate = async (a) => {
   assetPickerOpen.value = false; aiLoading.value = true
   try {
-    const r = await POST('/form-templates/forms/ai-generate', { asset_id: a.id, country: (fCfg.value.target_countries||[])[0] || '', locale: fMeta.value.locale || 'en_US' })
+    const r = await POST('/form-templates/forms/ai-generate', { asset_id: a.id, country: (fCfg.value.target_countries||[])[0] || '', locale: fMeta.value.locale || 'en_US', purpose: aiPurposeInput.value })
     const cfg = r.config || {}
     if (cfg.form_title) fCfg.value.form_title = cfg.form_title
     if (cfg.description) fCfg.value.description = cfg.description
@@ -116,7 +130,7 @@ const aiGenerate = async (a) => {
 const aiGenerateMsg = async (a) => {
   assetPickerOpen.value = false; aiLoading.value = true
   try {
-    const r = await POST('/form-templates/messages/ai-generate', { asset_id: a.id })
+    const r = await POST('/form-templates/messages/ai-generate', { asset_id: a.id, purpose: aiPurposeInput.value })
     if (r.welcome_text) mCfg.value.welcome_text = r.welcome_text
     if (r.ice_breakers && r.ice_breakers.length) mCfg.value.ice_breakers = r.ice_breakers
     ElMessage.success(t('formtpl.aiGenerated'))
