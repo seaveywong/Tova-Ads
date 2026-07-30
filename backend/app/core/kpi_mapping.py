@@ -49,6 +49,7 @@ DEFAULT_POOR_FALLBACK_TYPES = [
     "omni_view_content", "omni_landing_page_view", "onsite_web_view_content",
     "onsite_web_app_view_content", "view_content", "landing_page_view",
     "link_click", "page_engagement", "post_engagement",
+    "video_view", "thruplay", "like",
     "offsite_content_view_add_meta_leads",
     "onsite_conversion.post_net_like", "onsite_conversion.post_net_comment",
     "onsite_conversion.post_net_save", "onsite_conversion.post_save",
