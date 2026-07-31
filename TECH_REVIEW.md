@@ -446,3 +446,37 @@ Phase 2.2 部署预过滤上线后，用户指出：**多令牌同主页但不�
 - `65d7221` fix(launch): 跟帖多令牌主页权限——主页感知选 token + 可用性端点
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[page-post-follow-mode]] [[token-dispatch-planning]]
+
+---
+
+## 2026-07-31 修广告组 Tab 崩溃真因（vue-i18n 消息花括号 SyntaxError）
+
+### 概述
+用户三次报"新建模板点②广告组 Tab → 弹窗消失只剩蒙版"。静态审计模板逻辑多次判定干净（确无代码缺陷）。靠新加的 `app.config.errorHandler` + sourcemap 抓到真错：`vue-i18n message-compiler SyntaxError @ LaunchTemplates.vue:815`。**根因是 i18n 消息串里的花括号，不是模板代码。**
+
+### 根因
+`launch.advancedPlaceholder`（zh/en）原值含 `{"bid_amount":500}`。vue-i18n 消息编译器把 `{` 当插值占位符开头，`"bid_amount":500` 非合法占位符语法 → `SyntaxError` → 组件渲染崩溃 → 抽屉面板销毁、蒙版残留。
+- vue-i18n 默认 **JIT 编译**（首次 `t()` 访问才编译）。
+- 该 key 仅**广告组 Tab 底部"高级设置" textarea** 用 → ①系列 Tab 不访问它正常，②广告组一渲染就崩。完美解释"只有广告组崩"。
+- 这类 bug 对模板逻辑静态分析隐形（它是消息串不是代码）。
+
+### 修复
+| commit | 文件 | 改动 |
+|---|---|---|
+| `5e39fd5` | main.js | 加 `app.config.errorHandler`：Vue 渲染/生命周期错误默认只进 console 不弹窗，现捕获并 showError 回显（含 info+组件名）。诊断利器。 |
+| `9cd1bdb` | locales/launch.js | `advancedPlaceholder` 去花括号：zh `'JSON 选填，例：bid_amount:500'` / en `'JSON optional, e.g. bid_amount:500'`。 |
+
+### 验证
+- build ✓ 部署（`c1f66a35`）。用户硬刷后点广告组 Tab 应不再崩（待用户确认）。
+- 全 locale 扫 `\{[^a-zA-Z_@:':}]`：launch.js 仅此一处（已修）；manualPostPh `{page}_{post}` 是合法双占位符（编译通过，只是无参渲染为空）。
+- **🔴 潜在同类风险（Landing 视图，用户未报，未动）**：landing.js `subdomainAuto:'lp{编号}'`（`{编号}` CJK 占位符名）、`copiedHtml:'...{{ad.id}}...'`（双花括号）。vue-i18n 对 CJK 占位符名/`{{` 的容忍度未验；若 Landing 子域名预览/复制 HTML 崩溃，同因。**待验**（用户重度用 Landing 却未报，可能 JIT 未触发或编译器容忍）。
+
+### 教训
+- vue-i18n 消息串**不能含裸 `{ }`**（除非合法占位符）；JSON/代码示例入文案要去花括号或用转义。
+- Vue 渲染错误**不触发 window error**，必须有 `app.config.errorHandler` 才弹窗——之前只接 Promise/window 错误，漏了渲染错误。
+
+### commit 列表
+- `5e39fd5` fix(diag): 加 app.config.errorHandler——Vue 渲染崩溃弹窗回显
+- `9cd1bdb` fix(i18n): launch.advancedPlaceholder 花括号致广告组Tab崩溃
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[ux-clarity-bar]]
