@@ -1417,17 +1417,13 @@ def run_keepalive():
                 if not os.path.exists(filepath):
                     failed += 1; results.append(_ka_res(acc, "fail", "asset_missing", "素材文件丢失"))
                     continue
-                # 保活跟帖：复用该账户种子帖，或建一次（YR 素材 + 随机 AI 文案）→ object_story_id
-                from ..core.page_post import get_or_create_page_post
-                from ..core.ad_ops import pick_random_copy, pick_cta
+                # 素材 image_hash + 随机 AI 文案+标题（object_story_spec 模式，完整内容+CTA）
+                from ..core.ad_ops import ensure_image_hash_for_account, pick_random_copy
+                image_hash = ensure_image_hash_for_account(fb, db, asset, acc.act_id, filepath)
+                db.commit()
                 _rh, _rb = pick_random_copy(asset)
-                _ka_msg = _rb or "Follow us!"
-                if acc.keepalive_post_id:
-                    post_id = acc.keepalive_post_id
-                else:
-                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, _ka_msg, "", asset.public_url)
-                    acc.keepalive_post_id = post_id
-                    db.commit()
+                _ka_msg = _rb or "Welcome!"
+                _ka_name = _rh or "Like our page"
 
                 # 6. 建 Page Like（campaign→adset→creative→ad；任一步失败 _ka_rollback 回滚已建对象，避免 orphan 卡去重）
                 camp = fb.post(f"act_{acc.act_id}/campaigns", {
@@ -1452,7 +1448,17 @@ def run_keepalive():
                     raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
                 built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
-                    "name": f"{prefix} Creative", "object_story_id": post_id,
+                    "name": f"{prefix} Creative",
+                    "object_story_spec": json.dumps({
+                        "page_id": page_id,
+                        "link_data": {
+                            "image_hash": image_hash,
+                            "message": _ka_msg,
+                            "name": _ka_name,
+                            "link": f"https://www.facebook.com/{page_id}",
+                            "call_to_action": {"type": "LIKE_PAGE"}
+                        }
+                    })
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
