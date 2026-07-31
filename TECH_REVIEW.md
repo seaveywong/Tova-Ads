@@ -480,3 +480,34 @@ Phase 2.2 部署预过滤上线后，用户指出：**多令牌同主页但不�
 - `9cd1bdb` fix(i18n): launch.advancedPlaceholder 花括号致广告组Tab崩溃
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[ux-clarity-bar]]
+
+---
+
+## 2026-08-01 Landing 花括号崩溃扫灭 + 帖子 ID 自动匹配主页
+
+### 概述
+广告组 Tab 崩溃修后，用户确认生效。继续：(1) 用 vue-i18n 运行时全字典扫，挖出并修 Landing 三处同类花括号崩溃；(2) 实现"帖子 ID/URL 自动匹配主页"（用户的点子：本地 ads_cache 优先，零 FB 调用）。
+
+### 变更表
+| commit | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| `8a0658a` | locales/landing.js + Landing.vue | (1) `subdomainAuto`/`fSubdomainPrefixPh` zh `{编号}`→`（编号）`（CJK 占位符名编译 THROW）；(2) `copiedHtml` `{{ad.id}}`→`{macro}` 占位符 + 调用点传 `macro:'{{ad.id}}'`（`{{` 嵌套 THROW，zh/en 都中） | vue-i18n 运行时全 view 字典复扫 **TOTAL THROW: 0** |
+| `0e6fec6` | fb.py | 新增 `POST /fb/resolve-post {q}` + `_local_resolve_post`：完整 `{page}_{post}` 直接拆；裸号/URL → 本地 ads_cache 后缀匹配(零 FB) → FB 遍历令牌兜底 | 冒烟：真帖 `...730089638` → 秒回 page `156015644262452`(local)；假号→None |
+| `0e6fec6` | LaunchTemplates.vue + launch.js | `confirmManualPost` 改 async 调 `/fb/resolve-post`：裸 ID/URL 自动回填主页+帖子（不再要求先选主页）；`postResolving` 加载态；i18n `resolving`/`sourceLocal`/`resolvePostFail` + `manualPostPh` 更新 | build ✓ |
+
+### 怎么挖到 Landing 的崩溃
+vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了运行时扫脚本（createI18n + 逐 key t()）→ 直接抛的就是坏消息。三处：
+- `subdomainAuto: 'lp{编号}'` → "Invalid token in placeholder: '编号'"（占位符名必须 ASCII 标识符，CJK 非法）。
+- `copiedHtml: '...{{ad.id}}...'` → "Not allowed nest placeholder"（`{{` 嵌套）。
+- 注：en `lp{index}` 编译通过（ASCII 占位符），只 zh `{编号}` 崩；`copiedHtml` zh/en 都崩。
+
+### 复审结论
+- **崩溃类已扫净**：全 view 字典 runtime 复扫 0 THROW。main zh.js/en.js 内联命名空间 grep 复查仅合法 `{ascii占位符}`。
+- **resolve-post 本地优先**命中用户场景（铺过广告的帖）：零 FB、秒回。未铺过的帖走 FB 兜底（GET /{post_num} 遍历令牌，best-effort——裸号 FB 可能要求 {page}_{post} 格式，失败则 404）。
+- **风险**：FB 兜底对"裸号 + 未铺过广告"的帖可能 404（FB 裸号解析依赖令牌上下文）；但跟帖主流场景（复用已跑的帖）走本地，覆盖绝大多数。
+
+### commit 列表
+- `8a0658a` fix(i18n): landing 三处花括号致 vue-i18n 编译崩溃
+- `0e6fec6` feat(reuse): 帖子 ID/URL 自动匹配主页（本地 ads_cache 优先）
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[ux-clarity-bar]]
