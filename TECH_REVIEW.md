@@ -313,3 +313,38 @@ b9d28c5 feat(跟帖模式Phase2): 新建/复用帖切换+Post Picker+锁卡+主�
 - **page_post 子系统生产已 dead**（access_level=standard）：page_posts 表 9 行历史遗留；object_story_id 路径恒不触发。等下次 dev 切换/过审回退时复活，届时需验 dead-code 分支。
 - **_campaign_objectives 不取 optimization_goal**（已知精度限制，购物→purchase 正确，私信线索低风险）。
 - **Phase 2.2**（上轮已记）：广告列表「复用此帖铺放」入口 + 部署抽屉账户硬预过滤 + 锁卡字段灰化 + summary 来源 chip。
+
+---
+
+## 2026-07-31 修后台任务锁号撞车（上轮记的既存隐患，本次落地）
+
+### 概述
+上轮深度复审把「锁 ID 冲突」列为范围外既存隐患并建议改唯一 ID。本次落地：`account_sync` 107→110、`ads_cache_sync` 108→111，guard 块 101-109 不动。纯代码（4 个字面整数），无 schema、无功能/逻辑变化。
+
+### 变更表
+| 文件 | 改动 |
+|---|---|
+| services/account_sync.py | acquire+release 锁号 `107→110`（原与 `run_landing_block_scan` 撞） |
+| services/ads_cache_sync.py | acquire+release 锁号 `108→111`（原与 `run_subcode_cleanup` 撞） |
+
+> 上轮建议「landing_block_scan→110 / subcode_cleanup→111」（改 guard 侧）；本次改对立侧（standalone service），目的相同 = 11 个固定锁号全唯一。保留 guard 块 101-109 连续段更整洁。
+
+### DB 迁移
+无（纯代码，不动表）。
+
+### 生产环境变更
+仅上传 2 文件 + restart。无 .env/配置/FB 操作/数据操作。回退点 `git tag backup-pre-lockid-fix`（= c9d53fa）。
+
+### 复审结论
+- **影响**：两对任务时段重叠时不再互相 `lock_busy` 静默跳过。属轻微自愈型隐患（下一轮会补上），本次清根因。
+- **锁号唯一性**：本地 + 服务器双校验，11 个固定锁号（101-111）各出现 1 次；`ad_ops` 用随机化 hash 锁号（PYTHONHASHSEED 每进程不同），与固定小整数碰撞概率≈0，不动。
+- **无 bug**：py_compile + import 门过，/health 200。
+
+### commit 列表
+- `5bc0465` fix(cron): 修后台任务锁号撞车(107/108 各两任务共用→静默漏跑) — 已 push GitHub
+
+### 生产部署验证
+- 上传 2 文件 → py_compile + `from app.main import app` `IMPORT_OK` → restart → `active` → /health 200 v1.3.5。
+- 服务器 grep 复核：`account_sync=110` / `ads_cache_sync=111`，11 锁号全唯一。
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]]
