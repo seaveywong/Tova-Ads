@@ -250,3 +250,66 @@ b9d28c5 feat(跟帖模式Phase2): 新建/复用帖切换+Post Picker+锁卡+主�
 - **Phase 2.2**：广告列表 ♂「复用此帖铺放」入口（§6）+ 部署抽屉账户预过滤硬过滤（§3）+ 锁卡字段灰化（§2）+ summary 来源 chip —— 上述 P2 四项，下次会话按需做。
 - **reuse 帖属同主页约束**：当前仅文字提示，跨主页部署会在 get_page_access_token 阶段报错（已 raise，不静默）。Phase 2.2 预过滤后消除误选。
 - **landing.js en 块全中文**（既存，非 Phase2 引入，commit 1628b51 i18n 基线）：landing 页 en 完全未译。本次范围外，建议单独排期译 landing.js en 块。
+
+---
+
+## 2026-07-31 主管深度逐行复审（ad6cbf7..HEAD 全量，改 3 处）
+
+复审人=主管 AI。这次不是 6 维度浅审，是**逐文件逐行逻辑深审**（每行分支/边界/前后端字段对接）。范围 = `git log ad6cbf7..HEAD`（新 AI 这批所有 commit，含 i18n 基线/AI 文案重构/保活多轮/跟帖 Phase1+2/OAuth/仪表盘 3 bug）。读完所有目标文件全文（不只 diff）。
+
+### 深审方法
+- 后端：逐函数读 page_post.py / ad_ops.py / guard_engine.py(run_keepalive+_campaign_objectives) / launch_templates.py(_resolve_page_post+_run_deploy_job+_retry_one) / account_sync.py / landing_lib.py / fb_oauth.py / kpi_mapping.py / fb_client.py(get_page_access_token) / ad_builder.build_creative。
+- 前端：逐行读 LaunchTemplates.vue(1465行) / AdManager.vue / useFbError.js / useStatus.js + 跑 3 个 i18n 校验脚本。
+- 生产：py_compile + import 双门 + 服务 active + /health 200 + alembic 0058 head + 前端 hash 比对 + DB 状态(access_level/keepalive/kpi_mapping/page_posts)。
+
+### 逐文件结论
+
+| 文件 | 逻辑 | 发现 |
+|---|---|---|
+| **page_post.py** `_body_hash`/`get_or_create_page_post` | ✅ 正确 | hash = sha1(asset_id\|message\|link) **含 asset_id**——brief 担心的"换图不建新帖"bug **不存在**（asset_id 变→hash 变→建新帖）。/feed(link 帖)/photos(保活照片帖)两路径字段对。page_posts upsert 用 flush（竞态见 P2.3）。 |
+| **ad_ops.deploy_one_account** | ⚠ P2 dead work | L170-175 即使 page_post_id 非空仍调 build_creative(...) 建完整 object_story_spec dict，但该 dict 在 page_post_id 分支(L176-190)从未使用（分支自己 POST /adcreatives）。纯浪费+误导。**但生产 access_level=standard→_resolve_page_post 返""→page_post_id 恒空→object_story_id 分支整体 dead code**，不影响生产。不改（动核心建广告文件风险高且分支已死）。 |
+| **guard_engine.run_keepalive** | ✅ 正确 | 已回归 object_story_spec(commit 32a79d3，App Live 后)。完整 link_data{image_hash+message+name+link+LIKE_PAGE CTA}。失败 _ka_rollback 回滚。pick_random_copy 空文案兜底 "Welcome!"。status=ACTIVE（区别 deploy 的 PAUSED）正确。keepalive_post_id/page_post 路径已废弃（spec 直建），一致。 |
+| **guard_engine._campaign_objectives** | ✅ 正确 | batch 用 fields=id,objective（不含 optimization_goal=AdSet 字段，避免 invalid_param）。L71/L79 读 optimization_goal 恒""（未请求字段），harmless dead parse。已知精度限制（by_objective 推）已记。 |
+| **launch_templates._resolve_page_post** | ✅ 正确 | access_level≠dev→返""；reuse+reuse_post_ref→短路返 ref；否则建帖。传 asset.id 进 hash（含 asset）。 |
+| **launch_templates._run_deploy_job** | ✅ 正确 | 表单模板 page-aware 解析 + AI 消息兜底 + pick_random_copy + page_post 解析 + item.page_post_id 持久化。 |
+| **launch_templates._retry_one** | ❌ P2（已修） | 与 _run_deploy_job **分歧**：重试用 tpl.lead_form_id（原始）不调 _resolve_lead_form，跳过 AI 消息兜底。LEADS/ENGAGEMENT 重试拿到错误/缺失 form/message。**已改为与 deploy 一致**。 |
+| **launch_templates._tpl_dict/TemplateIn/_COPY_COLS** | ✅ 正确 | post_source/reuse_post_ref 三处齐全（返/收/复制）。复制跨主页旧帖失效由用户自负（reuse_post_ref 原样拷）。 |
+| **account_sync.py** pixel dup | ✅ 正确 | sync_pixels_for_act 用 begin_nested savepoint 隔离单条 UniqueViolation，外层 commit 正常。 |
+| **fb_oauth.py** | ✅ 正确 | OAUTH_SCOPES 含 pages_manage_posts 去 read_insights。_done_page 完成页（硬编码中文=P2，i18n Phase2）。state HMAC 验签+TTL。callback 换 code→long token→建凭证。 |
+| **kpi_mapping.DEFAULT_POOR_FALLBACK_TYPES** | ✅ 正确 | 补 video_view/like/thruplay。生产 system_settings **无 kpi_mapping 行**→走代码默认（含修复）。 |
+| **fb_client.get_page_access_token** | ✅ 正确 | me/accounts?fields=id,access_token 派生 page token（正斜杠，非之前误读的反斜杠）。无权限→空串→上游 raise FbApiError。 |
+| **LaunchTemplates.vue** openEdit | ❌ P1（已修） | **L470 `t.advanced_config`**：openEdit 参数从 `t` 重命名为 `tpl`（commit 范围内）后这行漏改，`t` 现解析为 i18n t() 函数(L10)→`t.advanced_config`=undefined→`JSON.parse(undefined)` 抛 SyntaxError→被 L497 `catch{}` 吞→**编辑已有模板时 Advantage+/版位/频次/CPA/归因/Dayparting 全部无法恢复**（用户重编辑这些设置丢失）。**已改回 tpl.advanced_config**。 |
+| **LaunchTemplates.vue** 跟帖锁卡 | ⚠ P2（不改，自主会话） | reuse 模式 asset/headline/body/cta/landing/subcode 输入框未 :disabled（只有 lockHint 文字）。功能正确（设 page_post_id 后 deploy 忽略这些字段）但 UX 误导。与上轮复审 P2.2 同。 |
+| **LaunchTemplates.vue** confirmManualPost | ✅ 正确 | 3 格式解析（{page}\_{post}正则/FB URL 末段数字/纯数字）覆盖全。post_source 切换保留 reuse_post_ref（不丢）。 |
+| **Assets.vue** L203 | ❌ P1（已修） | `t('assets.analyze')` 字典无此 key→确认钮显示原始串 'assets.analyze'。**assets.js zh/en 补 analyze key（分析/Analyze）**。 |
+| **AdManager.vue** | ✅ 正确 | OBJ_MAP/OPT_MAP 是 computed（切语言实时）。§6「复用此帖铺放」入口=Phase2.2 未做（已知，非 bug）。 |
+| **useFbError.js / useStatus.js** | ✅ 正确 | fbError 19 key（18 category+generic）zh/en 齐。useStatus t() 在 resolver 期求值（渲染期）→切语言实时。无 v-for="t" 遮蔽。 |
+
+### i18n 校验（3 脚本全跑）
+- **en 零 CJK**：launch/dashboard/assets/formtpl/guard/landing/lplogs 全 0 CJK（landing.js en 块**已译**——上轮复审"landing.js en 全中文"备注过时，本次扫证实干净，纠正之）。en.js 唯一命中 `langToZh:'切换到中文'`=切换目标语言钮 by-design。
+- **t() key 解析**：1917 leaf key，10 个"missing"全是误报（params.set/get()/.split/ createElement 等非 i18n 调用）。**唯一真 missing = `assets.analyze`（已修）**。
+- **const 物化 t()**：LandingLogs L102/Guard L72 HUMAN 是函数内/map-of-arrow-fn，t() 在调用期求值，切语言正常。无真物化。
+- **v-for="t" 遮蔽**：0 命中。
+
+### P0/P1/P2 清单 + 修复状态
+- **P0**：无（服务 active/health 200/前端 hash 对齐/建广告链路 access_level=standard 走 spec 实测过/i18n en 干净）。
+- **P1**（已修 2）：
+  1. LaunchTemplates.vue:470 `t.advanced_config`→`tpl.advanced_config`（编辑恢复丢失，已部署）。
+  2. assets.js 补 `analyze` key zh/en（确认钮显原始串，已部署）。
+- **P2**（已修 1）：
+  3. _retry_one 与 _run_deploy_job 分歧（LEADS/ENGAGEMENT 重试 form/message 错），已对齐（已部署）。
+- **P2（不改，报告）**：
+  - 跟帖锁卡字段未 :disabled（UX 误导，功能正确）。
+  - deploy_one_account page_post_id 分支建未用 creative（dead work，生产分支整体 dead）。
+  - OAuth _done_page 硬编码中文（i18n Phase2）。
+
+### 生产部署验证
+- 后端：launch_templates.py 上传→py_compile + import OK→DB 备份(backup_review_20260731.sql 2.9MB)→restart→active→/health 200 v1.3.5。
+- 前端：build ✓(743ms)→wrangler --branch master→生产 hash `index-gG1i9Go2.js` = 本地 dist 完全一致。
+- git：commit `4dd2f79` push GitHub。
+
+### 风险 / 待跟进（不改，报告）
+- **🔴 锁 ID 冲突（既存，范围外）**：account_sync 用锁 107 = guard_engine.run_landing_block_scan 的 107；ads_cache_sync 用 108 = guard_engine.run_subcode_cleanup 的 108。两对同锁→同时触发时一方 `lock_busy` 静默跳过（account_sync 30min / landing_block_scan 60min / ads_cache_sync 15min / subcode_cleanup 每天4:17）。**本次范围外**（account_sync 未改；guard_engine 改的是 keepalive/objectives 非 lock 行），自主会话不扩散改。建议下批给 landing_block_scan 改锁 110、subcode_cleanup 改锁 111（唯一 ID）。
+- **page_post 子系统生产已 dead**（access_level=standard）：page_posts 表 9 行历史遗留；object_story_id 路径恒不触发。等下次 dev 切换/过审回退时复活，届时需验 dead-code 分支。
+- **_campaign_objectives 不取 optimization_goal**（已知精度限制，购物→purchase 正确，私信线索低风险）。
+- **Phase 2.2**（上轮已记）：广告列表「复用此帖铺放」入口 + 部署抽屉账户硬预过滤 + 锁卡字段灰化 + summary 来源 chip。
