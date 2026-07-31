@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
@@ -8,6 +9,7 @@ import { jobStatus, itemStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
 
 const { t } = useI18n()
+const route = useRoute()
 
 const list = ref([])
 const loading = ref(false)
@@ -310,7 +312,20 @@ const onLandingChange = async () => {
     } catch {}
   }
 }
-onMounted(() => { load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages() })
+onMounted(() => {
+  load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages()
+  // 广告列表「复用此帖铺放」入口 → 预填跟帖模板
+  const rp = route.query.reuse_post
+  if (rp) {
+    openNew()
+    form.value.post_source = 'reuse'
+    form.value.reuse_post_ref = String(rp)
+    form.value.page_id = String(rp).split('_')[0]  // {page}_{post} → page
+    editLevel.value = 'ad'  // 直达广告 Tab 显示跟帖锁卡
+    snapshotForm()  // 重新快照（含预填值，避免一开就标 dirty）
+    ElMessage.info(t('launch.reusePrefilled'))
+  }
+})
 const loadTplPages = async () => { try { const r = await GET('/fb/assets'); tplPages.value = r.pages || [] } catch {} }
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
@@ -330,7 +345,7 @@ const validationErrors = ref([])
 const validateTemplate = () => {
   const errs = []
   if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
-  if (!form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
+  if (!form.value.asset_id && form.value.post_source !== 'reuse') errs.push(t('launch.fieldAssetAdTab'))
   if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
   if (!form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
     errs.push(t('launch.fieldLandingPickOrUrl'))
@@ -688,10 +703,31 @@ const preflight = async (tpl) => {
   preflighting.value = false
 }
 // 部署
+// 跟帖部署：按主页权限预过滤账户（帖属 page → 只能选令牌管该 page 的账户）
+const reuseDeployPage = computed(() => {
+  if (deployTpl.value?.post_source !== 'reuse') return ''
+  return (deployTpl.value?.reuse_post_ref || '').split('_')[0] || ''  // {page}_{post} → page
+})
+const accManagesReusePage = (actId) => {
+  const pg = reuseDeployPage.value
+  if (!pg) return true  // 非跟帖模式不限制
+  return (accPages.value[actId] || []).some(p => String(p.id) === String(pg))
+}
+const preloadAccPagesForReuse = async () => {
+  const pg = reuseDeployPage.value
+  if (!pg) return
+  await Promise.all((accounts.value || [])
+    .filter(a => a.fb_credential_id && !accPages.value[a.act_id])
+    .map(async (a) => {
+      try { accPages.value[a.act_id] = await GET('/fb/credentials/' + a.fb_credential_id + '/pages').catch(() => []) || [] }
+      catch {}
+    }))
+}
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   accLoading.value = true
   try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, t('launch.loadAccFail')) }
+  if (tpl.post_source === 'reuse') await preloadAccPagesForReuse()  // 预加载 pages 以判定主页权限
   accLoading.value = false
 }
 const toggleAcc = async (id) => {
@@ -789,6 +825,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <span class="ss-chip" @click="editLevel='campaign'" :title="t('launch.gotoCampaign')">{{ t('launch.objColon') }}{{ t(OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective) }}</span>
         <span class="ss-chip" @click="editLevel='adset'" :title="t('launch.gotoAdSet')">{{ t('launch.audienceColon') }}{{ (form.audience_countries||[]).join(',') || t('launch.defaultAudience') }} · {{ t('launch.interestCount', { n: (form.audience_interests||[]).length }) }}</span>
         <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.assetColon') }}{{ editingAsset?.name || t('launch.notSelected') }}</span>
+        <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.sourceColon') }}{{ form.post_source==='reuse' ? t('launch.postSourceReuse') : t('launch.postSourceNew') }}</span>
         <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
           {{ completionStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + completionStatus.missing.join('、') }}
         </span>
@@ -981,7 +1018,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
               <video v-else :src="editingAsset.public_url" class="asset-thumb" preload="metadata" />
               <span class="asset-name">{{ editingAsset.name }}（{{ t('launch.clickToPreview') }}）</span>
             </div>
-            <button class="btn sm" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
+            <button class="btn sm" :disabled="form.post_source==='reuse'" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
           </div>
         </div>
         <!-- Advantage+ 创意（对齐 FB Ads Manager） -->
@@ -999,8 +1036,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div v-for="(h,i) in (editingAsset.ai_copy?.headlines||[])" :key="'h'+i" class="ai-pick" @click="form.headline=h"><span class="ai-tag">{{ t('launch.headlineN', { n: i+1 }) }}</span> {{ h }}</div>
           <div v-for="(b,i) in (editingAsset.ai_copy?.bodies||[])" :key="'b'+i" class="ai-pick" @click="form.body=b"><span class="ai-tag">{{ t('launch.bodyN', { n: i+1 }) }}</span> {{ b }}</div>
         </div>
-        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" /></div>
-        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3"></textarea></div>
+        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" :disabled="form.post_source==='reuse'" /></div>
+        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3" :disabled="form.post_source==='reuse'"></textarea></div>
         <div class="row"><label>{{ t('launch.ctaLabel') }}</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" /></el-select></div>
         <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.pagePixelHint') }}</div>
         <div class="row"><label>{{ t('launch.landing') }}</label>
@@ -1102,12 +1139,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
       </div>
       <div class="acc-list" v-loading="accLoading">
-        <div v-for="a in filteredDeployAccounts" :key="a.act_id" class="acc-block">
+        <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
-            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" @change="toggleAcc(a.act_id)" />
+            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="reuseDeployPage && !accManagesReusePage(a.act_id)" @change="toggleAcc(a.act_id)" />
             <span class="acc-name">{{ a.name || a.act_id }}</span>
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
             <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
+            <span v-if="reuseDeployPage && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')">🔒</span>
           </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
@@ -1324,6 +1362,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .acc-status{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;white-space:nowrap}
 .acc-status.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .acc-status.warn{color:var(--warning);background:rgba(255,159,10,.13)}
+.acc-block.disabled{opacity:.5}
+.acc-block.disabled .acc-row{cursor:not-allowed}
+.acc-no-perm{font-size:12px;cursor:help}
 .acc-count-hint{font-size:11px;color:var(--t3);white-space:nowrap}
 .deploy-search-row{display:flex;gap:8px;align-items:center;margin-bottom:8px }
 .deploy-search-row .inp{flex:1}

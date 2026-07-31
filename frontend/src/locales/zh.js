@@ -722,7 +722,7 @@ export default {
     slugEmpty: '未铺', slugEmptyTitle: '该广告暂无落地流量（访客点 /a/子码?ad= 后自动绑定）',
     lvTitle: '落地访问量（visit+redirect）', lpTitle: '通过量=按钮点击+跳转（按IP去重）',
     lprTitle: '通过 {pass} / 访问 {visits}', noVisits: '无访问', viewLandingLogs: '查看落地日志',
-    adDiagnose: '广告诊断', editBudgetTitle: '改预算 · {name}',
+    adDiagnose: '广告诊断', reuseThisPost: '复用此帖铺放', editBudgetTitle: '改预算 · {name}',
     lifetimeBudgetLabel: '总预算（本币）', dailyBudgetLabel: '日预算（本币）',
     redirectDialogTitle: '跳转链接 · {name}', redirectFormLabel: '该广告的专属跳转链接',
     redirectInputPh: 'https://...（留空=用落地页默认）',

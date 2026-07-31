@@ -181,6 +181,14 @@ def list_ads(
         _ls = _landing.get(str(ad.get("id")))
         ad["landing_visits"] = _ls["visits"] if _ls else 0
         ad["landing_pass"] = _ls["pass"] if _ls else 0
+        # 提取 creative 的 effective_object_story_id 供"复用此帖铺放"入口
+        _cr = ad.get("creative")
+        _sid = ""
+        if isinstance(_cr, dict):
+            _sid = _cr.get("effective_object_story_id") or ""
+            if not _sid and isinstance(_cr.get("data"), list) and _cr["data"]:
+                _sid = (_cr["data"][0] or {}).get("effective_object_story_id") or ""
+        ad["object_story_id"] = _sid
 
     # 子码（slug）展示：手动投放期一个子码常铺多个广告，绑定表 LandingAdLink.ad_id 只能存一个广告
     # （slug 唯一 + 单字段 + 首次点击绑死不覆盖）→ 不够用。改从 landing_events 实际流量反查：

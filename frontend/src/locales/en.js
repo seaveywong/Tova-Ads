@@ -711,7 +711,7 @@ export default {
     slugEmpty: 'Not laid', slugEmptyTitle: 'No landing traffic yet (auto-binds when a visitor hits /a/subcode?ad=)',
     lvTitle: 'Landing visits (visit + redirect)', lpTitle: 'Pass count = button clicks + redirects (IP-deduped)',
     lprTitle: '{pass} passed / {visits} visits', noVisits: 'No visits', viewLandingLogs: 'View landing logs',
-    adDiagnose: 'Ad Diagnosis', editBudgetTitle: 'Edit Budget · {name}',
+    adDiagnose: 'Ad Diagnosis', reuseThisPost: 'Reuse This Post', editBudgetTitle: 'Edit Budget · {name}',
     lifetimeBudgetLabel: 'Lifetime budget (local currency)', dailyBudgetLabel: 'Daily budget (local currency)',
     redirectDialogTitle: 'Redirect Link · {name}', redirectFormLabel: 'Dedicated redirect link for this ad',
     redirectInputPh: 'https://... (blank = use landing default)',
