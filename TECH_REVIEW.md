@@ -410,3 +410,39 @@ b9d28c5 feat(跟帖模式Phase2): 新建/复用帖切换+Post Picker+锁卡+主�
 - `d6b6d87` feat(launch): Phase 2.2 跟帖铺放 UI（锁卡灰化+来源chip+账户预过滤+广告入口）
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[page-post-follow-mode]] [[keepalive-creative-fix]] [[must-approve-before-do]]
+
+---
+
+## 2026-07-31 跟帖多令牌主页权限修正（用户指出缺口）
+
+### 概述
+Phase 2.2 部署预过滤上线后，用户指出：**多令牌同主页但不同账户**时，原预过滤用账户"绑定令牌"判主页权限、部署却用候选池里 priority 最高的写令牌——两者可能不是同一个，导致假阳性（预过滤可选→部署用的令牌没主页权限→`object_story_id` 建 creative 失败）/ 假阴性（候选池里某令牌有主页权限但非绑定/最高→账户被灰禁其实能用）。完整修（后端权威 + 前端可用性端点）。
+
+### 变更表
+| commit | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| `65d7221` | fb_tokens.py | 新增 `_account_write_candidates`（pool→bound→tenant-wide 去重 priority 序）+ `cred_for_account_page`（扫候选池取第一个 `get_page_access_token(page)≠空` 的写令牌，带 `_cache` 跨账户复用）+ `client_for_account_page` | 生产验证：6 账户 pool 各 2 写令牌→全命中 cred 10→**仅 1 次 FB 调用**（cache 生效）✅ |
+| `65d7221` | launch_templates.py | GET `/{id}/reuse-eligible`：解析 reuse_post_ref→page_id，遍历 managed 账户用 client_for_account_page(_cache 共享) 判定，返 `{page_id, eligible:[act_ids]}`；`_run_deploy_job` + `_retry_one` reuse 模式改用 client_for_account_page，选不到清晰报错"无访问该主页的写令牌" | py_compile + import OK；/health 200 |
+| `65d7221` | LaunchTemplates.vue | openDeploy reuse 调 /reuse-eligible→`reuseEligibleActs` Set；`accManagesReusePage` 用 eligible set（替掉绑定令牌 accPages 近似 + 删 preloadAccPagesForReuse） | build ✓ 已部署 |
+
+### 冒烟铁证（生产）
+- 测试页 `157129407483651`：6 managed 账户候选池各 2 写令牌 → 全部 eligible（命中 cred 10）。
+- cache size=1：6 账户共享同 2 令牌，首个(priority 最高 cred 10)即管该页→后续账户命中 cache，**总 FB 调用 = 1**（不爆炸）。
+
+### DB 迁移
+无（纯逻辑；account_fb_credentials 候选池表既有）。
+
+### 生产环境变更
+- 后端：2 文件上传→py_compile + import OK→restart→active→/health 200。
+- 前端：build ✓→wrangler deploy（CF 已恢复）→生产 hash 上线。
+
+### 复审结论
+- **多令牌正确性**：部署选令牌现按"能管该帖主页"扫整个候选池（不只 priority 最高/绑定），与预过滤（同源 /reuse-eligible 端点）一致 → 假阳性/假阴性双消。
+- **性能**：候选池 cred 的主页判定带跨账户 cache，多账户共享令牌时 FB 调用 ≈ 去重 cred 数（实测 6 账户/2 令牌→1 调用）。
+- **风险**：`_account_write_candidates` 含 tenant-wide 兜底（候选池空时）——极端情况下租户内任一能管该页的写令牌都会让账户 eligible，可能比"仅绑定池"更宽松；但与 deploy 实际选令牌一致（deploy 也会回退 tenant-wide），故预过滤与结果仍自洽。
+- 未做：reuse 模式 per-account 主页 `<select>` 仍可改（toggleAcc 懒加载 accPages）；deploy 实际 page_id 取 item.page_id or tpl.page_id，reuse 下应锁帖主页——属次要 UX，本轮不动。
+
+### commit 列表
+- `65d7221` fix(launch): 跟帖多令牌主页权限——主页感知选 token + 可用性端点
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[page-post-follow-mode]] [[token-dispatch-planning]]
