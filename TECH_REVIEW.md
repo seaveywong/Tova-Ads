@@ -348,3 +348,65 @@ b9d28c5 feat(跟帖模式Phase2): 新建/复用帖切换+Post Picker+锁卡+主�
 - 服务器 grep 复核：`account_sync=110` / `ads_cache_sync=111`，11 锁号全唯一。
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]]
+
+---
+
+## 2026-07-31 跟帖模式复活 + Phase 2.2 跟帖铺放 UI（sourcemap / 后端复活 / 4 项前端 / Bug1 定位）
+
+### 概述
+用户定方向：1-2 继续做、3 锁冲突复查。本轮：
+1. **Point 1**：开 sourcemap（生产 Vue 报错之前全 minified 无法定位行号）。
+2. **跟帖模式复活（后端，关键发现）**：冒烟发现跟帖在生产是 dead code——`_resolve_page_post` 的 access_level 门挡在 reuse 短路前（standard→返""→reuse_post_ref 被静默忽略）；另发现 `get_paged` 强写 limit=200 致 Post Picker（published_posts FB 上限 100）从未生效。两处都修，冒烟+单测验证。
+3. **Phase 2.2 前端**（c 锁卡灰化 / d 来源 chip / b 部署账户预过滤 / a 广告列表入口）。
+4. **Point 3**：锁号撞车已确认修复（`account_sync=110` / `ads_cache_sync=111`，11 号全唯一，见上节）。
+
+### 冒烟铁证（生产，Live App `access_level=standard`）
+- `act_1015999284712319` + page `157129407483651` + 已存在帖 `..._122240015186092338` → `POST adcreatives{object_story_id}` → creative 建成（id `3098005883741798`）→ 删除。**结论：object_story_id 在 Live App 可用，跟帖复活可行。**
+- `published_posts` limit=200 → `#100 The 'limit' parameter should not exceed 100`；limit=100 → 9 帖。
+- token scopes 含 `pages_manage_posts` / `pages_read_engagement`（权限够）。
+
+### 变更表
+
+| commit | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| `75d68e6` | frontend/vite.config.js | 开 `build.sourcemap` | build ✓ 已部署 |
+| `a0edd43` | launch_templates.py `_resolve_page_post` | reuse 短路前置（引用已存在帖不依赖 dev 模式）；新建帖路径仍仅 dev（standard 建 new post 撞 code3） | 单测：standard 下 reuse→返 post_id ✅，new→"" ✅ |
+| `a0edd43` | fb_client.py `get_paged` | `base[limit]=limit` 覆盖调用方 → 改为仅未指定才填默认 | 冒烟 published_posts 返 9 帖 ✅ |
+| `a0edd43` | fb.py `list_page_posts` | published_posts 显式 `limit=100` | 同上 |
+| `d6b6d87` | LaunchTemplates.vue | (c) reuse 模式 disable asset/headline/body + validateTemplate 放宽 reuse 不强求 asset；(d) summary 加来源 chip；(b) 部署抽屉 reuse 解析帖主页→灰禁无权限账户+🔒tooltip+预加载 pages；(a 入口侧) onMounted 读 `?reuse_post=` 预填跟帖模板 | build ✓ |
+| `d6b6d87` | AdManager.vue | 广告行 ⚙ 加「📌 复用此帖铺放」（ad 有 object_story_id 时显）→ `launch-templates?reuse_post=` | build ✓ |
+| `d6b6d87` | ads.py `/ads/list` | 提取 `creative.effective_object_story_id` → 顶层 `object_story_id`（兼容 `{data:[...]}`） | py_compile + import ✓ |
+| `d6b6d87` | locales (launch.js / zh.js / en.js) | `sourceColon`/`noPagePermission`/`reusePrefilled`/`adm.reuseThisPost` zh+en；`lockHint` 文案更正 | build ✓ |
+
+### DB 迁移
+无（`post_source` / `reuse_post_ref` / `object_story_id` 均无 schema 变更；`object_story_id` 是 `/ads/list` 运行时富化，不入库）。
+
+### 生产环境变更（非代码）
+- DB 备份：`/root/backups/pre_reuse_revive.sql`（2.9MB）。**坑**：pg_dump 需 `sed 's|+psycopg2||'` 去 SQLAlchemy 方言，否则报 `role "root" does not exist`（URL 被忽略走默认 socket/用户）。
+- 后端（reuse 三件套）：3 文件上传 → py_compile + import OK → restart → active → /health 200 v1.3.5。
+- 后端（ads.py）：上传 → py_compile + import OK → restart → active → /health 200。
+- 前端：build ✓；**部署遇 Cloudflare Pages API 522（CF 侧宕机，非代码问题），后台重试中**。
+
+### 复审结论（6 维度）
+- **对齐规划**：Phase 2.2 计划(c)(d)(b)(a) 全落地；后端复活是冒烟发现的前置（非计划内，但属"复活跟帖"题中之义）。
+- **SOP**：备份 ✓ / commit 先于 deploy ✓ / 语法门(py_compile+import) ✓ / i18n zh+en ✓。
+- **i18n**：4 新 key zh+en 齐；lockHint 双语更正；en 零 CJK。
+- **FB API**：object_story_id 冒烟过；published_posts limit≤100；get_paged 不再覆盖调用方 limit。
+- **数据层**：_resolve_page_post 重排（reuse 前置）逻辑正确，无 schema 变更。
+- **坑**：见下「已知限制」。
+
+### 已知限制 / 风险
+- **P0**：无。
+- **(b)** 部署抽屉 reuse 模式开抽屉时为所有账户并发拉 pages（N 次 API）→ 账户多时略慢（有 spinner）。某账户 pages 拉失败 → `accPages=[]` → 判无权限而灰禁（保守安全，重开抽屉可重试）。
+- **(a)** reuse_post 来自 AdManager 的 `effective_object_story_id`（恒 `{page}_{post}` 格式）；LaunchTemplates 内手动输入纯 post id（无页前缀）会让 `page_id` 误设为整串——仅影响手动输入路径，AdManager 入口不受影响。
+- **(c)** reuse 模式 asset 选择器 disabled；validateTemplate 对 reuse 不再强求 asset（避免死路）。cta/落地页/子码保持可配置（deploy object_story_id 分支确实用到——lockHint 文案已据此更正，纠正上轮"全锁"的误述）。
+- 跟帖 deploy 仍走 PAUSED（`deploy_one_account` object_story_id 分支 status=PAUSED），与新建帖一致。
+- **前端部署 pending**（CF 522 宕机）；后端已 live。CF 恢复后需验前端 4 项。
+- **Bug 1（AdSet tab 崩溃）**：当前源码静态审计（逐常量/函数/ref）+ 生产 build 均无缺陷；用户当时测的是旧构建（6221601 部署前）。已开 sourcemap，若复现可定位行号。
+
+### commit 列表
+- `75d68e6` build(frontend): 开 sourcemap——生产 Vue 报错可直接定位行号
+- `a0edd43` fix(launch): 复活跟帖模式 + 修 Post Picker limit 崩溃
+- `d6b6d87` feat(launch): Phase 2.2 跟帖铺放 UI（锁卡灰化+来源chip+账户预过滤+广告入口）
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[page-post-follow-mode]] [[keepalive-creative-fix]] [[must-approve-before-do]]
