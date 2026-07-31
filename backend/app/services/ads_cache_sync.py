@@ -17,7 +17,7 @@ logger = logging.getLogger("toveads.ads_cache")
 def run_ads_cache_sync():
     """定时拉所有账户 campaigns/adsets/ads（全状态）→ upsert ads_cache。"""
     db = SuperSessionLocal()
-    lock = acquire_run_lock(108)
+    lock = acquire_run_lock(111)
     if not lock:
         db.close()
         return {"skipped": "already running"}
@@ -56,4 +56,4 @@ def run_ads_cache_sync():
         return {"error": str(e)}
     finally:
         db.close()
-        release_run_lock(lock, 108)
+        release_run_lock(lock, 111)

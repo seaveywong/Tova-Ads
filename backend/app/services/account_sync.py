@@ -51,7 +51,7 @@ def _last_notified_status(db, tenant_id: int, act_id: str):
 
 def run_account_status_sync():
     """定时同步账户状态/余额，变动到异常 → emit 告警。每 30min。"""
-    lock = acquire_run_lock(107)
+    lock = acquire_run_lock(110)
     if not lock:
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
@@ -155,5 +155,5 @@ def run_account_status_sync():
         logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复")
     finally:
         db.close()
-        release_run_lock(lock, 107)
+        release_run_lock(lock, 110)
     return {"synced": synced, "alerted": alerted}
