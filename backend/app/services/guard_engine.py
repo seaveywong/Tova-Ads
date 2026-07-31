@@ -1425,7 +1425,7 @@ def run_keepalive():
                 if acc.keepalive_post_id:
                     post_id = acc.keepalive_post_id
                 else:
-                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, _ka_msg, f"https://facebook.com/{page_id}", asset.public_url)
+                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, _ka_msg, "", asset.public_url)
                     acc.keepalive_post_id = post_id
                     db.commit()
 
@@ -1453,7 +1453,6 @@ def run_keepalive():
                 built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
                     "name": f"{prefix} Creative", "object_story_id": post_id,
-                    "call_to_action": json.dumps({"type": pick_cta(_ka_msg, "OUTCOME_ENGAGEMENT"), "value": {"page": page_id}}),
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
