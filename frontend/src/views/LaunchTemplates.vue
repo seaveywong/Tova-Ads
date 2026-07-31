@@ -429,9 +429,16 @@ const pickPost = (p) => { form.value.reuse_post_ref = p.id; postPickerOpen.value
 const confirmManualPost = () => {
   const raw = manualPostId.value.trim()
   if (!raw) return
-  const m = raw.match(/(\d+_\d+)/) || raw.match(/(\d+)/)
-  form.value.reuse_post_ref = m ? (m[1].includes('_') ? m[1] : `${form.value.page_id}_${m[1]}`) : raw
-  postPickerOpen.value = false; ElMessage.success(t('launch.postSelected'))
+  // 已是 {page}_{post} 格式 → 直接用
+  const m1 = raw.match(/(\d+_\d+)/)
+  if (m1) { form.value.reuse_post_ref = m1[1]; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')); return }
+  // FB URL → 提取最后一段数字作 post_id
+  const m2 = raw.match(/(\d{10,})/)
+  if (m2 && form.value.page_id) {
+    form.value.reuse_post_ref = `${form.value.page_id}_${m2[1]}`
+    postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')); return
+  }
+  ElMessage.warning(t('launch.manualPostNeedPage'))
 }
 const clearReusePost = () => { form.value.reuse_post_ref = '' }
 // 卡片完整性判断（列表用，不需打开编辑器）
@@ -493,6 +500,9 @@ const openEdit = async (tpl) => {
   if (f.lead_form_template_id) { try { selectedFormTpl.value = formTemplates.value.find(x => x.id === f.lead_form_template_id) || null } catch {} }
   if (f.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === f.message_template_id) || null } catch {} }
   form.value = f
+  // post_source 兜底（旧模板无此字段 → 默认 new）
+  if (!form.value.post_source) form.value.post_source = 'new'
+  if (!form.value.reuse_post_ref) form.value.reuse_post_ref = ''
   editingAsset.value = null
   if (tpl.asset_id) { try { editingAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   // 已绑落地页 → 预拉子码（填充子码下拉）
@@ -949,6 +959,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <!-- 跟帖锁卡 -->
         <div v-if="form.post_source==='reuse'" class="reuse-box">
           <div class="reuse-hint">🔒 {{ t('launch.lockHint') }}</div>
+          <div v-if="!form.page_id" class="reuse-need-page">⚠ {{ t('launch.postPickerNeedPage') }} <button class="btn sm ghost" @click="editLevel='campaign'">{{ t('launch.goSelectPage') }} →</button></div>
           <div v-if="form.reuse_post_ref" class="reuse-selected">
             <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
             <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>

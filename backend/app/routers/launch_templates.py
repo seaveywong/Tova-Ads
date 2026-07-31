@@ -48,6 +48,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "lead_form_template_id": t.lead_form_template_id or 0,
         "message_template_id": t.message_template_id or 0,
         "beneficiary": t.beneficiary or "", "payer": t.payer or "",
+        "post_source": t.post_source or "new", "reuse_post_ref": t.reuse_post_ref or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -86,6 +87,8 @@ class TemplateIn(BaseModel):
     message_template_id: int = 0
     beneficiary: str = ""
     payer: str = ""
+    post_source: str = "new"
+    reuse_post_ref: str = ""
 
 
 @router.get("")
@@ -145,6 +148,7 @@ _COPY_COLS = [
     "headline", "body", "page_id", "pixel_id", "landing_url", "cta_type", "subcode_slug",
     "ad_language", "message_template", "landing_page_id",
     "lead_form_template_id", "message_template_id", "beneficiary", "payer",
+    "post_source", "reuse_post_ref",
 ]
 
 
