@@ -74,6 +74,25 @@ def pick_random_copy(asset) -> tuple[str, str]:
     return h, b
 
 
+def pick_cta(body: str, objective: str) -> str:
+    """根据文案内容 + 广告目标选最合适的 CTA 类型。"""
+    b = (body or "").lower()
+    obj = (objective or "").upper()
+    if obj == "OUTCOME_ENGAGEMENT":
+        return "LIKE_PAGE"
+    if any(k in b for k in ["shop", "buy", "order", "purchase", "deal", "price", "sale", "store"]):
+        return "SHOP_NOW"
+    if any(k in b for k in ["sign up", "register", "subscribe", "book", "reserve"]):
+        return "SIGN_UP"
+    if any(k in b for k in ["contact", "message", "reach", "call", "whatsapp"]):
+        return "CONTACT_US"
+    if obj == "OUTCOME_SALES":
+        return "SHOP_NOW"
+    if obj == "OUTCOME_LEADS":
+        return "SIGN_UP"
+    return "LEARN_MORE"
+
+
 def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_goal: str,
                        page_id: str, pixel_id: str, landing_url: str,
                        daily_budget: int, budget_mode: str, bid_strategy: str,
@@ -156,9 +175,11 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     )
     if page_post_id:
         # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id
+        _cta_t = cta_type or pick_cta(body, objective)
+        _cta_val = {"page": page_id} if _cta_t == "LIKE_PAGE" else {"link": effective_url or f"https://facebook.com/{page_id}"}
         cr = fb.post(f"{act}/adcreatives", {
             "name": f"{name_prefix} creative", "object_story_id": page_post_id,
-            **({"call_to_action": json.dumps({"type": cta_type, "value": {"link": effective_url or f"https://facebook.com/{page_id}"}})} if cta_type else {}),
+            "call_to_action": json.dumps({"type": _cta_t, "value": _cta_val}),
         })
         creative_id = cr.get("id")
         if not creative_id:

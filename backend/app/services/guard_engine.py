@@ -1419,7 +1419,7 @@ def run_keepalive():
                     continue
                 # 保活跟帖：复用该账户种子帖，或建一次（YR 素材 + 随机 AI 文案）→ object_story_id
                 from ..core.page_post import get_or_create_page_post
-                from ..core.ad_ops import pick_random_copy
+                from ..core.ad_ops import pick_random_copy, pick_cta
                 _rh, _rb = pick_random_copy(asset)
                 _ka_msg = _rb or "Follow us!"
                 if acc.keepalive_post_id:
@@ -1453,7 +1453,7 @@ def run_keepalive():
                 built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
                     "name": f"{prefix} Creative", "object_story_id": post_id,
-                    "call_to_action": json.dumps({"type": "LIKE_PAGE", "value": {"link": f"https://facebook.com/{page_id}"}}),
+                    "call_to_action": json.dumps({"type": pick_cta(_ka_msg, "OUTCOME_ENGAGEMENT"), "value": {"page": page_id}}),
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
