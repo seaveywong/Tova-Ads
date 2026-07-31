@@ -12,7 +12,7 @@ from typing import Optional
 from ..core.database import get_db, SessionLocal, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
-from ..core.fb_tokens import client_for_account
+from ..core.fb_tokens import client_for_account, client_for_account_page
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
 from ..core.ad_ops import deploy_one_account, ensure_image_hash_for_account, usd_to_fb_amount
@@ -209,6 +209,30 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     db.commit()
     bg.add_task(_run_deploy_job, job.id, user.tenant_id, t.id)
     return {"job_id": job.id, "total": len(body.items)}
+
+
+@router.get("/{tid}/reuse-eligible")
+def reuse_eligible_accounts(tid: int,
+                            user: CurrentUser = Depends(require_permission("ads.create")),
+                            db: Session = Depends(get_db)):
+    """跟帖模式：列令牌能管该帖主页的账户（部署抽屉预过滤用，权威判定）。
+    解析 reuse_post_ref({page}_{post}) → page_id；managed 账户候选池里有能管 page_id 的写令牌则可选。
+    多令牌同账户：扫整个候选池（不只绑定/priority最高），任一能管主页即算可用。"""
+    tpl = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not tpl:
+        raise HTTPException(404, "模板不存在")
+    ref = tpl.reuse_post_ref or ""
+    page_id = ref.split("_", 1)[0] if "_" in ref else (tpl.page_id or "")
+    if not page_id:
+        return {"page_id": "", "eligible": []}
+    accs = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).all()
+    cache: dict = {}  # cred_id → 能管 page? 跨账户复用（多账户共享令牌只查一次 FB）
+    eligible = [a.act_id for a in accs
+                if client_for_account_page(db, user.tenant_id, a.act_id, page_id, "write", cache)]
+    return {"page_id": page_id, "eligible": eligible}
 
 
 class PreflightIn(BaseModel):
@@ -500,9 +524,17 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         for item in items:
             try:
                 item.status = "creating"; sdb.commit()
-                fb = client_for_account(sdb, tenant_id, item.act_id, "write")
-                if not fb:
-                    raise FbApiError(f"act_{item.act_id} 未绑定写令牌", 0)
+                # 跟帖(reuse)：选能管该帖主页的写令牌（多令牌场景扫候选池，不只 priority 最高）
+                is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
+                _page_for_token = (item.page_id or tpl.page_id or "") if is_reuse else ""
+                if is_reuse and _page_for_token:
+                    fb = client_for_account_page(sdb, tenant_id, item.act_id, _page_for_token, "write")
+                    if not fb:
+                        raise FbApiError(f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）", 0)
+                else:
+                    fb = client_for_account(sdb, tenant_id, item.act_id, "write")
+                    if not fb:
+                        raise FbApiError(f"act_{item.act_id} 未绑定写令牌", 0)
                 # per-account 图片 hash（FB hash 按账户）
                 image_hash = ""
                 if asset and asset.type == "image":
@@ -678,9 +710,17 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
         job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
         try:
             it.status = "creating"; sdb.commit()
-            fb = client_for_account(sdb, tenant_id, it.act_id, "write")
-            if not fb:
-                raise FbApiError(f"act_{it.act_id} 未绑定写令牌", 0)
+            # 跟帖(reuse)：选能管该帖主页的写令牌（与 _run_deploy_job 一致）
+            is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
+            _page_for_token = (it.page_id or tpl.page_id or "") if is_reuse else ""
+            if is_reuse and _page_for_token:
+                fb = client_for_account_page(sdb, tenant_id, it.act_id, _page_for_token, "write")
+                if not fb:
+                    raise FbApiError(f"act_{it.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）", 0)
+            else:
+                fb = client_for_account(sdb, tenant_id, it.act_id, "write")
+                if not fb:
+                    raise FbApiError(f"act_{it.act_id} 未绑定写令牌", 0)
             image_hash = ""
             if asset and asset.type == "image":
                 filepath = os.path.join(ASSET_DIR, asset.storage_key)

@@ -703,31 +703,26 @@ const preflight = async (tpl) => {
   preflighting.value = false
 }
 // 部署
-// 跟帖部署：按主页权限预过滤账户（帖属 page → 只能选令牌管该 page 的账户）
+// 跟帖部署：按主页权限预过滤账户（权威判定走后端 /reuse-eligible，扫候选池不只绑定令牌）
+const reuseEligibleActs = ref(new Set())
 const reuseDeployPage = computed(() => {
   if (deployTpl.value?.post_source !== 'reuse') return ''
   return (deployTpl.value?.reuse_post_ref || '').split('_')[0] || ''  // {page}_{post} → page
 })
 const accManagesReusePage = (actId) => {
-  const pg = reuseDeployPage.value
-  if (!pg) return true  // 非跟帖模式不限制
-  return (accPages.value[actId] || []).some(p => String(p.id) === String(pg))
-}
-const preloadAccPagesForReuse = async () => {
-  const pg = reuseDeployPage.value
-  if (!pg) return
-  await Promise.all((accounts.value || [])
-    .filter(a => a.fb_credential_id && !accPages.value[a.act_id])
-    .map(async (a) => {
-      try { accPages.value[a.act_id] = await GET('/fb/credentials/' + a.fb_credential_id + '/pages').catch(() => []) || [] }
-      catch {}
-    }))
+  if (!reuseDeployPage.value) return true  // 非跟帖模式不限制
+  return reuseEligibleActs.value.has(actId)
 }
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
+  reuseEligibleActs.value = new Set()
   accLoading.value = true
   try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, t('launch.loadAccFail')) }
-  if (tpl.post_source === 'reuse') await preloadAccPagesForReuse()  // 预加载 pages 以判定主页权限
+  if (tpl.post_source === 'reuse' && tpl.id) {
+    // 后端权威判定：候选池里有能管该帖主页的写令牌的账户才可选（多令牌同账户也覆盖）
+    try { const r = await GET('/launch-templates/' + tpl.id + '/reuse-eligible'); reuseEligibleActs.value = new Set(r.eligible || []) }
+    catch (e) { showError(e, t('launch.loadAccFail')) }
+  }
   accLoading.value = false
 }
 const toggleAcc = async (id) => {

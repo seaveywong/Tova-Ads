@@ -134,6 +134,69 @@ def client_for_account(db: Session, tenant_id: int, act_id: str,
     return FbClient(decrypt(cred.access_token_enc)) if cred else None
 
 
+def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
+                              op_kind: str = "write") -> list[FbCredential]:
+    """账户的 op_kind 候选令牌，按优先级序（pool → bound → tenant-wide 兜底），去重。
+    主页感知选择扫描用（返全序，不止选一个）。"""
+    from ..models.fb import AccountFbCredential
+    acc = db.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id == act_id,
+    ).first()
+    ordered: list[FbCredential] = []
+    seen: set[int] = set()
+
+    def _add(c):
+        if c and c.id not in seen and _is_cred_available(c) and _op_ok(c, op_kind):
+            ordered.append(c); seen.add(c.id)
+
+    if acc:
+        for c in db.query(FbCredential).join(
+            AccountFbCredential, AccountFbCredential.fb_credential_id == FbCredential.id
+        ).filter(
+            AccountFbCredential.account_id == acc.id,
+            AccountFbCredential.status == "active",
+            FbCredential.status == "active",
+        ).order_by(AccountFbCredential.priority, FbCredential.id).all():
+            _add(c)
+        if acc.fb_credential_id:
+            _add(db.query(FbCredential).filter(FbCredential.id == acc.fb_credential_id).first())
+    for c in db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id, FbCredential.status == "active",
+    ).order_by(FbCredential.id).all():
+        _add(c)
+    return ordered
+
+
+def cred_for_account_page(db: Session, tenant_id: int, act_id: str, page_id: str,
+                          op_kind: str = "write",
+                          _cache: Optional[dict] = None) -> Optional[FbCredential]:
+    """选同时满足 op_kind 且能管 page_id 的 cred（跟帖 reuse 部署用）。
+    扫候选池 priority 序，返第一个 get_page_access_token(page_id)≠空的；无则 None。
+    _cache={cred_id:bool} 跨账户复用（多账户共享令牌时只查一次 FB）。"""
+    if not page_id:
+        return None
+    for c in _account_write_candidates(db, tenant_id, act_id, op_kind):
+        manages = _cache.get(c.id) if _cache is not None else None
+        if manages is None:
+            try:
+                manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id))
+            except Exception:
+                manages = False
+            if _cache is not None:
+                _cache[c.id] = manages
+        if manages:
+            return c
+    return None
+
+
+def client_for_account_page(db: Session, tenant_id: int, act_id: str, page_id: str,
+                            op_kind: str = "write",
+                            _cache: Optional[dict] = None) -> Optional[FbClient]:
+    """跟帖 reuse 部署：选能管 page_id 的写令牌 → FbClient。无则 None（调用方报清晰错）。"""
+    cred = cred_for_account_page(db, tenant_id, act_id, page_id, op_kind, _cache)
+    return FbClient(decrypt(cred.access_token_enc)) if cred else None
+
+
 def mark_cred_cooldown(db: Session, cred_id: int, minutes: int = 30,
                        status: str = "rate_limited") -> None:
     """标记 cred 冷却（巡检/操作遇限流时调，下轮 client_for_account 自动跳过）。"""
