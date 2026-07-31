@@ -16,6 +16,7 @@ const editing = ref(null)
 const form = ref({})
 const saving = ref(false)
 const editLevel = ref('campaign')  // 3 Tab: campaign / adset / ad
+const tplPages = ref([])  // 模板编辑器主页下拉选项（从 FB 拉）
 // Advantage+ 开关（对齐 FB Ads Manager 2025）
 const advantage_audience = ref(true)   // Advantage+ 受众（开=只设国家+AI扩展；关=手动定向）
 const advantage_creative = ref(true)   // Advantage+ 创意（开=FB自动生成文案变体/裁切；关=固定1套）
@@ -309,7 +310,8 @@ const onLandingChange = async () => {
     } catch {}
   }
 }
-onMounted(() => { load(); loadLandingPages(); loadFormMsgTemplates() })
+onMounted(() => { load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages() })
+const loadTplPages = async () => { try { const r = await GET('/fb/assets'); tplPages.value = r.pages || [] } catch {} }
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 // #2 dirty-check：编辑抽屉关闭前确认
@@ -808,6 +810,12 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.specialAdCategory') }}</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="t(s.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
+        <div class="row"><label>{{ t('launch.pageId') }}</label>
+          <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')">
+            <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
+          </el-select>
+          <span class="hint">{{ t('launch.pageIdHint') }}</span>
+        </div>
       </div>
 
       <!-- ② 广告组 -->
