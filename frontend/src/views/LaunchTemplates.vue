@@ -409,8 +409,31 @@ const blankForm = () => ({
   frequency_cap: 0,
   attribution_preset: '',
   daypart_enabled: false, daypart_cells: emptyGrid(), daypart_tz: '',
+  post_source: 'new', reuse_post_ref: '',
 })
 const objLabel = (v) => t(OBJECTIVES.find(o => o.v === v)?.l || v)
+
+// 跟帖 Post Picker
+const postPickerOpen = ref(false)
+const pickerPosts = ref([])
+const postPickerLoading = ref(false)
+const manualPostId = ref('')
+const openPostPicker = async () => {
+  if (!form.value.page_id) return ElMessage.warning(t('launch.postPickerNeedPage'))
+  postPickerOpen.value = true; postPickerLoading.value = true; pickerPosts.value = []; manualPostId.value = ''
+  try { const r = await GET(`/fb/pages/${form.value.page_id}/posts`); pickerPosts.value = r.posts || [] }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  postPickerLoading.value = false
+}
+const pickPost = (p) => { form.value.reuse_post_ref = p.id; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')) }
+const confirmManualPost = () => {
+  const raw = manualPostId.value.trim()
+  if (!raw) return
+  const m = raw.match(/(\d+_\d+)/) || raw.match(/(\d+)/)
+  form.value.reuse_post_ref = m ? (m[1].includes('_') ? m[1] : `${form.value.page_id}_${m[1]}`) : raw
+  postPickerOpen.value = false; ElMessage.success(t('launch.postSelected'))
+}
+const clearReusePost = () => { form.value.reuse_post_ref = '' }
 // 卡片完整性判断（列表用，不需打开编辑器）
 const _tplMissing = (tpl) => {
   const m = []
@@ -559,6 +582,7 @@ const saveTpl = async () => {
       lead_form_template_id: form.value.lead_form_template_id || 0,
       message_template_id: form.value.message_template_id || 0,
       beneficiary: form.value.beneficiary, payer: form.value.payer,
+      post_source: form.value.post_source, reuse_post_ref: form.value.reuse_post_ref,
     }
     // Advantage+ 设置 + 性能目标 + 版位 + 频次 合并进 advanced_config
     try {
@@ -917,6 +941,20 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <!-- ③ 广告 -->
       <div v-if="editLevel==='ad'" class="form">
+        <!-- 跟帖模式 segmented -->
+        <div class="post-source-seg">
+          <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="form.post_source='new'">{{ t('launch.postSourceNew') }}</button>
+          <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="form.post_source='reuse'">{{ t('launch.postSourceReuse') }}</button>
+        </div>
+        <!-- 跟帖锁卡 -->
+        <div v-if="form.post_source==='reuse'" class="reuse-box">
+          <div class="reuse-hint">🔒 {{ t('launch.lockHint') }}</div>
+          <div v-if="form.reuse_post_ref" class="reuse-selected">
+            <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
+            <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+          </div>
+          <button class="btn sm primary" @click="openPostPicker">{{ form.reuse_post_ref ? t('launch.changePost') : t('launch.selectPost') }}</button>
+        </div>
         <div class="row"><label>{{ t('launch.asset') }}</label>
           <div class="asset-pick">
             <div v-if="editingAsset" class="asset-chosen" @click="openPreview(editingAsset)" style="cursor:pointer">
@@ -1004,6 +1042,26 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
           <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
           <span class="picker-name">{{ a.name }}</span>
+        </div>
+      </div>
+    </el-drawer>
+
+    <!-- Post Picker（选已有主页帖 → 跟帖） -->
+    <el-drawer v-model="postPickerOpen" :title="t('launch.postPickerTitle')" direction="rtl" size="560px" append-to-body>
+      <div class="hint" style="margin-bottom:10px">{{ t('launch.postPickerHint') }}</div>
+      <div class="picker-grid" v-loading="postPickerLoading">
+        <div v-for="p in pickerPosts" :key="p.id" class="picker-card" @click="pickPost(p)">
+          <img v-if="p.picture" :src="p.picture" class="picker-thumb" />
+          <div v-else class="picker-thumb picker-no-img">{{ t('launch.noImage') }}</div>
+          <span class="picker-name">{{ (p.message||'').slice(0,60) || p.id }}</span>
+        </div>
+        <div v-if="!pickerPosts.length && !postPickerLoading" class="drawer-empty">{{ t('launch.noPosts') }}</div>
+      </div>
+      <div class="manual-post">
+        <div class="hint" style="margin:12px 0 6px">{{ t('launch.manualPostId') }}</div>
+        <div style="display:flex;gap:8px">
+          <input v-model="manualPostId" class="inp" :placeholder="t('launch.manualPostPh')" />
+          <button class="btn sm primary" @click="confirmManualPost">{{ t('common.confirm') }}</button>
         </div>
       </div>
     </el-drawer>
@@ -1225,6 +1283,15 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .picker-card:hover{border-color:var(--ac)}
 .picker-thumb{width:100%;height:90px;object-fit:cover}
 .picker-name{display:block;font-size:11px;color:var(--t2);padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.post-source-seg{display:flex;gap:2px;background:var(--bg3);border-radius:7px;padding:2px;margin-bottom:12px}
+.ps-btn{flex:1;padding:7px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:5px;cursor:pointer;font-family:inherit}
+.ps-btn.on{background:var(--ac);color:#fff}
+.reuse-box{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.reuse-hint{font-size:12px;color:var(--ac);font-weight:500}
+.reuse-selected{display:flex;align-items:center;gap:8px}
+.reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
+.manual-post{border-top:1px solid var(--bd);margin-top:12px;padding-top:8px}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}

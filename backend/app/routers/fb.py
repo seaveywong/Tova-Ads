@@ -354,6 +354,47 @@ def list_credential_pages(
             for p in pages]
 
 
+@router.get("/pages/{page_id}/posts")
+def list_page_posts(
+    page_id: str,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """列主页已发帖（用 page token 拉 published_posts）。供跟帖 Post Picker 选帖。"""
+    from ..core.fb_tokens import iter_tenant_clients
+    page_token = ""
+    for _cred, fb in iter_tenant_clients(db, user.tenant_id):
+        try:
+            page_token = fb.get_page_access_token(page_id)
+            if page_token:
+                break
+        except Exception:
+            continue
+    if not page_token:
+        raise HTTPException(400, "拿不到主页 token（令牌不管该主页或缺 pages_manage_posts）")
+    pfb = FbClient(page_token)
+    try:
+        posts = pfb.get_paged(f"{page_id}/published_posts", {
+            "fields": "id,message,attachments{media_type,media{src}},created_time,permalink_url",
+        })
+    except FbApiError as e:
+        raise HTTPException(400, e.friendly)
+    out = []
+    for p in posts:
+        atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+        picture = ""
+        if atts and isinstance(atts[0], dict):
+            picture = (atts[0].get("media") or {}).get("src", "")
+        out.append({
+            "id": p.get("id", ""),
+            "message": (p.get("message") or "")[:200],
+            "picture": picture,
+            "created_time": p.get("created_time", ""),
+            "permalink_url": p.get("permalink_url", ""),
+        })
+    return {"posts": out}
+
+
 @router.get("/credentials/{cred_id}/pixels")
 def list_credential_pixels(
     cred_id: int,
