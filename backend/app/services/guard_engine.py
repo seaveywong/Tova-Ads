@@ -1425,7 +1425,7 @@ def run_keepalive():
                 if acc.keepalive_post_id:
                     post_id = acc.keepalive_post_id
                 else:
-                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, _ka_msg, "", asset.public_url)
+                    post_id = get_or_create_page_post(db, fb, acc.tenant_id, page_id, asset.id, _ka_msg, f"https://facebook.com/{page_id}", asset.public_url)
                     acc.keepalive_post_id = post_id
                     db.commit()
 
