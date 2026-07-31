@@ -38,8 +38,8 @@ def get_or_create_page_post(db, fb: FbClient, tenant_id: int, page_id: str,
         raise FbApiError(f"拿不到主页 {page_id} 的 access token（令牌不管该页或缺 pages_manage_posts）", 0)
     pfb = FbClient(page_token)
     if link:
-        # 链接帖（投放/购物：落地页 + 图 + 文案）
-        r = pfb.post(f"{page_id}/feed", {"message": message or "", "link": link, "picture": image_url})
+        # 链接帖（投放/保活：链接 + 文案；picture 在 /feed 会 invalid_param → 不传，FB 用链接 OG 图）
+        r = pfb.post(f"{page_id}/feed", {"message": message or "", "link": link})
         post_id = r.get("id")
     else:
         # 照片帖（保活 Page Like：图 + 文案）
