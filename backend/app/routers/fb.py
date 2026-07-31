@@ -376,6 +376,7 @@ def list_page_posts(
     try:
         posts = pfb.get_paged(f"{page_id}/published_posts", {
             "fields": "id,message,attachments{media_type,media{src}},created_time,permalink_url",
+            "limit": 100,  # published_posts FB 上限 100（get_paged 默认 200 会 #100）
         })
     except FbApiError as e:
         raise HTTPException(400, e.friendly)

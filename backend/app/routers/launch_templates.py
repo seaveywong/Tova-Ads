@@ -458,9 +458,14 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) 
 
 
 def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page_id: str, body: str = "") -> str:
-    """dev app 走 object_story_id：建/复用主页帖 → 返 page_post_id。
-    standard app（access_level=standard）返空（deploy_one_account 走 object_story_spec）。
-    跟帖(reuse+reuse_post_ref)直接引用；否则建帖(link=落地页, 图=素材, 文案=body)。"""
+    """返 page_post_id 供 deploy_one_account 走 object_story_id（引用主页帖）。
+    - 跟帖(reuse + reuse_post_ref)：直接引用已存在帖，object_story_id。
+      引用已存在帖不建新帖，不依赖 dev 模式——Live/standard App 也可用（已冒烟验证 creative 建成）。
+    - 新建帖(dev app only)：建主页帖拿 post_id；standard App 建 new post 撞 code3 → 返空走 object_story_spec。"""
+    # 1) 跟帖复用：引用已存在帖（object_story_id），前置——不依赖 dev 模式
+    if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref and page_id:
+        return tpl.reuse_post_ref
+    # 2) 新建帖路径仅 dev 模式（standard 建 new post 撞 code3）
     from ..routers.fb_apps import FbApp
     from ..core.page_post import get_or_create_page_post
     app = sdb.query(FbApp).filter(FbApp.tenant_id == tenant_id, FbApp.status == "active").first()
@@ -470,8 +475,6 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
         return ""
     if not (page_id and asset and asset.type == "image"):
         return ""
-    if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:
-        return tpl.reuse_post_ref
     return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, body or tpl.body or "", tpl.landing_url or "", asset.public_url or "")
 
 

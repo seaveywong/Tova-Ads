@@ -132,7 +132,8 @@ class FbClient:
         """
         from urllib.parse import urlparse, parse_qs
         base = dict(params or {})
-        base["limit"] = limit
+        if "limit" not in base:
+            base["limit"] = limit  # 调用方未指定才用默认；部分端点(published_posts/posts/feed)FB 上限 100，默认 200 会 #100 报错
         all_items: list[dict] = []
         after = None
         while len(all_items) < max_total:
