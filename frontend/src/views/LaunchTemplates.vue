@@ -443,19 +443,25 @@ const openPostPicker = async () => {
   postPickerLoading.value = false
 }
 const pickPost = (p) => { form.value.reuse_post_ref = p.id; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')) }
-const confirmManualPost = () => {
+const postResolving = ref(false)
+const confirmManualPost = async () => {
   const raw = manualPostId.value.trim()
   if (!raw) return
   // 已是 {page}_{post} 格式 → 直接用
   const m1 = raw.match(/(\d+_\d+)/)
   if (m1) { form.value.reuse_post_ref = m1[1]; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')); return }
-  // FB URL → 提取最后一段数字作 post_id
-  const m2 = raw.match(/(\d{10,})/)
-  if (m2 && form.value.page_id) {
-    form.value.reuse_post_ref = `${form.value.page_id}_${m2[1]}`
-    postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')); return
+  // 裸 ID / URL → 后端解析（本地 ads_cache 优先，FB 兜底）自动匹配主页
+  postResolving.value = true
+  try {
+    const r = await POST('/fb/resolve-post', { q: raw })
+    form.value.reuse_post_ref = r.post_id
+    if (r.page_id) form.value.page_id = r.page_id  // 自动回填主页
+    postPickerOpen.value = false
+    ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
+  } catch (e) {
+    showError(e, t('launch.resolvePostFail'))
   }
-  ElMessage.warning(t('launch.manualPostNeedPage'))
+  postResolving.value = false
 }
 const clearReusePost = () => { form.value.reuse_post_ref = '' }
 // 卡片完整性判断（列表用，不需打开编辑器）
@@ -1111,8 +1117,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       <div class="manual-post">
         <div class="hint" style="margin:12px 0 6px">{{ t('launch.manualPostId') }}</div>
         <div style="display:flex;gap:8px">
-          <input v-model="manualPostId" class="inp" :placeholder="t('launch.manualPostPh')" />
-          <button class="btn sm primary" @click="confirmManualPost">{{ t('common.confirm') }}</button>
+          <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
+          <button class="btn sm primary" :disabled="postResolving" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('common.confirm') }}</button>
         </div>
       </div>
     </el-drawer>

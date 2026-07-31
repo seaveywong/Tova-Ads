@@ -396,7 +396,77 @@ def list_page_posts(
     return {"posts": out}
 
 
-@router.get("/credentials/{cred_id}/pixels")
+class ResolvePostIn(BaseModel):
+    q: str
+
+
+def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
+    """本地 ads_cache 反查：帖子号后缀匹配 ad 的 effective_object_story_id。零 FB 调用，秒回。
+    多数跟帖场景（帖已铺过广告）走这里。返 {page_id, post_id, source} 或 None。"""
+    from ..models.ads_cache import AdsCache
+    for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
+        try:
+            ads = json.loads(row.ads_json or "[]")
+        except Exception:
+            continue
+        for ad in ads:
+            cr = ad.get("creative")
+            sid = ""
+            if isinstance(cr, dict):
+                sid = cr.get("effective_object_story_id") or ""
+                if not sid and isinstance(cr.get("data"), list) and cr["data"]:
+                    sid = (cr["data"][0] or {}).get("effective_object_story_id") or ""
+            # sid 形如 {page}_{post}；匹配整串或末段 post 号
+            if sid and (sid == post_num or (sid.split("_")[-1] == post_num if "_" in sid else False)):
+                page_id = sid.split("_", 1)[0] if "_" in sid else ""
+                return {"page_id": page_id, "post_id": sid, "source": "local"}
+    return None
+
+
+@router.post("/resolve-post")
+def resolve_post(body: ResolvePostIn,
+                 user: CurrentUser = Depends(require_permission("ads.create")),
+                 db: Session = Depends(get_db)):
+    """帖子 ID/URL → 主页 + 完整 post_id。供跟帖 Post Picker 手动输入：裸帖子号/URL 自动匹配主页。
+    顺序：完整 {page}_{post} 直接拆 → 本地 ads_cache 反查（零 FB）→ FB 遍历令牌兜底。"""
+    import re
+    from ..core.fb_tokens import iter_tenant_clients
+    q = (body.q or "").strip()
+    if not q:
+        raise HTTPException(400, "空")
+    # 1. 完整 {page}_{post} → 直接拆
+    m = re.search(r"(\d+_\d+)", q)
+    if m:
+        full = m.group(1)
+        return {"page_id": full.split("_", 1)[0], "post_id": full, "source": "full"}
+    # 2. 裸 post 号 / URL → 提取最长数字串
+    m2 = re.search(r"(\d{10,})", q)
+    if not m2:
+        raise HTTPException(400, "无法识别帖子 ID")
+    post_num = m2.group(1)
+    # 2a. 本地 ads_cache 反查（用户的点：本地已有帖子→主页映射）
+    hit = _local_resolve_post(db, user.tenant_id, post_num)
+    if hit:
+        return hit
+    # 2b. FB 兜底：遍历令牌 GET /{post_num}（管该帖主页的令牌能查到）
+    for _cred, fb in iter_tenant_clients(db, user.tenant_id):
+        try:
+            p = fb.get(post_num, {"fields": "id,from,message,attachments{media{src}},permalink_url"})
+        except Exception:
+            continue
+        full = p.get("id", "")
+        frm = p.get("from") or {}
+        page_id = str(frm.get("id") or ("")) or (full.split("_", 1)[0] if "_" in full else "")
+        if full and page_id:
+            atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+            picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+            return {"page_id": page_id, "post_id": full, "source": "fb",
+                    "message": (p.get("message") or "")[:200], "picture": picture,
+                    "permalink_url": p.get("permalink_url", "")}
+    raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
+
+
+
 def list_credential_pixels(
     cred_id: int,
     user: CurrentUser = Depends(require_permission("ads.read")),
