@@ -684,6 +684,22 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
+            # 与 _run_deploy_job 保持一致：表单模板 page-aware 解析 + AI 消息兜底（重试要等价于全新部署，否则 LEADS/ENGAGEMENT 重试拿到错误/缺失的 form/message）
+            lead_form_id = ""
+            if tpl.objective == "OUTCOME_LEADS" and _page_id:
+                try:
+                    lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id, tpl.landing_url or "")
+                except Exception:
+                    pass
+            message_template = tpl.message_template or ""
+            if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT" and asset:
+                try:
+                    ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                    bodies = ai_copy.get("bodies", [])
+                    if bodies:
+                        message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
+                except Exception:
+                    pass
             from ..core.ad_ops import pick_random_copy
             _rh, _rb = pick_random_copy(asset)
             _headline = _rh or (tpl.headline or "")
@@ -703,7 +719,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 destination_type_override=tpl.destination_type or "",
                 page_post_id=page_post_id,
                 advanced_config=advanced,
-                lead_form_id=tpl.lead_form_id or "", message_template=tpl.message_template or "",
+                lead_form_id=lead_form_id, message_template=message_template,
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.page_post_id = r.get("page_post_id") or page_post_id

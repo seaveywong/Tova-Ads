@@ -467,7 +467,7 @@ const openEdit = async (tpl) => {
   // 从 advanced_config 恢复 Advantage+ / 版位 / 频次 / CPA（P0-3/P0-4 fix）
   if (tpl.advanced_config) {
     try {
-      const adv = JSON.parse(t.advanced_config)
+      const adv = JSON.parse(tpl.advanced_config)
       advantage_creative.value = !!adv.is_dynamic_creative
       if (adv.targeting) {
         const tg = adv.targeting
