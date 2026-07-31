@@ -336,7 +336,7 @@ const copyUrl = (slug) => {
   navigator.clipboard?.writeText(url)
   // 引导：说明 {{ad.id}} 占位符——FB 广告层级 URL 参数会自动替换成实际广告 ID，用于子码自动绑定
   ElMessage({
-    message: t('landing.copiedHtml', { url: _esc(url) }),
+    message: t('landing.copiedHtml', { url: _esc(url), macro: '{{ad.id}}' }),
     dangerouslyUseHTMLString: true, type: 'success', duration: 6000,
   })
 }
