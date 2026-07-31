@@ -156,7 +156,10 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     )
     if page_post_id:
         # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id
-        cr = fb.post(f"{act}/adcreatives", {"name": f"{name_prefix} creative", "object_story_id": page_post_id})
+        cr = fb.post(f"{act}/adcreatives", {
+            "name": f"{name_prefix} creative", "object_story_id": page_post_id,
+            **({"call_to_action": json.dumps({"type": cta_type, "value": {"link": effective_url or f"https://facebook.com/{page_id}"}})} if cta_type else {}),
+        })
         creative_id = cr.get("id")
         if not creative_id:
             raise FbApiError(f"建 creative(object_story_id) 未返回 id：{str(cr)[:200]}", 0)

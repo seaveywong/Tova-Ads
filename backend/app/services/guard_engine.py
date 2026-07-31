@@ -1453,6 +1453,7 @@ def run_keepalive():
                 built.append(adset_id)
                 creative = fb.post(f"act_{acc.act_id}/adcreatives", {
                     "name": f"{prefix} Creative", "object_story_id": post_id,
+                    "call_to_action": json.dumps({"type": "LIKE_PAGE", "value": {"link": f"https://facebook.com/{page_id}"}}),
                 })
                 creative_id = creative.get("id")
                 if not creative_id:
