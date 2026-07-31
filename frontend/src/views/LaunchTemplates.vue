@@ -1088,6 +1088,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
       <div class="d">{{ t('launch.deploySubtitle') }}</div>
+      <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">⚠ {{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
       <div class="deploy-search-row">
         <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
@@ -1303,6 +1304,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
 .manual-post{border-top:1px solid var(--bd);margin-top:12px;padding-top:8px}
+.deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
+.reuse-need-page{font-size:12px;color:var(--warning);display:flex;align-items:center;gap:6px}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
