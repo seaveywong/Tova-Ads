@@ -423,47 +423,73 @@ def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
     return None
 
 
+def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
+    """GET /{post_id} 取文案/图/链接（用能访问该帖主页的令牌）。供跟帖预览展示。无权访问→空 dict。"""
+    from ..core.fb_tokens import iter_tenant_clients
+    for _cred, fb in iter_tenant_clients(db, tenant_id):
+        try:
+            p = fb.get(post_id, {"fields": "id,message,attachments{media{src}},permalink_url"})
+        except Exception:
+            continue
+        atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+        picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+        return {"message": (p.get("message") or "")[:300], "picture": picture,
+                "permalink_url": p.get("permalink_url", "")}
+    return {}
+
+
 @router.post("/resolve-post")
 def resolve_post(body: ResolvePostIn,
                  user: CurrentUser = Depends(require_permission("ads.create")),
                  db: Session = Depends(get_db)):
-    """帖子 ID/URL → 主页 + 完整 post_id。供跟帖 Post Picker 手动输入：裸帖子号/URL 自动匹配主页。
-    顺序：完整 {page}_{post} 直接拆 → 本地 ads_cache 反查（零 FB）→ FB 遍历令牌兜底。"""
+    """帖子 ID/URL → 主页 + 完整 post_id + 内容预览(文案/图/链接)。供跟帖手动输入。
+    顺序：完整 {page}_{post} 直接拆 → 本地 ads_cache 反查 → FB 遍历令牌兜底。
+    统一返回 {page_id, post_id, source, message, picture, permalink_url}（内容尽力取，无权访问则空）。"""
     import re
-    from ..core.fb_tokens import iter_tenant_clients
     q = (body.q or "").strip()
     if not q:
         raise HTTPException(400, "空")
+    page_id = post_id = source = ""
+    content = {}
     # 1. 完整 {page}_{post} → 直接拆
     m = re.search(r"(\d+_\d+)", q)
     if m:
-        full = m.group(1)
-        return {"page_id": full.split("_", 1)[0], "post_id": full, "source": "full"}
-    # 2. 裸 post 号 / URL → 提取最长数字串
-    m2 = re.search(r"(\d{10,})", q)
-    if not m2:
-        raise HTTPException(400, "无法识别帖子 ID")
-    post_num = m2.group(1)
-    # 2a. 本地 ads_cache 反查（用户的点：本地已有帖子→主页映射）
-    hit = _local_resolve_post(db, user.tenant_id, post_num)
-    if hit:
-        return hit
-    # 2b. FB 兜底：遍历令牌 GET /{post_num}（管该帖主页的令牌能查到）
-    for _cred, fb in iter_tenant_clients(db, user.tenant_id):
-        try:
-            p = fb.get(post_num, {"fields": "id,from,message,attachments{media{src}},permalink_url"})
-        except Exception:
-            continue
-        full = p.get("id", "")
-        frm = p.get("from") or {}
-        page_id = str(frm.get("id") or ("")) or (full.split("_", 1)[0] if "_" in full else "")
-        if full and page_id:
-            atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
-            picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
-            return {"page_id": page_id, "post_id": full, "source": "fb",
-                    "message": (p.get("message") or "")[:200], "picture": picture,
-                    "permalink_url": p.get("permalink_url", "")}
-    raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
+        post_id = m.group(1); page_id = post_id.split("_", 1)[0]; source = "full"
+    else:
+        # 2. 裸 post 号 / URL → 提取最长数字串
+        m2 = re.search(r"(\d{10,})", q)
+        if not m2:
+            raise HTTPException(400, "无法识别帖子 ID")
+        post_num = m2.group(1)
+        hit = _local_resolve_post(db, user.tenant_id, post_num)  # 2a. 本地 ads_cache 反查
+        if hit:
+            page_id, post_id, source = hit["page_id"], hit["post_id"], hit["source"]
+        else:
+            # 2b. FB 兜底：遍历令牌 GET /{post_num}
+            from ..core.fb_tokens import iter_tenant_clients
+            for _cred, fb in iter_tenant_clients(db, user.tenant_id):
+                try:
+                    p = fb.get(post_num, {"fields": "id,from,message,attachments{media{src}},permalink_url"})
+                except Exception:
+                    continue
+                full = p.get("id", "")
+                frm = p.get("from") or {}
+                pid = str(frm.get("id") or ("")) or (full.split("_", 1)[0] if "_" in full else "")
+                if full and pid:
+                    page_id, post_id, source = pid, full, "fb"
+                    atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+                    picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+                    content = {"message": (p.get("message") or "")[:300], "picture": picture,
+                               "permalink_url": p.get("permalink_url", "")}
+                    break
+            if not post_id:
+                raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
+    # full/local → 补内容预览（FB 兜底已带 content）；无权访问则空字段
+    if source != "fb":
+        content = _fetch_post_content(db, user.tenant_id, post_id)
+    return {"page_id": page_id, "post_id": post_id, "source": source,
+            "message": content.get("message", ""), "picture": content.get("picture", ""),
+            "permalink_url": content.get("permalink_url", "")}
 
 
 

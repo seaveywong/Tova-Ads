@@ -321,6 +321,7 @@ onMounted(() => {
     form.value.post_source = 'reuse'
     form.value.reuse_post_ref = String(rp)
     form.value.page_id = String(rp).split('_')[0]  // {page}_{post} → page
+    fetchReusePreview(String(rp))  // 拉帖子内容预览
     editLevel.value = 'ad'  // 直达广告 Tab 显示跟帖锁卡
     snapshotForm()  // 重新快照（含预填值，避免一开就标 dirty）
     ElMessage.info(t('launch.reusePrefilled'))
@@ -462,14 +463,14 @@ const pickPost = (p) => {
 const confirmManualPost = async () => {
   const raw = manualPostId.value.trim()
   if (!raw) return
-  // 完整 {page}_{post} → 直接用
+  // 完整 {page}_{post} → 直接用（再拉内容预览）
   const m1 = raw.match(/(\d+_\d+)/)
-  if (m1) { _setReusePost(m1[1], m1[1].split('_')[0], null); ElMessage.success(t('launch.postSelected')); return }
-  // 裸 ID / URL → 后端解析（本地 ads_cache 优先，FB 兜底）自动匹配主页
+  if (m1) { _setReusePost(m1[1], m1[1].split('_')[0], null); fetchReusePreview(m1[1]); ElMessage.success(t('launch.postSelected')); return }
+  // 裸 ID / URL → 后端解析（本地 ads_cache 优先，FB 兜底）自动匹配主页 + 内容预览
   postResolving.value = true
   try {
     const r = await POST('/fb/resolve-post', { q: raw })
-    _setReusePost(r.post_id, r.page_id, r.source === 'fb' ? { message: r.message, picture: r.picture, permalink: r.permalink_url } : null)
+    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url })
     ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
   } catch (e) {
     // 识别不出 → 揭示手选主页，让用户手动拼 {page}_{post}
@@ -479,6 +480,14 @@ const confirmManualPost = async () => {
   }
   postResolving.value = false
 }
+// 拉帖子内容预览（编辑已存跟帖模板/手选主页拼 ID 时用，让用户看到文案/图）
+const fetchReusePreview = async (postId) => {
+  if (!postId) return
+  try {
+    const r = await POST('/fb/resolve-post', { q: postId })
+    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url }
+  } catch { /* 取不到就只显 ID，不阻断 */ }
+}
 // 手选主页 + 裸帖子号 → 拼 {page}_{post}
 const confirmManualPostWithPage = () => {
   const raw = manualPostId.value.trim(); const pg = manualPageForPost.value
@@ -486,6 +495,7 @@ const confirmManualPostWithPage = () => {
   const m = raw.match(/(\d{10,})/)
   if (!m) return ElMessage.warning(t('launch.resolvePostFail'))
   _setReusePost(`${pg}_${m[1]}`, pg, null)
+  fetchReusePreview(`${pg}_${m[1]}`)
   ElMessage.success(t('launch.postSelected'))
 }
 const setPostSource = (src) => {
@@ -555,6 +565,12 @@ const openEdit = async (tpl) => {
   // post_source 兜底（旧模板无此字段 → 默认 new）
   if (!form.value.post_source) form.value.post_source = 'new'
   if (!form.value.reuse_post_ref) form.value.reuse_post_ref = ''
+  // 跟帖模板：拉帖子内容预览（文案/图），让用户看到选的是啥
+  if (form.value.post_source === 'reuse' && form.value.reuse_post_ref) {
+    reusePostPreview.value = null; fetchReusePreview(form.value.reuse_post_ref)
+  } else {
+    reusePostPreview.value = null
+  }
   editingAsset.value = null
   if (tpl.asset_id) { try { editingAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   // 已绑落地页 → 预拉子码（填充子码下拉）
@@ -866,10 +882,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </el-select>
           <button class="btn sm primary" :disabled="!manualPageForPost" @click="confirmManualPostWithPage">{{ t('common.confirm') }}</button>
         </div>
-        <!-- 已选帖 -->
-        <div v-if="form.reuse_post_ref" class="reuse-selected">
-          📌 <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
-          <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+        <!-- 已选帖 + 内容预览（让用户看到选的是啥） -->
+        <div v-if="form.reuse_post_ref" class="reuse-selected-block">
+          <div class="reuse-selected">
+            📌 <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
+            <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+          </div>
+          <div v-if="reusePostPreview" class="reuse-mini-preview">
+            <img v-if="reusePostPreview.picture" :src="reusePostPreview.picture" class="reuse-mini-thumb" />
+            <div class="reuse-mini-text">{{ (reusePostPreview.message || '').slice(0,120) || t('launch.noPostText') }}</div>
+          </div>
+          <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
         </div>
         <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
       </div>
@@ -1392,12 +1415,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .picker-card:hover{border-color:var(--ac)}
 .picker-thumb{width:100%;height:90px;object-fit:cover}
 .picker-name{display:block;font-size:11px;color:var(--t2);padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.post-source-seg{display:flex;gap:2px;background:var(--bg3);border-radius:7px;padding:2px;margin-bottom:12px}
-.ps-btn{flex:1;padding:7px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:5px;cursor:pointer;font-family:inherit}
-.ps-btn.on{background:var(--ac);color:#fff}
+.post-mode-seg{display:flex;gap:0;border-bottom:1px solid var(--bd);margin-bottom:14px}
+.ps-btn{flex:none;padding:9px 18px;border:none;background:transparent;color:var(--t3);font-size:14px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;transition:color .15s}
+.ps-btn:hover{color:var(--t2)}
+.ps-btn.on{color:var(--ac);border-bottom-color:var(--ac);font-weight:600}
 .reuse-box{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .reuse-hint{font-size:12px;color:var(--ac);font-weight:500}
 .reuse-selected{display:flex;align-items:center;gap:8px}
+.reuse-selected-block{display:flex;flex-direction:column;gap:6px}
+.reuse-mini-preview{display:flex;gap:8px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:8px}
+.reuse-mini-thumb{width:56px;height:56px;object-fit:cover;border-radius:4px;flex:none}
+.reuse-mini-text{font-size:12px;color:var(--t2);line-height:1.4;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
 .manual-post{border-top:1px solid var(--bd);margin-top:12px;padding-top:8px}
