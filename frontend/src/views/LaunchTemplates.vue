@@ -439,7 +439,11 @@ const pickerPosts = ref([])
 const postPickerLoading = ref(false)
 const manualPostId = ref('')
 const postResolving = ref(false)
-const reusePostPreview = ref(null)       // {message, picture, permalink} 已选帖预览（FB 源才有）
+const reusePostPreview = ref(null)       // {message, picture, permalink} 已选帖预览
+const reusePreviewAvailable = computed(() => {  // 内容是否真的取到（区分"无内容"vs"取不到"）
+  const p = reusePostPreview.value
+  return !!(p && (p.message || p.picture || p.permalink))
+})
 const reuseNeedManualPage = ref(false)   // 识别失败→揭示手选主页
 const manualPageForPost = ref('')        // 手选主页（兜底）
 const openPostPicker = async () => {
@@ -888,10 +892,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             📌 <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
             <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
           </div>
-          <div v-if="reusePostPreview" class="reuse-mini-preview">
+          <div v-if="reusePreviewAvailable" class="reuse-mini-preview">
             <img v-if="reusePostPreview.picture" :src="reusePostPreview.picture" class="reuse-mini-thumb" />
             <div class="reuse-mini-text">{{ (reusePostPreview.message || '').slice(0,120) || t('launch.noPostText') }}</div>
           </div>
+          <div v-else-if="reusePostPreview" class="hint">⚠ {{ t('launch.postContentUnavailable') }}</div>
           <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
         </div>
         <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
@@ -1083,8 +1088,9 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div class="reuse-preview-banner">🔒 {{ t('launch.reuseLockedHint') }}</div>
           <div v-if="form.reuse_post_ref" class="post-readonly-preview">
             <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="post-preview-thumb" />
-            <div v-else class="post-preview-noimg">{{ t('launch.noImage') }}</div>
-            <div class="post-preview-text">{{ reusePostPreview?.message || form.reuse_post_ref }}</div>
+            <div v-else-if="reusePreviewAvailable" class="post-preview-noimg">{{ t('launch.noImage') }}</div>
+            <div v-if="reusePreviewAvailable" class="post-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
+            <div v-else class="post-preview-text muted">⚠ {{ t('launch.postContentUnavailable') }}<br><code>{{ form.reuse_post_ref }}</code></div>
             <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="post-preview-link">{{ t('launch.viewOnFb') }} →</a>
           </div>
           <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>

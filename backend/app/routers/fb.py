@@ -424,17 +424,44 @@ def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
 
 
 def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
-    """GET /{post_id} 取文案/图/链接（用能访问该帖主页的令牌）。供跟帖预览展示。无权访问→空 dict。"""
+    """取帖子内容(文案/图/链接)供跟帖预览。① page_posts 本地(系统建过的帖，含 message+asset 图)
+    ② FB published_posts 边(有机帖，用 page token——GET /{post_id} 节点对主页帖常权限不足，边才行)。
+    都取不到→空 dict（前端显"无内容"）。"""
+    from ..models.page_post import PagePost
+    from ..models.launch import Asset
     from ..core.fb_tokens import iter_tenant_clients
+    # ① 本地 page_posts（系统建的暗帖：有 message + asset 图）
+    pp = db.query(PagePost).filter(PagePost.post_id == post_id).first()
+    if pp:
+        picture = ""
+        if pp.asset_id:
+            a = db.query(Asset).filter(Asset.id == pp.asset_id).first()
+            if a and a.type == "image":
+                picture = a.public_url or ""
+        return {"message": pp.message or "", "picture": picture, "permalink_url": ""}
+    # ② FB published_posts 边（有机帖：page token 读边）
+    page_id = post_id.split("_")[0] if "_" in post_id else ""
+    if not page_id:
+        return {}
     for _cred, fb in iter_tenant_clients(db, tenant_id):
         try:
-            p = fb.get(post_id, {"fields": "id,message,attachments{media{src}},permalink_url"})
+            pt = fb.get_page_access_token(page_id)
+        except Exception:
+            pt = ""
+        if not pt:
+            continue
+        try:
+            posts = FbClient(pt).get_paged(f"{page_id}/published_posts",
+                                           {"fields": "id,message,attachments{media{src}},permalink_url", "limit": 100})
         except Exception:
             continue
-        atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
-        picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
-        return {"message": (p.get("message") or "")[:300], "picture": picture,
-                "permalink_url": p.get("permalink_url", "")}
+        for p in posts:
+            if str(p.get("id", "")) == str(post_id):
+                atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+                picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+                return {"message": (p.get("message") or "")[:300], "picture": picture,
+                        "permalink_url": p.get("permalink_url", "")}
+        break  # 该令牌管此主页但 published_posts 里没这条（暗帖/已删）→ 不再试别的令牌
     return {}
 
 
