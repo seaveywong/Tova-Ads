@@ -511,3 +511,52 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - `0e6fec6` feat(reuse): 帖子 ID/URL 自动匹配主页（本地 ads_cache 优先）
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[ux-clarity-bar]]
+
+---
+
+## 2026-08-01 跟帖 UX 重构（切换置顶+选帖卡+③只读）+ 实测撞 FB business 限制
+
+### 概述
+用户 UX 反馈：① [新建/跟帖]切换埋在③广告Tab太深、看不到在哪输入帖子ID；② 切换应置顶（系列之前）；③ 跟帖把固定内容（文案/链接）固化。要求查实跟帖可改/不可改边界（实测或 Agent），1/2/4 一起做。
+
+### 跟帖(object_story_id)可改/不可改 —— 实测+Agent 双确认
+- **冒烟（真建 creative）**：object_story_id 单独✓ / +CTA(SHOP_NOW/LIKE_PAGE/LEARN_MORE)✓ 都建成；object_story_spec 覆写文案 → FB 拒(code100 Invalid parameter)。
+- **Agent 查 FB v26.0 文档**：`call_to_action` 字段文档明确"existing **Instagram** post"——对复用 **FB 主页帖静默忽略**（请求不拒但 CTA/value.link 不生效，帖子自带链接/CTA 才是最终展示）。
+- **边界**：跟帖模式图/标题/文案/链接/CTA **全锁**（来自帖，FB 忽略覆写）；可配仅 creative.name(内部)/url_tags(往帖URL追加UTM)+①目标/预算+②受众/版位。
+- 据此 UX：跟帖 ③广告Tab **整块只读**（帖子预览），创意字段全隐藏。
+
+### 变更表
+| commit | 文件 | 变更 |
+|---|---|---|
+| `d314059` | LaunchTemplates.vue | (1) [新建/跟帖]segmented 移抽屉最顶；(2) 跟帖置顶选帖卡(input URL/ID/裸号→`/fb/resolve-post`自动识别主页；识别失败→揭示手选主页兜底拼`{page}_{post}`)；(3) ③广告Tab重构：跟帖整块只读(帖子图/文/FB链接预览)，新建帖原创意字段；validateTemplate 跟帖不要求 asset/落地页,要求 reuse_post_ref；(4) ①主页跟帖锁定；(5) Post Picker 去重复手动输入 |
+| `d314059` | launch.js | lockHint/reuseLockedHint 据实(用帖自带链接不走落地页/子码追踪)；新 key recognize/browsePosts/resolveFailManual/reuseCardHint/reusePreviewEmpty/viewOnFb/pageLockedByPost/fieldReusePost zh+en。sweep 0 THROW |
+
+### DB 迁移
+无。
+
+### 生产环境变更
+- 前端 build✓ 部署（`95c1fc3e`）。
+- 后端无改动（resolve-post/get_paged 等上一批已上线）。
+
+### 🔴 B/C 实测撞 FB business policy 限制（关键发现）
+跟帖端到端实测（deploy_one_account page_post_id 全链路）：
+- campaign 创建 ✓（active 账户，2/2 都能建 campaign）。
+- adcreative(object_story_id) ✓（早先冒烟）。
+- **ad 创建 ✗**：所有账户×主页组合报 `permission_denied`："This business account didn't comply with our Advertising Policies or other standards."
+- **结论**：用户 business account 被 FB policy 限制（非代码问题）。跟帖/保活/投放所有真建 ad 都受阻，**需用户在 FB 侧申诉/修复 business 资质**。代码层验证通过（FB 允许的环节都对）。详见 [[fb-business-policy-restriction]]。
+
+### D 债清扫 —— 无可执行项
+- 债 1（多 token .first() 7处）/债 2（token fallback）：2026-07-06 已修。
+- 债 3（系统事件 tenant_id=1）：当前单租户正确（id=1），仅多租户下需改，属设计决策待定。
+- 债 4（landing stub）：landing.py 已建满(600+行)，memory 过时。
+
+### 复审结论
+- **跟帖 UX 重构完成**（用户反馈三点全落地：切换置顶+选帖卡发现性+③只读边界据实）。i18n 干净。
+- **跟帖代码链路验证通过**（至 FB 允许的上限）。
+- **🔴 阻塞**：FB business policy 限制 → 跟帖/保活/投放实测都需用户先修复 FB business 资质。
+- **待用户**：① 硬刷验跟帖新UX；② FB 侧修 business 限制（解 B/C/投放实测）。
+
+### commit 列表
+- `d314059` feat(reuse): 跟帖UX重构——切换置顶+选帖卡+③只读(事实定边界)
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[fb-business-policy-restriction]] [[ux-clarity-bar]]
