@@ -344,10 +344,12 @@ const onEditBeforeClose = (done) => {
 const validationErrors = ref([])
 const validateTemplate = () => {
   const errs = []
+  const isReuse = form.value.post_source === 'reuse'
   if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
-  if (!form.value.asset_id && form.value.post_source !== 'reuse') errs.push(t('launch.fieldAssetAdTab'))
+  if (!isReuse && !form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
+  if (isReuse && !form.value.reuse_post_ref) errs.push(t('launch.fieldReusePost'))
   if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
-  if (!form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
+  if (!isReuse && !form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
     errs.push(t('launch.fieldLandingPickOrUrl'))
   return errs
 }
@@ -435,35 +437,62 @@ const postPickerOpen = ref(false)
 const pickerPosts = ref([])
 const postPickerLoading = ref(false)
 const manualPostId = ref('')
+const postResolving = ref(false)
+const reusePostPreview = ref(null)       // {message, picture, permalink} 已选帖预览（FB 源才有）
+const reuseNeedManualPage = ref(false)   // 识别失败→揭示手选主页
+const manualPageForPost = ref('')        // 手选主页（兜底）
 const openPostPicker = async () => {
   if (!form.value.page_id) return ElMessage.warning(t('launch.postPickerNeedPage'))
-  postPickerOpen.value = true; postPickerLoading.value = true; pickerPosts.value = []; manualPostId.value = ''
+  postPickerOpen.value = true; postPickerLoading.value = true; pickerPosts.value = []
   try { const r = await GET(`/fb/pages/${form.value.page_id}/posts`); pickerPosts.value = r.posts || [] }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   postPickerLoading.value = false
 }
-const pickPost = (p) => { form.value.reuse_post_ref = p.id; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')) }
-const postResolving = ref(false)
+const _setReusePost = (postId, pageId, preview) => {
+  form.value.reuse_post_ref = postId
+  if (pageId) form.value.page_id = pageId  // 自动/手选主页回填
+  reusePostPreview.value = preview || null
+  reuseNeedManualPage.value = false; manualPageForPost.value = ''
+}
+const pickPost = (p) => {
+  const pg = (p.id || '').includes('_') ? p.id.split('_')[0] : form.value.page_id
+  _setReusePost(p.id, pg, { message: p.message, picture: p.picture, permalink: p.permalink_url })
+  postPickerOpen.value = false; ElMessage.success(t('launch.postSelected'))
+}
 const confirmManualPost = async () => {
   const raw = manualPostId.value.trim()
   if (!raw) return
-  // 已是 {page}_{post} 格式 → 直接用
+  // 完整 {page}_{post} → 直接用
   const m1 = raw.match(/(\d+_\d+)/)
-  if (m1) { form.value.reuse_post_ref = m1[1]; postPickerOpen.value = false; ElMessage.success(t('launch.postSelected')); return }
+  if (m1) { _setReusePost(m1[1], m1[1].split('_')[0], null); ElMessage.success(t('launch.postSelected')); return }
   // 裸 ID / URL → 后端解析（本地 ads_cache 优先，FB 兜底）自动匹配主页
   postResolving.value = true
   try {
     const r = await POST('/fb/resolve-post', { q: raw })
-    form.value.reuse_post_ref = r.post_id
-    if (r.page_id) form.value.page_id = r.page_id  // 自动回填主页
-    postPickerOpen.value = false
+    _setReusePost(r.post_id, r.page_id, r.source === 'fb' ? { message: r.message, picture: r.picture, permalink: r.permalink_url } : null)
     ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
   } catch (e) {
-    showError(e, t('launch.resolvePostFail'))
+    // 识别不出 → 揭示手选主页，让用户手动拼 {page}_{post}
+    reuseNeedManualPage.value = true
+    manualPageForPost.value = form.value.page_id || ''
+    ElMessage.warning(t('launch.resolveFailManual'))
   }
   postResolving.value = false
 }
-const clearReusePost = () => { form.value.reuse_post_ref = '' }
+// 手选主页 + 裸帖子号 → 拼 {page}_{post}
+const confirmManualPostWithPage = () => {
+  const raw = manualPostId.value.trim(); const pg = manualPageForPost.value
+  if (!pg) return ElMessage.warning(t('launch.postPickerNeedPage'))
+  const m = raw.match(/(\d{10,})/)
+  if (!m) return ElMessage.warning(t('launch.resolvePostFail'))
+  _setReusePost(`${pg}_${m[1]}`, pg, null)
+  ElMessage.success(t('launch.postSelected'))
+}
+const setPostSource = (src) => {
+  form.value.post_source = src
+  if (src !== 'reuse') { reuseNeedManualPage.value = false; manualPageForPost.value = '' }
+}
+const clearReusePost = () => { form.value.reuse_post_ref = ''; reusePostPreview.value = null; reuseNeedManualPage.value = false }
 // 卡片完整性判断（列表用，不需打开编辑器）
 const _tplMissing = (tpl) => {
   const m = []
@@ -816,6 +845,35 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
     <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
+      <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶 -->
+      <div class="post-mode-seg">
+        <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">📝 {{ t('launch.postSourceNew') }}</button>
+        <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">📌 {{ t('launch.postSourceReuse') }}</button>
+      </div>
+      <!-- 跟帖：置顶选帖卡（解决"不知在哪输入帖子ID"的发现性） -->
+      <div v-if="form.post_source==='reuse'" class="reuse-select-card">
+        <div class="reuse-card-hint">{{ t('launch.reuseCardHint') }}</div>
+        <div class="reuse-input-row">
+          <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
+          <button class="btn sm primary" :disabled="postResolving || !manualPostId.trim()" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
+          <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
+        </div>
+        <!-- 识别失败 → 手选主页兜底 -->
+        <div v-if="reuseNeedManualPage" class="reuse-manual-page">
+          <span class="hint">⚠ {{ t('launch.resolveFailManual') }}</span>
+          <el-select v-model="manualPageForPost" filterable size="small" style="flex:1;min-width:160px" :placeholder="t('launch.pageIdPh')">
+            <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
+          </el-select>
+          <button class="btn sm primary" :disabled="!manualPageForPost" @click="confirmManualPostWithPage">{{ t('common.confirm') }}</button>
+        </div>
+        <!-- 已选帖 -->
+        <div v-if="form.reuse_post_ref" class="reuse-selected">
+          📌 <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
+          <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+        </div>
+        <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
+      </div>
+
       <div class="level-tabs">
         <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① {{ t('launch.levelCampaign') }}</button>
         <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ t('launch.levelAdSet') }}</button>
@@ -849,7 +907,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>{{ t('launch.specialAdCategory') }}</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="t(s.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
         <div class="row"><label>{{ t('launch.pageId') }}</label>
-          <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')">
+          <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="form.post_source==='reuse'" :title="form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
@@ -997,21 +1055,19 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <!-- ③ 广告 -->
       <div v-if="editLevel==='ad'" class="form">
-        <!-- 跟帖模式 segmented -->
-        <div class="post-source-seg">
-          <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="form.post_source='new'">{{ t('launch.postSourceNew') }}</button>
-          <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="form.post_source='reuse'">{{ t('launch.postSourceReuse') }}</button>
-        </div>
-        <!-- 跟帖锁卡 -->
-        <div v-if="form.post_source==='reuse'" class="reuse-box">
-          <div class="reuse-hint">🔒 {{ t('launch.lockHint') }}</div>
-          <div v-if="!form.page_id" class="reuse-need-page">⚠ {{ t('launch.postPickerNeedPage') }} <button class="btn sm ghost" @click="editLevel='campaign'">{{ t('launch.goSelectPage') }} →</button></div>
-          <div v-if="form.reuse_post_ref" class="reuse-selected">
-            <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
-            <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+        <!-- 跟帖：帖子内容只读预览（图/标题/文案/链接/CTA 全锁，来自帖子）-->
+        <template v-if="form.post_source==='reuse'">
+          <div class="reuse-preview-banner">🔒 {{ t('launch.reuseLockedHint') }}</div>
+          <div v-if="form.reuse_post_ref" class="post-readonly-preview">
+            <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="post-preview-thumb" />
+            <div v-else class="post-preview-noimg">{{ t('launch.noImage') }}</div>
+            <div class="post-preview-text">{{ reusePostPreview?.message || form.reuse_post_ref }}</div>
+            <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="post-preview-link">{{ t('launch.viewOnFb') }} →</a>
           </div>
-          <button class="btn sm primary" @click="openPostPicker">{{ form.reuse_post_ref ? t('launch.changePost') : t('launch.selectPost') }}</button>
-        </div>
+          <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
+        </template>
+        <!-- 新建帖：创意字段（asset/文案/CTA/落地页/子码）-->
+        <template v-else>
         <div class="row"><label>{{ t('launch.asset') }}</label>
           <div class="asset-pick">
             <div v-if="editingAsset" class="asset-chosen" @click="openPreview(editingAsset)" style="cursor:pointer">
@@ -1084,6 +1140,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="preview-link">{{ t('common.preview') }}</span>
           </div>
         </template>
+        </template>
       </div>
 
       <template #footer>
@@ -1113,13 +1170,6 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <span class="picker-name">{{ (p.message||'').slice(0,60) || p.id }}</span>
         </div>
         <div v-if="!pickerPosts.length && !postPickerLoading" class="drawer-empty">{{ t('launch.noPosts') }}</div>
-      </div>
-      <div class="manual-post">
-        <div class="hint" style="margin:12px 0 6px">{{ t('launch.manualPostId') }}</div>
-        <div style="display:flex;gap:8px">
-          <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
-          <button class="btn sm primary" :disabled="postResolving" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('common.confirm') }}</button>
-        </div>
       </div>
     </el-drawer>
 
@@ -1353,6 +1403,17 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .manual-post{border-top:1px solid var(--bd);margin-top:12px;padding-top:8px}
 .deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
 .reuse-need-page{font-size:12px;color:var(--warning);display:flex;align-items:center;gap:6px}
+.reuse-select-card{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.reuse-card-hint{font-size:12px;color:var(--t3);line-height:1.5}
+.reuse-input-row{display:flex;gap:6px}
+.reuse-input-row .inp{flex:1}
+.reuse-manual-page{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(255,159,10,.08);border:1px solid rgba(255,159,10,.25);border-radius:6px;padding:8px}
+.reuse-preview-banner{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--ac);line-height:1.6;margin-bottom:12px}
+.post-readonly-preview{display:flex;flex-direction:column;gap:8px;border:1px solid var(--bd);border-radius:8px;padding:12px;background:var(--bg2)}
+.post-preview-thumb{width:100%;max-height:200px;object-fit:cover;border-radius:6px}
+.post-preview-noimg{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:6px;color:var(--t3);font-size:12px}
+.post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
+.post-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
