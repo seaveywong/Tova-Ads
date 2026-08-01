@@ -424,12 +424,18 @@ def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
 
 
 def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
-    """取帖子内容(文案/图/链接)供跟帖预览。① page_posts 本地(系统建过的帖，含 message+asset 图)
-    ② FB published_posts 边(有机帖，用 page token——GET /{post_id} 节点对主页帖常权限不足，边才行)。
-    都取不到→空 dict（前端显"无内容"）。"""
+    """取帖子内容(文案/图/链接)供跟帖预览。
+    ① page_posts 本地(系统建过的帖，含 message+asset 图)
+    ② ads_cache creative.object_story_spec（暗帖——广告帖大多是暗帖，published_posts 读不到；
+       但同步广告时拉了 object_story_spec，含 link_data/video_data 的文案+图）
+    ③ FB published_posts 边(有机帖，page token——GET /{post_id} 节点对主页帖常权限不足，边才行)。
+    都取不到→空 dict（前端显"无法读取"）。"""
+    import json as _json
     from ..models.page_post import PagePost
     from ..models.launch import Asset
+    from ..models.ads_cache import AdsCache
     from ..core.fb_tokens import iter_tenant_clients
+    post_suffix = post_id.split("_")[-1] if "_" in post_id else post_id
     # ① 本地 page_posts（系统建的暗帖：有 message + asset 图）
     pp = db.query(PagePost).filter(PagePost.post_id == post_id).first()
     if pp:
@@ -439,7 +445,26 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
             if a and a.type == "image":
                 picture = a.public_url or ""
         return {"message": pp.message or "", "picture": picture, "permalink_url": ""}
-    # ② FB published_posts 边（有机帖：page token 读边）
+    # ② ads_cache object_story_spec（暗帖：广告 creative 的内容，跟帖主场景）
+    for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
+        try:
+            ads = _json.loads(row.ads_json or "[]")
+        except Exception:
+            continue
+        for ad in ads:
+            cr = ad.get("creative") or {}
+            sid = cr.get("effective_object_story_id") or ""
+            spec = cr.get("object_story_spec")
+            if sid and isinstance(spec, dict) and (sid == post_id or (sid.split("_")[-1] == post_suffix if "_" in sid else False)):
+                ld = spec.get("link_data") or {}
+                vd = spec.get("video_data") or {}
+                msg = (ld.get("message") or vd.get("message") or "")
+                title = (ld.get("name") or vd.get("title") or "")
+                picture = ld.get("picture") or (vd.get("image_url") or "")
+                full = (title + "\n" + msg).strip() if title else msg
+                if full or picture:  # 有内容才返（避免空 object_story_spec 误中）
+                    return {"message": full[:300], "picture": picture or "", "permalink_url": ""}
+    # ③ FB published_posts 边（有机帖：page token 读边）
     page_id = post_id.split("_")[0] if "_" in post_id else ""
     if not page_id:
         return {}
