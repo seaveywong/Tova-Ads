@@ -1444,8 +1444,6 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .ps-btn{flex:none;padding:9px 18px;border:none;background:transparent;color:var(--t3);font-size:14px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;transition:color .15s}
 .ps-btn:hover{color:var(--t2)}
 .ps-btn.on{color:var(--ac);border-bottom-color:var(--ac);font-weight:600}
-.reuse-box{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
-.reuse-hint{font-size:12px;color:var(--ac);font-weight:500}
 .reuse-selected{display:flex;align-items:center;gap:8px}
 .reuse-selected-block{display:flex;flex-direction:column;gap:6px}
 .reuse-mini-preview{display:flex;gap:8px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:8px}
@@ -1453,9 +1451,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .reuse-mini-text{font-size:12px;color:var(--t2);line-height:1.4;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
-.manual-post{border-top:1px solid var(--bd);margin-top:12px;padding-top:8px}
 .deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
-.reuse-need-page{font-size:12px;color:var(--warning);display:flex;align-items:center;gap:6px}
 .reuse-select-card{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .reuse-card-hint{font-size:12px;color:var(--t3);line-height:1.5}
 .reuse-input-row{display:flex;gap:6px}
@@ -1463,10 +1459,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .reuse-manual-page{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(255,159,10,.08);border:1px solid rgba(255,159,10,.25);border-radius:6px;padding:8px}
 .reuse-preview-banner{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--ac);line-height:1.6;margin-bottom:12px}
 .post-readonly-preview{display:flex;flex-direction:column;gap:8px;border:1px solid var(--bd);border-radius:8px;padding:12px;background:var(--bg2)}
-.post-preview-thumb{width:100%;max-height:200px;object-fit:cover;border-radius:6px}
-.post-preview-noimg{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:6px;color:var(--t3);font-size:12px}
-.post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
-.post-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
+.post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 /* 跟帖预览：内容卡（缩略图+标题/域名 头部，文案，CTA）—— 宽敞不挤 */
 .ad-preview-card{border:1px solid var(--bd);border-radius:10px;background:var(--bg2);padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .ad-preview-top{display:flex;gap:12px;align-items:flex-start}

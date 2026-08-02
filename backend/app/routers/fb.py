@@ -451,8 +451,7 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     ② ads_cache creative.object_story_spec（暗帖——广告帖大多是暗帖，published_posts 读不到；
        但同步广告时拉了 object_story_spec，含 link_data/video_data 的文案+图）
     ③ FB published_posts 边(有机帖，page token——GET /{post_id} 节点对主页帖常权限不足，边才行)。
-    都取不到→空 dict（前端显"无法读取"）。"""
-    import json as _json
+    都取不到→空 dict（前端显"无法读取"）。统一返 {message, headline, picture, cta_type, link, permalink_url}。"""
     from ..models.page_post import PagePost
     from ..models.launch import Asset
     from ..models.ads_cache import AdsCache
@@ -465,14 +464,14 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
         if pp.asset_id:
             a = db.query(Asset).filter(Asset.id == pp.asset_id).first()
             if a and a.type == "image" and a.public_url:
-                return {"message": pp_msg, "headline": "", "picture": a.public_url, "cta_type": "", "permalink_url": ""}
+                return {"message": pp_msg, "headline": "", "picture": a.public_url, "cta_type": "", "link": "", "permalink_url": ""}
     # ② ads_cache 定位 creative_id → 实时 GET /{creative_id} 拿真实内容+缩略图（不靠缓存陈旧字段；
     #    缓存常缺 thumbnail_url，实时拉才有图）。暗帖主场景。
     creative_id = ""
     cached = {}
     for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
         try:
-            ads = _json.loads(row.ads_json or "[]")
+            ads = json.loads(row.ads_json or "[]")
         except Exception:
             continue
         for ad in ads:
@@ -499,7 +498,7 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     # ③ FB published_posts 边（有机帖：page token 读边）
     page_id = post_id.split("_")[0] if "_" in post_id else ""
     if not page_id:
-        return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "permalink_url": ""} if pp_msg else {}
+        return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "link": "", "permalink_url": ""} if pp_msg else {}
     for _cred, fb in iter_tenant_clients(db, tenant_id):
         try:
             pt = fb.get_page_access_token(page_id)
@@ -517,19 +516,19 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
                 atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
                 picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
                 return {"message": (p.get("message") or "")[:500], "headline": "", "picture": picture,
-                        "cta_type": "", "permalink_url": p.get("permalink_url", "")}
+                        "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
         break  # 该令牌管此主页但 published_posts 里没这条（暗帖/已删）→ 不再试别的令牌
     # 都没图：至少返 page_posts 的 message（若有），比空好
-    return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "permalink_url": ""} if pp_msg else {}
+    return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "link": "", "permalink_url": ""} if pp_msg else {}
 
 
 @router.post("/resolve-post")
 def resolve_post(body: ResolvePostIn,
                  user: CurrentUser = Depends(require_permission("ads.create")),
                  db: Session = Depends(get_db)):
-    """帖子 ID/URL → 主页 + 完整 post_id + 内容预览(文案/图/链接)。供跟帖手动输入。
-    顺序：完整 {page}_{post} 直接拆 → 本地 ads_cache 反查 → FB 遍历令牌兜底。
-    统一返回 {page_id, post_id, source, message, picture, permalink_url}（内容尽力取，无权访问则空）。"""
+    """帖子 ID/URL/广告ID → 主页 + 完整 post_id + 内容预览。供跟帖手动输入。
+    支持：完整 {page}_{post} / 帖号 / permalink URL / 广告ID。
+    统一返回 {page_id, post_id, source, message, headline, picture, cta_type, link, permalink_url}。"""
     import re
     q = (body.q or "").strip()
     if not q:
