@@ -444,6 +444,10 @@ const reusePreviewAvailable = computed(() => {  // 内容是否真的取到（�
   const p = reusePostPreview.value
   return !!(p && (p.message || p.picture || p.permalink))
 })
+const ctaLabel = (type) => {  // CTA 类型 → 友好标签（预览用）
+  const c = CTAS.find(x => x.v === type)
+  return c ? t(c.l) : type
+}
 const reuseNeedManualPage = ref(false)   // 识别失败→揭示手选主页
 const manualPageForPost = ref('')        // 手选主页（兜底）
 const openPostPicker = async () => {
@@ -461,7 +465,7 @@ const _setReusePost = (postId, pageId, preview) => {
 }
 const pickPost = (p) => {
   const pg = (p.id || '').includes('_') ? p.id.split('_')[0] : form.value.page_id
-  _setReusePost(p.id, pg, { message: p.message, picture: p.picture, permalink: p.permalink_url })
+  _setReusePost(p.id, pg, { message: p.message, picture: p.picture, permalink: p.permalink_url, headline: '', cta_type: '' })
   postPickerOpen.value = false; ElMessage.success(t('launch.postSelected'))
 }
 const confirmManualPost = async () => {
@@ -474,7 +478,7 @@ const confirmManualPost = async () => {
   postResolving.value = true
   try {
     const r = await POST('/fb/resolve-post', { q: raw })
-    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url })
+    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type })
     ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
   } catch (e) {
     // 识别不出 → 揭示手选主页，让用户手动拼 {page}_{post}
@@ -489,7 +493,7 @@ const fetchReusePreview = async (postId) => {
   if (!postId) return
   try {
     const r = await POST('/fb/resolve-post', { q: postId })
-    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url }
+    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type }
   } catch { /* 取不到就只显 ID，不阻断 */ }
 }
 // 手选主页 + 裸帖子号 → 拼 {page}_{post}
@@ -1086,13 +1090,21 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <!-- 跟帖：帖子内容只读预览（图/标题/文案/链接/CTA 全锁，来自帖子）-->
         <template v-if="form.post_source==='reuse'">
           <div class="reuse-preview-banner">🔒 {{ t('launch.reuseLockedHint') }}</div>
-          <div v-if="form.reuse_post_ref" class="post-readonly-preview">
-            <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="post-preview-thumb" />
-            <div v-else-if="reusePreviewAvailable" class="post-preview-noimg">{{ t('launch.noImage') }}</div>
-            <div v-if="reusePreviewAvailable" class="post-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
-            <div v-else class="post-preview-text muted">⚠ {{ t('launch.postContentUnavailable') }}<br><code>{{ form.reuse_post_ref }}</code></div>
-            <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="post-preview-link">{{ t('launch.viewOnFb') }} →</a>
+          <div v-if="form.reuse_post_ref && reusePreviewAvailable" class="ad-preview-card">
+            <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="ad-preview-media" />
+            <div class="ad-preview-body">
+              <div v-if="reusePostPreview?.headline" class="ad-preview-headline">{{ reusePostPreview.headline }}</div>
+              <div class="ad-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
+              <div class="ad-preview-actions">
+                <span v-if="reusePostPreview?.cta_type" class="ad-preview-cta">{{ ctaLabel(reusePostPreview.cta_type) }}</span>
+                <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="ad-preview-link">{{ t('launch.viewOnFb') }} →</a>
+              </div>
+            </div>
           </div>
+          <div v-else-if="form.reuse_post_ref && reusePostPreview" class="post-readonly-preview">
+            <div class="post-preview-text muted">⚠ {{ t('launch.postContentUnavailable') }}<br><code>{{ form.reuse_post_ref }}</code></div>
+          </div>
+          <div v-else-if="form.reuse_post_ref" class="hint">{{ t('launch.loadingPreview') }}</div>
           <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
         </template>
         <!-- 新建帖：创意字段（asset/文案/CTA/落地页/子码）-->
@@ -1448,6 +1460,15 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .post-preview-noimg{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:6px;color:var(--t3);font-size:12px}
 .post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
 .post-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
+/* 跟帖预览：仿 FB 广告卡（图不放大避免模糊 + 标题 + 文案 + CTA 按钮）*/
+.ad-preview-card{border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--bg2);max-width:360px}
+.ad-preview-media{display:block;width:100%;max-height:220px;object-fit:cover;background:var(--bg3)}
+.ad-preview-body{padding:10px 12px;display:flex;flex-direction:column;gap:5px}
+.ad-preview-headline{font-size:14px;font-weight:600;color:var(--t1);line-height:1.35}
+.ad-preview-text{font-size:13px;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:110px;overflow:auto}
+.ad-preview-actions{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.ad-preview-cta{display:inline-block;font-size:12px;font-weight:600;color:#fff;background:var(--ac);padding:5px 12px;border-radius:6px}
+.ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}

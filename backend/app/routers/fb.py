@@ -443,8 +443,8 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
         if pp.asset_id:
             a = db.query(Asset).filter(Asset.id == pp.asset_id).first()
             if a and a.type == "image" and a.public_url:
-                return {"message": pp_msg, "picture": a.public_url, "permalink_url": ""}
-    # ② ads_cache object_story_spec + thumbnail_url（暗帖：广告 creative 的内容，跟帖主场景；thumbnail_url 覆盖视频帖）
+                return {"message": pp_msg, "headline": "", "picture": a.public_url, "cta_type": "", "permalink_url": ""}
+    # ② ads_cache object_story_spec + thumbnail_url（暗帖：creative 含 headline/文案/CTA/缩略图）
     for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
         try:
             ads = _json.loads(row.ads_json or "[]")
@@ -458,16 +458,17 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
                 ld = spec.get("link_data") or {}
                 vd = spec.get("video_data") or {}
                 msg = (ld.get("message") or vd.get("message") or "")
-                title = (ld.get("name") or vd.get("title") or "")
-                # 缩略图：creative.thumbnail_url（图/视频创意都有，最可靠）→ spec 里的 picture/image_url
-                picture = (cr.get("thumbnail_url") or ld.get("picture") or vd.get("image_url") or "")
-                full = (title + "\n" + msg).strip() if title else msg
-                if full or picture:  # 有内容才返（避免空 object_story_spec 误中）
-                    return {"message": full[:300], "picture": picture or "", "permalink_url": ""}
+                headline = (ld.get("name") or vd.get("title") or "")
+                cta = (ld.get("call_to_action") or vd.get("call_to_action") or {})
+                # 缩略图：fbcdn thumbnail_url（较清晰）→ video image_url → link picture
+                picture = (cr.get("thumbnail_url") or vd.get("image_url") or ld.get("picture") or "")
+                if msg or picture or headline:
+                    return {"message": msg[:500], "headline": headline[:100], "picture": picture,
+                            "cta_type": cta.get("type") or "", "permalink_url": ""}
     # ③ FB published_posts 边（有机帖：page token 读边）
     page_id = post_id.split("_")[0] if "_" in post_id else ""
     if not page_id:
-        return {}
+        return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "permalink_url": ""} if pp_msg else {}
     for _cred, fb in iter_tenant_clients(db, tenant_id):
         try:
             pt = fb.get_page_access_token(page_id)
@@ -484,11 +485,11 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
             if str(p.get("id", "")) == str(post_id):
                 atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
                 picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
-                return {"message": (p.get("message") or "")[:300], "picture": picture,
-                        "permalink_url": p.get("permalink_url", "")}
+                return {"message": (p.get("message") or "")[:500], "headline": "", "picture": picture,
+                        "cta_type": "", "permalink_url": p.get("permalink_url", "")}
         break  # 该令牌管此主页但 published_posts 里没这条（暗帖/已删）→ 不再试别的令牌
     # 都没图：至少返 page_posts 的 message（若有），比空好
-    return {"message": pp_msg, "picture": "", "permalink_url": ""} if pp_msg else {}
+    return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "permalink_url": ""} if pp_msg else {}
 
 
 @router.post("/resolve-post")
