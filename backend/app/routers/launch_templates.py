@@ -370,7 +370,7 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
         return None
 
 
-def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str) -> str:
+def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str, post_content: dict = None) -> str:
     """部署时解析 Instant Form ID（page-aware）。优先级：
     1. tpl.lead_form_template_id（选了表单模板）→ 同 page 有 fb_form_id 复用；否则按 config 建到「目标 page」
     2. tpl.lead_form_id（手填的已建 form_id）→ 直接用（用户自负；可能跨 page 失效）
@@ -429,22 +429,26 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
     # 2. 手填 lead_form_id（不校验 page；仅未选模板时用）
     if tpl.lead_form_id:
         return tpl.lead_form_id
-    # 3. AI 兜底
-    if asset and page_id:
-        return _ai_auto_create_form(fb, sdb, asset, page_id, landing_url)
+    # 3. AI 兜底（有素材 OR 跟帖有帖内容）
+    if page_id and (asset or (post_content and (post_content.get("message") or post_content.get("headline")))):
+        return _ai_auto_create_form(fb, sdb, asset, page_id, landing_url, post_content=post_content)
     return ""
 
 
-def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) -> str:
-    """没选表单模板时，从素材 AI 文案自动生成 Instant Form + 建到 FB。返回 form_id。"""
+def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, post_content: dict = None) -> str:
+    """没选表单模板时，从素材 AI 文案（跟帖无素材→用帖内容）自动生成 Instant Form + 建到 FB。返 form_id。"""
     from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
     from ..core.ai_client import AiClient, AiError
     ai = AiClient()
     if not ai.is_configured():
         return ""
-    ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+    ai_copy = json.loads(asset.ai_copy_json or "{}") if (asset and asset.ai_copy_json) else {}
     headlines = ai_copy.get("headlines", [])
     bodies = ai_copy.get("bodies", [])
+    # 跟帖无素材 → 用帖内容（headline/message）作 AI 输入
+    if not headlines and not bodies and post_content:
+        headlines = [post_content.get("headline", "")] if post_content.get("headline") else []
+        bodies = [post_content.get("message", "")] if post_content.get("message") else []
     sys_msg = "你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。严格只返回 JSON。"
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n\n"
@@ -457,7 +461,7 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str) 
     data = ai.chat_json([{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
                         temperature=0.7, max_tokens=2048)
     payload = build_lead_form_payload(
-        form_title=data.get("form_title", asset.name or "Lead Form"),
+        form_title=data.get("form_title", (asset.name if asset else None) or (post_content or {}).get("headline") or "Lead Form"),
         privacy_url="https://tovaads.com/privacy",
         locale="en_US", target_countries=[], description=data.get("description", ""),
         custom_questions=data.get("custom_questions", []),
@@ -521,6 +525,14 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         if tpl.subcode_slug:
             link = sdb.query(LandingAdLink).filter(LandingAdLink.slug == tpl.subcode_slug).first()
         items = sdb.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
+        # 跟帖模式：预取帖子内容（表单/消息 AI 生成 + 标题/文案兜底用，无素材时以帖内容代）
+        post_content = {}
+        if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:
+            try:
+                from ..routers.fb import _fetch_post_content
+                post_content = _fetch_post_content(sdb, tenant_id, tpl.reuse_post_ref) or {}
+            except Exception:
+                post_content = {}
         for item in items:
             try:
                 item.status = "creating"; sdb.commit()
@@ -550,19 +562,23 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 lead_form_id = ""
                 if tpl.objective == "OUTCOME_LEADS" and page_id:
                     try:
-                        lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "")
+                        lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "", post_content=post_content)
                     except Exception:
                         pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
-                # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）
+                # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
                 message_template = tpl.message_template or ""
-                if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT" and asset:
-                    try:
-                        ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
-                        bodies = ai_copy.get("bodies", [])
-                        if bodies:
-                            message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
-                    except Exception:
-                        pass
+                if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
+                    _msg_body = ""
+                    if asset:
+                        try:
+                            ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                            _msg_body = (ai_copy.get("bodies") or [""])[0]
+                        except Exception:
+                            pass
+                    elif post_content.get("message"):
+                        _msg_body = post_content["message"]  # 跟帖：用帖子文案当欢迎语
+                    if _msg_body:
+                        message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
                 # 随机组合素材 AI 文案+标题（每账户不同，增多样性）
                 from ..core.ad_ops import pick_random_copy
                 _rh, _rb = pick_random_copy(asset)
@@ -707,6 +723,14 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
         targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "")
         advanced = _parse_advanced(tpl)
         link = sdb.query(LandingAdLink).filter(LandingAdLink.slug == tpl.subcode_slug).first() if tpl.subcode_slug else None
+        # 跟帖：预取帖子内容（表单/消息 AI 生成兜底，与 _run_deploy_job 一致）
+        post_content = {}
+        if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:
+            try:
+                from ..routers.fb import _fetch_post_content
+                post_content = _fetch_post_content(sdb, tenant_id, tpl.reuse_post_ref) or {}
+            except Exception:
+                post_content = {}
         job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
         try:
             it.status = "creating"; sdb.commit()
@@ -731,18 +755,23 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             lead_form_id = ""
             if tpl.objective == "OUTCOME_LEADS" and _page_id:
                 try:
-                    lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id, tpl.landing_url or "")
+                    lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id, tpl.landing_url or "", post_content=post_content)
                 except Exception:
                     pass
+            # 没选消息模板 → AI 生成（ENGAGEMENT+消息）；跟帖无素材→用帖内容
             message_template = tpl.message_template or ""
-            if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT" and asset:
-                try:
-                    ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
-                    bodies = ai_copy.get("bodies", [])
-                    if bodies:
-                        message_template = json.dumps({"text": bodies[0], "ice_breakers": []})
-                except Exception:
-                    pass
+            if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
+                _msg_body = ""
+                if asset:
+                    try:
+                        ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                        _msg_body = (ai_copy.get("bodies") or [""])[0]
+                    except Exception:
+                        pass
+                elif post_content.get("message"):
+                    _msg_body = post_content["message"]
+                if _msg_body:
+                    message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
             from ..core.ad_ops import pick_random_copy
             _rh, _rb = pick_random_copy(asset)
             _headline = _rh or (tpl.headline or "")
