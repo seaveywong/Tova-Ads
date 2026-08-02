@@ -156,4 +156,69 @@ TK Ads Manager 的转化目标下拉**只列像素已收到的事件**；新像�
 - ✅ 5 条核心声明全经代码核验为真（含 P0 死路由发现）。
 - P0 已修：补 `_d_decode` 脚本（G1）+ event_id 真相源改后端（点5）。
 - P1 已修：OPTIONAL 占位分离（G5）+ 迁移 GRANT 参照（G2）+ preflight 位置（点1）。
+
+---
+
+## 附：test_event_code 适配规划（用户专项追问）
+
+### test_event_code 是什么
+TK Events Manager 里每个像素有一个 **Test Event Code**（形如 `TEST12345`）。S2S 事件 payload 带上它 → 事件进 TK 的 **Test Events 标签**（秒级可见）→ 用于**验证 S2S 链路**（不是生产数据）。
+
+### ⚠️ 关键区分：test_event_code ≠ 点亮事件
+- **test_event_code 事件**：进 Test Events 标签（调试用），**不计入生产**。用于"确认 S2S 打通 + event_id 去重正确"。
+- **真实 S2S 事件**（不带 test_event_code）：进 TK 事件库 → **点亮事件**（让事件可选为优化目标）+ 生产转化计数 + event_id 去重。
+- 点亮事件**需要真实 S2S**，不是 test 事件。
+
+### 三层 S2S 调用（TK Events API client）
+
+| 层 | 用途 | test_event_code | 场景 |
+|---|---|---|---|
+| **① 测试验证** | 验证 S2S 链路 + event_id 去重正确 | ✅ 带 | 用户绑定 TK 像素后"测试" |
+| **② 点亮事件** | 让事件进 TK 事件库 → 可选优化目标 | ❌ 不带（真实） | 用户选优化事件 + 该事件未 fire 过 |
+| **③ 生产去重双发** | 浏览器 ttq.track + S2S 同 event_id | ❌ 不带 | 每次访问的常规转化追踪 |
+
+### 数据模型
+- `landing_pixels`（TK 像素行）加：
+  - `test_event_code`(Text, nullable) — 从 TK Events Manager 复制。
+  - `tt_access_token_enc`(Text, nullable) — S2S API 鉴权 token（从 Events Manager → Settings → Access Token；加密存）。
+- `landing_pixels.platform='tt'` 的行才用这两个字段。
+
+### TK Events API client（新 `backend/app/core/tk_events.py`）
+```python
+class TkEventsClient:
+    def __init__(self, pixel_code, access_token, test_event_code=""):
+        ...
+    def send(self, events: list[dict], test=False):
+        """发 S2S 事件。test=True 带 test_event_code（调试）；False=生产。
+        events: [{event, event_time, event_id, user:{ttclid,...}, properties:{currency,value}}]"""
+        payload = {"pixel_code": self.pixel_code, "events": events}
+        if test and self.test_event_code:
+            payload["test_event_code"] = self.test_event_code
+        # POST https://business-api.tiktok.com/open_api/v1.3/event/track/
+        ...
+```
+
+### 用户操作流（UI）
+1. **绑定 TK 像素**：用户在像素库加 TK 像素（pixel_code + test_event_code + access_token，都从 Events Manager 复制）。
+2. **"测试 S2S"按钮**：系统发 1 个 test 事件（带 test_event_code + event_id）→ 用户去 TK Events Manager → Test Events 标签确认收到 → S2S 链路验证通过。
+3. **"点亮事件"按钮**（选优化事件时）：系统发 1 个**真实** S2S 事件（不带 test_event_code）→ ≤2h 后该事件在 TK Ads Manager 可选 → 用户配优化目标 → 部署广告。
+4. **生产**：广告上线后，访问→route_next 生成 event_id→浏览器 ttq.track + 后端 S2S 同 event_id（不带 test_event_code）→ TK 去重为 1。
+
+### 点亮哪些事件
+- 用户选的优化目标决定要点亮哪个事件（如 OUTCOME_SALES → `CompletePayment`；OUTCOME_LEADS → `SubmitForm`）。
+- **批量点亮**：一次发多个事件类型（CompletePayment + PlaceAnOrder + ...）→ 一次点亮多个，减少等待轮次。
+- 状态跟踪：`landing_pixels.seeded_events`(Text JSON) — 记录已点亮的事件列表 + 时间 → 避免重复点亮。
+
+### 代码改动
+| 文件 | 改动 |
+|---|---|
+| `core/tk_events.py`（新） | TK Events API client（send/send_test）|
+| `routers/landing_lib.py` | 像素库 CRUD 加 test_event_code/tt_access_token_enc 字段 + "测试 S2S"/"点亮事件"端点 |
+| `landing_pixels` 迁移 | + test_event_code + tt_access_token_enc + seeded_events |
+| 前端 Landing.vue | TK 像素编辑表单加 test_event_code + access_token 输入 + "测试"/"点亮"按钮 |
+
+### 风险
+- **TK API 限流**：S2S 点亮 + 生产双发，注意频率（TK Events API 有 rate limit）。点亮是低频（每事件 1 次），不撞限。
+- **access_token 安全**：加密存储（同 FB token 用 AES enc），不明文入库。
+- **test_event_code 可能过期/重生成**：TK Events Manager 可重生成 test code；我们的存储需支持更新（用户粘新的即可）。
 - P2 已修：ORGANIC TK 像素策略澄清（G3）+ upsert 细节（G4）。
