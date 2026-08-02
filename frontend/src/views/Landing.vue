@@ -56,7 +56,7 @@ const editingId = ref(null)
 const saving = ref(false)
 const emptyForm = () => ({
   title: '', description: '', target_urls: [], rotation_mode: 'first',
-  custom_domain: '', custom_domains: [], pixel_ids: [], tt_pixel_ids: [], conversion_events: [], tt_conversion_events: [],
+  custom_domain: '', custom_domains: [], bound_subdomains: [], pixel_ids: [], tt_pixel_ids: [], conversion_events: [], tt_conversion_events: [],
   redirect_mode: 'display', block_enabled: false, preview_enabled: false, preview_url: '',
   subdomain_prefix: '', dedup_enabled: false, dedup_window_hours: 24,
   protection_rules: {}, block_target: '', block_html: '', template_key: '', template_id: null,
@@ -111,7 +111,7 @@ const openEdit = async (p) => {
       title: detail.title || '', description: detail.description || '', custom_domain: detail.custom_domain || '',
       target_urls: detail.target_urls || [], rotation_mode: detail.rotation_mode || 'first',
       custom_domains: detail.custom_domains || (detail.custom_domain ? [detail.custom_domain.replace(/^https?:\/\//,'')] : []),
-      pixel_ids: detail.pixel_ids || [], tt_pixel_ids: detail.tt_pixel_ids || [], conversion_events: detail.conversion_events || [], tt_conversion_events: detail.tt_conversion_events || [],
+      pixel_ids: detail.pixel_ids || [], tt_pixel_ids: detail.tt_pixel_ids || [], conversion_events: detail.conversion_events || [], tt_conversion_events: detail.tt_conversion_events || [], bound_subdomains: detail.bound_subdomains || [],
       redirect_mode: detail.redirect_mode || 'display',
       block_enabled: !!detail.block_enabled,
       preview_enabled: !!detail.preview_enabled, preview_url: detail.preview_url || '',
@@ -399,6 +399,30 @@ const setTab = (tv) => {
 const copyText = (txt, msg) => { navigator.clipboard?.writeText(txt); ElMessage.success(msg || t('common.copied')) }
 const randomPrefix = () => 'go' + Math.random().toString(36).slice(2, 7)
 const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : h }
+// 子域名管理
+const newSubPrefix = ref('')
+const subAdding = ref(false)
+const addSubdomain = async () => {
+  const p = newSubPrefix.value.trim().toLowerCase()
+  if (!p) return ElMessage.warning(t('landing.subPrefixRequired'))
+  if (!editingId.value) return ElMessage.warning(t('landing.saveFirst'))
+  subAdding.value = true
+  try {
+    const r = await POST(`/landing/pages/${editingId.value}/subdomains`, { prefix: p })
+    form.value.bound_subdomains = r.bound_subdomains || []
+    newSubPrefix.value = ''
+    ElMessage.success(t('landing.subAdded', { sub: r.subdomain }))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  subAdding.value = false
+}
+const removeSubdomain = async (host) => {
+  try {
+    await ElMessageBox.confirm(t('landing.subDelConfirm', { host }), t('common.confirm'), { type: 'warning' })
+    const r = await DELETE(`/landing/pages/${editingId.value}/subdomains/${host}`)
+    form.value.bound_subdomains = r.bound_subdomains || []
+    ElMessage.success(t('common.done'))
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
+}
 const subdomainStatus = ref('')
 let _subTimer = null
 watch([() => form.value.subdomain_prefix, () => form.value.custom_domains], () => {
@@ -598,40 +622,61 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <el-option v-for="d in domains" :key="d.id" :value="d.domain" :label="d.domain + (d.label ? ' ('+d.label+')' : '')" />
         </el-select>
       </div>
-      <div class="form-l"><label>{{ t('landing.fSubdomainPrefix') }}</label>
-        <input v-model="form.subdomain_prefix" class="input" :placeholder="t('landing.fSubdomainPrefixPh')" style="flex:1" />
-        <button class="mb" type="button" @click="form.subdomain_prefix = randomPrefix()">🎲 {{ t('landing.random') }}</button>
+      <!-- 已绑定子域名列表（多域名管理） -->
+      <div class="form-l" v-if="form.bound_subdomains && form.bound_subdomains.length">
+        <label>{{ t('landing.boundSubs') }}</label>
+        <div class="subdomain-tags" style="flex:1">
+          <span v-for="sub in form.bound_subdomains" :key="sub" class="subdomain-tag">
+            <a :href="'https://'+sub" target="_blank" rel="noopener" class="sub-link">🔗 {{ sub }}</a>
+            <button v-if="form.bound_subdomains.length > 1" class="sub-del" @click="removeSubdomain(sub)" :title="t('common.delete')">✕</button>
+          </span>
+        </div>
       </div>
-      <div class="pixel-hint" v-if="form.custom_domains.length">{{ t('landing.previewLabel') }}：{{ form.subdomain_prefix || t('landing.subdomainAuto') }}.{{ rootOf(form.custom_domains[0]) }}<span v-if="subdomainStatus==='ok'" style="color:var(--success)"> ✓ {{ t('landing.available') }}</span><span v-else-if="subdomainStatus==='taken'" style="color:var(--error)"> ✗ {{ t('landing.taken') }}</span></div>
+      <!-- 添加新子域名 -->
+      <div class="form-l">
+        <label>{{ t('landing.addSub') }}</label>
+        <input v-model="newSubPrefix" class="input" :placeholder="t('landing.addSubPh')" style="flex:1" @keyup.enter="addSubdomain" />
+        <button class="mb" type="button" @click="newSubPrefix = randomPrefix()">🎲</button>
+        <button class="btn sm primary" :disabled="subAdding || !newSubPrefix.trim() || !editingId" @click="addSubdomain">{{ subAdding ? '…' : t('common.add') }}</button>
+      </div>
+      <div class="pixel-hint" v-if="form.custom_domains.length">{{ t('landing.addSubHint') }}</div>
 
       <template v-if="form.redirect_mode === 'display'">
-        <div class="form-l"><label>{{ t('landing.fPixel') }}</label>
-          <el-select v-model="form.pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
-            :placeholder="t('landing.fPixelPh')" style="flex:1">
-            <el-option v-for="p in pixels" :key="p.id" :value="p.pixel_id"
-              :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
-          </el-select>
+        <!-- Facebook 像素区块 -->
+        <div class="pixel-section fb-section">
+          <div class="pixel-section-header">📘 Facebook</div>
+          <div class="form-l"><label>{{ t('landing.fPixel') }}</label>
+            <el-select v-model="form.pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
+              :placeholder="t('landing.fPixelPh')" style="flex:1">
+              <el-option v-for="p in pixels" :key="p.id" :value="p.pixel_id"
+                :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
+            </el-select>
+          </div>
+          <div class="form-l"><label>{{ t('landing.fConversionEvent') }}</label>
+            <el-select v-model="form.conversion_events" multiple filterable allow-create default-first-option
+              :placeholder="t('landing.fConversionEventPh')" style="flex:1">
+              <el-option v-for="o in convEventOptions" :key="o.v" :value="o.v" :label="o.l" />
+            </el-select>
+          </div>
         </div>
-        <div class="form-l"><label>{{ t('landing.fTtPixel') }}</label>
-          <el-select v-model="form.tt_pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
-            :placeholder="t('landing.fTtPixelPh')" style="flex:1">
-            <el-option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id"
-              :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
-          </el-select>
+        <!-- TikTok 像素区块 -->
+        <div class="pixel-section tt-section">
+          <div class="pixel-section-header">🎵 TikTok</div>
+          <div class="form-l"><label>{{ t('landing.fTtPixel') }}</label>
+            <el-select v-model="form.tt_pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
+              :placeholder="t('landing.fTtPixelPh')" style="flex:1">
+              <el-option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id"
+                :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
+            </el-select>
+          </div>
+          <div class="form-l"><label>{{ t('landing.fTtConvEvent') }}</label>
+            <el-select v-model="form.tt_conversion_events" multiple filterable allow-create default-first-option
+              :placeholder="t('landing.fTtConvEventPh')" style="flex:1">
+              <el-option v-for="o in ttConvEventOptions" :key="o.v" :value="o.v" :label="o.l" />
+            </el-select>
+          </div>
         </div>
         <div class="pixel-hint">{{ t('landing.pixelHint') }}</div>
-        <div class="form-l"><label>{{ t('landing.fConversionEvent') }}</label>
-          <el-select v-model="form.conversion_events" multiple filterable allow-create default-first-option
-            :placeholder="t('landing.fConversionEventPh')" style="flex:1">
-            <el-option v-for="o in convEventOptions" :key="o.v" :value="o.v" :label="o.l" />
-          </el-select>
-        </div>
-        <div class="form-l"><label>{{ t('landing.fTtConvEvent') }}</label>
-          <el-select v-model="form.tt_conversion_events" multiple filterable allow-create default-first-option
-            :placeholder="t('landing.fTtConvEventPh')" style="flex:1">
-            <el-option v-for="o in ttConvEventOptions" :key="o.v" :value="o.v" :label="o.l" />
-          </el-select>
-        </div>
         <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
           <select v-model="form.template_id" class="input">
             <option :value="null">{{ t('landing.defaultTpl') }}</option>
@@ -931,6 +976,16 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .tpl-desc{font-size:11px;color:var(--t3);margin:-4px 0 10px 92px;line-height:1.5}
 .mode-hint{font-size:11px;color:var(--t3);margin:-6px 0 12px 92px;line-height:1.5}
 .pixel-hint{font-size:11px;color:var(--t3);margin:-6px 0 10px 92px;line-height:1.5}
+.pixel-section{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.pixel-section-header{font-size:13px;font-weight:600;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.fb-section{border-color:rgba(24,119,242,.3);background:rgba(24,119,242,.03)}
+.fb-section .pixel-section-header{color:#1877f2}
+.tt-section{border-color:rgba(0,0,0,.15);background:rgba(254,44,85,.02)}
+.tt-section .pixel-section-header{color:#fe2c55}
+.subdomain-tags{display:flex;flex-wrap:wrap;gap:6px}
+.subdomain-tag{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:3px 8px;font-size:12px}
+.sub-link{color:var(--ac);text-decoration:none;font-family:monospace}
+.sub-del{background:none;border:none;color:var(--error);cursor:pointer;font-size:11px;padding:0 2px}
 .block-off-hint{font-size:12px;color:var(--t3);padding:8px 0;line-height:1.5}
 .guard-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .guard-btn{padding:6px 12px;border:1px solid var(--bd);background:var(--bg3);color:var(--t2);border-radius:6px;font-size:12px;cursor:pointer;transition:.15s}

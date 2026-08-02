@@ -434,12 +434,16 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         except Exception:
             pass
     cd_clean = f"https://{bound[0]}" if bound else None
-    # 解绑不再用的旧子域名（改前缀/移除域名时清理 CF 残留）
-    if existing and existing.custom_domain:
-        old_host = existing.custom_domain.split("://", 1)[-1].split("/")[0]
-        if old_host and old_host not in bound:
-            try: cf.unbind_custom_domain(body.project_name, old_host)
-            except Exception: pass
+    # 多域名：合并已有 bound_subdomains + 新绑定的（不删旧的，用户手动管理）
+    all_subs = set(bound)
+    if existing and existing.bound_subdomains:
+        try:
+            old_subs = _json.loads(existing.bound_subdomains)
+            all_subs.update(old_subs)
+        except Exception:
+            pass
+    # 如果新前缀生成了新域名，确保也绑定到 CF（可能已在 all_subs 但未实际绑定）
+    all_subs_list = sorted(all_subs)
 
     # 5. 落库（existing 更新 else 新建）+ 发布后自检。**用独立 SessionLocal 持久化**：
     #    主 session 在上面长 wrangler 部署（10-20s 子进程）后连接可能失效重连，丢 SET LOCAL
@@ -471,6 +475,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             "preview_token": preview_token,
             "preview_enabled": preview_enabled,
             "subdomain_prefix": sub_prefix or existing.subdomain_prefix,
+            "bound_subdomains": _json.dumps(all_subs_list),
             "dedup_enabled": bool(body.dedup_enabled),
             "dedup_window_hours": body.dedup_window_hours or 24,
             "status": "published",
@@ -500,6 +505,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
                 preview_token=preview_token,
                 preview_enabled=preview_enabled,
                 subdomain_prefix=sub_prefix or None,
+                bound_subdomains=_json.dumps(all_subs_list),
                 dedup_enabled=bool(body.dedup_enabled),
                 dedup_window_hours=body.dedup_window_hours or 24,
                 ingest_secret=ingest_secret,
@@ -655,6 +661,16 @@ def _page_to_dict(p, db: Session = None) -> dict:
         if p.tt_conversion_events: tt_conv = _json.loads(p.tt_conversion_events)
     except Exception:
         pass
+    bound_subs = []
+    try:
+        if p.bound_subdomains: bound_subs = _json.loads(p.bound_subdomains)
+    except Exception:
+        pass
+    # 兜底：如果 bound_subdomains 为空但 custom_domain 有值，用它
+    if not bound_subs and p.custom_domain:
+        host = p.custom_domain.split("://", 1)[-1].split("/")[0]
+        if host:
+            bound_subs = [host]
     # 公开 URL（custom_domain 存的是子域名公开地址）+ 预览 URL（?_pv=token 跳过防护）
     pub_host = ""
     if p.custom_domain:
@@ -683,6 +699,7 @@ def _page_to_dict(p, db: Session = None) -> dict:
             "block_enabled": bool(p.block_enabled),
             "preview_enabled": bool(p.preview_enabled), "preview_url": preview_url,
             "subdomain_prefix": p.subdomain_prefix or "",
+            "bound_subdomains": bound_subs,
             "dedup_enabled": bool(p.dedup_enabled), "dedup_window_hours": p.dedup_window_hours or 24,
             "protection_rules": rules, "ingest_secret": p.ingest_secret, "template_id": p.template_id,
             "subcode_count": sub_count, "created_at": str(p.created_at or ""),
@@ -934,6 +951,103 @@ def _fb_ban_probe(db, tenant_id, url):
         return "warn", f"FB 返回异常：{e.friendly[:50]}"
     except Exception as e:
         return "warn", f"检测异常：{str(e)[:50]}"
+
+
+@router.post("/pages/{pid}/subdomains")
+def add_subdomain(pid: int, body: dict,
+                  user: CurrentUser = Depends(require_permission("ads.create")),
+                  db: Session = Depends(get_db)):
+    """添加一个新子域名到已有落地页（CF 绑定 + 入 bound_subdomains，不触发重部署）。"""
+    import json as _json
+    prefix = (body.get("prefix") or "").strip().lower()
+    if not prefix:
+        raise HTTPException(400, "请输入子域名前缀")
+    p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    # 取根域名
+    roots = []
+    try:
+        if p.custom_domains: roots = _json.loads(p.custom_domains)
+    except Exception:
+        pass
+    if not roots and p.custom_domain:
+        host = p.custom_domain.split("://", 1)[-1].split("/")[0]
+        parts = host.split(".", 1)
+        if len(parts) > 1: roots = [parts[1]]
+    if not roots:
+        raise HTTPException(400, "落地页没有配置根域名")
+    sub = f"{prefix}.{_domain_root(roots[0])}"
+    # 冲突检查
+    clash = db.query(LandingPage).filter(
+        LandingPage.custom_domain == f"https://{sub}",
+        LandingPage.id != pid
+    ).first()
+    if clash:
+        raise HTTPException(400, f"子域名 {sub} 已被「{clash.title}」占用")
+    # CF 绑定
+    cf_token = _settings("cf_api_token")
+    cf_account = _settings("cf_account_id")
+    if cf_token and cf_account:
+        cf = CfClient(cf_token, cf_account)
+        try:
+            if cf.get_zone_id(_domain_root(sub)):
+                cf.bind_custom_domain(f"tovaads-landing-{p.id}", sub)
+        except Exception as e:
+            raise HTTPException(400, f"CF 绑定失败: {e}")
+    # 加入 bound_subdomains
+    subs = []
+    try:
+        if p.bound_subdomains: subs = _json.loads(p.bound_subdomains)
+    except Exception:
+        pass
+    if not subs and p.custom_domain:
+        host = p.custom_domain.split("://", 1)[-1].split("/")[0]
+        if host: subs = [host]
+    if sub not in subs:
+        subs.append(sub)
+    p.bound_subdomains = _json.dumps(subs)
+    db.commit()
+    return {"ok": True, "subdomain": sub, "url": f"https://{sub}", "bound_subdomains": subs}
+
+
+@router.delete("/pages/{pid}/subdomains/{hostname}")
+def delete_subdomain(pid: int, hostname: str,
+                     user: CurrentUser = Depends(require_permission("ads.create")),
+                     db: Session = Depends(get_db)):
+    """删除一个绑定的子域名（CF 解绑 + 移出 bound_subdomains）。不删最后一个。"""
+    import json as _json
+    p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    subs = []
+    try:
+        if p.bound_subdomains: subs = _json.loads(p.bound_subdomains)
+    except Exception:
+        pass
+    # 兜底：从 custom_domain 补
+    if not subs and p.custom_domain:
+        host = p.custom_domain.split("://", 1)[-1].split("/")[0]
+        if host: subs = [host]
+    if hostname not in subs:
+        raise HTTPException(404, f"子域名 {hostname} 不在绑定列表中")
+    if len(subs) <= 1:
+        raise HTTPException(400, "至少保留一个子域名，不能删除最后一个")
+    # CF 解绑
+    cf_token = _settings("cf_api_token")
+    cf_account = _settings("cf_account_id")
+    if cf_token and cf_account:
+        cf = CfClient(cf_token, cf_account)
+        try: cf.unbind_custom_domain(f"tovaads-landing-{p.id}", hostname)
+        except Exception: pass
+    # 移出列表
+    subs.remove(hostname)
+    p.bound_subdomains = _json.dumps(subs)
+    # 如果删的是 custom_domain，换到第一个
+    if p.custom_domain and hostname in p.custom_domain:
+        p.custom_domain = f"https://{subs[0]}" if subs else p.custom_domain
+    db.commit()
+    return {"ok": True, "bound_subdomains": subs}
 
 
 @router.get("/pages/check-subdomain")

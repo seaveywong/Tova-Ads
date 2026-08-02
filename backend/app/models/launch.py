@@ -62,7 +62,8 @@ class LandingPage(Base):
     block_enabled = Column(Boolean, default=False)   # 防护开关：false=不评估规则全放行
     preview_token = Column(Text)                      # 预览令牌（?_pv=token 跳过防护看真实页）
     preview_enabled = Column(Boolean, default=False)  # 预览开关：关闭后该 token URL 失效
-    subdomain_prefix = Column(Text)                   # 子域名前缀（空=默认 lp{id}）
+    subdomain_prefix = Column(Text)
+    bound_subdomains = Column(Text)       # JSON 数组，追踪所有绑定的子域名 hostname（多域名管理）                   # 子域名前缀（空=默认 lp{id}）
     dedup_enabled = Column(Boolean, default=False)    # 防重复访客开关
     dedup_window_hours = Column(Integer)              # 防重时间窗（小时）
     last_health_status = Column(Text)   # pass/warn/fail（自检结果）
