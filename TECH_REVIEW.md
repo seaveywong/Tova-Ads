@@ -560,3 +560,65 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - `d314059` feat(reuse): 跟帖UX重构——切换置顶+选帖卡+③只读(事实定边界)
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[fb-business-policy-restriction]] [[ux-clarity-bar]]
+
+---
+
+## 2026-08-02 跟帖(复用帖)功能 6 维度复审 + 优化
+
+用户："复审优化 开启"。跟帖功能本轮反复迭代（resolve-post/内容拉取/前端预览），扫一遍清债。
+
+### 功能现状（已上线）
+跟帖模式 = 复用已有帖(object_story_id)投放。支持输入 **帖号 / permalink URL / 广告ID / {page}_{post}** 自动解析主页 + 拉内容预览。
+- 后端 `fb.py`: `_local_resolve_post`(本地 ads_cache 反查,支持帖号+广告ID) → `_fetch_post_content`(page_posts→ads_cache 实时 creative→published_posts 边三路) → `_content_from_creative`(统一提取) → `resolve-post` 端点(统一返 message/headline/picture/cta_type/link/permalink)。
+- 前端 `LaunchTemplates.vue`: 顶层[新建/跟帖]Tab + 选帖卡(识别/手选主页兜底/浏览) + ③广告Tab 内容卡预览(缩略图+标题+完整域名+文案+CTA按钮)。
+
+### 6 维度复审结论
+
+**① FB API 正确性** ✅
+- object_story_id 引用已存在帖：实测 Live App creative 建成（早先冒烟）。
+- 暗帖内容：ads_cache 同步带 object_story_spec + thumbnail_url；实时 GET /{creative_id} 兜底（缓存常缺 thumbnail）。
+- 视频帖缩略图：FB 给签名 64×64（stp=p64x64，改尺寸 403）—— 平台硬限制，显原生尺寸不放大。
+- CTA/链接：object_story_spec.link_data/video_data.call_to_action 提取（图/标题/文案/链接/CTA 全锁，FB 对复用帖忽略覆写，符合事实）。
+
+**② 数据层** ✅
+- resolve_post 纯读，无写入。_local_resolve_post 扫 ads_cache（零 FB）。
+- 无 schema 变更。
+
+**③ 前端逻辑** ✅
+- reusePreviewAvailable computed 区分 loading/无内容/取不到。
+- linkDomain 返完整 hostname+pathname（含子码路径）。
+- validateTemplate：跟帖不强求 asset/落地页，要求 reuse_post_ref。
+- ①主页跟帖锁定；Post Picker 去重复手动输入（移置顶卡）。
+
+**④ i18n** ✅
+- launch.js sweep 0 THROW（vue-i18n 编译全过）。
+- 新 key zh+en 齐（recognize/browsePosts/reuseLockedHint/postContentUnavailable/loadingPreview/fieldReusePost 等）。
+
+**⑤ 一致性** ⚠→✅（本次修）
+- **已修**：_fetch_post_content 路径①③兜底返 dict 补 link（统一形状）；去 _json 冗余 import；docstring 更新；删死 CSS（reuse-box/reuse-hint/manual-post/reuse-need-page/post-preview-thumb,noimg,link）。
+
+**⑥ 坑** 
+- 🔴 **FB business policy 限制**（[[fb-business-policy-restriction]]）：建 ad 被拦，跟帖/保活/投放实测都受阻，需用户 FB 侧修复。
+- **本会话曾踩的 bug（均已修）**：i18n 花括号 SyntaxError（advancedPlaceholder/CJK占位符/{{ad.id}}）、_resolve_page_post access_level 门挡 reuse 短路、get_paged limit200 覆盖、resolve_post URL 误取页ID、_content_from_creative 作用域 NameError、resolve_post return 漏 headline/cta/link。
+
+### P0/P1/P2 清单
+- **P0**：无。
+- **P1**：无（曾经的 NameError/return漏字段/i18n崩溃均已修）。
+- **P2（本次修）**：
+  1. _fetch_post_content 返字段统一（补 link）。
+  2. 去 _json 冗余 + docstring 更新。
+  3. 删 7 处死 CSS。
+- **P2（不改，报告）**：
+  - 死 i18n key（manualPostId/lockHint/manualPostNeedPage/goSelectPage）—— 留着无害，密集行编辑风险>收益。
+  - 视频帖缩略图 64×64 —— FB 平台限制，无法改。
+  - _fetch_post_content 路径②每次实时 GET creative（手动输入场景，可接受；非高频）。
+
+### 生产部署验证
+- 后端 fb.py：py_compile + import OK → restart → /health 200 v1.3.5。
+- 前端：build ✓ → 部署（8a37a0ef）。
+- i18n sweep：launch.js zh/en 0 THROW。
+
+### commit 列表（本轮复审优化）
+- `3e3c2b7` refactor(reuse): 复审优化——返字段统一+去 _json+删死CSS+docstring
+
+关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[fb-business-policy-restriction]] [[ux-clarity-bar]] [[review-standard]]
