@@ -53,7 +53,8 @@ class LandingPage(Base):
     target_urls = Column(Text)
     rotation_mode = Column(Text, default="first")
     pixel_id = Column(Text)            # legacy 单像素（兼容）
-    pixel_ids = Column(Text)           # JSON 数组 ["123","456"]（多像素，决策①）
+    pixel_ids = Column(Text)           # JSON 数组 ["123","456"]（FB 多像素）
+    tt_pixel_ids = Column(Text)        # JSON 数组（TK 多像素）
     conversion_event = Column(Text)    # legacy 单转化事件（兼容旧数据）
     conversion_events = Column(Text)   # JSON 数组 ["Purchase","Contact"]（多转化事件，CTA 点击 forEach fire）
     redirect_mode = Column(Text, default="display")  # display=展示落地页 / redirect=直接跳转

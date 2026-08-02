@@ -13,6 +13,7 @@ class LandingPixel(Base):
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
     created_by = Column(BigInteger, ForeignKey("users.id"))
     pixel_id = Column(Text, nullable=False)
+    platform = Column(Text, default="fb")     # fb / tt
     pixel_name = Column(Text)
     act_id = Column(Text, index=True)
     source = Column(Text, default="manual")

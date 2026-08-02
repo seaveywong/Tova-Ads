@@ -59,7 +59,7 @@ var LP_TARGET_URL=_info.t||"__LP_TARGET_URL__";
 var _rc=_info.c?_info.c.split(','):(__LP_CONV_EVENT_JSON__||[]);
 var LP_CONV=(Array.isArray(_rc)?_rc:[_rc]).filter(Boolean);
 LP_PIXELS.forEach(function(pid){if(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');}});
-var _cta=document.getElementById('cta');if(_cta&&LP_TARGET_URL)_cta.href=LP_TARGET_URL;
+var LP_TT_PIXELS=__LP_TT_PIXELS_JSON__||[];if(LP_TT_PIXELS.length){!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};LP_TT_PIXELS.forEach(function(pid){if(pid)ttq.load(pid);});ttq.page();}(window,document,'ttq');}
 </script>
 </head>
 <body style="margin:0;padding:0;font-family:sans-serif">
@@ -169,8 +169,8 @@ export default{
       rd=await rr.json();
     }catch(e){rd={};}
     const _target=rd.target_url||LP_CONFIG.target;
-    const _d=btoa(unescape(encodeURIComponent(JSON.stringify({p:(rd.pixel_ids||[]).join(","),t:_target,c:(rd.conversion_events||[]).join(","),s:slug,a:adId,ai:actId}))));
-    sendEvent("visit",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,pixel_ids:(rd.pixel_ids||[]).join(","),target_url:_target,decision:"display",country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
+    const _d=btoa(unescape(encodeURIComponent(JSON.stringify({p:(rd.pixel_ids||[]).join(","),tp:(rd.tt_pixel_ids||[]).join(","),t:_target,c:(rd.conversion_events||[]).join(","),s:slug,a:adId,ai:actId}))));
+    sendEvent("visit",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,pixel_ids:(rd.pixel_ids||[]).join(","),tt_pixel_ids:(rd.tt_pixel_ids||[]).join(","),target_url:_target,decision:"display",country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
     const lp=new URL(request.url);
     lp.pathname="/";
     const q=new URLSearchParams();
@@ -191,7 +191,8 @@ class PublishIn(BaseModel):
     target_url: str = "https://tovaads.com"   # legacy 单值（兼容，target_urls 优先）
     target_urls: list[str] = []                # 多目标轮换；空时 fallback target_url
     pixel_id: str = ""            # legacy 单像素
-    pixel_ids: list[str] = []     # 多像素；空时 fallback 到 pixel_id
+    pixel_ids: list[str] = []     # FB 多像素；空时 fallback 到 pixel_id
+    tt_pixel_ids: list[str] = []  # TK 多像素
     conversion_event: str = ""    # Purchase/Contact/Lead（空=只 PageView）
     protection_rules: dict = {}   # 防护规则 10 key（空=不防护）
     template_id: int | None = None  # 落地页模板（zip 上传的；空=默认模板）
@@ -286,20 +287,25 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         ).first()
         if tpl:
             template_html = tpl.html
+    tt_pixels = body.tt_pixel_ids or []
     html = (template_html
             .replace("__LP_PIXELS_JSON__", _json.dumps(pixels))
+            .replace("__LP_TT_PIXELS_JSON__", _json.dumps(tt_pixels))
             .replace("__LP_CONV_EVENT_JSON__", _json.dumps(body.conversion_events or []))
             .replace("__LP_TARGET_URL__", primary_target)
             .replace("{{TITLE}}", body.title)
             .replace("{{DESCRIPTION}}", body.description))
     # 注入 _d 解码脚本到 <head> 开头（FB 官方推荐位置，像素尽早加载；DOMContentLoaded 兜底按钮绑定）
     _d_decode = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _pids=info.p?info.p.split(',').filter(Boolean):[];var _conv=info.c?info.c.split(',').filter(Boolean):[];if(!window.fbq){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');}_pids.forEach(function(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');});if(info.t){try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}window.__lp_target=info.t;}try{if(typeof LP_CONV!=='undefined')LP_CONV=_conv;}catch(e){}var _slug=info.s||'',_ad=info.a||'',_act=info.ai||'',_tgt=info.t||'';function _lpClick(){_pids.forEach(function(pid){_conv.forEach(function(evt){fbq('trackSingle',pid,evt);});});try{navigator.sendBeacon('/__events/ingest',JSON.stringify({event_type:'click',slug:_slug,ad_id:_ad,act_id:_act,target_url:_tgt,decision:'click'}));}catch(e){}}document.addEventListener('click',function(e){var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el){_lpClick();}},{capture:true,once:true});if(info.t){document.addEventListener('DOMContentLoaded',function(){var cta=document.getElementById('cta')||document.querySelector('[onclick*=\"goNext\"]');if(cta)cta.href=info.t;try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}});}}catch(e){}})();</script>"""
+    # TK 像素解码脚本（独立于 FB，从 _d.tp 读取 TK 像素并 fire ttq）
+    _d_decode_tt = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _tpids=info.tp?info.tp.split(',').filter(Boolean):[];if(!_tpids.length)return;!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};_tpids.forEach(function(pid){ttq.load(pid);});ttq.page();}(window,document,'ttq');document.addEventListener('click',function(e){var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el){try{_tpids.forEach(function(pid){ttq.track('ClickButton',{content_id:pid});});}catch(err){}}},{capture:true,once:true});}catch(e){}})();</script>"""
+    _full_decode = _d_decode + _d_decode_tt
     if "<head" in html:
-        html = re.sub(r"(<head[^>]*>)", r"\1" + _d_decode, html, count=1)
+        html = re.sub(r"(<head[^>]*>)", r"\1" + _full_decode, html, count=1)
     elif "</body>" in html:
-        html = html.replace("</body>", _d_decode + "\n</body>", 1)
+        html = html.replace("</body>", _full_decode + "\n</body>", 1)
     else:
-        html = _d_decode + html
+        html = _full_decode + html
     # Worker 配置：JSON prepend（对齐 1.0 EDGE_CONFIG，不用占位符）
     _rules = body.protection_rules or {}
     _lp_config = {
@@ -450,6 +456,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             "rotation_mode": body.rotation_mode or existing.rotation_mode or "first",
             "pixel_id": body.pixel_id or existing.pixel_id,
             "pixel_ids": _json.dumps(pixels) if pixels else existing.pixel_ids,
+            "tt_pixel_ids": _json.dumps(tt_pixels) if tt_pixels else (existing.tt_pixel_ids or ""),
             "conversion_event": body.conversion_event or existing.conversion_event,
             "protection_rules": _json.dumps(body.protection_rules) if body.protection_rules else existing.protection_rules,
             "template_id": body.template_id,
@@ -585,6 +592,7 @@ class PageUpdateIn(BaseModel):
     description: str | None = None
     target_urls: list[str] | None = None
     pixel_ids: list[str] | None = None
+    tt_pixel_ids: list[str] | None = None
     conversion_event: str | None = None
     protection_rules: dict | None = None
     custom_domain: str | None = None
@@ -749,6 +757,7 @@ def update_landing_page(
         target_urls=body.target_urls if body.target_urls is not None else cur_targets,
         pixel_id=p.pixel_id or "",
         pixel_ids=body.pixel_ids if body.pixel_ids is not None else cur_pixels,
+        tt_pixel_ids=body.tt_pixel_ids if body.tt_pixel_ids is not None else (_json.loads(p.tt_pixel_ids) if p.tt_pixel_ids else []),
         conversion_event=body.conversion_event if body.conversion_event is not None else (p.conversion_event or ""),
         conversion_events=body.conversion_events if body.conversion_events is not None else (_json.loads(p.conversion_events) if p.conversion_events else ([p.conversion_event] if p.conversion_event else [])),
         redirect_mode=body.redirect_mode if body.redirect_mode is not None else (p.redirect_mode or "display"),

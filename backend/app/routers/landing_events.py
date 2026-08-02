@@ -376,8 +376,16 @@ def route_next(body: RouteNextIn):
                 pass
         if not conversion_events and conversion_event:
             conversion_events = [conversion_event]
+        # TK 像素（现阶段=页级 fallback，无 TK adset 动态解析）
+        tt_pixel_ids = []
+        if page and page.tt_pixel_ids:
+            try:
+                tt_pixel_ids = _json.loads(page.tt_pixel_ids)
+            except Exception:
+                pass
         return {"target_url": target_url, "mode": mode,
-                "pixel_ids": pixel_ids, "conversion_event": conversion_event,
+                "pixel_ids": pixel_ids, "tt_pixel_ids": tt_pixel_ids,
+                "conversion_event": conversion_event,
                 "conversion_events": conversion_events}
     finally:
         db.close()
