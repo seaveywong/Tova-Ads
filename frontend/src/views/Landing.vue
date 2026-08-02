@@ -632,6 +632,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <el-option v-for="o in ttConvEventOptions" :key="o.v" :value="o.v" :label="o.l" />
           </el-select>
         </div>
+        <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
           <select v-model="form.template_id" class="input">
             <option :value="null">{{ t('landing.defaultTpl') }}</option>
             <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
