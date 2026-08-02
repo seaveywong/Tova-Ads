@@ -510,11 +510,18 @@ def resolve_post(body: ResolvePostIn,
     if m:
         post_id = m.group(1); page_id = post_id.split("_", 1)[0]; source = "full"
     else:
-        # 2. 裸 post 号 / URL → 提取最长数字串
-        m2 = re.search(r"(\d{10,})", q)
-        if not m2:
-            raise HTTPException(400, "无法识别帖子 ID")
-        post_num = m2.group(1)
+        # 2. 裸 post 号 / URL → 提取帖子号
+        # 优先 URL 里的 post 段（/posts/{n}/、fbid=/story_fbid=、permalink/..._{n}），否则取最长数字串
+        # （避免把主页 ID 当帖子号——permalink 里页 ID 在前，帖号在后）
+        url_m = (re.search(r"/posts/(\d{10,})", q) or re.search(r"[?&](?:fbid|story_fbid)=(\d{10,})", q)
+                 or re.search(r"/permalink/\d+_(\d+)", q) or re.search(r"/videos/(\d{10,})", q))
+        if url_m:
+            post_num = url_m.group(1)
+        else:
+            runs = re.findall(r"\d{10,}", q)
+            if not runs:
+                raise HTTPException(400, "无法识别帖子 ID")
+            post_num = max(runs, key=len)  # 最长（帖子号通常比页 ID 长）
         hit = _local_resolve_post(db, user.tenant_id, post_num)  # 2a. 本地 ads_cache 反查
         if hit:
             page_id, post_id, source = hit["page_id"], hit["post_id"], hit["source"]
