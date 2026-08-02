@@ -1460,15 +1460,15 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .post-preview-noimg{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:6px;color:var(--t3);font-size:12px}
 .post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
 .post-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
-/* 跟帖预览：仿 FB 广告卡（图不放大避免模糊 + 标题 + 文案 + CTA 按钮）*/
-.ad-preview-card{border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--bg2);max-width:360px}
-.ad-preview-media{display:block;width:100%;max-height:220px;object-fit:cover;background:var(--bg3)}
+/* 跟帖预览：仿 FB 广告卡（图按原生尺寸不放大 + 标题 + 文案 + CTA 按钮）*/
+.ad-preview-card{border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--bg2);max-width:420px}
+.ad-preview-media{display:block;width:auto;height:auto;max-width:100%;max-height:320px;object-fit:contain;background:var(--bg3);margin:0 auto}
 .ad-preview-body{padding:10px 12px;display:flex;flex-direction:column;gap:5px}
 .ad-preview-headline{font-size:14px;font-weight:600;color:var(--t1);line-height:1.35}
 .ad-preview-text{font-size:13px;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:110px;overflow:auto}
-.ad-preview-actions{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
-.ad-preview-cta{display:inline-block;font-size:12px;font-weight:600;color:#fff;background:var(--ac);padding:5px 12px;border-radius:6px}
-.ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
+.ad-preview-actions{display:flex;align-items:center;justify-content:space-between;margin-top:4px;gap:8px}
+.ad-preview-cta{display:inline-block;font-size:12px;font-weight:600;color:#fff;background:var(--ac);padding:6px 14px;border-radius:6px;white-space:nowrap}
+.ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none;white-space:nowrap}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
