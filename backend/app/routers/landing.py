@@ -646,6 +646,15 @@ def _page_to_dict(p, db: Session = None) -> dict:
         pass
     if not conv_events and p.conversion_event:
         conv_events = [p.conversion_event]
+    tt_ids, tt_conv = [], []
+    try:
+        if p.tt_pixel_ids: tt_ids = _json.loads(p.tt_pixel_ids)
+    except Exception:
+        pass
+    try:
+        if p.tt_conversion_events: tt_conv = _json.loads(p.tt_conversion_events)
+    except Exception:
+        pass
     # 公开 URL（custom_domain 存的是子域名公开地址）+ 预览 URL（?_pv=token 跳过防护）
     pub_host = ""
     if p.custom_domain:
@@ -667,8 +676,9 @@ def _page_to_dict(p, db: Session = None) -> dict:
             "custom_domain": p.custom_domain, "custom_domains": cd_list,
             "target_urls": targets,
             "rotation_mode": p.rotation_mode, "pixel_ids": ids,
+            "tt_pixel_ids": tt_ids,
             "pixel_id": p.pixel_id, "conversion_event": p.conversion_event,
-            "conversion_events": conv_events,
+            "conversion_events": conv_events, "tt_conversion_events": tt_conv,
             "redirect_mode": p.redirect_mode or "display",
             "block_enabled": bool(p.block_enabled),
             "preview_enabled": bool(p.preview_enabled), "preview_url": preview_url,
