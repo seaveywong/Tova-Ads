@@ -448,8 +448,8 @@ const ctaLabel = (type) => {  // CTA 类型 → 友好标签（预览用）
   const c = CTAS.find(x => x.v === type)
   return c ? t(c.l) : type
 }
-const linkDomain = (url) => {  // URL → 小写域名（FB 预览样式）
-  try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase() } catch { return '' }
+const linkDomain = (url) => {  // URL → 域名+路径（完整链接，去 https/www）
+  try { const u = new URL(url); return (u.hostname.replace(/^www\./, '') + u.pathname).replace(/\/$/, '') } catch { return '' }
 }
 const reuseNeedManualPage = ref(false)   // 识别失败→揭示手选主页
 const manualPageForPost = ref('')        // 手选主页（兜底）
@@ -1094,15 +1094,18 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <template v-if="form.post_source==='reuse'">
           <div class="reuse-preview-banner">🔒 {{ t('launch.reuseLockedHint') }}</div>
           <div v-if="form.reuse_post_ref && reusePreviewAvailable" class="ad-preview-card">
-            <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="ad-preview-media" />
-            <div class="ad-preview-body">
-              <div v-if="reusePostPreview?.headline" class="ad-preview-headline">{{ reusePostPreview.headline }}</div>
-              <div v-if="linkDomain(reusePostPreview?.link)" class="ad-preview-domain">{{ linkDomain(reusePostPreview.link) }}</div>
-              <div class="ad-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
-              <div class="ad-preview-actions">
-                <span v-if="reusePostPreview?.cta_type" class="ad-preview-cta">{{ ctaLabel(reusePostPreview.cta_type) }}</span>
-                <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="ad-preview-link">{{ t('launch.viewOnFb') }} →</a>
+            <div class="ad-preview-top">
+              <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="ad-preview-thumb" />
+              <div v-else class="ad-preview-thumb ad-preview-noimg">{{ t('launch.noImage') }}</div>
+              <div class="ad-preview-topright">
+                <div v-if="reusePostPreview?.headline" class="ad-preview-headline">{{ reusePostPreview.headline }}</div>
+                <div v-if="linkDomain(reusePostPreview?.link)" class="ad-preview-domain" :title="reusePostPreview?.link">{{ linkDomain(reusePostPreview.link) }}</div>
               </div>
+            </div>
+            <div class="ad-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
+            <div class="ad-preview-actions">
+              <span v-if="reusePostPreview?.cta_type" class="ad-preview-cta">{{ ctaLabel(reusePostPreview.cta_type) }}</span>
+              <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="ad-preview-link">{{ t('launch.viewOnFb') }} →</a>
             </div>
           </div>
           <div v-else-if="form.reuse_post_ref && reusePostPreview" class="post-readonly-preview">
@@ -1464,16 +1467,18 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .post-preview-noimg{height:80px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:6px;color:var(--t3);font-size:12px}
 .post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
 .post-preview-link{font-size:12px;color:var(--ac);text-decoration:none}
-/* 跟帖预览：仿 FB 广告卡（图按原生尺寸不放大 + 标题 + 文案 + CTA 按钮）*/
-.ad-preview-card{border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--bg2);max-width:420px}
-.ad-preview-media{display:block;width:auto;height:auto;max-width:100%;max-height:320px;object-fit:contain;background:var(--bg3);margin:0 auto}
-.ad-preview-body{padding:10px 12px;display:flex;flex-direction:column;gap:5px}
-.ad-preview-headline{font-size:14px;font-weight:600;color:var(--t1);line-height:1.35}
-.ad-preview-domain{font-size:12px;color:var(--t3);text-transform:lowercase}
-.ad-preview-text{font-size:13px;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:110px;overflow:auto}
-.ad-preview-actions{display:flex;align-items:center;justify-content:space-between;margin-top:4px;gap:8px}
-.ad-preview-cta{display:inline-block;font-size:12px;font-weight:600;color:#fff;background:var(--ac);padding:6px 14px;border-radius:6px;white-space:nowrap}
-.ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none;white-space:nowrap}
+/* 跟帖预览：内容卡（缩略图+标题/域名 头部，文案，CTA）—— 宽敞不挤 */
+.ad-preview-card{border:1px solid var(--bd);border-radius:10px;background:var(--bg2);padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.ad-preview-top{display:flex;gap:12px;align-items:flex-start}
+.ad-preview-thumb{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:none;background:var(--bg3)}
+.ad-preview-noimg{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--t3)}
+.ad-preview-topright{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.ad-preview-headline{font-size:15px;font-weight:600;color:var(--t1);line-height:1.4}
+.ad-preview-domain{font-size:12px;color:var(--t3);word-break:break-all}
+.ad-preview-text{font-size:13px;color:var(--t2);line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.ad-preview-actions{display:flex;align-items:center;gap:10px}
+.ad-preview-cta{font-size:13px;font-weight:600;color:#fff;background:var(--ac);padding:8px 20px;border-radius:6px}
+.ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none;margin-left:auto}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
