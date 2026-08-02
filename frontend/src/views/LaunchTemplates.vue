@@ -448,6 +448,9 @@ const ctaLabel = (type) => {  // CTA 类型 → 友好标签（预览用）
   const c = CTAS.find(x => x.v === type)
   return c ? t(c.l) : type
 }
+const linkDomain = (url) => {  // URL → 小写域名（FB 预览样式）
+  try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase() } catch { return '' }
+}
 const reuseNeedManualPage = ref(false)   // 识别失败→揭示手选主页
 const manualPageForPost = ref('')        // 手选主页（兜底）
 const openPostPicker = async () => {
@@ -478,7 +481,7 @@ const confirmManualPost = async () => {
   postResolving.value = true
   try {
     const r = await POST('/fb/resolve-post', { q: raw })
-    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type })
+    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type, link: r.link })
     ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
   } catch (e) {
     // 识别不出 → 揭示手选主页，让用户手动拼 {page}_{post}
@@ -493,7 +496,7 @@ const fetchReusePreview = async (postId) => {
   if (!postId) return
   try {
     const r = await POST('/fb/resolve-post', { q: postId })
-    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type }
+    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type, link: r.link }
   } catch { /* 取不到就只显 ID，不阻断 */ }
 }
 // 手选主页 + 裸帖子号 → 拼 {page}_{post}
@@ -1094,6 +1097,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="ad-preview-media" />
             <div class="ad-preview-body">
               <div v-if="reusePostPreview?.headline" class="ad-preview-headline">{{ reusePostPreview.headline }}</div>
+              <div v-if="linkDomain(reusePostPreview?.link)" class="ad-preview-domain">{{ linkDomain(reusePostPreview.link) }}</div>
               <div class="ad-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
               <div class="ad-preview-actions">
                 <span v-if="reusePostPreview?.cta_type" class="ad-preview-cta">{{ ctaLabel(reusePostPreview.cta_type) }}</span>
@@ -1465,6 +1469,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .ad-preview-media{display:block;width:auto;height:auto;max-width:100%;max-height:320px;object-fit:contain;background:var(--bg3);margin:0 auto}
 .ad-preview-body{padding:10px 12px;display:flex;flex-direction:column;gap:5px}
 .ad-preview-headline{font-size:14px;font-weight:600;color:var(--t1);line-height:1.35}
+.ad-preview-domain{font-size:12px;color:var(--t3);text-transform:lowercase}
 .ad-preview-text{font-size:13px;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:110px;overflow:auto}
 .ad-preview-actions{display:flex;align-items:center;justify-content:space-between;margin-top:4px;gap:8px}
 .ad-preview-cta{display:inline-block;font-size:12px;font-weight:600;color:#fff;background:var(--ac);padding:6px 14px;border-radius:6px;white-space:nowrap}

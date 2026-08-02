@@ -401,8 +401,10 @@ class ResolvePostIn(BaseModel):
 
 
 def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
-    """本地 ads_cache 反查：帖子号后缀匹配 ad 的 effective_object_story_id。零 FB 调用，秒回。
-    多数跟帖场景（帖已铺过广告）走这里。返 {page_id, post_id, source} 或 None。"""
+    """本地 ads_cache 反查。零 FB 调用，秒回。
+    支持：① 帖号后缀匹配 ad.creative.effective_object_story_id；
+          ② 广告ID 匹配 ad.id → 取其 creative 的 post（用户常粘广告ID）。
+    返 {page_id, post_id, source} 或 None。"""
     from ..models.ads_cache import AdsCache
     for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
         try:
@@ -416,10 +418,13 @@ def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
                 sid = cr.get("effective_object_story_id") or ""
                 if not sid and isinstance(cr.get("data"), list) and cr["data"]:
                     sid = (cr["data"][0] or {}).get("effective_object_story_id") or ""
-            # sid 形如 {page}_{post}；匹配整串或末段 post 号
+            # ① 帖号匹配 effective_object_story_id（整串或末段）
             if sid and (sid == post_num or (sid.split("_")[-1] == post_num if "_" in sid else False)):
                 page_id = sid.split("_", 1)[0] if "_" in sid else ""
                 return {"page_id": page_id, "post_id": sid, "source": "local"}
+            # ② 广告ID 匹配 ad.id → 取其 creative 的 post
+            if str(ad.get("id", "")) == post_num and sid:
+                return {"page_id": (sid.split("_", 1)[0] if "_" in sid else ""), "post_id": sid, "source": "local"}
     return None
 
 
@@ -436,6 +441,23 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     from ..models.ads_cache import AdsCache
     from ..core.fb_tokens import iter_tenant_clients
     post_suffix = post_id.split("_")[-1] if "_" in post_id else post_id
+
+    def _content_from_creative(cr):
+        """从 creative dict 提取 {message, headline, picture, cta_type, link, permalink_url}。
+        cr 来自实时 GET /{creative_id} 或 ads_cache 的 creative 字段。"""
+        spec = cr.get("object_story_spec") or {}
+        ld = spec.get("link_data") or {}
+        vd = spec.get("video_data") or {}
+        cta = (ld.get("call_to_action") or vd.get("call_to_action") or cr.get("call_to_action") or {})
+        cta_val = (cta.get("value") or {}) if isinstance(cta, dict) else {}
+        msg = (ld.get("message") or vd.get("message") or "")
+        headline = (ld.get("name") or vd.get("title") or "")
+        picture = (cr.get("thumbnail_url") or vd.get("image_url") or ld.get("picture") or "")
+        link = (ld.get("link") or cta_val.get("link") or "")
+        return {"message": msg[:500], "headline": headline[:100], "picture": picture,
+                "cta_type": (cta.get("type") or "") if isinstance(cta, dict) else "",
+                "link": link, "permalink_url": ""}
+
     # ① 本地 page_posts（系统帖：message + asset 图）。视频帖无图 → 只留 message 继续往下取缩略图。
     pp_msg = ""; pp = db.query(PagePost).filter(PagePost.post_id == post_id).first()
     if pp:
@@ -444,7 +466,10 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
             a = db.query(Asset).filter(Asset.id == pp.asset_id).first()
             if a and a.type == "image" and a.public_url:
                 return {"message": pp_msg, "headline": "", "picture": a.public_url, "cta_type": "", "permalink_url": ""}
-    # ② ads_cache object_story_spec + thumbnail_url（暗帖：creative 含 headline/文案/CTA/缩略图）
+    # ② ads_cache 定位 creative_id → 实时 GET /{creative_id} 拿真实内容+缩略图（不靠缓存陈旧字段；
+    #    缓存常缺 thumbnail_url，实时拉才有图）。暗帖主场景。
+    creative_id = ""
+    cached = {}
     for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
         try:
             ads = _json.loads(row.ads_json or "[]")
@@ -453,18 +478,24 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
         for ad in ads:
             cr = ad.get("creative") or {}
             sid = cr.get("effective_object_story_id") or ""
-            spec = cr.get("object_story_spec")
-            if sid and isinstance(spec, dict) and (sid == post_id or (sid.split("_")[-1] == post_suffix if "_" in sid else False)):
-                ld = spec.get("link_data") or {}
-                vd = spec.get("video_data") or {}
-                msg = (ld.get("message") or vd.get("message") or "")
-                headline = (ld.get("name") or vd.get("title") or "")
-                cta = (ld.get("call_to_action") or vd.get("call_to_action") or {})
-                # 缩略图：fbcdn thumbnail_url（较清晰）→ video image_url → link picture
-                picture = (cr.get("thumbnail_url") or vd.get("image_url") or ld.get("picture") or "")
-                if msg or picture or headline:
-                    return {"message": msg[:500], "headline": headline[:100], "picture": picture,
-                            "cta_type": cta.get("type") or "", "permalink_url": ""}
+            if sid and (sid == post_id or (sid.split("_")[-1] == post_suffix if "_" in sid else False)):
+                creative_id = cr.get("id") or ""
+                # 缓存兜底（实时拉失败时用）
+                cached = _content_from_creative(cr) if isinstance(cr.get("object_story_spec"), dict) else {}
+                break
+        if creative_id:
+            break
+    if creative_id:
+        for _c, fb in iter_tenant_clients(db, tenant_id):
+            try:
+                live = fb.get(creative_id, {"fields": "object_story_spec,thumbnail_url,call_to_action,title,body"})
+            except Exception:
+                live = None
+            if live and (live.get("thumbnail_url") or isinstance(live.get("object_story_spec"), dict)):
+                return _content_from_creative(live)
+            break  # 拉失败 → 用缓存兜底
+        if cached and (cached.get("message") or cached.get("picture") or cached.get("headline")):
+            return cached
     # ③ FB published_posts 边（有机帖：page token 读边）
     page_id = post_id.split("_")[0] if "_" in post_id else ""
     if not page_id:
@@ -526,13 +557,22 @@ def resolve_post(body: ResolvePostIn,
         if hit:
             page_id, post_id, source = hit["page_id"], hit["post_id"], hit["source"]
         else:
-            # 2b. FB 兜底：遍历令牌 GET /{post_num}
+            # 2b. FB 兜底：遍历令牌 GET /{post_num}（可能是帖号或广告ID）
             from ..core.fb_tokens import iter_tenant_clients
             for _cred, fb in iter_tenant_clients(db, user.tenant_id):
                 try:
-                    p = fb.get(post_num, {"fields": "id,from,message,attachments{media{src}},permalink_url"})
+                    p = fb.get(post_num, {"fields": "id,name,from,message,attachments{media{src}},permalink_url,"
+                                                    "creative{id,effective_object_story_id,object_story_spec,thumbnail_url,call_to_action}"})
                 except Exception:
                     continue
+                # 广告ID → 取 creative 的 post
+                cr = p.get("creative") or {}
+                if isinstance(cr, dict) and cr.get("effective_object_story_id"):
+                    ad_sid = cr["effective_object_story_id"]
+                    page_id, post_id, source = (ad_sid.split("_", 1)[0] if "_" in ad_sid else ""), ad_sid, "fb"
+                    content = _content_from_creative(cr)
+                    break
+                # 帖号 → 直读
                 full = p.get("id", "")
                 frm = p.get("from") or {}
                 pid = str(frm.get("id") or ("")) or (full.split("_", 1)[0] if "_" in full else "")
@@ -540,8 +580,9 @@ def resolve_post(body: ResolvePostIn,
                     page_id, post_id, source = pid, full, "fb"
                     atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
                     picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
-                    content = {"message": (p.get("message") or "")[:300], "picture": picture,
-                               "permalink_url": p.get("permalink_url", "")}
+                    content = {"message": (p.get("message") or "")[:300], "headline": "", "picture": picture,
+                               "cta_type": "", "permalink_url": p.get("permalink_url", "")}
+                    break
                     break
             if not post_id:
                 raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
