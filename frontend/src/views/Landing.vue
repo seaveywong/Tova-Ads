@@ -595,7 +595,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 
       <template v-if="form.redirect_mode === 'display'">
         <div class="form-l"><label>{{ t('landing.fPixel') }}</label>
-          <el-select v-model="form.pixel_ids" multiple filterable collapse-tags collapse-tags-tooltip
+          <el-select v-model="form.pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
             :placeholder="t('landing.fPixelPh')" style="flex:1">
             <el-option v-for="p in pixels" :key="p.id" :value="p.pixel_id"
               :label="p.pixel_name ? `${p.pixel_name} (${p.pixel_id})` : p.pixel_id" />
