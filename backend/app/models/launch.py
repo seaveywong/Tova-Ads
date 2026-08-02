@@ -56,7 +56,8 @@ class LandingPage(Base):
     pixel_ids = Column(Text)           # JSON 数组 ["123","456"]（FB 多像素）
     tt_pixel_ids = Column(Text)        # JSON 数组（TK 多像素）
     conversion_event = Column(Text)    # legacy 单转化事件（兼容旧数据）
-    conversion_events = Column(Text)   # JSON 数组 ["Purchase","Contact"]（多转化事件，CTA 点击 forEach fire）
+    conversion_events = Column(Text)   # JSON 数组 ["Purchase","Contact"]（FB 多转化事件）
+    tt_conversion_events = Column(Text)  # JSON 数组（TK 转化事件 CompletePayment/SubmitForm 等）
     redirect_mode = Column(Text, default="display")  # display=展示落地页 / redirect=直接跳转
     block_enabled = Column(Boolean, default=False)   # 防护开关：false=不评估规则全放行
     preview_token = Column(Text)                      # 预览令牌（?_pv=token 跳过防护看真实页）

@@ -56,7 +56,7 @@ const editingId = ref(null)
 const saving = ref(false)
 const emptyForm = () => ({
   title: '', description: '', target_urls: [], rotation_mode: 'first',
-  custom_domain: '', custom_domains: [], pixel_ids: [], tt_pixel_ids: [], conversion_events: [],
+  custom_domain: '', custom_domains: [], pixel_ids: [], tt_pixel_ids: [], conversion_events: [], tt_conversion_events: [],
   redirect_mode: 'display', block_enabled: false, preview_enabled: false, preview_url: '',
   subdomain_prefix: '', dedup_enabled: false, dedup_window_hours: 24,
   protection_rules: {}, block_target: '', block_html: '', template_key: '', template_id: null,
@@ -75,6 +75,16 @@ const convEventOptions = computed(() => [
   { v: 'InitiateCheckout', l: t('landing.convInitiateCheckout') },
   { v: 'Subscribe', l: t('landing.convSubscribe') },
   { v: 'CompleteRegistration', l: t('landing.convCompleteRegistration') },
+])
+const ttConvEventOptions = computed(() => [
+  { v: 'CompletePayment', l: t('landing.convCompletePayment') },
+  { v: 'PlaceAnOrder', l: t('landing.convPlaceAnOrder') },
+  { v: 'SubmitForm', l: t('landing.convSubmitForm') },
+  { v: 'Contact', l: t('landing.convContact') },
+  { v: 'AddToCart', l: t('landing.convAddToCart') },
+  { v: 'CompleteRegistration', l: t('landing.convCompleteRegistration') },
+  { v: 'ViewContent', l: t('landing.convViewContent') },
+  { v: 'InitiateCheckout', l: t('landing.convInitiateCheckout') },
 ])
 const rotationOptions = computed(() => [
   { v: 'first', l: t('landing.rotFirst') },
@@ -101,7 +111,7 @@ const openEdit = async (p) => {
       title: detail.title || '', description: detail.description || '', custom_domain: detail.custom_domain || '',
       target_urls: detail.target_urls || [], rotation_mode: detail.rotation_mode || 'first',
       custom_domains: detail.custom_domains || (detail.custom_domain ? [detail.custom_domain.replace(/^https?:\/\//,'')] : []),
-      pixel_ids: detail.pixel_ids || [], tt_pixel_ids: detail.tt_pixel_ids || [], conversion_events: detail.conversion_events || [],
+      pixel_ids: detail.pixel_ids || [], tt_pixel_ids: detail.tt_pixel_ids || [], conversion_events: detail.conversion_events || [], tt_conversion_events: detail.tt_conversion_events || [],
       redirect_mode: detail.redirect_mode || 'display',
       block_enabled: !!detail.block_enabled,
       preview_enabled: !!detail.preview_enabled, preview_url: detail.preview_url || '',
@@ -196,7 +206,7 @@ const save = async () => {
   const body = {
     title: form.value.title.trim(), description: form.value.description,
     target_urls: form.value.target_urls, rotation_mode: form.value.rotation_mode,
-    custom_domains: form.value.custom_domains, pixel_ids: form.value.pixel_ids, tt_pixel_ids: form.value.tt_pixel_ids,
+    custom_domains: form.value.custom_domains, pixel_ids: form.value.pixel_ids, tt_pixel_ids: form.value.tt_pixel_ids, tt_conversion_events: form.value.tt_conversion_events,
     conversion_events: form.value.conversion_events || [],
     redirect_mode: form.value.redirect_mode, block_enabled: form.value.block_enabled,
     preview_enabled: form.value.preview_enabled,
@@ -616,7 +626,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <el-option v-for="o in convEventOptions" :key="o.v" :value="o.v" :label="o.l" />
           </el-select>
         </div>
-        <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
+        <div class="form-l"><label>{{ t('landing.fTtConvEvent') }}</label>
+          <el-select v-model="form.tt_conversion_events" multiple filterable allow-create default-first-option
+            :placeholder="t('landing.fTtConvEventPh')" style="flex:1">
+            <el-option v-for="o in ttConvEventOptions" :key="o.v" :value="o.v" :label="o.l" />
+          </el-select>
+        </div>
           <select v-model="form.template_id" class="input">
             <option :value="null">{{ t('landing.defaultTpl') }}</option>
             <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
