@@ -667,6 +667,7 @@ def resolve_post(body: ResolvePostIn,
 
 
 
+@router.get("/credentials/{cred_id}/pixels")
 def list_credential_pixels(
     cred_id: int,
     user: CurrentUser = Depends(require_permission("ads.read")),

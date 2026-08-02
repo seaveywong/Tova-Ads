@@ -980,6 +980,10 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
         </div>
+        <div class="row"><label>{{ t('launch.pixelId') }}</label>
+          <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+          <span class="hint">{{ t('launch.pixelIdHint') }}</span>
+        </div>
       </div>
 
       <!-- ② 广告组 -->
