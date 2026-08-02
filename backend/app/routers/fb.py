@@ -445,6 +445,76 @@ def _content_from_creative(cr: dict) -> dict:
             "link": link, "permalink_url": ""}
 
 
+def _clone_ad_settings(db: Session, tenant_id: int, post_id: str) -> dict:
+    """从源广告(帖子所属的 ad)克隆 系列/广告组设置 供跟帖模板预填（"复用此帖铺放"=克隆广告）。
+    返 {objective, bid_strategy, optimization_goal, billing_event, destination_type,
+        audience_age_min/max/gender/countries/interests, manual_placement, placement_platforms/devices,
+        facebook_positions} 或 {}。预算不克隆（币种换算复杂，留手动）。"""
+    from ..models.ads_cache import AdsCache
+    from ..core.fb_tokens import client_for_account, iter_tenant_clients
+    post_suffix = post_id.split("_")[-1] if "_" in post_id else post_id
+    src = None  # (act_id, adset_id, campaign_id)
+    for row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
+        try:
+            ads = json.loads(row.ads_json or "[]")
+        except Exception:
+            continue
+        for ad in ads:
+            cr = ad.get("creative") or {}
+            sid = cr.get("effective_object_story_id") or ""
+            if sid and (sid == post_id or (sid.split("_")[-1] == post_suffix if "_" in sid else False)):
+                src = (row.act_id, str(ad.get("adset_id", "")), str(ad.get("campaign_id", "")))
+                break
+        if src:
+            break
+    if not src or not src[1]:
+        return {}
+    act_id, adset_id, camp_id = src
+    fb = client_for_account(db, tenant_id, act_id, "read")
+    if not fb:
+        for _c, f in iter_tenant_clients(db, tenant_id):
+            fb = f; break
+    if not fb:
+        return {}
+    out = {}
+    try:
+        a = fb.get(adset_id, {"fields": "targeting,optimization_goal,billing_event,destination_type"})
+        tg = a.get("targeting") or {}
+        out["optimization_goal"] = a.get("optimization_goal") or ""
+        out["billing_event"] = a.get("billing_event") or ""
+        dt = a.get("destination_type") or ""
+        out["destination_type"] = "" if dt in ("UNDEFINED", "") else dt
+        out["audience_age_min"] = tg.get("age_min")
+        out["audience_age_max"] = tg.get("age_max")
+        g = tg.get("genders") or []
+        out["audience_gender"] = g[0] if g else 0
+        out["audience_countries"] = ((tg.get("geo_locations") or {}).get("countries") or [])
+        ints = []
+        for grp in (tg.get("flexible_spec") or []):
+            for it in (grp.get("interests") or []):
+                ints.append({"id": str(it.get("id", "")), "name": it.get("name", "")})
+        for it in (tg.get("interests") or []):
+            ints.append({"id": str(it.get("id", "")), "name": it.get("name", "")})
+        out["audience_interests"] = ints
+        pp = tg.get("publisher_platforms"); dp = tg.get("device_platforms"); fp = tg.get("facebook_positions")
+        if pp or dp or fp:
+            out["manual_placement"] = True
+            out["placement_platforms"] = pp or []
+            out["placement_devices"] = dp or []
+            out["facebook_positions"] = fp or []
+        else:
+            out["manual_placement"] = False
+    except Exception:
+        pass
+    try:
+        c = fb.get(camp_id, {"fields": "objective,bid_strategy"})
+        out["objective"] = c.get("objective") or ""
+        out["bid_strategy"] = c.get("bid_strategy") or ""
+    except Exception:
+        pass
+    return out
+
+
 def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     """取帖子内容(文案/图/链接)供跟帖预览。
     ① page_posts 本地(系统建过的帖，含 message+asset 图)
@@ -587,10 +657,13 @@ def resolve_post(body: ResolvePostIn,
     # full/local → 补内容预览（FB 兜底已带 content）；无权访问则空字段
     if source != "fb":
         content = _fetch_post_content(db, user.tenant_id, post_id)
+    # 克隆源广告的系列/广告组设置（受众/版位/目标）——"复用此帖铺放"= 克隆广告
+    ad_settings = _clone_ad_settings(db, user.tenant_id, post_id)
     return {"page_id": page_id, "post_id": post_id, "source": source,
             "message": content.get("message", ""), "headline": content.get("headline", ""),
             "picture": content.get("picture", ""), "cta_type": content.get("cta_type", ""),
-            "link": content.get("link", ""), "permalink_url": content.get("permalink_url", "")}
+            "link": content.get("link", ""), "permalink_url": content.get("permalink_url", ""),
+            "ad_settings": ad_settings}
 
 
 

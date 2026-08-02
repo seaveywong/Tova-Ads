@@ -481,7 +481,8 @@ const confirmManualPost = async () => {
   postResolving.value = true
   try {
     const r = await POST('/fb/resolve-post', { q: raw })
-    _setReusePost(r.post_id, r.page_id, { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type, link: r.link })
+    _setReusePost(r.post_id, r.page_id, null)
+    applyReuseResponse(r)
     ElMessage.success(t('launch.postSelected') + ' · ' + (r.source === 'local' ? t('launch.sourceLocal') : r.source === 'fb' ? 'FB' : ''))
   } catch (e) {
     // 识别不出 → 揭示手选主页，让用户手动拼 {page}_{post}
@@ -496,8 +497,40 @@ const fetchReusePreview = async (postId) => {
   if (!postId) return
   try {
     const r = await POST('/fb/resolve-post', { q: postId })
-    reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type, link: r.link }
+    applyReuseResponse(r)
   } catch { /* 取不到就只显 ID，不阻断 */ }
+}
+// 应用 resolve-post 响应：设内容预览 + 克隆源广告设置(受众/版位/目标) + 自动命名
+const applyReuseResponse = (r) => {
+  reusePostPreview.value = { message: r.message, picture: r.picture, permalink: r.permalink_url, headline: r.headline, cta_type: r.cta_type, link: r.link }
+  const s = r.ad_settings
+  if (s && Object.keys(s).length) {
+    applyClonedSettings(s)
+    if (!form.value.name?.trim()) {
+      const h = (r.headline || '').trim()
+      form.value.name = h ? `${t('launch.postSourceReuse')}·${h.slice(0, 14)}` : `${t('launch.postSourceReuse')} ${form.value.reuse_post_ref.split('_').pop().slice(-6)}`
+    }
+    snapshotForm()  // 重快照（含克隆+命名，避免一开就标 dirty）
+  }
+}
+// 把克隆的源广告设置写进表单（系列目标/广告组受众+版位）
+const applyClonedSettings = (s) => {
+  const f = form.value
+  if (s.objective) f.objective = s.objective
+  if (s.optimization_goal) f.optimization_goal = s.optimization_goal
+  if (s.billing_event) f.billing_event = s.billing_event
+  if (s.destination_type) f.destination_type = s.destination_type
+  if (s.bid_strategy) f.bid_strategy = s.bid_strategy
+  if (s.audience_age_min) f.audience_age_min = s.audience_age_min
+  if (s.audience_age_max) f.audience_age_max = s.audience_age_max
+  if (s.audience_gender !== undefined && s.audience_gender !== 0) f.audience_gender = s.audience_gender
+  if (s.audience_countries?.length) f.audience_countries = s.audience_countries
+  if (s.audience_interests?.length) f.audience_interests = s.audience_interests
+  if (s.manual_placement !== undefined) f.manual_placement = s.manual_placement
+  if (s.placement_platforms?.length) f.placement_platforms = s.placement_platforms
+  if (s.placement_devices?.length) f.placement_devices = s.placement_devices
+  if (s.facebook_positions?.length) f.facebook_positions = s.facebook_positions
+  advantage_audience.value = !(s.audience_interests?.length)  // 有手选兴趣→关 Advantage+
 }
 // 手选主页 + 裸帖子号 → 拼 {page}_{post}
 const confirmManualPostWithPage = () => {
