@@ -589,8 +589,9 @@ def resolve_post(body: ResolvePostIn,
     if source != "fb":
         content = _fetch_post_content(db, user.tenant_id, post_id)
     return {"page_id": page_id, "post_id": post_id, "source": source,
-            "message": content.get("message", ""), "picture": content.get("picture", ""),
-            "permalink_url": content.get("permalink_url", "")}
+            "message": content.get("message", ""), "headline": content.get("headline", ""),
+            "picture": content.get("picture", ""), "cta_type": content.get("cta_type", ""),
+            "link": content.get("link", ""), "permalink_url": content.get("permalink_url", "")}
 
 
 
