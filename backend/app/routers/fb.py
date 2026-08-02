@@ -428,6 +428,23 @@ def _local_resolve_post(db: Session, tenant_id: int, post_num: str):
     return None
 
 
+def _content_from_creative(cr: dict) -> dict:
+    """从 creative dict 提取 {message, headline, picture, cta_type, link, permalink_url}。
+    cr 来自实时 GET /{creative_id}、ads_cache 的 creative 字段、或 FB 兜底的广告响应。模块级（resolve_post 也用）。"""
+    spec = cr.get("object_story_spec") or {}
+    ld = spec.get("link_data") or {}
+    vd = spec.get("video_data") or {}
+    cta = (ld.get("call_to_action") or vd.get("call_to_action") or cr.get("call_to_action") or {})
+    cta_val = (cta.get("value") or {}) if isinstance(cta, dict) else {}
+    msg = (ld.get("message") or vd.get("message") or "")
+    headline = (ld.get("name") or vd.get("title") or "")
+    picture = (cr.get("thumbnail_url") or vd.get("image_url") or ld.get("picture") or "")
+    link = (ld.get("link") or cta_val.get("link") or "")
+    return {"message": msg[:500], "headline": headline[:100], "picture": picture,
+            "cta_type": (cta.get("type") or "") if isinstance(cta, dict) else "",
+            "link": link, "permalink_url": ""}
+
+
 def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     """取帖子内容(文案/图/链接)供跟帖预览。
     ① page_posts 本地(系统建过的帖，含 message+asset 图)
@@ -441,23 +458,6 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     from ..models.ads_cache import AdsCache
     from ..core.fb_tokens import iter_tenant_clients
     post_suffix = post_id.split("_")[-1] if "_" in post_id else post_id
-
-    def _content_from_creative(cr):
-        """从 creative dict 提取 {message, headline, picture, cta_type, link, permalink_url}。
-        cr 来自实时 GET /{creative_id} 或 ads_cache 的 creative 字段。"""
-        spec = cr.get("object_story_spec") or {}
-        ld = spec.get("link_data") or {}
-        vd = spec.get("video_data") or {}
-        cta = (ld.get("call_to_action") or vd.get("call_to_action") or cr.get("call_to_action") or {})
-        cta_val = (cta.get("value") or {}) if isinstance(cta, dict) else {}
-        msg = (ld.get("message") or vd.get("message") or "")
-        headline = (ld.get("name") or vd.get("title") or "")
-        picture = (cr.get("thumbnail_url") or vd.get("image_url") or ld.get("picture") or "")
-        link = (ld.get("link") or cta_val.get("link") or "")
-        return {"message": msg[:500], "headline": headline[:100], "picture": picture,
-                "cta_type": (cta.get("type") or "") if isinstance(cta, dict) else "",
-                "link": link, "permalink_url": ""}
-
     # ① 本地 page_posts（系统帖：message + asset 图）。视频帖无图 → 只留 message 继续往下取缩略图。
     pp_msg = ""; pp = db.query(PagePost).filter(PagePost.post_id == post_id).first()
     if pp:
@@ -581,8 +581,7 @@ def resolve_post(body: ResolvePostIn,
                     atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
                     picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
                     content = {"message": (p.get("message") or "")[:300], "headline": "", "picture": picture,
-                               "cta_type": "", "permalink_url": p.get("permalink_url", "")}
-                    break
+                               "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
                     break
             if not post_id:
                 raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
