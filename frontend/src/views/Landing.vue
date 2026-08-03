@@ -440,17 +440,17 @@ watch([() => form.value.subdomain_prefix, () => form.value.custom_domains], () =
 
 // ── 像素库管理 ──
 const pixelOpen = ref(false)
-const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '' })
+const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' })
 const pixelSaving = ref(false)
 const syncing = ref(false)
-const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '' } }
+const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' } }
 const syncPixels = async () => {
   syncing.value = true
   try { const r = await POST('/landing-lib/pixels/sync', {}); ElMessage.success(t('landing.pixelSynced', { n: r.added || 0 })); await loadLib() }
   catch (e) { ElMessage.error(t('landing.syncFail') + '：' + (e.message || '')) }
   syncing.value = false
 }
-const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '' } }
+const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '' } }
 const delPixel = async (p) => {
   try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
   catch {}
@@ -460,14 +460,14 @@ const savePixel = async () => {
   pixelSaving.value = true
   try {
     if (pixelForm.value.id) {
-      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note })
+      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined })
       ElMessage.success(t('common.saved'))
     } else {
-      await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note })
+      await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined })
       ElMessage.success(t('common.done'))
     }
     await loadLib()
-    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '' }
+    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' }
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   pixelSaving.value = false
 }
@@ -862,7 +862,15 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <button class="btn" :disabled="syncing" @click="syncPixels" style="margin-bottom:14px">{{ syncing ? t('landing.pixelSyncing') : t('landing.pixelSync') }}</button>
       <div class="sec-title">{{ pixelForm.id ? t('landing.pixelEdit') : t('landing.pixelAdd') }}</div>
       <div class="form-l"><label>{{ t('landing.fPixelId') }}</label><input v-model="pixelForm.pixel_id" class="input" :placeholder="t('landing.fPixelIdPh')" :disabled="!!pixelForm.id" /></div>
+      <div class="form-l"><label>{{ t('landing.fPixelPlatform') }}</label>
+        <select v-model="pixelForm.platform" class="input">
+          <option value="fb">📘 Facebook</option>
+          <option value="tt">🎵 TikTok</option>
+        </select>
+      </div>
       <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>
+      <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTtToken') }}</label><input v-model="pixelForm.tt_access_token" class="input" type="password" :placeholder="t('landing.fTtTokenPh')" /></div>
+      <div class="pixel-hint" v-if="pixelForm.platform === 'tt'" style="margin:0 0 10px">{{ t('landing.fTtTokenHint') }}</div>
       <button class="btn primary" :disabled="pixelSaving" @click="savePixel">{{ pixelForm.id ? t('common.save') : t('common.add') }}</button>
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">

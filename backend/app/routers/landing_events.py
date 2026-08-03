@@ -102,6 +102,10 @@ class EventIngestIn(BaseModel):
     referrer: str = ""
     metadata: str = ""
     ip: str = ""
+    tt_pixel_ids: str = ""
+    tt_conversion_events: str = ""
+    tt_event_id: str = ""
+    ttclid: str = ""
 
 
 # 爬虫拦截不记录（噪音：FB爬虫AS32934 + bot UA 占 block 绝大多数，无诊断价值；真人误拦的 block 仍记录）
@@ -187,6 +191,18 @@ def ingest_event(body: EventIngestIn, request: Request):
         )
         db.add(ev)
         db.commit()
+        # TK S2S：如果是 visit 事件且带了 TK 像素 + event_id → 发 S2S
+        if body.event_type == "visit" and body.tt_pixel_ids and body.tt_event_id:
+            try:
+                from ..core.tk_events import send_tt_s2s_for_visit
+                _tt_pixels = [p for p in body.tt_pixel_ids.split(",") if p]
+                _tt_convs = [c for c in (body.tt_conversion_events or "").split(",") if c]
+                if _tt_pixels and _tt_convs:
+                    send_tt_s2s_for_visit(db, tenant_id, _tt_pixels, _tt_convs,
+                                          body.tt_event_id, ttclid=body.ttclid or "")
+            except Exception as e:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(f"[TK S2S] ingest 触发失败: {e}")
         return {"ok": True, "event_id": ev.id}
     finally:
         db.close()
@@ -389,9 +405,13 @@ def route_next(body: RouteNextIn):
                 tt_conversion_events = _json.loads(page.tt_conversion_events)
             except Exception:
                 pass
+        # 生成 event_id（TK S2S 双发去重要求；浏览器+后端必须同 UUID）
+        import uuid as _uuid
+        tt_event_id = str(_uuid.uuid4()) if tt_pixel_ids else ""
         return {"target_url": target_url, "mode": mode,
                 "pixel_ids": pixel_ids, "tt_pixel_ids": tt_pixel_ids,
                 "tt_conversion_events": tt_conversion_events,
+                "tt_event_id": tt_event_id,
                 "conversion_event": conversion_event,
                 "conversion_events": conversion_events}
     finally:

@@ -14,6 +14,7 @@ class LandingPixel(Base):
     created_by = Column(BigInteger, ForeignKey("users.id"))
     pixel_id = Column(Text, nullable=False)
     platform = Column(Text, default="fb")     # fb / tt
+    tt_access_token_enc = Column(Text)        # TK Events API access token（加密存；仅 platform=tt 用）
     pixel_name = Column(Text)
     act_id = Column(Text, index=True)
     source = Column(Text, default="manual")

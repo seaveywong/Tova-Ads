@@ -90,12 +90,16 @@ class PixelIn(BaseModel):
     pixel_id: str
     pixel_name: str = ""
     note: str = ""
+    platform: str = "fb"
+    tt_access_token: str = ""  # TK Events API token（仅 platform=tt；加密存）
 
 
 class PixelUpdate(BaseModel):
     pixel_name: str | None = None
     note: str | None = None
     status: str | None = None
+    platform: str | None = None
+    tt_access_token: str | None = None  # 传则更新，不传则保持
 
 
 @router.get("/pixels")
@@ -136,7 +140,11 @@ def create_pixel(body: PixelIn, user: CurrentUser = Depends(require_permission("
     if exists:
         raise HTTPException(400, "该像素已在库中")
     row = LandingPixel(tenant_id=user.tenant_id, created_by=user.id,
-                       pixel_id=body.pixel_id, pixel_name=body.pixel_name or None, note=body.note or None)
+                       pixel_id=body.pixel_id, pixel_name=body.pixel_name or None, note=body.note or None,
+                       platform=body.platform or "fb")
+    if body.platform == "tt" and body.tt_access_token:
+        from ..core.encryption import encrypt
+        row.tt_access_token_enc = encrypt(body.tt_access_token)
     db.add(row); db.flush()
     tid = new_trace_id()
     write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
@@ -156,7 +164,12 @@ def update_pixel(pid: int, body: PixelUpdate,
     if not row:
         raise HTTPException(404, "像素不存在")
     for k, v in body.model_dump(exclude_unset=True).items():
-        setattr(row, k, v)
+        if k == "tt_access_token":
+            if v:
+                from ..core.encryption import encrypt
+                row.tt_access_token_enc = encrypt(v)
+        else:
+            setattr(row, k, v)
     db.commit()
     return {"id": row.id, "pixel_name": row.pixel_name, "status": row.status}
 
