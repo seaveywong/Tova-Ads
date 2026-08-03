@@ -127,7 +127,8 @@ def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
             LandingPixel.status != "archived",
         ).scalar() or 0
         out.append({"id": p.id, "pixel_id": p.pixel_id, "pixel_name": p.pixel_name,
-                    "note": p.note, "status": p.status, "act_count": act_count, **u})
+                    "note": p.note, "status": p.status, "act_count": act_count,
+                    "platform": p.platform or "fb", **u})
     return out
 
 
