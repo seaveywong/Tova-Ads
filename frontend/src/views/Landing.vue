@@ -634,6 +634,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <option v-for="o in rotationOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
         </select>
       </div>
+      <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
+        <select v-model="form.template_id" class="input">
+          <option :value="null">{{ t('landing.defaultTpl') }}</option>
+          <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
+        </select>
+      </div>
         </div>
       </div>
 
@@ -711,12 +717,6 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           </div>
         </div>
         <div class="pixel-hint">{{ t('landing.pixelHint') }}</div>
-        <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
-          <select v-model="form.template_id" class="input">
-            <option :value="null">{{ t('landing.defaultTpl') }}</option>
-            <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
-          </select>
-        </div>
       </template>
         </div>
       </div>
@@ -908,8 +908,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="form-l"><label>{{ t('landing.fPixelId') }}</label><input v-model="pixelForm.pixel_id" class="input" :placeholder="t('landing.fPixelIdPh')" :disabled="!!pixelForm.id" /></div>
       <div class="form-l"><label>{{ t('landing.fPixelPlatform') }}</label>
         <select v-model="pixelForm.platform" class="input">
-          <option value="fb">📘 Facebook</option>
-          <option value="tt">🎵 TikTok</option>
+          <option value="fb">Facebook</option>
+          <option value="tt">TikTok</option>
         </select>
       </div>
       <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>

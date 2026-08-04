@@ -988,8 +988,8 @@ def add_subdomain(pid: int, body: dict,
     if clash:
         raise HTTPException(400, f"子域名 {sub} 已被「{clash.title}」占用")
     # CF 绑定
-    cf_token = _settings("cf_api_token")
-    cf_account = _settings("cf_account_id")
+    cf_token = settings.cf_api_token
+    cf_account = settings.cf_account_id
     if cf_token and cf_account:
         cf = CfClient(cf_token, cf_account)
         try:
@@ -1037,8 +1037,8 @@ def delete_subdomain(pid: int, hostname: str,
     if len(subs) <= 1:
         raise HTTPException(400, "至少保留一个子域名，不能删除最后一个")
     # CF 解绑
-    cf_token = _settings("cf_api_token")
-    cf_account = _settings("cf_account_id")
+    cf_token = settings.cf_api_token
+    cf_account = settings.cf_account_id
     if cf_token and cf_account:
         cf = CfClient(cf_token, cf_account)
         try: cf.unbind_custom_domain(f"tovaads-landing-{p.id}", hostname)
