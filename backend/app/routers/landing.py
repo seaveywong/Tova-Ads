@@ -89,6 +89,10 @@ function evalProtection(request,url,cf){
   const country=(cf.country||"").toUpperCase();
   const dev=parseDev(ua);
   const asn=String(cf.asn||"");
+  // 内置爬虫拦截（无需用户手配 ua_block；FB/TK/Google/Bing 等爬虫一律挡）
+  const _BOT_UA=["facebookexternalhit","facebot","meta-externalagent","googlebot","googleother","googleweblight","bingbot","baiduspider","bytespider","yandexbot","duckduckbot","applebot","twitterbot","linkedinbot","telegrambot","whatsapp","semrushbot","ahrefsbot","mj12bot","petalbot","slurp","crawler","spider","bot/","bot;"];
+  const uaLow=ua.toLowerCase();
+  for(const b of _BOT_UA){if(uaLow.includes(b)){return{blocked:true,reason:"crawler_block",country,device:dev,asn};}}
   const checks=[
     ["country_allow",()=>Array.isArray(rules.country_allow)&&rules.country_allow.length&&!rules.country_allow.map(c=>String(c).toUpperCase()).includes(country)],
     ["country_block",()=>Array.isArray(rules.country_block)&&rules.country_block.map(c=>String(c).toUpperCase()).includes(country)],

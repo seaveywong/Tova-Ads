@@ -15,6 +15,7 @@ class LandingPixel(Base):
     pixel_id = Column(Text, nullable=False)
     platform = Column(Text, default="fb")     # fb / tt
     tt_access_token_enc = Column(Text)        # TK Events API access token（加密存；仅 platform=tt 用）
+    test_event_code = Column(Text)            # TK Events Manager Test Events 标签的测试码（明文，定期过期需更新）
     pixel_name = Column(Text)
     act_id = Column(Text, index=True)
     source = Column(Text, default="manual")

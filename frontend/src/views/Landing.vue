@@ -461,17 +461,18 @@ watch([() => form.value.subdomain_prefix, () => form.value.custom_domains], () =
 
 // ── 像素库管理 ──
 const pixelOpen = ref(false)
-const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' })
+const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' })
 const pixelSaving = ref(false)
 const syncing = ref(false)
-const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' } }
+const pixelTesting = ref(false)
+const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' } }
 const syncPixels = async () => {
   syncing.value = true
   try { const r = await POST('/landing-lib/pixels/sync', {}); ElMessage.success(t('landing.pixelSynced', { n: r.added || 0 })); await loadLib() }
   catch (e) { ElMessage.error(t('landing.syncFail') + '：' + (e.message || '')) }
   syncing.value = false
 }
-const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '' } }
+const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '', test_event_code: p.test_event_code || '' } }
 const delPixel = async (p) => {
   try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
   catch {}
@@ -488,9 +489,19 @@ const savePixel = async () => {
       ElMessage.success(t('common.done'))
     }
     await loadLib()
-    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '' }
+    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' }
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   pixelSaving.value = false
+}
+const testS2s = async () => {
+  if (!pixelForm.value.id) return ElMessage.warning(t('landing.testSaveFirst'))
+  pixelTesting.value = true
+  try {
+    const r = await POST(`/landing-lib/pixels/${pixelForm.value.id}/test-s2s`)
+    if (r.ok) ElMessage.success(r.hint || 'OK')
+    else ElMessage.error(`TK API ${r.code}: ${r.message}`)
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  pixelTesting.value = false
 }
 
 // 域名管理（超管：从域名服务商导入）
@@ -916,7 +927,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
       <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>
       <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTtToken') }}</label><input v-model="pixelForm.tt_access_token" class="input" type="password" :placeholder="t('landing.fTtTokenPh')" /></div>
+      <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTestCode') }}</label><input v-model="pixelForm.test_event_code" class="input" :placeholder="t('landing.fTestCodePh')" /></div>
       <div class="pixel-hint" v-if="pixelForm.platform === 'tt'" style="margin:0 0 10px">{{ t('landing.fTtTokenHint') }}</div>
+      <button class="btn" v-if="pixelForm.platform === 'tt' && pixelForm.id" :disabled="pixelTesting" @click="testS2s" style="margin-bottom:12px">{{ pixelTesting ? '…' : t('landing.testS2sBtn') }}</button>
       <button class="btn primary" :disabled="pixelSaving" @click="savePixel">{{ pixelForm.id ? t('common.save') : t('common.add') }}</button>
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">

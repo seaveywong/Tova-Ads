@@ -92,6 +92,7 @@ class PixelIn(BaseModel):
     note: str = ""
     platform: str = "fb"
     tt_access_token: str = ""  # TK Events API token（仅 platform=tt；加密存）
+    test_event_code: str = ""  # TK Test Events 标签测试码（明文存）
 
 
 class PixelUpdate(BaseModel):
@@ -100,6 +101,7 @@ class PixelUpdate(BaseModel):
     status: str | None = None
     platform: str | None = None
     tt_access_token: str | None = None  # 传则更新，不传则保持
+    test_event_code: str | None = None
 
 
 @router.get("/pixels")
@@ -175,6 +177,43 @@ def update_pixel(pid: int, body: PixelUpdate,
             setattr(row, k, v)
     db.commit()
     return {"id": row.id, "pixel_name": row.pixel_name, "status": row.status}
+
+
+@router.post("/pixels/{pid}/test-s2s")
+def test_pixel_s2s(pid: int,
+                   user: CurrentUser = Depends(require_permission("landing.manage")),
+                   db: Session = Depends(get_db)):
+    """测试 TK S2S 事件：用 test_event_code 发一个测试事件 → TK Events Manager Test Events 标签秒级可见。"""
+    import uuid as _uuid
+    row = db.query(LandingPixel).filter(
+        LandingPixel.id == pid, LandingPixel.tenant_id == user.tenant_id).first()
+    if not row:
+        raise HTTPException(404, "像素不存在")
+    if (row.platform or "fb") != "tt":
+        raise HTTPException(400, "仅 TK 像素支持测试")
+    if not row.tt_access_token_enc:
+        raise HTTPException(400, "请先配置 Events API Token")
+    if not row.test_event_code:
+        raise HTTPException(400, "请先配置 Test Event Code（从 TK Events Manager → Test Events 标签复制）")
+    from ..core.encryption import decrypt
+    from ..core.tk_events import TkEventsClient
+    token = decrypt(row.tt_access_token_enc)
+    client = TkEventsClient(row.pixel_id, token)
+    event_id = str(_uuid.uuid4())
+    result = client.send(
+        event="CompletePayment",
+        event_id=event_id,
+        test_event_code=row.test_event_code,
+        currency="USD", value=1.0,
+    )
+    code = result.get("code")
+    ok = code == 0
+    return {"ok": ok, "code": code, "message": result.get("message", ""),
+            "event_id": event_id,
+            "hint": "请到 TK Events Manager → 该像素 → Test Events 标签查看（秒级可见）" if ok else "TK API 返回错误，请检查 token/test_code 是否正确"}
+
+
+@router.delete("/pixels/{pid}")
 
 
 @router.delete("/pixels/{pid}")
