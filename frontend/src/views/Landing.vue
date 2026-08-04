@@ -614,10 +614,16 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     <div class="bar">
       <div class="bar-l">{{ t('landing.totalPages', { n: pages.length }) }}</div>
       <div class="bar-r">
-        <button class="btn" @click="router.push('/dashboard')">{{ t('landing.viewData') }}</button>
-        <button class="btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
-        <button v-if="isSuper" class="btn" @click="openDomains">{{ t('landing.domainMgmt') }}</button>
-        <button class="btn" @click="openLandingTemplates">{{ t('landing.templates') }}</button>
+        <el-dropdown trigger="click" @command="cmd => { if(cmd==='pixels')openPixels(); else if(cmd==='templates')openLandingTemplates(); else if(cmd==='domains')openDomains(); }">
+          <button class="btn">{{ t('landing.tools') }} ▾</button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="pixels">{{ t('landing.pixelLib') }}</el-dropdown-item>
+              <el-dropdown-item command="templates">{{ t('landing.templates') }}</el-dropdown-item>
+              <el-dropdown-item v-if="isSuper" command="domains">{{ t('landing.domainMgmt') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <button class="btn primary" @click="openCreate">+ {{ t('landing.newLink') }}</button>
       </div>
     </div>
@@ -638,11 +644,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
-          <div v-for="(sub,si) in p.bound_subdomains" :key="sub" style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+          <div v-for="(sub,si) in p.bound_subdomains.slice(0,2)" :key="sub" class="lp-sub-row">
             <span class="url-text" :title="'https://'+sub">🔗 {{ sub }}</span>
             <button class="mb" @click="copyText('https://'+sub, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
-            <a class="mb" :href="'https://'+sub" target="_blank" rel="noopener" v-if="si===0">↗</a>
           </div>
+          <div v-if="p.bound_subdomains.length > 2" class="lp-sub-more" @click="openEdit(p)">{{ t('landing.moreDomains', { n: p.bound_subdomains.length - 2 }) }}</div>
         </div>
         <div class="lp-url" v-else-if="p.custom_domain">
           <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
@@ -1060,6 +1066,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .st-tag.warn{background:rgba(255,159,10,.15);color:var(--warning)}
 .lp-body{font-size:12px;color:var(--t3);margin-top:6px}
 .lp-foot{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
+.lp-sub-row{display:flex;align-items:center;gap:4px;margin-bottom:2px}
+.lp-sub-more{font-size:11px;color:var(--ac);cursor:pointer;padding:2px 0}
+.lp-sub-more:hover{text-decoration:underline}
 .mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer}
 .mb:hover{color:var(--ac);border-color:var(--ac)}
 .mb.danger{color:var(--error);border-color:rgba(239,68,68,.4)}
