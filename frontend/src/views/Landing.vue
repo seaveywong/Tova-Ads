@@ -365,6 +365,7 @@ const copyTtLink = (slug) => {
 }
 const previewTestUrl = (slug) => {
   const base = _subBase(); if (!base) return ''
+  if (!subPage.value?.preview_enabled) return ''
   const token = subPage.value?.preview_token || ''
   if (!token) return ''
   return `https://${base}/a/${slug}?_pv=${token}&ad=test123`
@@ -918,7 +919,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">
         <div v-for="p in pixels" :key="p.id" class="sub-row">
-          <span class="plat-badge" :class="p.platform || 'fb'" v-html="p.platform === 'tt' ? '♪' : 'f'"></span>
+          <span class="plat-badge" :class="p.platform || 'fb'"></span>
           <code>{{ p.pixel_id }}</code>
           <span v-if="p.act_id" class="tag">{{ String(p.act_id).slice(-6) }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
@@ -1039,9 +1040,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .subdomain-tag{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:3px 8px;font-size:12px}
 .sub-link{color:var(--ac);text-decoration:none;font-family:monospace}
 .sub-del{background:none;border:none;color:var(--error);cursor:pointer;font-size:11px;padding:0 2px}
-.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-size:13px;flex:none}
-.plat-badge.fb{background:rgba(24,119,242,.12)}
-.plat-badge.tt{background:rgba(254,44,85,.1)}
+.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;flex:none}
+.plat-badge.fb{background:#1877f2;color:#fff}
+.plat-badge.fb::after{content:"f";font-weight:700;font-size:11px;font-family:Arial,sans-serif}
+.plat-badge.tt{background:#000;color:#fff}
+.plat-badge.tt::after{content:"♪";font-weight:700;font-size:12px}
 .tag.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .tag.warn{color:var(--warning);background:rgba(255,159,10,.13)}
 /* 品牌标识 */
@@ -1049,12 +1052,6 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .brand-fb::before{content:"f";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#1877f2;color:#fff;font-size:11px;font-weight:700;font-family:Arial,sans-serif}
 .brand-tt{display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:13px;color:#fe2c55}
 .brand-tt::before{content:"♪";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#000;color:#fff;font-size:12px;font-weight:700}
-.plat-badge.fb{background:#1877f2;color:#fff}
-.plat-badge.fb::after{content:"f";font-weight:700;font-size:11px}
-.plat-badge.tt{background:#000;color:#fff}
-.plat-badge.tt::after{content:"♪";font-weight:700;font-size:11px}
-.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-size:0;flex:none}
-.plat-badge::after{font-size:11px}
 /* 子码复制链接按钮 */
 .btn-link{border:1px solid var(--bd);background:var(--bg2);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap;transition:opacity .15s}
 .btn-link:hover{opacity:.8}
