@@ -699,6 +699,7 @@ def _page_to_dict(p, db: Session = None) -> dict:
             "redirect_mode": p.redirect_mode or "display",
             "block_enabled": bool(p.block_enabled),
             "preview_enabled": bool(p.preview_enabled), "preview_url": preview_url,
+            "preview_token": p.preview_token or "",
             "subdomain_prefix": p.subdomain_prefix or "",
             "bound_subdomains": bound_subs,
             "dedup_enabled": bool(p.dedup_enabled), "dedup_window_hours": p.dedup_window_hours or 24,
@@ -956,7 +957,7 @@ def _fb_ban_probe(db, tenant_id, url):
 
 @router.post("/pages/{pid}/subdomains")
 def add_subdomain(pid: int, body: dict,
-                  user: CurrentUser = Depends(require_permission("ads.create")),
+                  user: CurrentUser = Depends(require_permission("landing.manage")),
                   db: Session = Depends(get_db)):
     """添加一个新子域名到已有落地页（CF 绑定 + 入 bound_subdomains，不触发重部署）。"""
     import json as _json
@@ -964,6 +965,9 @@ def add_subdomain(pid: int, body: dict,
     prefix = (body.get("prefix") or "").strip().lower()
     if not prefix:
         raise HTTPException(400, "请输入子域名前缀")
+    import re as _re
+    if not _re.match(r'^[a-z0-9][a-z0-9-]{0,30}$', prefix):
+        raise HTTPException(400, "前缀只能含小写字母、数字、连字符（2-31 字符）")
     p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
@@ -991,6 +995,7 @@ def add_subdomain(pid: int, body: dict,
     cf_token = settings.cf_api_token
     cf_account = settings.cf_account_id
     if cf_token and cf_account:
+        from ..core.cf_client import CfClient
         cf = CfClient(cf_token, cf_account)
         try:
             if cf.get_zone_id(_domain_root(sub)):
@@ -1015,7 +1020,7 @@ def add_subdomain(pid: int, body: dict,
 
 @router.delete("/pages/{pid}/subdomains/{hostname}")
 def delete_subdomain(pid: int, hostname: str,
-                     user: CurrentUser = Depends(require_permission("ads.create")),
+                     user: CurrentUser = Depends(require_permission("landing.manage")),
                      db: Session = Depends(get_db)):
     """删除一个绑定的子域名（CF 解绑 + 移出 bound_subdomains）。不删最后一个。"""
     import json as _json
@@ -1040,6 +1045,7 @@ def delete_subdomain(pid: int, hostname: str,
     cf_token = settings.cf_api_token
     cf_account = settings.cf_account_id
     if cf_token and cf_account:
+        from ..core.cf_client import CfClient
         cf = CfClient(cf_token, cf_account)
         try: cf.unbind_custom_domain(f"tovaads-landing-{p.id}", hostname)
         except Exception: pass

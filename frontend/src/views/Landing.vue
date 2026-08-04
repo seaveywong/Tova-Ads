@@ -347,7 +347,9 @@ const copyUrl = (slug) => {
   ElMessage({ message: t('landing.copiedHtml', { url: _esc(url), macro: '{{ad.id}}' }), dangerouslyUseHTMLString: true, type: 'success', duration: 6000 })
 }
 const _subBase = () => {
-  const base = (subPage.value?.custom_domain || subPage.value?.custom_domains?.[0] || '').replace(/^https?:\/\//, '')
+  // 优先用 bound_subdomains[0]（实际绑定的子域名如 lp6.xxx.com），其次 custom_domain
+  const raw = subPage.value?.bound_subdomains?.[0] || subPage.value?.custom_domain || ''
+  const base = raw.replace(/^https?:\/\//, '').split('/')[0]
   if (!base) { ElMessage.warning(t('landing.copyUrlNoDomain')); return null }
   return base
 }
@@ -921,9 +923,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in pixels" :key="p.id" class="sub-row">
           <span class="plat-badge" :class="p.platform || 'fb'"></span>
           <code>{{ p.pixel_id }}</code>
-          <span v-if="p.act_id" class="tag">{{ String(p.act_id).slice(-6) }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
-          <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? '✓ Token' : '⚠ 无Token' }}</span>
+          <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? t('landing.hasToken') : t('landing.noToken') }}</span>
           <span class="tag">{{ t('landing.pixelPages', { n: p.usage_count }) }}</span>
           <button class="mb" style="margin-left:auto" @click="editPixel(p)">{{ t('common.edit') }}</button>
           <button class="mb danger" @click="delPixel(p)">{{ t('common.delete') }}</button>
