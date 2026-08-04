@@ -515,7 +515,35 @@ const tplFileInput = ref(null)
 const tplOpen = ref(false)
 const tplForm = ref({ name: '', description: '', file: null })
 const tplUploading = ref(false)
+const tplInlineUpload = ref(null)
+const tplInlineUploading = ref(false)
 const loadLandingTemplates = async () => { try { landingTemplates.value = await GET('/landing-lib/templates') } catch {} }
+const onTplInline = async (e) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  // 文件名（去 .zip 扩展名）作为模板名
+  const tplName = file.name.replace(/\.zip$/i, '')
+  tplInlineUploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('name', tplName)
+    fd.append('description', '')
+    fd.append('file', file)
+    const BASE = (import.meta.env?.VITE_API_BASE || '/api')
+    const r = await fetch(BASE + '/landing-lib/templates/upload', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') }, body: fd
+    }).then(r => r.json())
+    if (r.id) {
+      await loadLandingTemplates()
+      form.value.template_id = r.id  // 自动选中新模板
+      ElMessage.success(t('landing.tplUploaded', { name: tplName, action: r.action === 'update' ? t('landing.tplUpdated') : t('landing.tplCreated') }))
+    } else {
+      ElMessage.error(r.detail || t('common.opFail'))
+    }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  tplInlineUploading.value = false
+  e.target.value = ''  // 清空 input 允许重复选同一文件
+}
 const openLandingTemplates = () => { tplOpen.value = true; loadLandingTemplates() }
 const onTplFile = (e) => { tplForm.value.file = e.target.files[0] }
 const uploadLandingTpl = async () => {
@@ -648,10 +676,16 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </select>
       </div>
       <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
-        <select v-model="form.template_id" class="input">
+        <select v-model="form.template_id" class="input" style="flex:1">
           <option :value="null">{{ t('landing.defaultTpl') }}</option>
           <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
         </select>
+        <button class="btn sm" @click="tplInlineUpload.click()" :title="t('landing.uploadTplHint')" :disabled="tplInlineUploading">📤</button>
+        <input ref="tplInlineUpload" type="file" accept=".zip" @change="onTplInline" style="display:none" />
+      </div>
+      <div class="pixel-hint" v-if="form.template_id" style="margin:0 0 6px">
+        <a href="#" @click.prevent="openLandingTemplates" style="color:var(--ac)">{{ t('landing.tplMgmt') }}</a>
+        <span v-if="tplInlineUploading" style="margin-left:8px">{{ t('landing.uploading') }}</span>
       </div>
         </div>
       </div>

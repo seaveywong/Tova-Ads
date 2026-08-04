@@ -451,17 +451,31 @@ async def upload_template(
     missing = [p for p in REQUIRED_PLACEHOLDERS if p not in html]
     if missing:
         raise HTTPException(400, f"index.html 缺少系统占位符: {', '.join(missing)}")
-    row = LandingTemplate(
-        tenant_id=user.tenant_id, name=name, description=description or None, html=html,
-        resources_meta=json.dumps(resources) if resources else None,
-        is_builtin=False, status="active", created_by=user.id,
-    )
-    db.add(row); db.flush()
+    # 同名覆盖：有则 UPDATE，无则 INSERT
+    existing_tpl = db.query(LandingTemplate).filter(
+        LandingTemplate.tenant_id == user.tenant_id,
+        LandingTemplate.name == name,
+        LandingTemplate.is_builtin == False,
+    ).first()
+    if existing_tpl:
+        existing_tpl.html = html
+        existing_tpl.resources_meta = json.dumps(resources) if resources else None
+        existing_tpl.description = description or existing_tpl.description
+        row = existing_tpl
+        action = "update"
+    else:
+        row = LandingTemplate(
+            tenant_id=user.tenant_id, name=name, description=description or None, html=html,
+            resources_meta=json.dumps(resources) if resources else None,
+            is_builtin=False, status="active", created_by=user.id,
+        )
+        db.add(row); db.flush()
+        action = "create"
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="landing_template", target_id=str(row.id),
-              action_type="create", source="user", result="success", metadata={"name": name})
+              action_type=action, source="user", result="success", metadata={"name": name})
     db.commit()
-    return {"id": row.id, "name": name, "validation": {"ok": True, "resources": len(resources)}}
+    return {"id": row.id, "name": name, "action": action, "validation": {"ok": True, "resources": len(resources)}}
 
 
 @router.delete("/templates/{tid}")
