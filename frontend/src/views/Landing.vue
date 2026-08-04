@@ -339,17 +339,35 @@ const saveSubTarget = async (s) => {
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const copyUrl = (slug) => {
-  // custom_domain = 该页绑定的子域名公开地址（如 gocal75.marketbriefnow.xyz）；
-  // custom_domains = 根域名列表（仅兜底）。优先用子域名，避免投放到根域。
+  // 旧版兼容（仅 FB 宏链接）
   const base = (subPage.value?.custom_domain || subPage.value?.custom_domains?.[0] || '').replace(/^https?:\/\//, '')
   if (!base) { ElMessage.warning(t('landing.copyUrlNoDomain')); return }
   const url = `https://${base}/a/${slug}?ad={{ad.id}}`
   navigator.clipboard?.writeText(url)
-  // 引导：说明 {{ad.id}} 占位符——FB 广告层级 URL 参数会自动替换成实际广告 ID，用于子码自动绑定
-  ElMessage({
-    message: t('landing.copiedHtml', { url: _esc(url), macro: '{{ad.id}}' }),
-    dangerouslyUseHTMLString: true, type: 'success', duration: 6000,
-  })
+  ElMessage({ message: t('landing.copiedHtml', { url: _esc(url), macro: '{{ad.id}}' }), dangerouslyUseHTMLString: true, type: 'success', duration: 6000 })
+}
+const _subBase = () => {
+  const base = (subPage.value?.custom_domain || subPage.value?.custom_domains?.[0] || '').replace(/^https?:\/\//, '')
+  if (!base) { ElMessage.warning(t('landing.copyUrlNoDomain')); return null }
+  return base
+}
+const copyFbLink = (slug) => {
+  const base = _subBase(); if (!base) return
+  const url = `https://${base}/a/${slug}?ad={{ad.id}}`
+  navigator.clipboard?.writeText(url)
+  ElMessage({ message: t('landing.copiedFb', { url: _esc(url) }), dangerouslyUseHTMLString: true, type: 'success', duration: 6000 })
+}
+const copyTtLink = (slug) => {
+  const base = _subBase(); if (!base) return
+  const url = `https://${base}/a/${slug}`
+  navigator.clipboard?.writeText(url)
+  ElMessage.success(t('landing.copiedTt'))
+}
+const previewTestUrl = (slug) => {
+  const base = _subBase(); if (!base) return ''
+  const token = subPage.value?.preview_token || ''
+  if (!token) return ''
+  return `https://${base}/a/${slug}?_pv=${token}&ad=test123`
 }
 // 子码 FB 封禁检测（单个 + 批量）
 const subFbStatus = ref({})  // {slug: {status, detail, loading}}
@@ -593,6 +611,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     </div>
 
     <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-text="saving ? t('landing.deployingCloud') : ''">
+      <div class="lp-section">
+        <div class="lp-section-title">{{ t('landing.secBasic') }}</div>
+        <div class="lp-section-body">
       <div class="form-l"><label>{{ t('landing.fTitle') }}</label><input v-model="form.title" class="input" :placeholder="t('landing.fTitlePh')" /></div>
       <div class="form-l"><label>{{ t('landing.accessMode') }}</label>
         <el-radio-group v-model="form.redirect_mode">
@@ -612,10 +633,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <option v-for="o in rotationOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
         </select>
       </div>
-      <div class="form-l" v-if="form.custom_domain"><label>{{ t('landing.fPublicUrl') }}</label>
-        <span class="url-text" style="flex:1">🔗 {{ form.custom_domain }}</span>
-        <button class="mb" @click="copyText(form.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
+        </div>
       </div>
+
+      <div class="lp-section">
+        <div class="lp-section-title">{{ t('landing.secDomain') }}</div>
+        <div class="lp-section-body">
       <div class="form-l"><label>{{ t('landing.fDomain') }}</label>
         <el-select v-model="form.custom_domains" multiple filterable allow-create default-first-option
           :placeholder="t('landing.fDomainPh')" style="flex:1">
@@ -640,11 +663,21 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <button class="btn sm primary" :disabled="subAdding || !newSubPrefix.trim() || !editingId" @click="addSubdomain">{{ subAdding ? '…' : t('common.add') }}</button>
       </div>
       <div class="pixel-hint" v-if="form.custom_domains.length">{{ t('landing.addSubHint') }}</div>
+      <div class="form-l" v-if="form.custom_domain"><label>{{ t('landing.fPublicUrl') }}</label>
+        <span class="url-text" style="flex:1">🔗 {{ form.custom_domain }}</span>
+        <button class="mb" @click="copyText(form.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
+      </div>
+        </div>
+      </div>
+
+      <div class="lp-section" v-if="form.redirect_mode === 'display'">
+        <div class="lp-section-title">{{ t('landing.secPixel') }}</div>
+        <div class="lp-section-body">
 
       <template v-if="form.redirect_mode === 'display'">
         <!-- Facebook 像素区块 -->
         <div class="pixel-section fb-section">
-          <div class="pixel-section-header">📘 Facebook</div>
+          <div class="pixel-section-header brand-fb">Facebook</div>
           <div class="form-l"><label>{{ t('landing.fPixel') }}</label>
             <el-select v-model="form.pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
               :placeholder="t('landing.fPixelPh')" style="flex:1">
@@ -661,7 +694,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </div>
         <!-- TikTok 像素区块 -->
         <div class="pixel-section tt-section">
-          <div class="pixel-section-header">🎵 TikTok</div>
+          <div class="pixel-section-header brand-tt">TikTok</div>
           <div class="form-l"><label>{{ t('landing.fTtPixel') }}</label>
             <el-select v-model="form.tt_pixel_ids" multiple filterable allow-create collapse-tags collapse-tags-tooltip
               :placeholder="t('landing.fTtPixelPh')" style="flex:1">
@@ -684,6 +717,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           </select>
         </div>
       </template>
+        </div>
+      </div>
+
+      <div class="lp-section">
+        <div class="lp-section-title">{{ t('landing.secProtection') }}</div>
+        <div class="lp-section-body">
 
       <div class="sec-title">{{ t('landing.dedup') }} <el-switch v-model="form.dedup_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
       <template v-if="form.dedup_enabled">
@@ -766,6 +805,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div class="form-l"><label>{{ t('landing.fBlockHtml') }}</label><textarea v-model="form.block_html" class="input" rows="2" :placeholder="t('landing.fBlockHtmlPh')"></textarea></div>
       </template>
       <div v-else class="block-off-hint">{{ t('landing.protectionOff') }}</div>
+        </div>
+      </div>
 
       <template #footer>
         <button class="btn" @click="drawerOpen=false">{{ t('common.cancel') }}</button>
@@ -808,7 +849,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <template v-if="subStatus !== 'trash'">
               <div class="sub-ops">
                 <button class="mb" @click="goSubLogs(s)">{{ t('landing.logsBtn') }}</button>
-                <button class="mb" @click="copyUrl(s.slug)">{{ t('common.copy') }}</button>
+                <button class="btn-link fb" @click="copyFbLink(s.slug)" :title="t('landing.copyFbLink')">f FB</button>
+                <button class="btn-link tt" @click="copyTtLink(s.slug)" :title="t('landing.copyTtLink')">♪ TK</button>
+                <a v-if="previewTestUrl(s.slug)" class="btn-link preview" :href="previewTestUrl(s.slug)" target="_blank" rel="noopener" :title="t('landing.previewTestLink')">👁</a>
                 <el-dropdown trigger="click" @command="cmd => {
                   if (cmd === 'fb') checkSubFb(s)
                   else if (cmd === 'ad') router.push({ name: 'ad-manager', query: { act: s.act_id || '' } })
@@ -875,7 +918,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">
         <div v-for="p in pixels" :key="p.id" class="sub-row">
-          <span class="plat-badge" :class="p.platform || 'fb'">{{ p.platform === 'tt' ? '🎵' : '📘' }}</span>
+          <span class="plat-badge" :class="p.platform || 'fb'" v-html="p.platform === 'tt' ? '♪' : 'f'"></span>
           <code>{{ p.pixel_id }}</code>
           <span v-if="p.act_id" class="tag">{{ String(p.act_id).slice(-6) }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
@@ -1001,6 +1044,27 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .plat-badge.tt{background:rgba(254,44,85,.1)}
 .tag.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .tag.warn{color:var(--warning);background:rgba(255,159,10,.13)}
+/* 品牌标识 */
+.brand-fb{display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:13px;color:#1877f2}
+.brand-fb::before{content:"f";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#1877f2;color:#fff;font-size:11px;font-weight:700;font-family:Arial,sans-serif}
+.brand-tt{display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:13px;color:#fe2c55}
+.brand-tt::before{content:"♪";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;background:#000;color:#fff;font-size:12px;font-weight:700}
+.plat-badge.fb{background:#1877f2;color:#fff}
+.plat-badge.fb::after{content:"f";font-weight:700;font-size:11px}
+.plat-badge.tt{background:#000;color:#fff}
+.plat-badge.tt::after{content:"♪";font-weight:700;font-size:11px}
+.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-size:0;flex:none}
+.plat-badge::after{font-size:11px}
+/* 子码复制链接按钮 */
+.btn-link{border:1px solid var(--bd);background:var(--bg2);padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap;transition:opacity .15s}
+.btn-link:hover{opacity:.8}
+.btn-link.fb{color:#1877f2;border-color:rgba(24,119,242,.3)}
+.btn-link.tt{color:#fe2c55;border-color:rgba(254,44,85,.3)}
+.btn-link.preview{color:var(--t3);border-color:var(--bd)}
+/* 编辑器分区 */
+.lp-section{border:1px solid var(--bd);border-radius:10px;margin-bottom:14px;overflow:hidden}
+.lp-section-title{padding:8px 14px;font-size:13px;font-weight:600;background:var(--bg3);border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:6px}
+.lp-section-body{padding:12px 14px}
 .block-off-hint{font-size:12px;color:var(--t3);padding:8px 0;line-height:1.5}
 .guard-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .guard-btn{padding:6px 12px;border:1px solid var(--bd);background:var(--bg3);color:var(--t2);border-radius:6px;font-size:12px;cursor:pointer;transition:.15s}
