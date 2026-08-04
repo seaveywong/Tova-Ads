@@ -875,9 +875,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">
         <div v-for="p in pixels" :key="p.id" class="sub-row">
+          <span class="plat-badge" :class="p.platform || 'fb'">{{ p.platform === 'tt' ? '🎵' : '📘' }}</span>
           <code>{{ p.pixel_id }}</code>
           <span v-if="p.act_id" class="tag">{{ String(p.act_id).slice(-6) }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
+          <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? '✓ Token' : '⚠ 无Token' }}</span>
           <span class="tag">{{ t('landing.pixelPages', { n: p.usage_count }) }}</span>
           <button class="mb" style="margin-left:auto" @click="editPixel(p)">{{ t('common.edit') }}</button>
           <button class="mb danger" @click="delPixel(p)">{{ t('common.delete') }}</button>
@@ -994,6 +996,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .subdomain-tag{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:3px 8px;font-size:12px}
 .sub-link{color:var(--ac);text-decoration:none;font-family:monospace}
 .sub-del{background:none;border:none;color:var(--error);cursor:pointer;font-size:11px;padding:0 2px}
+.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-size:13px;flex:none}
+.plat-badge.fb{background:rgba(24,119,242,.12)}
+.plat-badge.tt{background:rgba(254,44,85,.1)}
+.tag.ok{color:var(--success);background:rgba(52,199,89,.13)}
+.tag.warn{color:var(--warning);background:rgba(255,159,10,.13)}
 .block-off-hint{font-size:12px;color:var(--t3);padding:8px 0;line-height:1.5}
 .guard-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .guard-btn{padding:6px 12px;border:1px solid var(--bd);background:var(--bg3);color:var(--t2);border-radius:6px;font-size:12px;cursor:pointer;transition:.15s}

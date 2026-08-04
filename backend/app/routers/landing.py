@@ -960,6 +960,7 @@ def add_subdomain(pid: int, body: dict,
                   db: Session = Depends(get_db)):
     """添加一个新子域名到已有落地页（CF 绑定 + 入 bound_subdomains，不触发重部署）。"""
     import json as _json
+    from ..models.launch import LandingPage
     prefix = (body.get("prefix") or "").strip().lower()
     if not prefix:
         raise HTTPException(400, "请输入子域名前缀")
@@ -1018,6 +1019,7 @@ def delete_subdomain(pid: int, hostname: str,
                      db: Session = Depends(get_db)):
     """删除一个绑定的子域名（CF 解绑 + 移出 bound_subdomains）。不删最后一个。"""
     import json as _json
+    from ..models.launch import LandingPage
     p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")

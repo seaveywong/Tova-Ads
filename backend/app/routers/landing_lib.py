@@ -128,7 +128,9 @@ def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
         ).scalar() or 0
         out.append({"id": p.id, "pixel_id": p.pixel_id, "pixel_name": p.pixel_name,
                     "note": p.note, "status": p.status, "act_count": act_count,
-                    "platform": p.platform or "fb", **u})
+                    "platform": p.platform or "fb",
+                    "tt_has_token": bool(p.tt_access_token_enc) if (p.platform or "fb") == "tt" else False,
+                    **u})
     return out
 
 
