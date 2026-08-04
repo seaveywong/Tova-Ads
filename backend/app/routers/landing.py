@@ -124,7 +124,19 @@ export default{
         return new Response(await resp.text(),{status:resp.status});
       }catch(e){return new Response('{"ok":false}',{status:500});}
     }
-    if(!url.pathname.startsWith("/a/"))return env.ASSETS.fetch(request);
+    if(!url.pathname.startsWith("/a/")){
+      // 非子码路径（根路径 / 等）：防护开启时也评估规则（防止直访绕过）
+      const _hasD=url.searchParams.get("_d");
+      const _isAsset=/\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|map|webp|mp4)(\?|$)/i.test(url.pathname);
+      if(LP_CONFIG.block_enabled&&!_isPreview&&!_hasD&&!_isAsset){
+        const v2=evalProtection(request,url,cf);
+        if(v2.blocked){
+          sendEvent("block",{path:url.pathname,reason:"root_"+v2.reason,country:cf.country||"",asn:String(cf.asn||""),user_agent:ua,ip:ip},ctx);
+          return Response.redirect(LP_CONFIG.rules.block_target||LP_CONFIG.block_target||"https://whatsapp.com",302);
+        }
+      }
+      return env.ASSETS.fetch(request);
+    }
     const cf=request.cf||{};
     const slug=url.pathname.replace("/a/","").split("?")[0];
     const adId=url.searchParams.get("ad")||url.searchParams.get("ad_id")||"";
@@ -987,7 +999,16 @@ def add_subdomain(pid: int, body: dict,
         if len(parts) > 1: roots = [parts[1]]
     if not roots:
         raise HTTPException(400, "落地页没有配置根域名")
-    sub = f"{prefix}.{_domain_root(roots[0])}"
+    # 多根域：前端可指定 root，否则用第一个
+    _root = body.get("root") or ""
+    if _root:
+        _root = _domain_root(_root)
+        if _root not in [_domain_root(r) for r in roots]:
+            raise HTTPException(400, f"根域名 {_root} 不在该落地页配置中")
+        selected_root = _root
+    else:
+        selected_root = _domain_root(roots[0])
+    sub = f"{prefix}.{selected_root}"
     # 冲突检查
     clash = db.query(LandingPage).filter(
         LandingPage.custom_domain == f"https://{sub}",

@@ -422,6 +422,7 @@ const randomPrefix = () => 'go' + Math.random().toString(36).slice(2, 7)
 const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : h }
 // 子域名管理
 const newSubPrefix = ref('')
+const newSubRoot = ref('')
 const subAdding = ref(false)
 const addSubdomain = async () => {
   const p = newSubPrefix.value.trim().toLowerCase()
@@ -429,7 +430,7 @@ const addSubdomain = async () => {
   if (!editingId.value) return ElMessage.warning(t('landing.saveFirst'))
   subAdding.value = true
   try {
-    const r = await POST(`/landing/pages/${editingId.value}/subdomains`, { prefix: p })
+    const r = await POST(`/landing/pages/${editingId.value}/subdomains`, { prefix: p, root: newSubRoot.value || undefined })
     form.value.bound_subdomains = r.bound_subdomains || []
     newSubPrefix.value = ''
     ElMessage.success(t('landing.subAdded', { sub: r.subdomain }))
@@ -636,7 +637,14 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           {{ t('landing.cardStats', { sub: p.subcode_count, visit: p.visit_count||0, click: p.click_count||0, rate: p.pass_rate||0 }) }}<span v-if="(p.block_count||0) > 0" style="color:var(--warning);margin-left:4px">{{ t('landing.blockedCount', { n: p.block_count }) }}</span>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
-        <div class="lp-url" v-if="p.custom_domain">
+        <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
+          <div v-for="(sub,si) in p.bound_subdomains" :key="sub" style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+            <span class="url-text" :title="'https://'+sub">🔗 {{ sub }}</span>
+            <button class="mb" @click="copyText('https://'+sub, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
+            <a class="mb" :href="'https://'+sub" target="_blank" rel="noopener" v-if="si===0">↗</a>
+          </div>
+        </div>
+        <div class="lp-url" v-else-if="p.custom_domain">
           <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
           <button class="mb" @click="copyText(p.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
           <a class="mb" :href="p.custom_domain" target="_blank" rel="noopener">{{ t('landing.open') }}↗</a>
@@ -713,6 +721,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="form-l">
         <label>{{ t('landing.addSub') }}</label>
         <input v-model="newSubPrefix" class="input" :placeholder="t('landing.addSubPh')" style="flex:1" @keyup.enter="addSubdomain" />
+        <select v-model="newSubRoot" class="input" style="width:160px;flex:none" v-if="(form.custom_domains||[]).length > 1">
+          <option v-for="d in form.custom_domains" :key="d" :value="d">{{ rootOf(d) }}</option>
+        </select>
         <button class="mb" type="button" @click="newSubPrefix = randomPrefix()">🎲</button>
         <button class="btn sm primary" :disabled="subAdding || !newSubPrefix.trim() || !editingId" @click="addSubdomain">{{ subAdding ? '…' : t('common.add') }}</button>
       </div>
