@@ -9,9 +9,10 @@ POST /fb/webhook — FB 推送事件（leadgen → 存 leads 表）
 - POST 校验 X-Hub-Signature-256 HMAC-SHA256（payload + FB_APP_SECRET）——防伪造。
   FB_APP_SECRET 未配则跳过（dev/测试），生产应配。
 """
-import json, os, hmac, hashlib, logging
+import json, hmac, hashlib, logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Response
+from ..core.config import settings
 from ..core.database import SuperSessionLocal
 from ..models.lead import Lead
 from ..models.lead_form_template import LeadFormTemplate
@@ -19,8 +20,9 @@ from ..models.lead_form_template import LeadFormTemplate
 router = APIRouter(prefix="/fb/webhook", tags=["fb-webhook"])
 logger = logging.getLogger("toveads.fb_webhook")
 
-VERIFY_TOKEN = os.environ.get("FB_WEBHOOK_VERIFY_TOKEN", "toveads_webhook_verify")
-FB_APP_SECRET = os.environ.get("FB_APP_SECRET", "")
+# 从 settings 读（pydantic 从 .env 加载；os.environ 读不到 .env 值）
+VERIFY_TOKEN = settings.fb_webhook_verify_token
+FB_APP_SECRET = settings.fb_app_secret
 
 
 def _parse_created_time(raw):

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     cf_account_id: str = ""
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
+    # FB webhook（leads_retrieval 实时回调）
+    fb_webhook_verify_token: str = "toveads_webhook_verify"  # FB Dashboard 配同一值
+    fb_app_secret: str = ""  # 配后启用 X-Hub-Signature-256 HMAC 校验；空=跳过(dev)
 
     # AI 全局配置（无损切换厂商：Gemini/OpenAI/DeepSeek/Grok，均 OpenAI 兼容）
     # 切换 = 改 base_url + key + model，不改代码（审计"AI 厂商无损切换"）
