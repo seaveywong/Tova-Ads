@@ -540,7 +540,7 @@ const copySelected = () => {
 }
 const localTime = (tz) => {
   if (!tz) return '—'
-  try { return new Intl.DateTimeFormat('zh-CN', { timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()) }
+  try { return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'zh-CN', { timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()) }
   catch { return '—' }
 }
 const tzOffset = (tz) => {

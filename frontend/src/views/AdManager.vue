@@ -7,7 +7,7 @@ import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const accounts = ref([])
@@ -205,7 +205,7 @@ const leadFieldMap = (l) => { const m = {}; for (const f of (l.field_data || [])
 const leadField = (l, names) => { const m = leadFieldMap(l); for (const n of names) if (m[n]) return m[n]; return '' }
 const LEAD_SKIP = ['full_name', 'first_name', 'last_name', 'email', 'work_email', 'phone_number', 'phone', 'work_phone_number']
 const leadExtra = (l) => Object.entries(leadFieldMap(l)).filter(([k]) => !LEAD_SKIP.includes(k))
-const fmtLeadTime = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }) } catch { return iso } }
+const fmtLeadTime = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', { hour12: false }) } catch { return iso } }
 const switchLeadTab = () => { tab.value = 'lead'; selected.value = new Set(); if (!leads.value.length) loadLeads() }
 const loadLeads = async () => {
   leadsLoading.value = true
