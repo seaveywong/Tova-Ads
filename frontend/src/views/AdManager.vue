@@ -195,6 +195,39 @@ const resetRedirects = async () => {
 const toggleSelect = (id) => { const s = new Set(selected.value); s.has(id) ? s.delete(id) : s.add(id); selected.value = s }
 const selectAll = () => { selected.value = selected.value.size === curList.value.length ? new Set() : new Set(curList.value.map(x => x.id)) }
 const isSelected = (id) => selected.value.has(id)
+
+// 潜客（FB Leadgen）
+const leads = ref([])
+const leadsLoading = ref(false)
+const FIELD_LABELS = computed(() => ({ city: t('adm.lfCity'), state: t('adm.lfState'), zip_code: t('adm.lfZip'), postal_code: t('adm.lfZip'), country: t('adm.lfCountry'), gender: t('adm.lfGender'), date_of_birth: t('adm.lfDob'), marital_status: t('adm.lfMarital'), company_name: t('adm.lfCompany'), job_title: t('adm.lfJob'), address: t('adm.lfAddress'), no_of_employees: t('adm.lfEmps') }))
+const fieldLabel = (k) => FIELD_LABELS.value[k] || k.replace(/_/g, ' ')
+const leadFieldMap = (l) => { const m = {}; for (const f of (l.field_data || [])) m[f.name] = (f.values || [])[0] || ''; return m }
+const leadField = (l, names) => { const m = leadFieldMap(l); for (const n of names) if (m[n]) return m[n]; return '' }
+const LEAD_SKIP = ['full_name', 'first_name', 'last_name', 'email', 'work_email', 'phone_number', 'phone', 'work_phone_number']
+const leadExtra = (l) => Object.entries(leadFieldMap(l)).filter(([k]) => !LEAD_SKIP.includes(k))
+const fmtLeadTime = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }) } catch { return iso } }
+const switchLeadTab = () => { tab.value = 'lead'; selected.value = new Set(); if (!leads.value.length) loadLeads() }
+const loadLeads = async () => {
+  leadsLoading.value = true
+  try { const r = await GET('/leads'); leads.value = r.items || [] }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  leadsLoading.value = false
+}
+const syncLeads = async () => {
+  opLoading.value = true
+  try {
+    const r = await POST('/leads/sync')
+    if (r.error) ElMessage.warning(t('adm.leadsErr', { msg: r.error }))
+    else { ElMessage.success(t('adm.leadsSynced', { n: (r.synced || 0) + (r.enriched || 0) })); await loadLeads() }
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  opLoading.value = false
+}
+const subscribeLeads = async () => {
+  opLoading.value = true
+  try { const r = await POST('/leads/subscribe'); ElMessage.success(r.error ? t('adm.leadsErr', { msg: r.error }) : t('adm.leadsSubscribed', { ok: r.subscribed || 0, n: r.total_pages || 0 })) }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  opLoading.value = false
+}
 </script>
 
 <template>
@@ -207,7 +240,7 @@ const isSelected = (id) => selected.value.has(id)
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <button class="ctrl-btn primary" :disabled="loading" @click="load" style="margin-left:auto">{{ loading ? t('common.loading') + '…' : t('common.refresh') }}</button>
+      <button class="ctrl-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load()" style="margin-left:auto">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">
@@ -222,9 +255,10 @@ const isSelected = (id) => selected.value.has(id)
       <div :class="['tab', { on: tab === 'campaign' }]" @click="tab = 'campaign'; clearDrill(); selected = new Set()">{{ t('adm.tabCampaign') }}</div>
       <div :class="['tab', { on: tab === 'adset' }]" @click="tab = 'adset'; selected = new Set()">{{ t('adm.tabAdset') }}</div>
       <div :class="['tab', { on: tab === 'ad' }]" @click="tab = 'ad'; selected = new Set()">{{ t('adm.tabAd') }}</div>
+      <div :class="['tab', { on: tab === 'lead' }]" @click="switchLeadTab">{{ t('adm.tabLead') }}</div>
       <div v-if="drillName" class="drill-tag">{{ drillName }} <span @click="clearDrill">✕</span></div>
     </div>
-    <div class="tbl" v-loading="loading">
+    <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <template v-if="tab === 'campaign'">
         <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
@@ -258,6 +292,26 @@ const isSelected = (id) => selected.value.has(id)
         </div>
       </template>
       <div v-if="!curList.length && !loading" class="empty">{{ t('common.noData') }}</div>
+    </div>
+    <div v-if="tab === 'lead'" class="leads-panel">
+      <div class="leads-bar">
+        <span class="rd-cnt">{{ t('adm.leadsCount', { n: leads.length }) }}</span>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads">🔔 {{ t('adm.leadsSubscribe') }}</button>
+        <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
+      </div>
+      <div class="tbl" v-loading="leadsLoading">
+        <div class="row head lead-row"><div>{{ t('adm.lcolTime') }}</div><div>{{ t('adm.lcolName') }}</div><div>{{ t('adm.lcolEmail') }}</div><div>{{ t('adm.lcolPhone') }}</div><div>{{ t('adm.lcolSource') }}</div><div>{{ t('adm.lcolDetail') }}</div></div>
+        <div v-for="l in leads" :key="l.lead_id" class="row lead-row">
+          <div class="ld-time">{{ fmtLeadTime(l.created_time) }}</div>
+          <div class="ld-name">{{ leadField(l, ['full_name', 'first_name', 'last_name']) || '-' }}</div>
+          <div class="ld-email">{{ leadField(l, ['email', 'work_email']) || '-' }}</div>
+          <div>{{ leadField(l, ['phone_number', 'phone', 'work_phone_number']) || '-' }}</div>
+          <div class="ld-src"><code v-if="l.ad_id">{{ l.ad_id }}</code><span v-else-if="l.form_id" class="muted">form …{{ String(l.form_id).slice(-6) }}</span><span v-else class="muted">-</span></div>
+          <div class="ld-extra"><span v-for="[k, v] in leadExtra(l)" :key="k" class="ld-chip">{{ fieldLabel(k) }}: {{ v }}</span></div>
+        </div>
+        <div v-if="!leads.length && !leadsLoading" class="empty">{{ t('adm.leadsEmpty') }}</div>
+      </div>
     </div>
     <el-dialog v-model="budgetDialog" :title="t('adm.editBudgetTitle', { name: budgetTarget?.name || '' })" width="360px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
       <div class="budget-form">
@@ -467,4 +521,13 @@ const isSelected = (id) => selected.value.has(id)
 .da-result.ok { color: var(--success) }
 .da-result.fail { color: var(--error) }
 .diag-empty { padding: 20px; text-align: center; color: var(--t3); font-size: 12px }
+.leads-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap }
+.leads-hint { font-size: 11px; color: var(--t3); margin-left: auto }
+.lead-row { grid-template-columns: 1.3fr 1fr 1.4fr 1.1fr 1fr 1.6fr }
+.ld-time { color: var(--t3); font-size: 11px; white-space: nowrap }
+.ld-name { font-weight: 600; color: var(--t1) }
+.ld-email { color: var(--ac); font-size: 11px; word-break: break-all }
+.ld-src code { font-size: 11px; color: var(--t3) }
+.ld-extra { display: flex; flex-wrap: wrap; gap: 4px }
+.ld-chip { font-size: 10px; color: var(--t2); background: var(--bg3); padding: 1px 6px; border-radius: 8px; white-space: nowrap }
 </style>
