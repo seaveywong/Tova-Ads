@@ -16,7 +16,7 @@ from ..core.deps import CurrentUser, require_permission
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, GRAPH_BASE, GRAPH_VERSION
 from ..models.fb import FbCredential
-from .fb_apps import FbApp
+from ..models.fb_app import FbApp
 
 router = APIRouter(prefix="/fb/oauth", tags=["fb-oauth"])
 

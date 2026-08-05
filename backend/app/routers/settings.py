@@ -263,3 +263,40 @@ def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ad
                   db: Session = Depends(get_db)):
     from ..core.keepalive_config import save_keepalive_config
     return save_keepalive_config(db, user.tenant_id, body)
+
+
+# ── FB Webhook 配置（超管）── verify_token 存 system_settings，App Secret 复用 fb_apps 表
+class WebhookIn(BaseModel):
+    verify_token: str = ""
+
+
+@router.get("/webhook")
+def get_webhook(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
+    """返回 webhook 配置：公开 URL（只读）+ verify_token（脱敏）+ active App 数。"""
+    from ..core.webhook_config import get_webhook_config
+    from ..models.fb_app import FbApp
+    cfg = get_webhook_config(db)
+    vt = cfg["verify_token"]
+    masked = (vt[:4] + "***" + vt[-3:]) if vt and len(vt) > 8 else ("***" if vt else "")
+    apps = db.query(FbApp).filter(FbApp.status == "active").all()
+    return {
+        "public_url": cfg["public_url"],
+        "verify_token_masked": masked,
+        "verify_token_set": bool(vt),
+        "verify_token_is_default": vt == "toveads_webhook_verify",
+        "active_apps": len(apps),
+        "app_names": [a.name or f"App {a.app_id}" for a in apps],
+    }
+
+
+@router.put("/webhook")
+def set_webhook(body: WebhookIn, user: CurrentUser = Depends(require_superadmin),
+                db: Session = Depends(get_db)):
+    """更新 verify_token（空=恢复默认值）。DB 即时生效，免重启。"""
+    from ..core.webhook_config import save_webhook_config
+    save_webhook_config(db, body.verify_token)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="fb_webhook",
+              action_type="update", source="user", result="success",
+              metadata={"field": "verify_token"})
+    return {"saved": True}

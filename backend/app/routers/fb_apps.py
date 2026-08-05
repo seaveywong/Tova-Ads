@@ -11,25 +11,9 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
 from ..core.encryption import encrypt, decrypt
-from ..core.database import Base
-from sqlalchemy import Column, BigInteger, Text, Boolean, DateTime, func
+from ..models.fb_app import FbApp
 
 router = APIRouter(prefix="/fb/apps", tags=["fb-apps"])
-
-
-class FbApp(Base):
-    __tablename__ = "fb_apps"
-    id = Column(BigInteger, primary_key=True)
-    tenant_id = Column(BigInteger)  # NULL=系统级
-    name = Column(Text)
-    app_id = Column(Text, nullable=False)
-    app_secret_enc = Column(Text, nullable=False)
-    is_system = Column(Boolean, default=False)
-    status = Column(Text, default="active")
-    access_level = Column(Text, default="dev")  # standard/dev：dev=走建帖(object_story_id)；standard=走 object_story_spec
-    created_by = Column(BigInteger)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class AppIn(BaseModel):
@@ -79,6 +63,8 @@ def create_app(
     db.add(app)
     db.flush()
     db.commit()
+    from ..core.webhook_config import invalidate_app_secret_cache
+    invalidate_app_secret_cache()
     return _app_dict(app)
 
 
@@ -102,6 +88,8 @@ def update_app(
     app.is_system = body.is_system if getattr(user, 'is_superadmin', False) else app.is_system
     app.updated_at = datetime.now(timezone.utc)
     db.commit()
+    from ..core.webhook_config import invalidate_app_secret_cache
+    invalidate_app_secret_cache()
     return _app_dict(app)
 
 
@@ -119,4 +107,6 @@ def delete_app(
         raise HTTPException(403, "仅超管可删除系统级 App")
     app.status = "deleted"
     db.commit()
+    from ..core.webhook_config import invalidate_app_secret_cache
+    invalidate_app_secret_cache()
     return {"deleted": True, "id": app_id}
