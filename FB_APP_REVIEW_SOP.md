@@ -1,8 +1,6 @@
 # FB App Review — Permissions SOP (10 Permissions)
 
-> **中文导读（给 Seavey）**：这份文档给 Saurabh（reviewer）和 FB 审核员看。**一共 10 个权限**，每个都写清楚：**用途 → 系统哪个功能在用 → 调的 FB API → 前端入口 → 录屏怎么录 → 审核员怎么测**。Saurabh 拿着这份就能操作系统、录屏、填每个权限的审核申请。
->
-> **How to use (for Saurabh)**: This doc covers all 10 permissions Seavey paid for. For each permission: (1) business reason, (2) the feature in our app that uses it, (3) the exact FB Graph API endpoint, (4) a step-by-step screencast script, (5) test steps a FB reviewer can reproduce. Follow the "Screencast script" to record each demo and use the rest to fill the App Review submission.
+> **Purpose**: This is the SOP for the FB App Review of all 10 permissions. For each permission you get: (1) the business reason, (2) the exact feature in ToveAds that uses it, (3) the FB Graph API endpoint called, (4) a step-by-step screencast script to record, (5) test steps a FB reviewer can reproduce. Follow the screencast scripts to record each demo, and use the rest to fill the App Review submission for each permission.
 
 ---
 
