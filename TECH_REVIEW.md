@@ -34,9 +34,12 @@
 - `0064_leads`：`leads` 表（id/tenant_id/page_id/ad_id/form_id/lead_id 唯一/field_data_json/created_time/fetched_at）+ idx_leads_tenant + idx_leads_form + GRANT。`alembic current` = 0064 head ✓。
 
 ### 生产环境变更（非代码）
-- ❌ `FB_APP_SECRET` **未配**（.env 无此 key）→ HMAC 校验跳过。**过审前需配**（FB App Dashboard → App Settings → Basic → App Secret），加到 `.env` 后 `systemctl restart toveads` 生效 → 自动启用签名校验（fix `c0e1e2b` 后 settings 能正确读到 .env，prod 实测合法签名 200/伪造 403 ✓）。
-- ⚠️ `FB_WEBHOOK_VERIFY_TOKEN` 未配 → 用默认 `toveads_webhook_verify`。**过审前建议改强随机值**：在 `.env` 加 `FB_WEBHOOK_VERIFY_TOKEN=<强随机>` + FB Dashboard 配同一值 + restart。
-- 📋 **FB App Dashboard 一次性手动步骤**（程序无法替自己做）：Webhooks → Edit Callback URL → Callback URL `https://api.tovaads.com/fb/webhook` + Verify Token `toveads_webhook_verify` + 勾选 `leadgen` field。公网 GET 验证已通（200）✓。
+> **更新（同日重构）**：App Secret + verify_token 已全部挪前端，**不再需要改 .env**。下面是最终方案。
+
+- ✅ **App Secret（HMAC 验签）**：复用 `fb_apps` 表（前端「App 管理」已配的 App Secret，加密存）。webhook POST 遍历所有 active App secret 逐一验签——**用户在前端建/改 App 即自动生效，零 .env 配置**。commit `f...`（refactor）。prod 实测：2 个 active App，真 secret 签名→200 / 伪造→403 ✓。
+- ✅ **Verify Token**：存 `system_settings['fb_webhook']`（前端「系统设置 → FB Webhook」卡片改，DB 即时生效免重启）。默认 `toveads_webhook_verify`，建议改强随机值。
+- ❌ **不再用** `FB_APP_SECRET` / `FB_WEBHOOK_VERIFY_TOKEN`（已从 config.py 删除；.env 不需要这俩 key）。
+- 📋 **FB App Dashboard 一次性手动步骤**（程序做不了自己）：Webhooks → Edit Callback URL → URL `https://api.tovaads.com/fb/webhook` + Verify Token（和前端系统设置里填的同一值）+ 勾 `leadgen` field。公网 GET 验证已通（200）✓。
 
 ### 复审结论
 - **已知限制**：webhook 回调只带 leadgen_id/form_id/ad_id/created_time（不带 field_data 答案）→ webhook 入 stub，`/leads/sync` 补全答案（已实现回填）。webhook 找不到归属租户的 lead（form_id 未部署过）跳过不入库（避免孤儿）。
@@ -47,7 +50,9 @@
 ### commit 列表
 - `8416907` feat(leads): FB leadgen 取潜客 + webhook 实时回调 + 订阅
 - `5402e68` feat(leads): 前端潜客 tab + 同步/订阅按钮
-- `c0e1e2b` fix(webhook): FB_APP_SECRET/VERIFY_TOKEN 改读 settings（原 os.environ 读不到 .env）
+- `c0e1e2b` fix(webhook): FB_APP_SECRET/VERIFY_TOKEN 改读 settings（原 os.environ 读不到 .env）—— *后被 f10be53 重构取代（挪前端）*
+- (refactor) App Secret 复用 fb_apps 表 + verify_token 挪 system_settings：FbApp ORM 挪 models + core/webhook_config.py + fb_webhook 遍历验签 + settings.py webhook 段 + config.py 删两字段
+- `f10be53` feat(webhook): Settings 页加 FB Webhook 卡片（前端配 verify_token）
 
 ### 关联
 - 为 FB App Review 第二批权限（leads_retrieval + pages_manage_metadata + read_insights + pages_manage_ads + pages_manage_posts）交付。SOP 文档 + 录屏给 reviewer Saurabh（**用户明确推迟**）。
