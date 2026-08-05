@@ -286,7 +286,36 @@ const unbindTg = async () => {
     userTg.value = await GET('/notifications/tg/user-binding')
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
 }
-onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadRetention(); await loadFx(); await loadTg() })
+const whCfg = ref({ public_url: '', verify_token_masked: '', verify_token_set: false, verify_token_is_default: true, active_apps: 0, app_names: [] })
+const whForm = ref({ verify_token: '' })
+const whSaving = ref(false)
+const loadWebhook = async () => {
+  if (!isSuper.value) return
+  try {
+    whCfg.value = await GET('/settings/webhook')
+    whForm.value = { verify_token: '' }
+  } catch {}
+}
+const saveWebhook = async () => {
+  whSaving.value = true
+  try {
+    await PUT('/settings/webhook', { verify_token: whForm.value.verify_token })
+    ElMessage.success(t('common.saved'))
+    await loadWebhook()
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
+  whSaving.value = false
+}
+const resetWebhookToken = async () => {
+  whSaving.value = true
+  try {
+    await PUT('/settings/webhook', { verify_token: '' })
+    ElMessage.success(t('settings.whTokenReset'))
+    await loadWebhook()
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
+  whSaving.value = false
+}
+
+onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadWebhook(); await loadRetention(); await loadFx(); await loadTg() })
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -467,6 +496,28 @@ const runKeepaliveNow = async () => {
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
       <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : t('settings.fillNewTokenPh')" /></div>
       <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
+    </div>
+
+    <div v-if="isSuper" class="card">
+      <div class="t">{{ t('settings.whTitle') }}</div>
+      <div class="d">{{ t('settings.whDesc') }}</div>
+      <div class="wh-url-row">
+        <code class="wh-url">{{ whCfg.public_url }}</code>
+        <button class="btn sm" @click="copyText(whCfg.public_url, t('settings.whUrlCopied'))">{{ t('settings.whCopyUrl') }}</button>
+      </div>
+      <div class="wh-status">
+        <span class="wh-chip" :class="{ ok: whCfg.active_apps > 0, warn: !whCfg.active_apps }">
+          {{ t('settings.whActiveApps', { n: whCfg.active_apps }) }}
+        </span>
+        <span v-if="whCfg.active_apps" class="wh-app-names">{{ (whCfg.app_names || []).join(' · ') }}</span>
+      </div>
+      <div class="d" style="margin:6px 0 4px">{{ t('settings.whTokenLabel') }}</div>
+      <div class="form-l"><input v-model="whForm.verify_token" class="input" type="password" :placeholder="whCfg.verify_token_set ? whCfg.verify_token_masked + ' (' + (whCfg.verify_token_is_default ? t('settings.whDefault') : t('settings.whCustom')) + ')' : t('settings.whTokenPh')" /></div>
+      <div class="d" style="font-size:11px;color:var(--t3);margin:4px 0 10px">{{ t('settings.whTokenHint') }}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" :disabled="whSaving" @click="saveWebhook">{{ t('common.save') }}</button>
+        <button v-if="whCfg.verify_token_set && !whCfg.verify_token_is_default" class="btn" :disabled="whSaving" @click="resetWebhookToken">{{ t('settings.whResetDefault') }}</button>
+      </div>
     </div>
 
     <div v-if="isSuper" class="card">
@@ -651,4 +702,11 @@ const runKeepaliveNow = async () => {
 .ka-st.err{background:rgba(255,69,58,.13);color:var(--error)}
 .ka-reason{color:var(--t3);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ka-empty{text-align:center;color:var(--t3);padding:20px;font-size:13px}
+.wh-url-row{display:flex;align-items:center;gap:8px;margin:8px 0 12px}
+.wh-url{flex:1;font-family:monospace;font-size:12px;color:var(--ac);background:var(--bg3);padding:6px 10px;border-radius:6px;word-break:break-all}
+.wh-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.wh-chip{font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600}
+.wh-chip.ok{background:rgba(48,209,97,.12);color:var(--success)}
+.wh-chip.warn{background:rgba(255,159,10,.12);color:var(--warning)}
+.wh-app-names{font-size:11px;color:var(--t3)}
 </style>
