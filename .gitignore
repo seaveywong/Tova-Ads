@@ -41,3 +41,7 @@ logs/
 *.swo
 *~
 Thumbs.db
+
+# FB Review SOP（本地文档，不入仓库）
+FB_APP_REVIEW_SOP.md
+FB_APP_REVIEW_SOP.zh.md
