@@ -13,6 +13,7 @@ POST /fb/webhook — FB 推送事件（leadgen → 存 leads 表）
 import json, hmac, hashlib, logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Response
+from sqlalchemy.exc import IntegrityError
 from ..core.database import SuperSessionLocal
 from ..core.webhook_config import get_webhook_config, get_active_app_secrets
 from ..models.lead import Lead
@@ -56,7 +57,7 @@ async def fb_webhook_verify(request: Request):
             verify_token = get_webhook_config(db)["verify_token"]
         finally:
             db.close()
-        if p.get("hub.verify_token") == verify_token:
+        if hmac.compare_digest(p.get("hub.verify_token", ""), verify_token):
             return Response(content=p.get("hub.challenge", ""), media_type="text/plain")
     return Response(content="Forbidden", status_code=403)
 
@@ -109,17 +110,23 @@ async def fb_webhook_receive(request: Request):
                 if not tenant_id:
                     logger.info(f"[FB Webhook] lead 无归属租户: lead_id={lid} form={form_id}")
                     continue
-                db.add(Lead(
-                    tenant_id=tenant_id, page_id=str(page_id) if page_id else None,
-                    ad_id=str(ad_id) if ad_id else None,
-                    form_id=str(form_id) if form_id else None,
-                    lead_id=lid, field_data_json="[]",  # webhook 不带答案，sync 回填
-                    created_time=created_time,
-                ))
-                db.commit()
-                logger.info(f"[FB Webhook] lead 存入: lead_id={lid} page={page_id} tenant={tenant_id}")
+                try:
+                    db.add(Lead(
+                        tenant_id=tenant_id, page_id=str(page_id) if page_id else None,
+                        ad_id=str(ad_id) if ad_id else None,
+                        form_id=str(form_id) if form_id else None,
+                        lead_id=lid, field_data_json="[]",  # webhook 不带答案，sync 回填
+                        created_time=created_time,
+                    ))
+                    db.commit()
+                    logger.info(f"[FB Webhook] lead 存入: lead_id={lid} form={form_id} page={page_id} tenant={tenant_id}")
+                except IntegrityError:
+                    db.rollback()  # lead_id 重复（FB 并发重推），幂等跳过
+                    logger.info(f"[FB Webhook] lead 重复跳过: lead_id={lid}")
     except Exception as e:
         logger.exception(f"[FB Webhook] 处理异常: {e}")
+        db.rollback()
+        return Response(content="EVENT_RECEIVED", status_code=500)  # 让 FB 重推（已 commit 的 lead 被 lead_id 去重跳过，幂等）
     finally:
         db.close()
     return Response(content="EVENT_RECEIVED", status_code=200)

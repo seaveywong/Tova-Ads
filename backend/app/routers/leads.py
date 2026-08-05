@@ -53,8 +53,9 @@ def list_leads(
         q = q.filter(Lead.ad_id == ad_id)
     if form_id:
         q = q.filter(Lead.form_id == form_id)
+    total = q.count()  # 真实总数（limit 前），给前端准确显示
     rows = q.order_by(Lead.created_time.desc().nullslast()).limit(min(max(limit, 1), 500)).all()
-    return {"items": [_lead_dict(r) for r in rows], "total": len(rows)}
+    return {"items": [_lead_dict(r) for r in rows], "total": total}
 
 
 def _get_active_cred(db: Session, tenant_id: int):
