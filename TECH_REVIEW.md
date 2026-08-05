@@ -53,6 +53,12 @@
 - `c0e1e2b` fix(webhook): FB_APP_SECRET/VERIFY_TOKEN 改读 settings（原 os.environ 读不到 .env）—— *后被 f10be53 重构取代（挪前端）*
 - (refactor) App Secret 复用 fb_apps 表 + verify_token 挪 system_settings：FbApp ORM 挪 models + core/webhook_config.py + fb_webhook 遍历验签 + settings.py webhook 段 + config.py 删两字段
 - `f10be53` feat(webhook): Settings 页加 FB Webhook 卡片（前端配 verify_token）
+- `fbba89c` fix(webhook): 复审 P0/P1 修复（异常返 500 让 FB 重推 + IntegrityError 幂等兜底；GET verify_token 改 compare_digest；/leads total 用真实 count）
+
+### 独立 Agent 审计 + 人工裁决（fbba89c）
+审 fb_webhook/webhook_config/leads/settings webhook 段。Agent 报 4 P0 + 6 P1/P2。人工裁决：
+- **修**：异常返 200→500（丢 lead 风险，P0）；GET verify_token `==`→`compare_digest`（一致性）；/leads total=真实 count（前端展示错，P1）；单条 IntegrityError 兜底（并发重推幂等）。
+- **不改（裁决理由）**：① 默认 verify_token 公开——Agent 方案 b「默认值时 GET 返 403」会致 FB 验证过不了（鸡生蛋），当前用前端「默认」标识提示改强值 + FB App Dashboard 受保护（知道 token 也利用不了）缓解，接受。② 跨租户验签混淆（团队 App secret 在池）——prod 2 个 App 全 `is_system=False`，改 `is_system=True` 过滤会致验签池空=全 403 break；且 form_id 反查才是真租户隔离屏障（fb_form_id 不可猜），当前单租户无实际威胁，未来多租户再加「签名 App 租户 == form_id 租户」一致性校验。
 
 ### 关联
 - 为 FB App Review 第二批权限（leads_retrieval + pages_manage_metadata + read_insights + pages_manage_ads + pages_manage_posts）交付。SOP 文档 + 录屏给 reviewer Saurabh（**用户明确推迟**）。
