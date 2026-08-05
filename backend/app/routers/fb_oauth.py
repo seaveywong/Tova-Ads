@@ -3,7 +3,7 @@
 callback 是公开端点（FB 跳转回来无 JWT）→ 仿 landing_events 用 SuperSessionLocal
 + HMAC-signed state 恢复 tenant 上下文（state 编码 uid/tid/app_pk/ts/nonce，用 jwt_secret 签）。
 """
-import json, hmac, hashlib, base64, secrets, time
+import json, hmac, hashlib, base64, secrets, time, logging
 from datetime import datetime, timezone
 from urllib.parse import urlencode, quote
 import httpx
@@ -19,6 +19,7 @@ from ..models.fb import FbCredential
 from ..models.fb_app import FbApp
 
 router = APIRouter(prefix="/fb/oauth", tags=["fb-oauth"])
+logger = logging.getLogger("toveads.fb_oauth")
 
 # 申请的 scope。read_insights 非 OAuth 登录 scope（FB 报 Invalid Scopes 直接拒授权）已去掉——广告成效由 ads_read 覆盖。
 # pages_manage_posts：建广告 creative 用 object_story_spec 底层建主页帖，必须此权限。
@@ -58,6 +59,10 @@ def _verify_state(state: str) -> dict | None:
 def _done_page(ok: bool, msg: str = ""):
     """OAuth 完成页（公开、免登录）：显示成功/失败 + "可关闭此页"。
     不再 302 跳前端（前端需登录 → 未登录会落到登录页，体验差）。令牌已在回调里建好，用户关页即可。"""
+    if ok:
+        logger.info("[OAuth callback] 成功")
+    else:
+        logger.error("[OAuth callback] 失败: %s", msg or "(no detail)")
     import html
     icon, color = ("✓", "#30d488") if ok else ("✗", "#ff5757")
     title = "授权成功" if ok else "授权失败"
