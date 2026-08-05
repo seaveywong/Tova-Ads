@@ -350,7 +350,8 @@ const deleteToken = async (tk) => {
       <div class="bar-r">
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
         <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
-        <button class="btn" @click="openAppConfig">{{ t('tokens.configApp') }}</button>
+        <!-- 审核期间隐藏"配置 App"入口（reviewer 建议：避免迷惑 Meta 审核员）。后续取消该功能时删：本按钮 + appConfig 弹窗 + openAppConfig/saveApp/editApp/deleteApp -->
+        <!-- <button class="btn" @click="openAppConfig">{{ t('tokens.configApp') }}</button> -->
         <button class="btn" @click="refreshAll">{{ refreshAllLabel }}</button>
       </div>
     </div>
