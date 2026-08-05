@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-08-05 会话 — FB leadgen 潜客 + webhook（FB App Review 第二批权限交付）
+
+### 概述
+为 FB App Review 第二批 5 权限中的 `leads_retrieval` + `pages_manage_metadata` 交付完整功能：潜客数据存取 + 实时 webhook 回调。2 个 commit（`8416907` 后端 + `5402e68` 前端），1 个 DB 迁移（0064），后端 + 前端均已部署上线。
+
+### 一、后端：leads 取数 + webhook 回调 + 订阅
+
+| commit | 内容 | 文件 | 验证 |
+|---|---|---|---|
+| `8416907` | Lead 模型 + leads 表(迁移0064, `lead_id` 唯一去重 + tenant/form 索引)；`GET /leads` 本地列表(page/ad/form 筛选)；`POST /leads/sync` 从 FB `GET /{form_id}/leads` 拉取 + **回填 webhook stub 的 field_data**；`POST /leads/subscribe` 订阅租户所有主页 leadgen webhook；`GET/POST /fb/webhook` 验证 + leadgen 回调(form_id→LeadFormTemplate→tenant 反查) | lead.py, 0064_leads.py, leads.py, fb_webhook.py, fb_client.py, main.py | smoke 全通✓ |
+
+**审计修的 bug**（部署后复审发现并修）：
+1. 🔴 `fb_webhook` `created_time` 是 **Unix 时间戳(int)** 存进 `DateTime` 列会错值 → `_parse_created_time` 兼容 int/ISO 两种格式转 datetime。
+2. 🟡 `sync` 原去重 `lead_id 存在就 skip` → webhook 先存的 stub（field_data 空）永远补不全答案 → 改 upsert：存在且 field_data 空 → 回填。
+3. 🟡 webhook 无 `X-Hub-Signature-256` HMAC 校验 → 加 `_verify_signature`（`FB_APP_SECRET` 配了才启用，未配跳过=dev 模式）。
+4. 🟢 `subscribe_page_webhook` 冗余 self-import + 两次 POST → 单次 POST（FB 覆盖式订阅）。
+5. 🟢 缺订阅触发点 → 加 `POST /leads/subscribe`（遍历 `me/accounts` 逐页订阅）。
+
+### 二、前端：潜客 tab
+
+| commit | 内容 | 文件 | 验证 |
+|---|---|---|---|
+| `5402e68` | AdManager 第 4 个 tab「潜客」：列表(提交时间/姓名/邮箱/电话/来源/其他字段 chip)；「从 FB 同步」按钮(`/leads/sync`) + 「订阅主页 webhook」按钮(`/leads/subscribe`)；field_data 解析(标准字段映射中文 label + 自定义字段 chip)；i18n zh+en 两份同步 | AdManager.vue, zh.js, en.js | build ✓ + CF Pages 部署 ✓ |
+
+### DB 迁移
+- `0064_leads`：`leads` 表（id/tenant_id/page_id/ad_id/form_id/lead_id 唯一/field_data_json/created_time/fetched_at）+ idx_leads_tenant + idx_leads_form + GRANT。`alembic current` = 0064 head ✓。
+
+### 生产环境变更（非代码）
+- ❌ `FB_APP_SECRET` **未配**（.env 无此 key）→ HMAC 校验跳过。**过审前需配**（FB App Dashboard → App Settings → Basic → App Secret），配后自动启用签名校验。
+- ⚠️ `FB_WEBHOOK_VERIFY_TOKEN` 未配 → 用默认 `toveads_webhook_verify`。**过审前建议改强随机值**（FB Dashboard 配同一值）。
+- 📋 **FB App Dashboard 一次性手动步骤**（程序无法替自己做）：Webhooks → Edit Callback URL → Callback URL `https://api.tovaads.com/fb/webhook` + Verify Token `toveads_webhook_verify` + 勾选 `leadgen` field。公网 GET 验证已通（200）✓。
+
+### 复审结论
+- **已知限制**：webhook 回调只带 leadgen_id/form_id/ad_id/created_time（不带 field_data 答案）→ webhook 入 stub，`/leads/sync` 补全答案（已实现回填）。webhook 找不到归属租户的 lead（form_id 未部署过）跳过不入库（避免孤儿）。
+- **安全**：HMAC 未启用期间，任何人可 POST 假潜客 → 影响：伪造 lead 因 form_id→tenant 反查失败被丢（无 LeadFormTemplate 匹配），**不会污染真实租户数据**；启用 FB_APP_SECRET 后彻底封死。
+- **OAuth 集成**：`subscribe_page_webhook` 已就绪但**未自动接入 OAuth callback**（遵循「显式纳管」原则：用户点「订阅」按钮触发）。
+- **真数据测试**：blocked on FB App Review 通过 + 账户导入（FB business policy 限制，无法建 Instant Form 跑真 lead）。webhook GET 验证 + 路由 401 + HMAC 跳过逻辑均已 smoke。
+
+### commit 列表
+- `8416907` feat(leads): FB leadgen 取潜客 + webhook 实时回调 + 订阅
+- `5402e68` feat(leads): 前端潜客 tab + 同步/订阅按钮
+
+### 关联
+- 为 FB App Review 第二批权限（leads_retrieval + pages_manage_metadata + read_insights + pages_manage_ads + pages_manage_posts）交付。SOP 文档 + 录屏给 reviewer Saurabh（**用户明确推迟**）。
+
+---
+
 ## 2026-07-30 ~ 31 会话
 
 ### 概述
