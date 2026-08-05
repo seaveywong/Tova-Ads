@@ -283,6 +283,24 @@ class FbClient:
         """改名。"""
         return self.post(node_id, {"name": name})
 
+    def get_leads(self, form_id: str, limit: int = 100) -> list[dict]:
+        """FB leadgen：取 Instant Form 潜客数据。GET /{form_id}/leads（leads_retrieval scope）。"""
+        return self.get_paged(
+            f"{form_id}/leads",
+            params={"fields": "id,created_time,field_data,ad_id,form_id"},
+            limit=limit,
+        )
+
+    def subscribe_page_webhook(self, page_id: str, page_token: str, fields: list[str] = None) -> dict:
+        """订阅主页 webhook（pages_manage_metadata scope）。POST /{page_id}/subscribed_apps + subscribed_fields。
+
+        需 page access token（user token 会 code200）。FB 单次 POST 即订阅 + 指定 fields（覆盖式）。
+        """
+        desired = fields or ["leadgen", "feed", "messages"]
+        page_fb = FbClient(page_token)
+        page_fb.post(f"{page_id}/subscribed_apps", {"subscribed_fields": ",".join(desired)})
+        return {"page_id": page_id, "subscribed_fields": desired}
+
     def delete_node(self, node_id: str) -> dict:
         """硬删节点（DELETE /{id}）。通常用 update_status(ARCHIVED) 软删更安全。"""
         return self._request("DELETE", node_id)

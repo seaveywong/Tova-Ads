@@ -123,6 +123,10 @@ app.include_router(landing_events_router)
 app.include_router(assets_router)
 app.include_router(backup_router)
 app.include_router(fb_apps_router)
+from .routers.leads import router as leads_router
+from .routers.fb_webhook import router as fb_webhook_router
+app.include_router(leads_router)
+app.include_router(fb_webhook_router)
 app.include_router(fb_oauth_router)
 app.include_router(ads_router)
 app.include_router(settings_router)
