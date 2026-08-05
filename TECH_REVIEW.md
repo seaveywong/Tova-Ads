@@ -22,6 +22,7 @@
 3. 🟡 webhook 无 `X-Hub-Signature-256` HMAC 校验 → 加 `_verify_signature`（`FB_APP_SECRET` 配了才启用，未配跳过=dev 模式）。
 4. 🟢 `subscribe_page_webhook` 冗余 self-import + 两次 POST → 单次 POST（FB 覆盖式订阅）。
 5. 🟢 缺订阅触发点 → 加 `POST /leads/subscribe`（遍历 `me/accounts` 逐页订阅）。
+6. 🔴 **`FB_APP_SECRET`/`FB_WEBHOOK_VERIFY_TOKEN` 读不到**（commit `c0e1e2b`）：原 `os.environ.get()` 永远 fallback 默认值——pydantic `BaseSettings(env_file=".env")` 只把 .env 加载到 `settings` 对象，**不注入 os.environ**，systemd 也不用 EnvironmentFile。改为 `settings.fb_app_secret` / `settings.fb_webhook_verify_token`（config.py 加两字段）。**否则用户在 .env 配了也不生效**。prod 实测验证：临时加 secret → 合法签名 200 / 伪造签名 403 / 还原后 200（HMAC 又跳过）✓。
 
 ### 二、前端：潜客 tab
 
@@ -33,8 +34,8 @@
 - `0064_leads`：`leads` 表（id/tenant_id/page_id/ad_id/form_id/lead_id 唯一/field_data_json/created_time/fetched_at）+ idx_leads_tenant + idx_leads_form + GRANT。`alembic current` = 0064 head ✓。
 
 ### 生产环境变更（非代码）
-- ❌ `FB_APP_SECRET` **未配**（.env 无此 key）→ HMAC 校验跳过。**过审前需配**（FB App Dashboard → App Settings → Basic → App Secret），配后自动启用签名校验。
-- ⚠️ `FB_WEBHOOK_VERIFY_TOKEN` 未配 → 用默认 `toveads_webhook_verify`。**过审前建议改强随机值**（FB Dashboard 配同一值）。
+- ❌ `FB_APP_SECRET` **未配**（.env 无此 key）→ HMAC 校验跳过。**过审前需配**（FB App Dashboard → App Settings → Basic → App Secret），加到 `.env` 后 `systemctl restart toveads` 生效 → 自动启用签名校验（fix `c0e1e2b` 后 settings 能正确读到 .env，prod 实测合法签名 200/伪造 403 ✓）。
+- ⚠️ `FB_WEBHOOK_VERIFY_TOKEN` 未配 → 用默认 `toveads_webhook_verify`。**过审前建议改强随机值**：在 `.env` 加 `FB_WEBHOOK_VERIFY_TOKEN=<强随机>` + FB Dashboard 配同一值 + restart。
 - 📋 **FB App Dashboard 一次性手动步骤**（程序无法替自己做）：Webhooks → Edit Callback URL → Callback URL `https://api.tovaads.com/fb/webhook` + Verify Token `toveads_webhook_verify` + 勾选 `leadgen` field。公网 GET 验证已通（200）✓。
 
 ### 复审结论
@@ -46,6 +47,7 @@
 ### commit 列表
 - `8416907` feat(leads): FB leadgen 取潜客 + webhook 实时回调 + 订阅
 - `5402e68` feat(leads): 前端潜客 tab + 同步/订阅按钮
+- `c0e1e2b` fix(webhook): FB_APP_SECRET/VERIFY_TOKEN 改读 settings（原 os.environ 读不到 .env）
 
 ### 关联
 - 为 FB App Review 第二批权限（leads_retrieval + pages_manage_metadata + read_insights + pages_manage_ads + pages_manage_posts）交付。SOP 文档 + 录屏给 reviewer Saurabh（**用户明确推迟**）。
