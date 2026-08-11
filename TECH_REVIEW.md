@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-08-06 — FB Graph API v22→v25 升级
+
+### 概述
+FB 平台当前 v25（App Dashboard 确认），系统原 v22 落后（fb_client.py:14）。升级 GRAPH_VERSION + 修 v25 breaking。改前探测 9 核心端点确保安全，0 真实版本 breaking（published_posts 报 code12 是 attachments 聚合字段 v3.3+ 废弃，跨版本都有）。
+
+### 变更
+| commit | 内容 | 文件 | 验证 |
+|---|---|---|---|
+| `5b35f8f` | GRAPH_VERSION v22.0→v25.0（所有 FB 调用统一版本） | core/fb_client.py | 探测 9 端点 8/9 过（published_posts 报210 是 page-token 要求非版本）；7 核心读方法 smoke 全过（accounts/pages/businesses/campaigns/adsets/ads/insights）|
+| `217d473` | published_posts 去 deprecated `attachments` 聚合字段→`picture`（v25 下 code12，跟帖 Post Picker 会挂）| routers/fb.py (list_page_posts) | published_posts v25 不报 code12 ✓，picture 字段取到 ✓ |
+
+### 背景：ad policy 顺带验证
+换新 App "Tova Ads Manager" 后测 business policy 是否解了：v25 下 campaign/adset/creative 全建成功，ad 失败是 post 不可推广（subcode 1487472，有明确 error_user_msg，**非 policy "didn't comply"**）。结论：business policy 在写操作层没拦，倾向已解；100% 铁证需 page 可推广 post（当前唯一 post 属不可推广类型，如 cover/profile 类）。
+
+### 生产变更
+无（纯代码：GRAPH_VERSION 一行 + fb.py 字段适配）。ad_builder.py 参数早就是 v25 风格（LOWEST_COST_WITHOUT_CAP/special_ad_categories），升级无需改。
+
+---
+
 ## 2026-08-05 会话 — FB leadgen 潜客 + webhook（FB App Review 第二批权限交付）
 
 ### 概述
