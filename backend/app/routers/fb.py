@@ -375,17 +375,14 @@ def list_page_posts(
     pfb = FbClient(page_token)
     try:
         posts = pfb.get_paged(f"{page_id}/published_posts", {
-            "fields": "id,message,attachments{media_type,media{src}},created_time,permalink_url",
+            "fields": "id,message,picture,created_time,permalink_url",
             "limit": 100,  # published_posts FB 上限 100（get_paged 默认 200 会 #100）
         })
     except FbApiError as e:
         raise HTTPException(400, e.friendly)
     out = []
     for p in posts:
-        atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
-        picture = ""
-        if atts and isinstance(atts[0], dict):
-            picture = (atts[0].get("media") or {}).get("src", "")
+        picture = p.get("picture") or ""
         out.append({
             "id": p.get("id", ""),
             "message": (p.get("message") or "")[:200],
