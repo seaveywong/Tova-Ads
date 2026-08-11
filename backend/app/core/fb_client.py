@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger("toveads.fb")
 
-GRAPH_VERSION = "v22.0"
+GRAPH_VERSION = "v25.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 TIMEOUT = 30
 MAX_RETRIES = 3
