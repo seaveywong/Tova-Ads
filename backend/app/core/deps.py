@@ -46,6 +46,15 @@ def get_current_user(
     tenant_id = payload.get("tenant_id")
     is_super = bool(payload.get("is_superadmin", False))
 
+    # 设 RLS 会话上下文。set_config(is_local=false)=会话级：请求中途 commit 后仍生效
+    # （SET LOCAL 随事务结束蒸发 → commit 后同 session 查询静默 0 行，曾击穿批量写/紧急暂停/refresh）。
+    # 安全性：连接归池走 rollback/reset，会话变量随连接归还被清理，不泄漏到下一请求。
+    # 必须在 membership 复查之前——tenant_memberships 是 RLS 表，上下文未设时查到 0 行。
+    db.execute(text("SELECT set_config('app.tenant_id', :tid, false)"),
+               {"tid": str(tenant_id) if tenant_id is not None else ""})
+    db.execute(text("SELECT set_config('app.is_superadmin', :s, false)"),
+               {"s": "true" if is_super else "false"})
+
     # 复查团队身份（防 JWT 无吊销窗口：被移除/停用团队的 token 立即失效，不等 7 天过期）
     if tenant_id and not is_super:
         from ..models.auth import TenantMembership
@@ -58,14 +67,6 @@ def get_current_user(
         if (payload.get("role") or "") != (m.role or ""):
             # 角色已变（升降权）→ 拒旧 token，强制重登拿新角色
             raise HTTPException(401, "角色已变更，请重新登录")
-
-    # 设 RLS 会话上下文。set_config(is_local=false)=会话级：请求中途 commit 后仍生效
-    # （SET LOCAL 随事务结束蒸发 → commit 后同 session 查询静默 0 行，曾击穿批量写/紧急暂停/refresh）。
-    # 安全性：连接归池走 rollback/reset，会话变量随连接归还被清理，不泄漏到下一请求。
-    db.execute(text("SELECT set_config('app.tenant_id', :tid, false)"),
-               {"tid": str(tenant_id) if tenant_id is not None else ""})
-    db.execute(text("SELECT set_config('app.is_superadmin', :s, false)"),
-               {"s": "true" if is_super else "false"})
 
     role = payload.get("role")
     return CurrentUser(
