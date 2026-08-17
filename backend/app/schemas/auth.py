@@ -42,6 +42,7 @@ class UpdateTimezoneIn(BaseModel):
 
 class UpdateEmailIn(BaseModel):
     email: str
+    old_password: str = ""
 
 
 class UpdatePasswordIn(BaseModel):

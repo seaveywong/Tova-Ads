@@ -78,7 +78,7 @@ function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion
 """
 
 # Worker 源码（常量，不含占位符；配置通过 JSON prepend 注入）
-WORKER_SOURCE = """
+WORKER_SOURCE = r"""
 function parseDev(u){u=(u||"").toLowerCase();let t="desktop";if(/ipad|tablet|playbook|silk/.test(u)||(/android/.test(u)&&!/mobile/.test(u)))t="tablet";else if(/mobile|iphone|ipod|android.*mobile|blackberry|opera mini/.test(u))t="mobile";return t;}
 function matchAny(list,s){if(!Array.isArray(list)||!list.length)return false;s=(s||"").toLowerCase();return list.some(k=>s.includes(String(k).toLowerCase()));}
 function evalProtection(request,url,cf){

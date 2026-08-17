@@ -3,6 +3,7 @@
 注册/登录用 system 连接（toveads_super，BYPASSRLS）——因为尚未建立租户上下文。
 /auth/me 用普通连接（toveads_app + RLS），get_current_user 接线 tenant 上下文。
 """
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -22,6 +23,9 @@ def _tenant_name_of(db, tid):
     return t.name if t else f"团队{tid}"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# 登录限速滑窗（进程内存；{ip|email: [fail_ts...]}，多 worker 各自计数=更严，可接受）
+_LOGIN_FAILS: dict = {}
 
 
 @router.post("/register", response_model=TokenOut)
@@ -53,14 +57,28 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_system_db))
     """邮箱密码登录 → 返 token（含第一个 membership 的 tenant/role）+ 所有 memberships。
 
     记登录日志（成功/失败均记）。失败日志归主团队(tenant 1)供超管安全审计；不记密码明文。
+    限速：同 IP+邮箱 15 分钟内失败 ≥5 次 → 429（防暴力破解；无 Redis 用进程内存，多 worker 近似）。
     """
     from ..core.log_utils import write_log, new_trace_id
     email_lc = body.email.strip().lower()
     ip = (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
     ua = (request.headers.get("user-agent") or "")[:200]
+    # ── 登录限速（进程内存滑窗；多 worker 各自计数 = 有效阈值更严，可接受）──
+    _now = time.time()
+    _key = f"{ip}|{email_lc}"
+    _fails = [ts for ts in _LOGIN_FAILS.get(_key, []) if _now - ts < 900]
+    if len(_fails) >= 5:
+        raise HTTPException(429, "尝试次数过多，请 15 分钟后再试")
     user = db.query(User).filter(User.email == email_lc).first()
     # 失败：用户不存在 / 密码错（提示不区分防枚举；不记密码明文）
+    # 用户不存在也跑一次 bcrypt 校验（恒定时差，防邮箱枚举）
+    if not user:
+        verify_password(body.password, "$2b$12$C6UzMDM.H6dfQ/f/IKcEeO7ZBp2q3n1x9u0a4e5r6t7y8u9i0o1p2")
     if not user or not verify_password(body.password, user.password_hash):
+        _fails.append(_now)
+        _LOGIN_FAILS[_key] = _fails[-10:]
+        if len(_LOGIN_FAILS) > 5000:  # 防 dict 无上限
+            _LOGIN_FAILS.clear()
         write_log(db, tenant_id=1, trace_id=new_trace_id(), actor_type="user",
                   actor_user_id=user.id if user else None, action_type="login",
                   source="auth", result="fail", friendly_error="邮箱或密码错误",
@@ -177,7 +195,7 @@ def update_me(body: UpdateTimezoneIn, user: CurrentUser = Depends(get_current_us
 @router.patch("/me/email")
 def update_my_email(body: UpdateEmailIn, user: CurrentUser = Depends(get_current_user),
                    db: Session = Depends(get_system_db)):
-    """修改当前用户名（登录邮箱）。"""
+    """修改当前用户名（登录邮箱）。需验证旧密码（防会话劫持后改邮箱完成账户接管）。"""
     new = (body.email or "").strip().lower()
     if not new or "@" not in new:
         raise HTTPException(400, "邮箱格式不正确")
@@ -186,6 +204,10 @@ def update_my_email(body: UpdateEmailIn, user: CurrentUser = Depends(get_current
     u = db.query(User).filter(User.id == user.id).first()
     if not u:
         raise HTTPException(404, "用户不存在")
+    if not getattr(body, "old_password", ""):
+        raise HTTPException(400, "需要旧密码确认")
+    if not verify_password(body.old_password, u.password_hash):
+        raise HTTPException(403, "旧密码不正确")
     u.email = new
     db.commit()
     return {"email": new}

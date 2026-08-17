@@ -318,6 +318,8 @@ def list_importable_zones(
     user: CurrentUser = Depends(require_permission("landing.manage")),
     db: Session = Depends(get_db),
 ):
+    if not getattr(user, "is_superadmin", False):
+        raise HTTPException(403, "仅平台超管可查看域名服务 zones")
     """列可导入的域名（超管，从已配置的域名服务商拉取）。"""
     from ..core.cf_client import CfClient
     cf_token = settings.cf_api_token
@@ -343,6 +345,8 @@ def import_domains(
     user: CurrentUser = Depends(require_permission("landing.manage")),
     db: Session = Depends(get_db),
 ):
+    if not getattr(user, "is_superadmin", False):
+        raise HTTPException(403, "仅平台超管可导入域名")
     """导入域名到域名库（超管）。"""
     added = 0
     for name in body.domains:
