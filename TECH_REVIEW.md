@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-08-17 — 全系统审计 + 第一批修复（P0×8 + 关键 P1）
+
+### 概述
+8 并行 agent 深度审计全库（routers×3/services/core/安全/多租户/前端），发现 P0×8/P1×47/P2×111（报告 AUDIT_2026-08-17.md）。本批修复全部 P0 + 第一批 P1，端到端 smoke 9/9 PASS。
+
+### 变更
+| commit | 内容 | 验证 |
+|---|---|---|
+| `234fef8` | P0×8：RLS set_config 会话级（救批量写/紧急暂停/refresh）/冷却自动恢复（rate_limited+过期=可用）/JWT membership+role 复查+TG tg_bind 专用 token/Worker TDZ（声明提前）/预算告警补 get_adset_insights/部署 runner tenant 过滤×6/上传白名单+200MB/AI KPI 1h 缓存+tick 去重调用。P1：effective_status/opt_goal 字段补齐（trend_drop+L4 矩阵复活）/FbApiError raw 默认值/POST 超时不重试/creative_links 翻页/coverage_lost 按租户分桶/leads form_id 归属校验/manual_inspect force 参数化/bindparam 顶层/nosniff+DENY 头/迁移 0065（9 表补 RLS）/前端 ElMessageBox+copyIds+趋势图 3 处同步+Assets BASE env | smoke 部分过（见下行修复）|
+| `0625dfe` | 补充：cf-zones+domains/import 超管门/登录限速 429+恒定时差/改邮箱要旧密码 | ✓ |
+| `1384431` | 关键修复：membership 复查移到 set_config 之后（RLS 表在上下文未设时查 0 行 → 全员误 401） | **9/9 PASS** |
+
+### 关键教训
+membership 复查（新加的安全检查）踩了 RLS 自家的坑——tenant_memberships 是 RLS 表，检查放在 RLS 上下文设置前 = 自己把自己锁死。审计修复也要过全链路 smoke。
+
+### 生产验证
+- alembic 0065 head ✓，9/9 表 RLS+policy 生效 ✓
+- 9/9 smoke：登录限速 429/demo 登录/auth/me/fb accounts(RLS+commit)/dashboard/leads list/伪造 form_id 403/svg 上传 400/cf-zones 403/伪造租户 token 401
+- nosniff+DENY 头 ✓，无 SyntaxWarning ✓
+
+
 ## 2026-08-06 — FB Graph API v22→v25 升级
 
 ### 概述
