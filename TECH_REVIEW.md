@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-08-17（二）— 审计第二批修复（P1 剩余 16 项）
+
+### 概述
+commit `1ad6fec`，11 文件 +225/-30 + 迁移 0066。部署链路守卫 + 保活 lifetime + 落地页 5 项 + ingest 防灌 + 表单 config_hash + RBAC/AI 配额。
+
+### 变更（按主题）
+| 主题 | 内容 |
+|---|---|
+| 部署守卫 | 同模板 running job 409 / 账户 managed+归属校验 / items 去重 / archived 拒部署 / retry 只许 fail item+非 running job / startup 回收 >30min 中断 job（FB 侧花钱可见）|
+| 保活 | daily_budget→lifetime_budget（原 $5/天无上限烧钱）+ Asset 查询补 tenant |
+| 落地页 | Worker 爬虫拦截先行（rules 空也挡）/ block_html 校验明确报错 / 幽灵 draft 失败即删 / CF project_name 强制前缀 / TK S2S dry_run（自检不再发假转化）|
+| ingest | event_type 白名单 + 字段 500 钳制 + 每 IP 600/min 限速 |
+| 表单 | config_hash 列（迁移 0066，config 变更强制重建 FB 表单）+ AI 生成 20/h 租户配额 + asset 归属 |
+| 其他 | rbac 最后 owner 保护 / subcode {{}} 拒绑+status 枚举 / check_credential generic 连续 3 次才判死 / _fetch_post_content 补 tenant |
+
+### 验证
+- alembic 0066 head ✓，IMPORT_OK ✓，服务 active ✓
+- smoke 13 PASS + 1 假 FAIL（/dashboard/summary 是我拼错路径；真实 /dashboard + /dashboard/trend 均 200）
+- ingest 白名单/401、部署守卫 404、subcode 校验（无子码环境跳过）✓
+
+
 ## 2026-08-17 — 全系统审计 + 第一批修复（P0×8 + 关键 P1）
 
 ### 概述
