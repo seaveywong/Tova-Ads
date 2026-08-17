@@ -83,6 +83,15 @@ async def sliding_renew_middleware(request: Request, call_next):
 app.add_middleware(TraceIdMiddleware)
 
 
+# ── 安全响应头（素材同源静态服务需 nosniff 防存储型 XSS 内容嗅探）──
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
+
+
 # ── 报错 i18n：en-locale 请求把中文 HTTPException detail 译成英文（不动各 router）──
 from fastapi import HTTPException as _HTTPException
 from fastapi.responses import JSONResponse as _JSONResponse

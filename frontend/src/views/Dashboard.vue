@@ -6,7 +6,7 @@ import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
 import Fuse from 'fuse.js'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -595,6 +595,7 @@ const customTo = ref('')
 const applyCustom = () => {
   if (!customFrom.value || !customTo.value) return
   loadDashboard()  // showCustom=true，rangeQuery 自动用 custom 范围
+  loadTrend()      // 趋势图同步用 custom 范围（原漏刷 → 图表与 KPI 卡脱钩）
 }
 
 const dateOptions = computed(() => DATE_PRESETS.map(p => ({ label: p.label, value: p.key })))
@@ -732,7 +733,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <el-option value="traffic" :label="t('dashboard.convTraffic')" />
         </el-select>
         <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
-                   @change="loadDashboard()" size="small" class="filter-select act-filter"
+                   @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
                    :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
           <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="a.name" />
         </el-select>
@@ -766,7 +767,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <span>{{ kpiDetail.title }}</span>
           <div class="detail-tools">
             <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
-            <button v-if="kpiDetail.mode === 'spend'" class="copy-ids-btn" @click="copyIds(filteredKpiAccs.filter(a => (a.spend_usd || 0) > 0), '有消耗 ID')">{{ t('dashboard.copySpendIdBtn') }}</button>
+            <button v-if="kpiDetail.mode === 'spend'" class="copy-ids-btn" @click="copySpendActIds">{{ t('dashboard.copySpendIdBtn') }}</button>
             <button v-if="kpiDetail.mode === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
             <el-icon class="detail-close" @click="kpiExpanded = null"><Close /></el-icon>
           </div>

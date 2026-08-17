@@ -6,7 +6,7 @@ POST /leads/subscribe — 订阅该租户所有主页的 leadgen webhook（page-
 """
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
@@ -77,7 +77,14 @@ def sync_leads(
     """
     forms = []
     if form_id:
-        forms = [{"form_id": form_id, "page_id": None}]
+        # 归属校验：form_id 必须属于本租户已部署的表单（否则可拉别家表单的潜客进自己租户）
+        own = db.query(LeadFormTemplate).filter(
+            LeadFormTemplate.tenant_id == user.tenant_id,
+            LeadFormTemplate.fb_form_id == form_id,
+        ).first()
+        if not own:
+            raise HTTPException(403, "该表单不属于当前团队")
+        forms = [{"form_id": form_id, "page_id": own.fb_page_id}]
     else:
         tpls = db.query(LeadFormTemplate).filter(
             LeadFormTemplate.tenant_id == user.tenant_id,

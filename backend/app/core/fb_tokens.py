@@ -31,8 +31,11 @@ def first_client(db: Session, tenant_id: int) -> Optional[FbClient]:
 
 
 def _is_cred_available(c) -> bool:
-    """cred 可用：active + 不在冷却期。学习 1.0 交接包 §3.4（限流冷却）。"""
-    if c.status != "active":
+    """cred 可用：active + 不在冷却期。学习 1.0 交接包 §3.4（限流冷却）。
+
+    rate_limited + 冷却已过 = 可用（自动恢复；否则一次 code-17 令牌永久出池 → 止损静默停摆）。
+    """
+    if c.status not in ("active", "rate_limited"):
         return False
     if c.cooldown_until:
         from datetime import datetime, timezone

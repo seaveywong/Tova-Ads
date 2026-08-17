@@ -281,11 +281,13 @@ def tg_bind_link(user: CurrentUser = Depends(require_permission("ads.read")),
         raise HTTPException(500, "获取 Bot 信息失败")
     if not bot_username:
         raise HTTPException(500, "Bot username 为空")
-    # 生成绑定 token（10 分钟有效）
+    # 生成绑定 token：专用 type=tg_bind + 10 分钟短效（deep-link 经 TG 服务器/聊天记录传播，
+    # 不能复用 7 天 access token——泄露即账号接管）
     bind_token = create_access_token(
         user_id=user.id, email=user.email,
         tenant_id=user.tenant_id, role=user.role,
         is_superadmin=bool(user.is_superadmin),
+        token_use="tg_bind", expire_min=10,
     )
     return {"url": f"https://t.me/{bot_username}?start={bind_token}",
             "bot_username": bot_username}

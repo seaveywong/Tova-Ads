@@ -78,7 +78,7 @@ const editAsset = ref(null)
 const editForm = ref({ analysis: '', headlines: [''], bodies: [''], interestsStr: '', audienceNote: '', countriesStr: '' })
 const editSaving = ref(false)
 
-const BASE = 'https://api.tovaads.com'
+const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'  // 读 env（本地开发连本地后端，原硬编码打生产）
 
 const COUNTRIES = [
   { code: 'US', label: 'United States' }, { code: 'VN', label: 'Vietnam' }, { code: 'TH', label: 'Thailand' },

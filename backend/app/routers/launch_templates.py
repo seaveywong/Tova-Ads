@@ -300,8 +300,9 @@ def preflight_deploy(tid: int, body: PreflightIn,
     }
 
 
-def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
-    """解析受众 → targeting dict。优先 audience_json（内联编辑），其次 SavedAudience，None=FB 默认。"""
+def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0):
+    """解析受众 → targeting dict。优先 audience_json（内联编辑），其次 SavedAudience，None=FB 默认。
+    SuperSession（BYPASSRLS）路径必须传 sdb_tenant_id 做 SavedAudience 归属过滤。"""
     # 1. 内联 audience_json（投放模板编辑器直接编辑的受众）
     if audience_json and audience_json.strip():
         try:
@@ -331,7 +332,8 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = ""):
     if not audience_id:
         return None
     aud = sdb.query(SavedAudience).filter(
-        SavedAudience.id == audience_id, SavedAudience.status == "active").first()
+        SavedAudience.id == audience_id, SavedAudience.tenant_id == sdb_tenant_id,
+        SavedAudience.status == "active").first()
     if not aud:
         return None
     return build_targeting(
@@ -517,13 +519,16 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         if not tpl:
             job.status = "failed"; job.finished_at = datetime.now(timezone.utc); sdb.commit(); return
         job.status = "running"; sdb.commit()
-        asset = sdb.query(Asset).filter(Asset.id == tpl.asset_id).first() if tpl.asset_id else None
-        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "")
+        asset = (sdb.query(Asset).filter(Asset.id == tpl.asset_id, Asset.tenant_id == tenant_id).first()
+                 if tpl.asset_id else None)
+        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "", sdb_tenant_id=tenant_id)
         advanced = _parse_advanced(tpl)
         # 子码链接（一个 slug 共享多广告，{{ad.id}} 宏区分）
         link = None
         if tpl.subcode_slug:
-            link = sdb.query(LandingAdLink).filter(LandingAdLink.slug == tpl.subcode_slug).first()
+            link = sdb.query(LandingAdLink).filter(
+                LandingAdLink.slug == tpl.subcode_slug,
+                LandingAdLink.tenant_id == tenant_id).first()
         items = sdb.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
         # 跟帖模式：预取帖子内容（表单/消息 AI 生成 + 标题/文案兜底用，无素材时以帖内容代）
         post_content = {}
@@ -708,21 +713,26 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
 
 
 def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
-    """后台重跑单个 item（复用 deploy 逻辑，只跑这一个账户）。"""
+    """后台重跑单个 item（复用 deploy 逻辑，只跑这一个账户）。BYPASSRLS → 全部查询显式 tenant 过滤。"""
     sdb = SuperSessionLocal()
     try:
-        tpl = sdb.query(LaunchTemplate).filter(LaunchTemplate.id == template_id).first()
+        tpl = sdb.query(LaunchTemplate).filter(
+            LaunchTemplate.id == template_id, LaunchTemplate.tenant_id == tenant_id).first()
         if not tpl:
             return
         # 临时建一个只含该 item 的"job 视图"——直接调 deploy_one_account，更新该 item
-        it = sdb.query(LaunchJobItem).filter(LaunchJobItem.id == item_id).first()
-        if not it:
+        it = sdb.query(LaunchJobItem).filter(
+            LaunchJobItem.id == item_id).first()
+        if not it or it.tenant_id != tenant_id:
             return
         # 借用 _run_deploy_job 的单账户逻辑：把 job 的 total 固定，succeeded/failed 增量
-        asset = sdb.query(Asset).filter(Asset.id == tpl.asset_id).first() if tpl.asset_id else None
-        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "")
+        asset = (sdb.query(Asset).filter(Asset.id == tpl.asset_id, Asset.tenant_id == tenant_id).first()
+                 if tpl.asset_id else None)
+        targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "", sdb_tenant_id=tenant_id)
         advanced = _parse_advanced(tpl)
-        link = sdb.query(LandingAdLink).filter(LandingAdLink.slug == tpl.subcode_slug).first() if tpl.subcode_slug else None
+        link = (sdb.query(LandingAdLink).filter(
+            LandingAdLink.slug == tpl.subcode_slug, LandingAdLink.tenant_id == tenant_id).first()
+            if tpl.subcode_slug else None)
         # 跟帖：预取帖子内容（表单/消息 AI 生成兜底，与 _run_deploy_job 一致）
         post_content = {}
         if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref:

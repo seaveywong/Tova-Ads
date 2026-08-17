@@ -88,6 +88,8 @@ async def tg_webhook(secret: str, request: Request):
                 from ..core.database import get_db as _get_db
                 from ..models.notify import UserTgBinding
                 payload = decode_token(bind_token)
+                if payload.get("type") != "tg_bind":
+                    raise ValueError("invalid token type")  # 只认专用绑定 token（access JWT 不行）
                 user_id = int(payload.get("user_id") or 0)
                 tenant_id = payload.get("tenant_id")
                 if not user_id or not tenant_id:

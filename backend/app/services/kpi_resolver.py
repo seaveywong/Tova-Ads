@@ -7,12 +7,16 @@ v1 三级：L0 手动（kpi_configs）→ L4 规则（objective×opt_goal 矩阵
 之前 _extract_conversions 只认 purchase/lead → PAGE_LIKES 回传 0（实际 19）。resolver 按目标解析。
 """
 import logging
+import time
 from typing import Optional
 from sqlalchemy.orm import Session
 from ..core.ai_client import AiClient
 from ..models.kpi import KpiConfig
 
 logger = logging.getLogger("toveads.kpi")
+
+# AI KPI 纠偏结果缓存：{(objective|opt_goal): (field, ts)}，1h TTL（防巡检热路径 token 失控）
+_AI_KPI_CACHE: dict = {}
 
 # 辅助/上游字段（AI 应避免选择；L5 排除）—— 照 1.0 kpi_resolver
 _AUXILIARY_FIELDS = {
@@ -46,7 +50,15 @@ def _action_count(actions: list, field: str) -> int:
 def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[str]:
     """AI 纠偏（L1/L2）：规则推出辅助字段、或 L5 兜底时，AI 推断更准的 KPI 字段。
     用 AiClient（配置化，DeepSeek/OpenAI 兼容，换 key 改 .env 不动代码）。失败非致命返 None。
-    照 1.0 kpi_resolver._l1_ai_sync（防幻觉：AI 推辅助字段→替换为 actions 里有的高优先级）。"""
+    照 1.0 kpi_resolver._l1_ai_sync（防幻觉：AI 推辅助字段→替换为 actions 里有的高优先级）。
+
+    进程内缓存（objective,opt_goal）→ field，1h TTL：巡检热路径每广告最多 2 次调用，
+    不缓存时 5min 一轮 × N 广告 = AI token 失控 + 60s 超时拖死巡检。"""
+    cache_key = f"{(objective or '').upper()}|{(opt_goal or '').upper()}"
+    now = time.time()
+    hit = _AI_KPI_CACHE.get(cache_key)
+    if hit and now - hit[1] < 3600:
+        return hit[0]
     client = AiClient()
     if not client.is_configured():
         return None
@@ -79,8 +91,10 @@ def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[st
             action_fields = {a.get("action_type") for a in actions}
             for hp in _HIGH_PRIORITY_FIELDS:
                 if hp in action_fields:
+                    _AI_KPI_CACHE[cache_key] = (hp, time.time())
                     return hp
             return None
+        _AI_KPI_CACHE[cache_key] = (field, time.time())
         return field
     except Exception as e:
         logger.warning(f"AI KPI 纠偏失败（非致命）: {e}")

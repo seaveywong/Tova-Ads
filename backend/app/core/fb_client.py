@@ -70,10 +70,10 @@ def classify_fb_error(error_data: dict) -> tuple[str, str]:
 class FbApiError(Exception):
     """FB API 调用失败 —— 带 category + friendly + raw，供错误翻译层用（doc 05）。"""
 
-    def __init__(self, category: str, friendly: str, raw: dict, status: int = 0):
+    def __init__(self, category: str, friendly: str, raw: dict = None, status: int = 0):
         self.category = category
         self.friendly = friendly
-        self.raw = raw
+        self.raw = raw or {}
         self.status = status
         super().__init__(friendly)
 
@@ -111,6 +111,11 @@ class FbClient:
             except FbApiError:
                 raise
             except httpx.RequestError as e:
+                # 幂等保护：POST/DELETE 只对"确认未到达"的连接错误重试；
+                # ReadTimeout/WriteTimeout 时服务端可能已执行（重放=重复建广告/帖/花钱）
+                _retryable = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout))
+                if method in ("POST", "DELETE") and not _retryable:
+                    raise FbApiError("network", f"网络超时（结果未知，不重试防重复创建）：{e}", {}, 0)
                 if attempt < MAX_RETRIES - 1:
                     wait = 2 ** attempt
                     logger.info(f"[FB] 网络错误，{wait}s 后重试: {e}")
@@ -219,6 +224,16 @@ class FbClient:
             return data["data"][0]
         return {"spend": "0", "impressions": "0", "clicks": "0"}
 
+    def get_adset_insights(self, act_id: str, date_preset: str = "today") -> list[dict]:
+        """拉取广告组级 insights（预算进度告警用）。返 [{adset_id, spend}, ...]。"""
+        params = {
+            "fields": "adset_id,spend,impressions,clicks",
+            "level": "adset",
+            "date_preset": date_preset,
+            "limit": 200,
+        }
+        return self.get_paged(f"act_{act_id}/insights", params, limit=200)
+
     def get_ad_insights(self, act_id: str, date_preset: str = "today", limit: int = 200,
                        only_active: bool = True, since: str = "", until: str = "") -> list[dict]:
         """拉取广告级 insights（按广告拆解，全量分页）。
@@ -229,7 +244,7 @@ class FbClient:
         params = {
             "fields": "ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,"
                       "spend,impressions,clicks,ctr,cpc,reach,frequency,"
-                      "actions,purchase_roas",
+                      "actions,purchase_roas,effective_status",
             "level": "ad",
         }
         if since and until:
@@ -354,16 +369,15 @@ class FbClient:
         return self.get_ads(act_id)
 
     def get_ad_creative_links(self, act_id: str) -> dict:
-        """拉账户下广告的创意链接（子码自动绑定用）。返 {ad_id: link_url}。
+        """拉账户下广告的创意链接（子码自动绑定用）。返 {ad_id: link_url}（全量分页）。
 
         从 object_story_spec 提取 link_data.link 或 video_data.call_to_action.value.link。
         """
-        data = self.get(f"act_{act_id}/ads", {
+        data_list = self.get_paged(f"act_{act_id}/ads", {
             "fields": "id,creative{object_story_spec{link_data{link},video_data{call_to_action{value{link}}}}}",
-            "limit": 200,
-        })
+        }, limit=200)
         out: dict[str, str] = {}
-        for ad in data.get("data", []):
+        for ad in data_list:
             ad_id = ad.get("id")
             spec = ((ad.get("creative") or {}).get("object_story_spec") or {})
             link = ((spec.get("link_data") or {}).get("link")

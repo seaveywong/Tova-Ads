@@ -64,19 +64,21 @@ def _campaign_objectives(fb, campaign_ids) -> dict:
     for i in range(0, len(ids), 50):
         batch = ids[i:i + 50]
         try:
-            data = fb.get("", {"ids": ",".join(batch), "fields": "id,objective"})
+            data = fb.get("", {"ids": ",".join(batch), "fields": "id,objective,optimization_goal"})
             if isinstance(data, dict):
                 for cid, c in data.items():
                     if isinstance(c, dict):
-                        out[cid] = ((c.get("objective") or "").upper(), (c.get("optimization_goal") or "").upper())
+                        out[cid] = ((c.get("objective") or "").upper(),
+                                    ((c.get("optimization_goal") or c.get("effective_optimization_goal")) or "").upper())
         except Exception:
             # batch 失败 → 逐个 fallback（保可用性）
             for cid in batch:
                 if cid in out:
                     continue
                 try:
-                    c = fb.get(cid, {"fields": "id,objective"})
-                    out[cid] = ((c.get("objective") or "").upper(), (c.get("optimization_goal") or "").upper())
+                    c = fb.get(cid, {"fields": "id,objective,optimization_goal"})
+                    out[cid] = ((c.get("objective") or "").upper(),
+                                ((c.get("optimization_goal") or c.get("effective_optimization_goal")) or "").upper())
                 except Exception:
                     out[cid] = ("", "")
     for cid in ids:
@@ -230,13 +232,14 @@ class _DefaultBleedRule:
 _DEFAULT_BLEED_ABS_RULE = _DefaultBleedRule()
 
 
-def run_inspection():
+def run_inspection(force: bool = False):
     """巡检主函数。遍历所有租户，评估规则，命中按 rule.action 动作。
 
     动作由 rule.action 唯一控制（observe=只告警 / pause=停广告 / pause_adset=停组 /
     pause_campaign=停系列）——无全局 dry_run（2026-07-07 用户决策）。
     规则作用域：全局(scope_act_id NULL=名下所有账户) + 账户级(scope_act_id=指定账户)，并存各评估。
     多 worker：advisory lock 保证每轮只有一个 worker 真跑（防 TG spam）。
+    force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
     """
     lock = acquire_run_lock(101)
     if not lock:
@@ -247,6 +250,7 @@ def run_inspection():
     total_hits = 0
     total_paused = 0
     total_skipped_spend = 0  # 有消耗但被 active_ids 过滤掉的广告数（覆盖丢失，止损盲区）
+    _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
     paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
 
     try:
@@ -416,10 +420,6 @@ def run_inspection():
                     # tick spend + conv 累计所有广告（含已暂停——累计值不因暂停下降）
                     try:
                         acc_tick_spend += to_usd(float(ad.get("spend", 0)), acc.currency)
-                        _obj_all = obj_map.get(ad.get("campaign_id", ""), ("", ""))
-                        _kpi_all = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
-                                               _obj_all[0], _obj_all[1], ad.get("actions", []))
-                        acc_tick_conv += int(_kpi_all["conversions"] or 0)
                     except Exception:
                         pass
                     # 过滤：只评估 ACTIVE 广告（拉了 active_ids 就用它；None=不过滤）
@@ -435,6 +435,7 @@ def run_inspection():
                                     _ad_active = ad_id in _cache_active_set
                                 if _ad_active:
                                     total_skipped_spend += 1  # ACTIVE 但被漏掉 = 真盲区
+                                    _tenant_skipped[tenant_id] = _tenant_skipped.get(tenant_id, 0) + 1
                         except Exception:
                             pass
                         continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
@@ -525,16 +526,19 @@ def run_inspection():
                             continue
 
                         # 冷却 dedup（22：成功 60min 阻断；失败仅 5min 重试冷却，下轮重试）
+                        # force=True（手动触发）跳过成功冷却
                         now_utc = datetime.now(timezone.utc)
-                        succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
-                        succ = db.query(ActionLog).filter(
-                            ActionLog.tenant_id == tenant_id,
-                            ActionLog.target_id == ad_id,
-                            ActionLog.trigger_type == rule.rule_type,
-                            ActionLog.action_type == "pause",
-                            ActionLog.result == "success",
-                            ActionLog.created_at >= succ_cd,
-                        ).first()
+                        succ = None
+                        if not force:
+                            succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
+                            succ = db.query(ActionLog).filter(
+                                ActionLog.tenant_id == tenant_id,
+                                ActionLog.target_id == ad_id,
+                                ActionLog.trigger_type == rule.rule_type,
+                                ActionLog.action_type == "pause",
+                                ActionLog.result == "success",
+                                ActionLog.created_at >= succ_cd,
+                            ).first()
                         if succ:
                             continue  # 成功暂停过，60min 内不重复
                         fail_cd = now_utc - timedelta(minutes=RETRY_COOLDOWN_MIN)
@@ -714,21 +718,24 @@ def run_inspection():
                   target_type="scheduler", action_type="inspection_heartbeat",
                   source="scheduled", result="success",
                   trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条止损 · 跳过{total_skipped_spend}条有消耗广告")
-        # 覆盖丢失告警：有消耗的广告被 active_ids 过滤掉（止损盲区）→ 告警（6h dedup 避免每轮 spam）
-        if total_skipped_spend > 0:
-            if not dedup_recent(db, tenant_id, "coverage_lost", "*", 360):
-                # 写 action_log 让 dedup_recent 下轮命中（6h 内不再重复发）
-                write_log(db, tenant_id=tenant_id, trace_id=trace_id,
-                          actor_type="system", target_type="ad", target_id="*",
-                          action_type="coverage_lost", source="guard", result="success",
-                          trigger_detail=f"skipped={total_skipped_spend}")
-                _loc = tenant_locale(db, tenant_id)
-                _t_cl, _b_cl = notify_text(_loc, "coverage_lost", n=total_skipped_spend)
-                emit_notification(
-                    db, tenant_id=tenant_id, level="warning",
-                    event_type="coverage_lost", trace_id=trace_id,
-                    title=_t_cl, body=_b_cl,
-                )
+        # 覆盖丢失告警：按租户分桶（原实现用循环残留 tenant_id → 发错租户+压制真盲区租户的告警）
+        for _tid, _skipped in _tenant_skipped.items():
+            if _skipped <= 0:
+                continue
+            if dedup_recent(db, _tid, "coverage_lost", "*", 360):
+                continue
+            # 写 action_log 让 dedup_recent 下轮命中（6h 内不再重复发）
+            write_log(db, tenant_id=_tid, trace_id=trace_id,
+                      actor_type="system", target_type="ad", target_id="*",
+                      action_type="coverage_lost", source="guard", result="success",
+                      trigger_detail=f"skipped={_skipped}")
+            _loc = tenant_locale(db, _tid)
+            _t_cl, _b_cl = notify_text(_loc, "coverage_lost", n=_skipped)
+            emit_notification(
+                db, tenant_id=_tid, level="warning",
+                event_type="coverage_lost", trace_id=trace_id,
+                title=_t_cl, body=_b_cl,
+            )
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
                 "skipped_spend": total_skipped_spend, "details": paused_details}

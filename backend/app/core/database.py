@@ -41,12 +41,13 @@ def get_system_db():
 def tenant_ctx(db: Session, tenant_id: int, is_superadmin: bool = False):
     """设置 RLS 会话上下文（请求/操作期间）。
 
-    必须在事务内调用。SET LOCAL 随事务结束自动清，防泄漏到下一请求。
+    set_config(is_local=false)=会话级：中途 commit 后仍生效（SET LOCAL 会随事务蒸发）。
+    连接归池 rollback/reset 清理，不泄漏到下一请求。
     平台超管用 BYPASSRLS 角色（toveads_super）连接，或这里 is_superadmin=True。
     """
-    db.execute(text("SET LOCAL app.tenant_id = :tid"), {"tid": str(tenant_id)})
+    db.execute(text("SELECT set_config('app.tenant_id', :tid, false)"), {"tid": str(tenant_id)})
     db.execute(
-        text("SET LOCAL app.is_superadmin = :s"),
+        text("SELECT set_config('app.is_superadmin', :s, false)"),
         {"s": "true" if is_superadmin else "false"},
     )
     yield

@@ -124,6 +124,12 @@ export default{
         return new Response(await resp.text(),{status:resp.status});
       }catch(e){return new Response('{"ok":false}',{status:500});}
     }
+    // 公共上下文先声明（防 TDZ：根路径分支也要用 _isPreview/cf/ua/ip，必须在引用前声明）
+    const cf=request.cf||{};
+    const ip=request.headers.get("CF-Connecting-IP")||"";
+    const ua=request.headers.get("user-agent")||"";
+    const _pv=url.searchParams.get("_pv");
+    const _isPreview=LP_CONFIG.preview_enabled&&_pv&&LP_CONFIG.preview_token&&_pv===LP_CONFIG.preview_token;
     if(!url.pathname.startsWith("/a/")){
       // 非子码路径（根路径 / 等）：防护开启时也评估规则（防止直访绕过）
       const _hasD=url.searchParams.get("_d");
@@ -137,17 +143,11 @@ export default{
       }
       return env.ASSETS.fetch(request);
     }
-    const cf=request.cf||{};
     const slug=url.pathname.replace("/a/","").split("?")[0];
     const adId=url.searchParams.get("ad")||url.searchParams.get("ad_id")||"";
     const actId=url.searchParams.get("act")||url.searchParams.get("act_id")||"";
     const fbclid=url.searchParams.get("fbclid")||"";
-    const ip=request.headers.get("CF-Connecting-IP")||"";
-    const ua=request.headers.get("user-agent")||"";
     const referer=request.headers.get("referer")||"";
-    // 预览模式：?_pv=<token> 命中本页 token → 跳过所有防护（审核/测试用）
-    const _pv=url.searchParams.get("_pv");
-    const _isPreview=LP_CONFIG.preview_enabled&&_pv&&LP_CONFIG.preview_token&&_pv===LP_CONFIG.preview_token;
     const verdict=(LP_CONFIG.block_enabled&&!_isPreview)?evalProtection(request,url,cf):{blocked:false};
     if(verdict.blocked){
       sendEvent("block",{slug:slug,reason:verdict.reason,country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);

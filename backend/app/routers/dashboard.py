@@ -7,7 +7,7 @@ import time as _time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 from ..core.database import get_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
 from ..models.fb import Account
@@ -77,7 +77,6 @@ def dashboard(
             return entry[1]
 
     # 查 perf_snapshots：按账户聚合（支持转化分类① + 账户多选③过滤）
-    from sqlalchemy import bindparam
     KPI_CATEGORY = {
         "shopping": ["offsite_conversion.fb_pixel_purchase", "purchase", "omni_purchase",
                      "onsite_web_purchase", "web_in_store_purchase", "onsite_web_app_purchase"],

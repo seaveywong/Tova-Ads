@@ -276,14 +276,8 @@ def guard_status(user: CurrentUser = Depends(require_permission("ads.pause")),
 def manual_inspect(force: bool = False,
                    user: CurrentUser = Depends(require_permission("rules.edit"))):
     """手动触发巡检。force=True 跳过冷却。"""
-    from ..services import guard_engine as ge
-    original = ge.COOLDOWN_MIN
-    if force:
-        ge.COOLDOWN_MIN = 0
-    try:
-        return ge.run_inspection()
-    finally:
-        ge.COOLDOWN_MIN = original
+    from ..services.guard_engine import run_inspection
+    return run_inspection(force=force)
 
 
 @router.post("/sentinel-patrol")

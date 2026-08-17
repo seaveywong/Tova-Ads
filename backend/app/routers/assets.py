@@ -146,10 +146,19 @@ async def upload_asset(
     上传时自动探测图片尺寸（Pillow）/视频时长（ffprobe），缺工具则留 0 不阻断。
     """
     os.makedirs(ASSET_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    # 白名单 + 大小门：防 .html/.svg 同源存储型 XSS（static-assets 同源服务）与磁盘耗尽
+    _ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mov", ".avi"}
+    _MAX_SIZE = 200 * 1024 * 1024  # 200MB（视频）
+    ext = (os.path.splitext(file.filename or "")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_EXT:
+        raise HTTPException(400, f"不支持的文件类型 {ext}（仅图片 jpg/png/gif/webp 或视频 mp4/mov/avi）")
+    content = await file.read()
+    if len(content) > _MAX_SIZE:
+        raise HTTPException(400, "文件超过 200MB 上限")
+    if not content:
+        raise HTTPException(400, "空文件")
     storage_key = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(ASSET_DIR, storage_key)
-    content = await file.read()
     with open(filepath, "wb") as f:
         f.write(content)
     ftype = "video" if is_video(filepath) else "image"
