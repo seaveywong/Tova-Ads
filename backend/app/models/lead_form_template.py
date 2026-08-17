@@ -16,6 +16,7 @@ class LeadFormTemplate(Base):
     name = Column(Text, nullable=False)
     description = Column(Text)
     config_json = Column(Text)      # 完整表单配置 JSON（form_title/privacy_url/locale/custom_questions/extra_contact_fields/thank_you_*/...）
+    config_hash = Column(Text)      # 部署时 config 的哈希（变了不复用旧 FB 表单，强制重建）
     fb_form_id = Column(Text)       # 部署成功后 FB 返回的 form_id（复用免重建）
     fb_page_id = Column(Text)       # 建在哪个 page 上（fb_form_id 绑 page）
     locale = Column(Text, default="en_US")

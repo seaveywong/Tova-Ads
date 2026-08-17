@@ -192,6 +192,11 @@ def update_subcode(
     if not link:
         raise HTTPException(404, "子码不存在")
     for k, v in body.model_dump(exclude_unset=True).items():
+        # ad_id/act_id 拒绝 {{ 宏占位符（绑了=像素永不 fire，历史 bug 复发）；status 枚举校验
+        if k in ("ad_id", "act_id") and isinstance(v, str) and "{{" in v:
+            raise HTTPException(400, f"{k} 不能填 {{{{...}}}} 占位符（FB 未填宏时来的字面量，绑了像素不 fire）")
+        if k == "status" and v not in ("reserved", "active", "archived", "deleted"):
+            raise HTTPException(400, f"无效状态 {v}")
         setattr(link, k, v)
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
               actor_type="user", actor_user_id=user.id,

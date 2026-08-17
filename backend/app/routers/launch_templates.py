@@ -4,7 +4,8 @@
 部署 = 选模板 + 选 N 账户 → BackgroundTasks 异步逐账户建广告（Campaign→AdSet→Ad），per-item 状态。
 """
 import json
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -189,12 +190,38 @@ class DeployIn(BaseModel):
 def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
                     user: CurrentUser = Depends(require_permission("ads.create")),
                     db: Session = Depends(get_db)):
-    """部署模板到多账户（异步）：建 job + items，BackgroundTasks 逐账户建广告。立即返 job_id。"""
+    """部署模板到多账户（异步）：建 job + items，BackgroundTasks 逐账户建广告。立即返 job_id。
+
+    守卫：① 同模板已有 pending/running job 拒绝（双击=双份广告双份预算）
+         ② 目标账户必须 managed 且属于本租户（未纳管账户建广告=违反显式导入+无止损覆盖）
+         ③ items 去重（同账户重复提交）。"""
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
     if not body.items:
         raise HTTPException(400, "至少选一个账户")
+    if t.status == "archived":
+        raise HTTPException(400, "模板已归档")
+    running = db.query(LaunchJob).filter(
+        LaunchJob.tenant_id == user.tenant_id, LaunchJob.template_id == tid,
+        LaunchJob.status.in_(("pending", "running")),
+    ).first()
+    if running:
+        raise HTTPException(409, f"该模板已有进行中的部署任务(#{running.id})，等它完成再发（防重复建广告）")
+    # 账户归属 + managed 校验 + 去重（保序）
+    seen, clean_items = set(), []
+    for it in body.items:
+        if it.act_id in seen:
+            continue
+        seen.add(it.act_id)
+        acc = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == it.act_id,
+            Account.is_managed == True,  # noqa: E712
+        ).first()
+        if not acc:
+            raise HTTPException(400, f"账户 {it.act_id} 不在已纳管列表（先在令牌页载入并勾选导入）")
+        clean_items.append(it)
+    body.items = clean_items
     job = LaunchJob(tenant_id=user.tenant_id, template_id=t.id, template_name=t.name,
                     status="pending", total=len(body.items), created_by=user.id)
     db.add(job)
@@ -508,6 +535,31 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
     return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, body or tpl.body or "", tpl.landing_url or "", asset.public_url or "")
 
 
+def _reap_stale_jobs():
+    """启动时回收孤儿 job：重启/崩溃后 running 的 job 永卡（FB 侧广告可能已建在花钱）→ 标 failed 告警。"""
+    sdb = SuperSessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        stale = sdb.query(LaunchJob).filter(
+            LaunchJob.status.in_(("pending", "running")),
+            LaunchJob.created_at < cutoff,
+        ).all()
+        for j in stale:
+            j.status = "failed"
+            j.finished_at = datetime.now(timezone.utc)
+            sdb.query(LaunchJobItem).filter(
+                LaunchJobItem.job_id == j.id,
+                LaunchJobItem.status.in_(("pending", "creating")),
+            ).update({"status": "fail", "error": "job 中断（服务重启），请检查 FB 后台并重试"},
+                     synchronize_session=False)
+        if stale:
+            sdb.commit()
+            logging.getLogger("toveads.launch").warning(
+                f"[Launch] 回收 {len(stale)} 个中断 job: {[j.id for j in stale]}")
+    finally:
+        sdb.close()
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -515,7 +567,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id, LaunchJob.tenant_id == tenant_id).first()
         if not job:
             return
-        tpl = sdb.query(LaunchTemplate).filter(LaunchTemplate.id == template_id).first()
+        tpl = sdb.query(LaunchTemplate).filter(
+            LaunchTemplate.id == template_id, LaunchTemplate.tenant_id == tenant_id).first()
         if not tpl:
             job.status = "failed"; job.finished_at = datetime.now(timezone.utc); sdb.commit(); return
         job.status = "running"; sdb.commit()
@@ -695,13 +748,20 @@ class RetryIn(BaseModel):
 def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
                user: CurrentUser = Depends(require_permission("ads.create")),
                db: Session = Depends(get_db)):
-    """重试一个失败 item（重置为 pending，再跑一次）。"""
+    """重试一个失败 item（重置为 pending，再跑一次）。
+
+    守卫：① job 必须 failed/partial（running 中的重试=与原循环并发跑同账户→双份广告）
+         ② item 必须 fail（success 重试=重复部署；creating/pending 在跑中）。"""
     j = db.query(LaunchJob).filter(LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id).first()
     if not j:
         raise HTTPException(404, "job 不存在")
+    if j.status in ("pending", "running"):
+        raise HTTPException(409, f"任务进行中(#{j.id})，不能重试（防并发重复建广告）")
     it = db.query(LaunchJobItem).filter(LaunchJobItem.id == item_id, LaunchJobItem.job_id == job_id).first()
     if not it:
         raise HTTPException(404, "item 不存在")
+    if it.status != "fail":
+        raise HTTPException(400, f"只能重试失败的 item（当前 {it.status}）")
     it.status = "pending"; it.error = None
     if body.page_id:
         it.page_id = body.page_id

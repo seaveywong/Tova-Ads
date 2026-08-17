@@ -274,17 +274,16 @@ def check_credential(
     except FbApiError as e:
         cred.consecutive_fails = (cred.consecutive_fails or 0) + 1
         cred.last_verified_at = datetime.now(timezone.utc)
-        # 临时错误豁免（code 1/2/4/17/32/341/613 不标 expired）
-        transient = {"rate_limited", "network", "unknown"}
-        if e.category not in transient:
-            cred.status = "expired"
-        else:
-            # 限流（code=17）→ rate_limited + 30min 冷却（学习 1.0 §3.4）
-            if e.category == "rate_limited":
-                cred.status = "rate_limited"
-                cred.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
-            elif cred.consecutive_fails >= 3:
+        # 临时错误豁免：未知/generic 可能是 FB 侧瞬时抽风，需连续 3 次才判死（单次不 expired）
+        # rate_limited → 30min 冷却；network/unknown/generic → 连续 3 次升级 limited
+        if e.category == "rate_limited":
+            cred.status = "rate_limited"
+            cred.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+        elif e.category in ("network", "unknown", "generic"):
+            if cred.consecutive_fails >= 3:
                 cred.status = "limited"
+        else:
+            cred.status = "expired"  # 明确错误（token 失效/权限/参数）直接判死
         db.commit()
         result["now_valid"] = cred.status == "active"
         result["detail"] = e.friendly
@@ -525,11 +524,12 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     from ..core.fb_tokens import iter_tenant_clients
     post_suffix = post_id.split("_")[-1] if "_" in post_id else post_id
     # ① 本地 page_posts（系统帖：message + asset 图）。视频帖无图 → 只留 message 继续往下取缩略图。
-    pp_msg = ""; pp = db.query(PagePost).filter(PagePost.post_id == post_id).first()
+    pp_msg = ""; pp = db.query(PagePost).filter(
+        PagePost.post_id == post_id, PagePost.tenant_id == tenant_id).first()
     if pp:
         pp_msg = pp.message or ""
         if pp.asset_id:
-            a = db.query(Asset).filter(Asset.id == pp.asset_id).first()
+            a = db.query(Asset).filter(Asset.id == pp.asset_id, Asset.tenant_id == tenant_id).first()
             if a and a.type == "image" and a.public_url:
                 return {"message": pp_msg, "headline": "", "picture": a.public_url, "cta_type": "", "link": "", "permalink_url": ""}
     # ② ads_cache 定位 creative_id → 实时 GET /{creative_id} 拿真实内容+缩略图（不靠缓存陈旧字段；

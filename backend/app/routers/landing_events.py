@@ -4,6 +4,7 @@
 用 SuperSessionLocal（BYPASSRLS）因为无租户上下文（secret→page→tenant 解析）。
 """
 import hashlib
+import time
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -13,6 +14,9 @@ from ..models.landing_event import LandingEvent
 from ..models.landing_lib import LandingPixel
 
 router = APIRouter(prefix="/landing-pages", tags=["landing-events"])
+
+# ingest 限速滑窗（进程内存；{ip: [ts...]}，600/min）
+_INGEST_RATE: dict = {}
 
 
 def _find_page_by_secret(db: Session, secret: str) -> LandingPage | None:
@@ -125,7 +129,28 @@ def ingest_event(body: EventIngestIn, request: Request):
     """落地页事件回传（visit/click/submit/block/redirect）。存表 + 子码自动绑。
 
     公开端点：secret（X-Edge-Secret header 或 body.secret）校验 landing_pages.ingest_secret。
+    防灌：event_type 枚举白名单 + 字段长度钳制 + 每 IP 滑窗限速（防伪造事件打爆存储/污染统计）。
     """
+    # ① event_type 枚举白名单（原任意字符串可灌垃圾事件打爆表）
+    _ALLOWED_EVENTS = {"visit", "click", "submit", "block", "redirect"}
+    if body.event_type not in _ALLOWED_EVENTS:
+        return {"ok": False, "skipped": "bad_event_type"}
+    # ② 字段长度钳制（防超长垃圾）
+    for f in ("slug", "ad_id", "act_id", "path", "pixel_ids", "user_agent", "referer", "ip"):
+        v = getattr(body, f, None)
+        if isinstance(v, str) and len(v) > 500:
+            setattr(body, f, v[:500])
+    # ③ 每 IP 滑窗限速：600 事件/分钟（正常页远达不到；伪造 flood 直接 429）
+    _ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "unknown"
+    _now = time.time()
+    _w = [ts for ts in _INGEST_RATE.get(_ip, []) if _now - ts < 60]
+    if len(_w) >= 600:
+        raise HTTPException(429, "too many events")
+    _w.append(_now)
+    _INGEST_RATE[_ip] = _w[-600:]
+    if len(_INGEST_RATE) > 20000:
+        _INGEST_RATE.clear()
+
     secret = request.headers.get("x-edge-secret") or body.secret
     db = SuperSessionLocal()
     try:
@@ -266,13 +291,14 @@ class RouteNextIn(BaseModel):
 
 
 @router.post("/router/next")
-def route_next(body: RouteNextIn):
+def route_next(body: RouteNextIn, dry_run: bool = False):
     """子码路由：slug → target_url（rotation: sequential/random/first，doc 02 §C）+ 子码级像素。
 
     公开端点（secret 校验）。Worker 调此决定 /a/{slug} 跳转目标 + fire 哪些像素。
     返回 {target_url, mode, pixel_ids, conversion_event}。
     pixel_ids 按本次点击的账户(body.act_id，来自 ?act= 宏)优先 fire——多账户复用一子码
     时按真实账户 fire 正确像素；无 act 则回退子码绑的账户，再回退页级。
+    dry_run=True（自检/发布探测路径）：只算不触发 TK S2S（防发布/健康检查向 TikTok 发假转化）。
     """
     import json as _json
     db = SuperSessionLocal()
@@ -398,7 +424,8 @@ def route_next(body: RouteNextIn):
         import uuid as _uuid
         tt_event_id = str(_uuid.uuid4()) if tt_pixel_ids else ""
         # S2S 在 route_next 直接 fire（不依赖 beacon 回程；route_next 已持有全部数据）
-        if tt_pixel_ids and tt_conversion_events and tt_event_id:
+        # dry_run（自检/发布探测）不触发——否则每次发布/健康检查都向 TikTok 发一条假 CompletePayment
+        if not dry_run and tt_pixel_ids and tt_conversion_events and tt_event_id:
             try:
                 from ..core.tk_events import send_tt_s2s_for_visit
                 send_tt_s2s_for_visit(db, page.tenant_id, tt_pixel_ids, tt_conversion_events, tt_event_id)

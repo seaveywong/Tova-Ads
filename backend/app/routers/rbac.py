@@ -248,6 +248,14 @@ def change_member_role(membership_id: int, body: ChangeRoleIn,
     ).first()
     if not role:
         raise HTTPException(400, f"角色 '{body.role}' 不存在")
+    # 最后 owner 保护（原只挡"自己降自己"——其他成员可把唯一 owner 降级→团队零 owner 锁死）
+    if m.role == "owner" and body.role != "owner":
+        owner_count = db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == user.tenant_id,
+            TenantMembership.role == "owner",
+        ).count()
+        if owner_count <= 1:
+            raise HTTPException(400, "不能降级最后一个 owner（团队会失去管理者）")
     m.role = body.role
     db.commit()
     return {"updated": True}

@@ -157,6 +157,12 @@ _scheduler = BackgroundScheduler()
 @app.on_event("startup")
 def _start_scheduler():
     from .services.guard_engine import run_inspection, run_watchdog, run_reassociate, run_subcode_autobind, run_sentinel_patrol, run_subcode_cleanup, run_landing_block_scan, run_keepalive
+    # 回收上次重启遗留的中断部署 job（FB 侧可能已建广告在花钱，标 failed 让用户看到并核查）
+    try:
+        from .routers.launch_templates import _reap_stale_jobs
+        _reap_stale_jobs()
+    except Exception as _e:
+        print(f"[Startup] stale job 回收失败(非致命): {_e}")
     from .services.budget_alerts import run_budget_alerts
     from .services.account_sync import run_account_status_sync
     from .services.ads_cache_sync import run_ads_cache_sync

@@ -1412,9 +1412,10 @@ def run_keepalive():
                     continue
                 page_id = pages[0].get("id")
 
-                # 5. 选素材（YR 前缀随机）
+                # 5. 选素材（租户内 YR 前缀随机——BYPASSRLS 必须显式 tenant 过滤）
                 assets_q = db.query(Asset).filter(
                     Asset.name.like(f"{asset_prefix}%"), Asset.type == "image",
+                    Asset.tenant_id == acc.tenant_id,
                 ).all()
                 if not assets_q:
                     failed += 1; results.append(_ka_res(acc, "fail", "no_asset", f"无 {asset_prefix} 保活素材"))
@@ -1448,7 +1449,8 @@ def run_keepalive():
                     "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
                     "promoted_object": json.dumps({"page_id": page_id}),
                     "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                    "daily_budget": str(budget),
+                    # lifetime=总预算花完自动停（配置语义；原误用 daily_budget=$5/天无上限烧钱）
+                    "lifetime_budget": str(budget),
                 })
                 adset_id = adset.get("id")
                 if not adset_id:

@@ -22,6 +22,24 @@ from ..models.launch import Asset
 
 router = APIRouter(prefix="/form-templates", tags=["form-templates"])
 
+# AI 生成租户级配额（进程内存滑窗，多 worker 各自计数=更严可接受）——防刷爆共享 key
+_AI_QUOTA: dict = {}
+
+
+def _ai_quota_ok(db, tenant_id: int, kind: str, limit: int = 20, window_sec: int = 3600) -> bool:
+    import time as _t
+    now = _t.time()
+    key = f"{tenant_id}:{kind}"
+    hits = [ts for ts in _AI_QUOTA.get(key, []) if now - ts < window_sec]
+    if len(hits) >= limit:
+        return False
+    hits.append(now)
+    _AI_QUOTA[key] = hits[-limit:]
+    if len(_AI_QUOTA) > 5000:
+        _AI_QUOTA.clear()
+    return True
+
+
 
 def _form_dict(t: LeadFormTemplate) -> dict:
     cfg = {}
@@ -83,6 +101,18 @@ def save_form(body: FormTemplateIn,
     return _form_dict(t)
 
 
+def _config_hash(config_json: str | None) -> str:
+    """config 规范化哈希（key 排序，语义等价 config 同 hash）。"""
+    import hashlib
+    if not config_json:
+        return ""
+    try:
+        return hashlib.sha256(json.dumps(json.loads(config_json), sort_keys=True,
+                                         ensure_ascii=False).encode()).hexdigest()[:16]
+    except Exception:
+        return hashlib.sha256(config_json.encode()).hexdigest()[:16]
+
+
 @router.put("/forms/{fid}")
 def update_form(fid: int, body: FormTemplateIn,
                 user: CurrentUser = Depends(require_permission("ads.create")),
@@ -91,7 +121,10 @@ def update_form(fid: int, body: FormTemplateIn,
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
     t.name = body.name; t.description = body.description; t.locale = body.locale
-    t.config_json = json.dumps(body.config, ensure_ascii=False) if body.config else None
+    new_cfg = json.dumps(body.config, ensure_ascii=False) if body.config else None
+    if _config_hash(new_cfg) != (t.config_hash or ""):
+        t.fb_form_id = None  # config 变了 → 旧 FB 表单失效，下次部署强制重建
+    t.config_json = new_cfg
     db.commit()
     return _form_dict(t)
 
@@ -116,8 +149,8 @@ def deploy_form(fid: int, body: dict,
     if not t: raise HTTPException(404, "表单模板不存在")
     page_id = body.get("page_id", "")
     if not page_id: raise HTTPException(400, "page_id 必填")
-    # 已部署到同 page → 复用
-    if t.fb_form_id and t.fb_page_id == page_id:
+    # 已部署到同 page 且 config 未变 → 复用（config 变了必须重建，否则用户改了问题拿到的还是旧表单）
+    if t.fb_form_id and t.fb_page_id == page_id and t.config_hash == _config_hash(t.config_json):
         return {"form_id": t.fb_form_id, "reused": True}
     cfg = {}
     if t.config_json:
@@ -162,6 +195,7 @@ def deploy_form(fid: int, body: dict,
         else:
             raise HTTPException(400, f"表单创建失败：{e.friendly}")
     t.fb_form_id = form_id; t.fb_page_id = page_id
+    t.config_hash = _config_hash(t.config_json)  # 记部署时的 config 基线，后续变更触发重建
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="leadgen_form", target_id=form_id,
               action_type="create", source="fb_api", result="success",
@@ -248,11 +282,14 @@ class AiGenerateFormIn(BaseModel):
 def ai_generate_form(body: AiGenerateFormIn,
                      user: CurrentUser = Depends(require_permission("ads.create")),
                      db: Session = Depends(get_db)):
-    """AI 从素材文案生成 Instant Form 问题 + 感谢页文案（文本模型）。"""
+    """AI 从素材文案生成 Instant Form 问题 + 感谢页文案（文本模型）。租户级 20 次/小时配额。"""
+    if not _ai_quota_ok(db, user.tenant_id, "form"):
+        raise HTTPException(429, "AI 生成太频繁（租户每小时限 20 次），请稍后再试")
     ai = AiClient()
     if not ai.is_configured():
         raise HTTPException(400, "AI 未配置（缺 ai_api_key）")
-    asset = db.query(Asset).filter(Asset.id == body.asset_id).first()
+    asset = db.query(Asset).filter(
+        Asset.id == body.asset_id, Asset.tenant_id == user.tenant_id).first()
     if not asset: raise HTTPException(404, "素材不存在")
     copy = {}
     if asset.ai_copy_json:

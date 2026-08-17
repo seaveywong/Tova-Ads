@@ -83,7 +83,7 @@ function parseDev(u){u=(u||"").toLowerCase();let t="desktop";if(/ipad|tablet|pla
 function matchAny(list,s){if(!Array.isArray(list)||!list.length)return false;s=(s||"").toLowerCase();return list.some(k=>s.includes(String(k).toLowerCase()));}
 function evalProtection(request,url,cf){
   const rules=LP_CONFIG.rules;
-  if(!rules||typeof rules!=="object"||Object.keys(rules).length===0)return{blocked:false};
+  if(!rules||typeof rules!=="object")rules={};
   const ua=request.headers.get("user-agent")||"";
   const referer=request.headers.get("referer")||"";
   const country=(cf.country||"").toUpperCase();
@@ -278,6 +278,13 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     cf = CfClient(cf_token, cf_account)
     trace_id = new_trace_id()
 
+    # 0. project_name 规范化：强制 tovaads-landing-{id} 前缀（防用户传任意名在平台 CF 账户建/撞项目）
+    import re as _re
+    if not _re.fullmatch(r"tovaads-landing-\d+", body.project_name or ""):
+        body.project_name = f"tovaads-landing-{body.project_name}".replace("tovaads-landing-tovaads-landing-", "tovaads-landing-")
+        if not _re.fullmatch(r"tovaads-landing-[a-z0-9-]+", body.project_name):
+            raise HTTPException(400, "项目名仅允许小写字母/数字/连字符")
+
     # 1. 确保项目存在
     if not cf.get_project(body.project_name):
         cf.create_project(body.project_name)
@@ -287,11 +294,13 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     targets = body.target_urls or ([body.target_url] if body.target_url else [])
     primary_target = targets[0] if targets else "https://tovaads.com"
 
-    # 校验：防护开关开时必须有 block_target 或 block_html
+    # 校验：防护开关开时必须有 block_target（worker 只实现跳转；block_html 从不渲染，配了也无效）
     if body.block_enabled:
         rules = body.protection_rules or {}
-        if not rules.get("block_target") and not rules.get("block_html"):
-            raise HTTPException(400, "防护已开启，必须配置屏蔽跳转链接或屏蔽页 HTML（至少一项）")
+        if not rules.get("block_target"):
+            if rules.get("block_html"):
+                raise HTTPException(400, "当前版本屏蔽页 HTML 不生效，请填屏蔽跳转链接（block_target）")
+            raise HTTPException(400, "防护已开启，必须配置屏蔽跳转链接（block_target）")
     ingest_secret = (existing.ingest_secret if existing and existing.ingest_secret
                      else _secrets.token_urlsafe(32))
     preview_token = (existing.preview_token if existing and existing.preview_token
@@ -586,9 +595,22 @@ def publish_landing(
         return _do_publish(db, user, body, existing=existing, is_new=is_new)
     except HTTPException:
         db.rollback()
+        # 新建发布失败 → 删幽灵 draft 行（列表不留未部署坏页；重发走全新建路径）
+        if is_new:
+            try:
+                db.query(LandingPage).filter(LandingPage.id == existing.id).delete()
+                db.commit()
+            except Exception:
+                db.rollback()
         raise
     except Exception as e:
         db.rollback()
+        if is_new:
+            try:
+                db.query(LandingPage).filter(LandingPage.id == existing.id).delete()
+                db.commit()
+            except Exception:
+                db.rollback()
         write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
                   actor_type="user", actor_user_id=user.id,
                   target_type="landing_page", action_type="create",
@@ -1176,7 +1198,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         from .landing_events import route_next, RouteNextIn
         rd = route_next(RouteNextIn(secret=p.ingest_secret or "",
                                     slug=sample_slug or "__smoke__",
-                                    ad_id=sample_ad or "999999", act_id=""))
+                                    ad_id=sample_ad or "999999", act_id=""), dry_run=True)
     except Exception:
         rd = None
     # 5. 像素（display 才查；redirect 模式设计上无像素=正常）
