@@ -35,7 +35,7 @@ watch(() => mapping.value, () => { if (mapping.value) refreshGroups() })
 
 const resetDefault = async () => {
   try {
-    await ElMessageBox.confirm(t('kpi.resetConfirm'), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('kpi.resetConfirm'), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await PUT('/kpi/mapping', { matrix: {}, by_objective: {}, fallback_priority: [], poor_fallback_types: [], field_labels: {} })
     ElMessage.success(t('kpi.resetDone'))
     await load()

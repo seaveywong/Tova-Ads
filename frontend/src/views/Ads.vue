@@ -8,6 +8,7 @@ import { accountStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
+import DatePresetBar from '../components/DatePresetBar.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -44,7 +45,7 @@ const isAccSelected = (id) => selectedAccs.value.has(id)
 const batchRemove = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   try {
-    await ElMessageBox.confirm(t('ads.batchRemoveConfirm', { n: selectedAccs.value.size }), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('ads.batchRemoveConfirm', { n: selectedAccs.value.size }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     accLoading.value = true
     for (const actId of selectedAccs.value) { await DELETE(`/fb/accounts/${actId}`) }
     ElMessage.success(t('ads.removed', { n: selectedAccs.value.size })); selectedAccs.value.clear(); await load()
@@ -118,7 +119,7 @@ const onCmd = async (cmd, a) => {
     await toggleWarmup([a.act_id], a.warmup_state !== 'warming')
   } else if (cmd === 'remove') {
     try {
-      await ElMessageBox.confirm(t('ads.removeConfirm', { name: a.name }), t('common.confirm'), { type: 'warning' })
+      await ElMessageBox.confirm(t('ads.removeConfirm', { name: a.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
       await DELETE(`/fb/accounts/${a.act_id}`); ElMessage.success(t('ads.removedSimple')); await load()
     } catch(e) {}
   }
@@ -158,15 +159,7 @@ onMounted(async () => {
   <div class="page">
     <div class="date-bar">
       <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ accounts.length }}</span></h2>
-      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="date-btn"
-        :class="{ active: datePreset === opt.key && !showCustom }"
-        @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
-      <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('ads.custom') }}</button>
-      <div v-if="showCustom" class="custom-range">
-        <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
-        <input type="date" v-model="customTo" class="date-input" />
-        <button class="date-btn apply" @click="load">{{ t('ads.query') }}</button>
-      </div>
+      <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
       <button class="refresh-btn" :disabled="syncing" @click="syncCampaigns">{{ syncing ? t('common.loading') : t('ads.syncCampaigns') }}</button>
     </div>

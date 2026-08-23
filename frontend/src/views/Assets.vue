@@ -5,6 +5,7 @@ import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { aiStatus } from '../composables/useStatus'
+import { countryName } from '../composables/useCountries'
 
 const { t } = useI18n()
 
@@ -80,14 +81,9 @@ const editSaving = ref(false)
 
 const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'  // 读 env（本地开发连本地后端，原硬编码打生产）
 
-const COUNTRIES = [
-  { code: 'US', label: 'United States' }, { code: 'VN', label: 'Vietnam' }, { code: 'TH', label: 'Thailand' },
-  { code: 'ID', label: 'Indonesia' }, { code: 'PH', label: 'Philippines' }, { code: 'MY', label: 'Malaysia' },
-  { code: 'TW', label: 'Taiwan' }, { code: 'HK', label: 'Hong Kong' }, { code: 'SG', label: 'Singapore' },
-  { code: 'CN', label: 'Mainland China' }, { code: 'BR', label: 'Brazil' }, { code: 'MX', label: 'Mexico' },
-  { code: 'IN', label: 'India' }, { code: 'JP', label: 'Japan' }, { code: 'KR', label: 'South Korea' },
-  { code: 'GB', label: 'United Kingdom' }, { code: 'DE', label: 'Germany' }, { code: 'FR', label: 'France' },
-]
+// 资产 AI 分析常用国家子集，名称走中央 useCountries（随 locale 切换）
+const _ASSET_COUNTRY_CODES = ['US','VN','TH','ID','PH','MY','TW','HK','SG','CN','BR','MX','IN','JP','KR','GB','DE','FR']
+const COUNTRIES = _ASSET_COUNTRY_CODES.map(code => ({ code, get label() { return countryName(code) } }))
 
 const load = async () => {
   loading.value = true

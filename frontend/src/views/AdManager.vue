@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { useI18n } from 'vue-i18n'
+import DatePresetBar from '../components/DatePresetBar.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -40,7 +41,9 @@ const OPT_MAP = computed(() => ({ OFFSITE_CONVERSIONS: t('adm.optConversion'), L
 const optLabel = (o) => OPT_MAP.value[o] || o || '-'
 
 const _idOf = (v) => (v && typeof v === 'object') ? v.id : v
-const fmtMoney = (v) => (v == null) ? '-' : `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+// 金额走中央 useFormat（'-' 显示与 AdManager 现状一致，用单横线）；reach 0→'-' 为"无触达"提示语义，本地保留
+import { fmtUsd as _fmtUsd } from '../composables/useFormat'
+const fmtMoney = (v) => (v == null) ? '-' : _fmtUsd(v).replace('—', '-')
 const fmtNum = (v) => (v == null || v === 0) ? '-' : Number(v).toLocaleString()
 const fmtBudget = (a, ctx) => {
   if (a.daily_budget_amount != null) return t('adm.budgetDaily', { v: fmtMoney(a.daily_budget_amount) })
@@ -152,7 +155,7 @@ const deleteItem = async (item) => {
 const batchStatus = async (status) => {
   if (!selected.value.size) return ElMessage.warning(t('adm.selectRowsFirst'))
   if (status === 'PAUSED') {
-    try { await ElMessageBox.confirm(t('adm.batchPauseConfirm', { n: selected.value.size }), t('adm.batchPauseTitle'), { type: 'warning', confirmButtonText: t('adm.paused'), cancelButtonText: t('common.cancel') }) }
+    try { await ElMessageBox.confirm(t('adm.batchPauseConfirm', { n: selected.value.size }), t('adm.batchPauseTitle'), { type: 'warning', confirmButtonText: t('adm.paused'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' }) }
     catch { return }
   }
   const items = []; for (const id of selected.value) { const it = curList.value.find(x => x.id === id); if (it) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
@@ -233,9 +236,7 @@ const subscribeLeads = async () => {
 <template>
   <div class="page">
     <div class="ctrl-bar">
-      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn" :class="{ active: datePreset === opt.key && !showCustom }" @click="showCustom = false; datePreset = opt.key; load()">{{ opt.label }}</button>
-      <button class="ctrl-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('adm.customRange') }}</button>
-      <div v-if="showCustom" class="custom-range"><input type="date" v-model="customFrom" class="date-input" /><span class="sep">—</span><input type="date" v-model="customTo" class="date-input" /><button class="ctrl-btn apply" @click="load">{{ t('common.search') }}</button></div>
+      <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />

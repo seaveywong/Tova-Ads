@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router'
 import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
+import DatePresetBar from '../components/DatePresetBar.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -97,6 +98,9 @@ const renderTrendCharts = () => {
   mk(cpaCanvas.value, t('dashboard.seriesCpa'), d.cpa, 'rgb(245,158,11)')
 }
 watch(trendData, () => nextTick(renderTrendCharts))
+// 主题切换：图表初始化时读主题色，切主题后需重建才能更新网格/文字颜色
+const _themeObserver = new MutationObserver(() => nextTick(renderTrendCharts))
+_themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 watch(trendGran, () => loadTrend())
 watch(datePreset, () => {
   const old = trendGran.value
@@ -183,16 +187,10 @@ const BLOCK_REASON_KEY = {
   query_block: 'dashboard.brQueryBlock', datacenter_block: 'dashboard.brDatacenterBlock', frequency: 'dashboard.brFrequency', dedup: 'dashboard.brDedup',
   pass: 'dashboard.kpiPass',
 }
-// 国家码 → i18n key（CF 给 2 字母 ISO）
-const COUNTRY_KEY = {
-  US:'dashboard.cUS',GB:'dashboard.cGB',CA:'dashboard.cCA',AU:'dashboard.cAU',NZ:'dashboard.cNZ',IE:'dashboard.cIE',DE:'dashboard.cDE',FR:'dashboard.cFR',
-  IT:'dashboard.cIT',ES:'dashboard.cES',PT:'dashboard.cPT',NL:'dashboard.cNL',BE:'dashboard.cBE',CH:'dashboard.cCH',AT:'dashboard.cAT',SE:'dashboard.cSE',
-  NO:'dashboard.cNO',DK:'dashboard.cDK',FI:'dashboard.cFI',PL:'dashboard.cPL',RU:'dashboard.cRU',TR:'dashboard.cTR',IL:'dashboard.cIL',AE:'dashboard.cAE',
-  SA:'dashboard.cSA',IN:'dashboard.cIN',ID:'dashboard.cID',TH:'dashboard.cTH',VN:'dashboard.cVN',PH:'dashboard.cPH',MY:'dashboard.cMY',SG:'dashboard.cSG',
-  JP:'dashboard.cJP',KR:'dashboard.cKR',CN:'dashboard.cCN',HK:'dashboard.cHK',TW:'dashboard.cTW',BR:'dashboard.cBR',MX:'dashboard.cMX',
-}
+// 国家码 → 国名（中央 useCountries registry）
+import { countryLabel as _countryLabel } from '../composables/useCountries'
 const blockReasonLabel = (k) => { const key = BLOCK_REASON_KEY[k]; return key ? t(key) : k }
-const countryLabel = (k) => { const key = COUNTRY_KEY[String(k||'').toUpperCase()]; return key ? `${t(key)} ${k}` : (k || '-') }
+const countryLabel = (k) => _countryLabel(k)
 const landingSearch = ref('')
 const landingFilter = ref('all')  // all / good / waste / watch
 const landingLoading = ref(false)
@@ -259,9 +257,10 @@ const barWidth = (count, arr) => {
   return Math.max(4, (count / mx * 100)) + '%'
 }
 
-// 格式化
-const fmt = (n) => n == null ? '—' : Number(n).toLocaleString()
-const fmtUsd = (n) => n == null || n === 0 ? '—' : '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// 格式化：数字走中央 useFormat.fmtNum；金额保留 0→'—'（"该范围内无消耗"提示语义，真零≠无数据场景不适用于消耗列）
+import { fmtNum, fmtUsd as _fmtUsdRaw } from '../composables/useFormat'
+const fmt = fmtNum
+const fmtUsd = (n) => (n == null || n === 0) ? '—' : _fmtUsdRaw(n)
 const fmtPct = (n) => n == null || n === 0 ? '—' : Number(n).toFixed(2) + '%'
 const fmtSpendDual = (native, usd, cur) => {
   if (native == null) return { native: '—', usd: '—' }
@@ -597,8 +596,13 @@ const applyCustom = () => {
   loadDashboard()  // showCustom=true，rangeQuery 自动用 custom 范围
   loadTrend()      // 趋势图同步用 custom 范围（原漏刷 → 图表与 KPI 卡脱钩）
 }
+// DatePresetBar 自定义区间回调
+const onCustomRange = ({ from, to }) => {
+  customFrom.value = from; customTo.value = to; showCustom.value = true
+  applyCustom()
+}
 
-const dateOptions = computed(() => DATE_PRESETS.map(p => ({ label: p.label, value: p.key })))
+const dateOptions = computed(() => DATE_PRESETS.map(p => ({ label: p.label, key: p.key })))
 
 // ── 下次巡检倒计时（前端三态机，随时间自动切换）──
 // 巡检状态：用后端 inspection_heartbeat（action_logs）判断是否在跑。
@@ -706,7 +710,7 @@ onMounted(() => {
   ;['ads', 'landing'].forEach(id => { const el = document.getElementById(id); if (el) obs.observe(el) })
   _sectionObserver = obs
 })
-onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); if (_sectionObserver) _sectionObserver.disconnect(); _charts.forEach(c => c?.destroy()) })
+onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); if (_sectionObserver) _sectionObserver.disconnect(); _themeObserver.disconnect(); _charts.forEach(c => c?.destroy()) })
 </script>
 
 <template>
@@ -715,14 +719,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 
     <div class="sticky-top">
     <div class="date-bar">
-        <button v-for="opt in dateOptions" :key="opt.value" class="date-btn" :class="{ active: datePreset === opt.value && !showCustom }"
-                @click="showCustom = false; datePreset = opt.value; loadDashboard()">{{ opt.label }}</button>
-        <button class="date-btn" :class="{ active: showCustom }" @click="showCustom = !showCustom">{{ t('dashboard.custom') }}</button>
-        <div v-if="showCustom" class="custom-range">
-          <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
-          <input type="date" v-model="customTo" class="date-input" />
-          <button class="date-btn apply" @click="applyCustom">{{ t('dashboard.query') }}</button>
-        </div>
+        <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
         <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
                    :title="t('dashboard.convCatTitle')">
           <el-option value="all" :label="t('dashboard.convAll')" />

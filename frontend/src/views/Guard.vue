@@ -164,7 +164,7 @@ const onToggle = async (r, val) => {
   catch (e) { r.enabled = !val; ElMessage.error(t('guard.toggleFail') + '：' + (e.message || '')) }
 }
 const remove = async (r) => {
-  try { await ElMessageBox.confirm(t('guard.delConfirm', { name: r.name }), t('common.confirm'), { type: 'warning' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success(t('guard.deleted')); await load() }
+  try { await ElMessageBox.confirm(t('guard.delConfirm', { name: r.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success(t('guard.deleted')); await load() }
   catch {}
 }
 const doInspect = async (force = false) => {
@@ -223,7 +223,11 @@ const doInspect = async (force = false) => {
           </div>
         </div>
       </div>
-      <div v-if="!rules.length && !loading" class="empty">{{ t('guard.empty') }}</div>
+      <div v-if="!rules.length && !loading" class="empty empty-cta">
+        <div class="empty-title">{{ t('guard.emptyTitle') }}</div>
+        <div class="empty-step">{{ t('guard.emptyStep') }}</div>
+        <button class="btn primary empty-cta-btn" @click="openCreate">{{ t('guard.newRule') }}</button>
+      </div>
     </div>
 
     <div v-if="editOpen" class="overlay" @click.self="editOpen=false">
@@ -315,6 +319,10 @@ const doInspect = async (force = false) => {
 .conv{font-size:11px;color:var(--t3)}
 .rule-ops{display:flex;gap:6px}
 .empty{text-align:center;color:var(--t3);padding:32px;font-size:13px;line-height:1.6;background:var(--bg2);border:1px dashed var(--bd);border-radius:8px}
+.empty-cta{padding:50px 30px}
+.empty-title{font-size:15px;color:var(--t2);font-weight:600;margin-bottom:10px}
+.empty-step{font-size:13px;line-height:1.7}
+.empty-cta-btn{margin-top:16px}
 
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2500;display:flex;align-items:center;justify-content:center}
 .modal{background:var(--bg2);border-radius:12px;padding:20px;width:480px;max-width:90vw;box-shadow:var(--shadow-dropdown);max-height:88vh;overflow-y:auto}

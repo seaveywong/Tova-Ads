@@ -88,7 +88,7 @@ const saveForm = async () => {
   saving.value = false
 }
 const removeForm = async (t) => {
-  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
 const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.config || {}; previewOpen.value = true }
@@ -156,7 +156,7 @@ const saveMsg = async () => {
   saving.value = false
 }
 const removeMsg = async (t) => {
-  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
 const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; previewOpen.value = true }

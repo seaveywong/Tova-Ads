@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, PATCH, PUT, POST } from '../api'
 import { isSuperadminSync } from '../router'
@@ -315,7 +315,7 @@ const resetWebhookToken = async () => {
   whSaving.value = false
 }
 
-onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadWebhook(); await loadRetention(); await loadFx(); await loadTg() })
+onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadWebhook(); await loadRetention(); await loadFx(); await loadTg(); _setupObserver() })
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -354,7 +354,7 @@ const saveRetention = async () => {
     try {
       await ElMessageBox.confirm(
         t('settings.retentionShrinkMsg', { detail }),
-        t('settings.retentionShrinkTitle'), { type: 'warning', confirmButtonText: t('settings.confirmShrink'), cancelButtonText: t('common.cancel') }
+        t('settings.retentionShrinkTitle'), { type: 'warning', confirmButtonText: t('settings.confirmShrink'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' }
       )
     } catch { return }
   }
@@ -387,6 +387,44 @@ const saveKeepalive = async () => {
   kaSaving.value = false
 }
 const kaRunning = ref(false)
+
+// ── 锚点导航（sticky 横条，点跳对应卡片；滚动高亮当前区）──
+const activeSection = ref('sec-account')
+const anchorSections = computed(() => {
+  const secs = [
+    { id: 'sec-account', label: t('settings.accountTitle') },
+    { id: 'sec-tz', label: t('settings.tzTitle') },
+  ]
+  if (isSuper.value) {
+    secs.push({ id: 'sec-schedule', label: t('settings.scheduleTitle') })
+    secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
+    secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
+    secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
+    secs.push({ id: 'sec-retention', label: t('settings.retentionTitle') })
+    secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
+  }
+  secs.push({ id: 'sec-tg', label: t('settings.tgTitle') })
+  if (isSuper.value || (myPerms.value || []).includes('ads.pause')) secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
+  return secs
+})
+let _anchorLock = false
+const scrollToSection = (id) => {
+  activeSection.value = id
+  _anchorLock = true
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  setTimeout(() => { _anchorLock = false }, 800)
+}
+let _sectionObserver = null
+const _setupObserver = () => {
+  nextTick(() => {
+    _sectionObserver = new IntersectionObserver((entries) => {
+      if (_anchorLock) return
+      entries.forEach(e => { if (e.isIntersecting) activeSection.value = e.target.id })
+    }, { rootMargin: '-10% 0px -70% 0px', threshold: 0 })
+    anchorSections.value.forEach(s => { const el = document.getElementById(s.id); if (el) _sectionObserver.observe(el) })
+  })
+}
+onUnmounted(() => { if (_sectionObserver) _sectionObserver.disconnect() })
 const kaResultOpen = ref(false)
 const kaResult = ref(null)
 const kaResMeta = (r) => ({
@@ -407,7 +445,12 @@ const runKeepaliveNow = async () => {
 
 <template>
   <div class="page">
-    <div class="card">
+    <!-- 锚点导航：sticky 横条，点跳对应卡片（移动端横向滚动） -->
+    <div class="anchor-strip">
+      <button v-for="s in anchorSections" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="scrollToSection(s.id)">{{ s.label }}</button>
+    </div>
+
+    <div id="sec-account" class="card">
       <div class="t">{{ t('settings.accountTitle') }}</div>
       <div class="d">{{ t('settings.accountDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.username') }}</label><input v-model="acctEmail" class="input" :placeholder="t('settings.loginEmailPh')" /></div>
@@ -419,7 +462,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">{{ t('settings.changePwd') }}</button>
     </div>
 
-    <div class="card">
+    <div id="sec-tz" class="card">
       <div class="t">{{ t('settings.tzTitle') }}</div>
       <div class="d">{{ t('settings.tzDesc') }}</div>
       <el-select v-model="tz" filterable allow-create default-first-option
@@ -428,7 +471,7 @@ const runKeepaliveNow = async () => {
       </el-select>
     </div>
 
-    <div v-if="isSuper && sched" class="card">
+    <div v-if="isSuper && sched" id="sec-schedule" class="card">
       <div class="t">{{ t('settings.scheduleTitle') }}</div>
       <div class="d">{{ t('settings.scheduleDesc') }}</div>
       <div class="base-row">
@@ -451,7 +494,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="schedSaving" @click="saveSched">{{ t('settings.saveAndApply') }}</button>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper" id="sec-ai" class="card">
       <div class="t">{{ t('settings.aiTitle') }}</div>
       <div class="d">{{ t('settings.aiDesc') }}</div>
       <div class="sub-t">{{ t('settings.aiTextModelTitle') }}</div>
@@ -490,7 +533,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper" id="sec-cf" class="card">
       <div class="t">{{ t('settings.cfTitle') }}</div>
       <div class="d">{{ t('settings.cfDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
@@ -498,7 +541,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper" id="sec-webhook" class="card">
       <div class="t">{{ t('settings.whTitle') }}</div>
       <div class="d">{{ t('settings.whDesc') }}</div>
       <div class="wh-url-row">
@@ -520,7 +563,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper" id="sec-retention" class="card">
       <div class="t">{{ t('settings.retentionTitle') }}</div>
       <div class="d">{{ t('settings.retentionDesc') }}</div>
       <div class="ret-head"><span>{{ t('settings.retDataCol') }}</span><span>{{ t('settings.retDaysCol') }}</span><span>{{ t('settings.retDescCol') }}</span></div>
@@ -536,7 +579,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" class="card">
+    <div v-if="isSuper" id="sec-fx" class="card">
       <div class="t">{{ t('settings.fxTitle') }}</div>
       <div class="d">{{ t('settings.fxDesc') }}</div>
       <div class="fx-grid">
@@ -549,7 +592,7 @@ const runKeepaliveNow = async () => {
       <button class="btn" :disabled="fxLoading" @click="runFx" style="margin-top:14px">{{ fxLoading ? t('settings.fetching') : t('settings.syncFxNow') }}</button>
     </div>
 
-    <div class="card">
+    <div id="sec-tg" class="card">
       <div class="t">{{ t('settings.tgTitle') }}</div>
       <div class="d" style="margin-bottom:10px">{{ t('settings.tgDesc') }}</div>
 
@@ -574,7 +617,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper || (myPerms || []).includes('ads.pause')" class="card">
+    <div v-if="isSuper || (myPerms || []).includes('ads.pause')" id="sec-keepalive" class="card">
       <div class="t">{{ t('settings.keepaliveTitle') }}</div>
       <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
@@ -619,6 +662,12 @@ const runKeepaliveNow = async () => {
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
+/* 锚点导航 */
+.anchor-strip{position:sticky;top:0;z-index:50;display:flex;gap:4px;overflow-x:auto;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--bd)}
+.anchor-btn{padding:4px 12px;background:transparent;color:var(--t3);border:1px solid transparent;border-radius:var(--rs);font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.anchor-btn:hover{color:var(--t1);background:var(--bg2)}
+.anchor-btn.active{background:var(--ac);color:#fff}
+.card{scroll-margin-top:60px}
 .ep-input{flex:1}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:18px}
 .t{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:6px}

@@ -113,8 +113,7 @@ const changeMemberRole = async (m, role) => {
 }
 const removeMemberRow = async (m) => {
   try {
-    await ElMessageBox.confirm(t('teams.removeMemberConfirm', { email: m.email }), t('common.confirm'),
-      { type: 'warning', confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel') })
+    await ElMessageBox.confirm(t('teams.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning', confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
     await DELETE(`/admin/tenants/${membersTid.value}/members/${m.membership_id}`)
     ElMessage.success(t('teams.memberRemoved', { email: m.email }))
     memberList.value = memberList.value.filter(x => x.membership_id !== m.membership_id)

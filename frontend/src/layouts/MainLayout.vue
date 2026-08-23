@@ -244,6 +244,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
             <span class="team-switcher">
               <el-icon><OfficeBuilding /></el-icon>
               <span class="team-name">{{ currentTenantName || t('layout.noTeam') }}</span>
+              <span class="team-chip">{{ (currentTenantName || '?').slice(0, 2) }}</span>
               <el-icon v-if="memberships.length > 1" class="caret"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -384,6 +385,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .team-switcher .el-icon { font-size: 15px; }
 .team-switcher .caret { font-size: 11px; opacity: 0.6; }
 .team-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-chip { display: none; }
 .mute-role { color: var(--t3); font-size: 11px; margin-left: 4px; }
 .cur-mark { color: var(--ac); font-size: 11px; margin-left: 6px; }
 .topbar-icon {
@@ -465,7 +467,8 @@ watch(() => route.path, () => { sidebarOpen.value = false })
   .sidebar.open { transform: translateX(0); }
   .topbar { padding: 0 12px; gap: 8px; }
   .topbar-right { gap: 10px; }
-  .team-name, .user-email { display: none; }  /* 手机只留图标，省空间 */
+  .team-name, .user-email { display: none; }  /* 手机隐藏全名，用首字 chip 替代 */
+  .team-chip { display: inline-flex !important; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--acg); color: var(--ac); font-weight: 600; }
   .role-badge { display: none; }
   .page-title { font-size: 15px; }
   .content { padding: 12px; }

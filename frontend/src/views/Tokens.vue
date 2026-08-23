@@ -188,7 +188,7 @@ const handleAction = (cmd, tk) => {
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
     try {
-      await ElMessageBox.confirm(t('tokens.unmanageConfirm', { name: a.name }), t('common.confirm'), {type:'warning'})
+      await ElMessageBox.confirm(t('tokens.unmanageConfirm', { name: a.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
       await DELETE(`/fb/accounts/${a.account_id}`)
       ElMessage.success(t('tokens.unmanaged'))
       if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
@@ -321,7 +321,7 @@ const checkToken = async (tk) => {
   delete assetCache.value[tk.id]; await load(); await loadAtRisk()
 }
 const deleteToken = async (tk) => {
-  try { await ElMessageBox.confirm(t('tokens.deleteTokenConfirm', { name: tk.alias||tk.fb_user_name||tk.id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/credentials/${tk.id}`); ElMessage.success(t('tokens.deleted')); await Promise.all([load(), loadSummary(), loadAtRisk()]) }
+  try { await ElMessageBox.confirm(t('tokens.deleteTokenConfirm', { name: tk.alias||tk.fb_user_name||tk.id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/fb/credentials/${tk.id}`); ElMessage.success(t('tokens.deleted')); await Promise.all([load(), loadSummary(), loadAtRisk()]) }
   catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 </script>
@@ -388,7 +388,10 @@ const deleteToken = async (tk) => {
       </div>
       <div v-if="!tokens.length && !loading" class="empty empty-cta">
         <div class="empty-title">{{ t('tokens.emptyTitle') }}</div>
-        <div class="empty-step">{{ t('tokens.emptyStep') }}</div>
+        <div class="empty-step">① {{ t('tokens.emptyStep1') }}</div>
+        <div class="empty-step">② {{ t('tokens.emptyStep2') }}</div>
+        <div class="empty-step">③ {{ t('tokens.emptyStep3') }}</div>
+        <button class="btn primary empty-cta-btn" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
       </div>
     </div>
 
@@ -708,4 +711,5 @@ const deleteToken = async (tk) => {
 .empty-cta{padding:50px 30px}
 .empty-title{font-size:15px;color:var(--t2);font-weight:600;margin-bottom:10px}
 .empty-step{font-size:13px;color:var(--t3);line-height:1.7}
+.empty-cta-btn{margin-top:16px}
 </style>

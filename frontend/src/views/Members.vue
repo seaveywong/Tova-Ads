@@ -76,7 +76,7 @@ const removeRole = async (r) => {
   if (r.is_system) return ElMessage.warning(t('members.systemRoleNoDelete'))
   if (r.member_count > 0) return ElMessage.warning(t('members.roleHasMembers'))
   try {
-    await ElMessageBox.confirm(t('members.delRoleConfirm', { name: roleLabel(r.name) }), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('members.delRoleConfirm', { name: roleLabel(r.name) }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/rbac/roles/${r.id}`)
     ElMessage.success(t('common.delete') + t('members.doneSuffix'))
     await load()
@@ -116,7 +116,7 @@ const changeRole = async (m, roleName) => {
 }
 const removeMember = async (m) => {
   try {
-    await ElMessageBox.confirm(t('members.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('members.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/rbac/members/${m.membership_id}`)
     ElMessage.success(t('members.removed'))
     await load()

@@ -7,6 +7,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { jobStatus, itemStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
+import { fmtUsd } from '../composables/useFormat'
+import { COUNTRIES as ALL_COUNTRIES } from '../composables/useCountries'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -199,30 +201,6 @@ const CTAS = [
 ]
 const SPECIAL_CATS = [
   { v: '', l: 'launch.scat_none' },{ v: 'HOUSING', l: 'launch.scat_housing' },{ v: 'EMPLOYMENT', l: 'launch.scat_employment' },
-  { v: 'CREDIT', l: 'launch.scat_credit' },{ v: 'ISSUES_ELECTIONS_POLITICS', l: 'launch.scat_politics' },
-]
-const COUNTRIES = [
-  {v:'US',l:'launch.country_US'},{v:'VN',l:'launch.country_VN'},{v:'TH',l:'launch.country_TH'},{v:'ID',l:'launch.country_ID'},{v:'PH',l:'launch.country_PH'},
-  {v:'MY',l:'launch.country_MY'},{v:'TW',l:'launch.country_TW'},{v:'HK',l:'launch.country_HK'},{v:'SG',l:'launch.country_SG'},{v:'CN',l:'launch.country_CN'},
-  {v:'BR',l:'launch.country_BR'},{v:'MX',l:'launch.country_MX'},{v:'IN',l:'launch.country_IN'},{v:'JP',l:'launch.country_JP'},{v:'KR',l:'launch.country_KR'},
-  {v:'GB',l:'launch.country_GB'},{v:'DE',l:'launch.country_DE'},{v:'FR',l:'launch.country_FR'},{v:'AE',l:'launch.country_AE'},{v:'SA',l:'launch.country_SA'},
-  {v:'EG',l:'launch.country_EG'},{v:'KW',l:'launch.country_KW'},{v:'QA',l:'launch.country_QA'},{v:'TR',l:'launch.country_TR'},{v:'ES',l:'launch.country_ES'},
-  {v:'IT',l:'launch.country_IT'},{v:'CA',l:'launch.country_CA'},{v:'AU',l:'launch.country_AU'},{v:'NZ',l:'launch.country_NZ'},{v:'CL',l:'launch.country_CL'},
-  {v:'CO',l:'launch.country_CO'},{v:'PE',l:'launch.country_PE'},{v:'AR',l:'launch.country_AR'},{v:'ZA',l:'launch.country_ZA'},{v:'NG',l:'launch.country_NG'},
-  {v:'KE',l:'launch.country_KE'},{v:'BD',l:'launch.country_BD'},{v:'PK',l:'launch.country_PK'},{v:'PL',l:'launch.country_PL'},{v:'NL',l:'launch.country_NL'},
-  {v:'BE',l:'launch.country_BE'},{v:'CH',l:'launch.country_CH'},{v:'AT',l:'launch.country_AT'},{v:'SE',l:'launch.country_SE'},{v:'NO',l:'launch.country_NO'},
-  {v:'DK',l:'launch.country_DK'},{v:'FI',l:'launch.country_FI'},{v:'PT',l:'launch.country_PT'},{v:'GR',l:'launch.country_GR'},{v:'CZ',l:'launch.country_CZ'},
-  {v:'RO',l:'launch.country_RO'},{v:'HU',l:'launch.country_HU'},{v:'IL',l:'launch.country_IL'},{v:'IE',l:'launch.country_IE'},{v:'RU',l:'launch.country_RU'},
-  {v:'UA',l:'launch.country_UA'},{v:'BY',l:'launch.country_BY'},{v:'KZ',l:'launch.country_KZ'},{v:'UZ',l:'launch.country_UZ'},
-  {v:'GH',l:'launch.country_GH'},{v:'TZ',l:'launch.country_TZ'},{v:'UG',l:'launch.country_UG'},{v:'ET',l:'launch.country_ET'},{v:'MA',l:'launch.country_MA'},
-  {v:'DZ',l:'launch.country_DZ'},{v:'TN',l:'launch.country_TN'},{v:'IQ',l:'launch.country_IQ'},{v:'JO',l:'launch.country_JO'},{v:'LB',l:'launch.country_LB'},
-  {v:'BH',l:'launch.country_BH'},{v:'OM',l:'launch.country_OM'},{v:'PS',l:'launch.country_PS'},{v:'LK',l:'launch.country_LK'},{v:'NP',l:'launch.country_NP'},
-  {v:'MM',l:'launch.country_MM'},{v:'KH',l:'launch.country_KH'},{v:'LA',l:'launch.country_LA'},{v:'BN',l:'launch.country_BN'},{v:'MO',l:'launch.country_MO'},
-  {v:'PY',l:'launch.country_PY'},{v:'UY',l:'launch.country_UY'},{v:'BO',l:'launch.country_BO'},{v:'VE',l:'launch.country_VE'},{v:'EC',l:'launch.country_EC'},
-  {v:'PA',l:'launch.country_PA'},{v:'GT',l:'launch.country_GT'},{v:'DO',l:'launch.country_DO'},{v:'CR',l:'launch.country_CR'},{v:'SV',l:'launch.country_SV'},
-  {v:'HN',l:'launch.country_HN'},{v:'JM',l:'launch.country_JM'},{v:'TT',l:'launch.country_TT'},{v:'PR',l:'launch.country_PR'},
-  {v:'IS',l:'launch.country_IS'},{v:'LU',l:'launch.country_LU'},{v:'MT',l:'launch.country_MT'},{v:'CY',l:'launch.country_CY'},{v:'HR',l:'launch.country_HR'},
-  {v:'SK',l:'launch.country_SK'},{v:'SI',l:'launch.country_SI'},{v:'BG',l:'launch.country_BG'},{v:'RS',l:'launch.country_RS'},{v:'LT',l:'launch.country_LT'},
   {v:'LV',l:'launch.country_LV'},{v:'EE',l:'launch.country_EE'},{v:'AL',l:'launch.country_AL'},{v:'BA',l:'launch.country_BA'},{v:'MD',l:'launch.country_MD'},
 ]
 const LANGS = [
@@ -557,7 +535,6 @@ const _tplMissing = (tpl) => {
   return m
 }
 const _tplReady = (tpl) => _tplMissing(tpl).length === 0
-const fmtUsd = (v) => v != null ? '$' + Number(v).toFixed(2) : '—'
 
 // 编辑
 const openNew = () => { editing.value = null; form.value = blankForm(); editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
@@ -777,7 +754,7 @@ const saveTpl = async () => {
   saving.value = false
 }
 const removeTpl = async (tpl) => {
-  try { await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning' }); await DELETE('/launch-templates/' + tpl.id); ElMessage.success(t('launch.archived')); await load() }
+  try { await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/launch-templates/' + tpl.id); ElMessage.success(t('launch.archived')); await load() }
   catch (e) { if (e === 'cancel') return }
 }
 const copyTpl = async (tpl) => {
@@ -820,25 +797,41 @@ const openDeploy = async (tpl) => {
   }
   accLoading.value = false
 }
-const toggleAcc = async (id) => {
-  const s = new Set(selectedAccs.value); s.has(id) ? s.delete(id) : s.add(id); selectedAccs.value = s
-  if (s.has(id) && !accPages.value[id]) {
-    const acc = accounts.value.find(a => a.act_id === id)
-    const credId = acc?.fb_credential_id
-    deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
-    if (credId) {
-      accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
-      try {
-        const [pages, pixels] = await Promise.all([
-          GET('/fb/credentials/' + credId + '/pages').catch(() => []),
-          GET('/fb/credentials/' + credId + '/pixels').catch(() => []),
-        ])
-        accPages.value[id] = pages; accPixels.value[id] = pixels
-      } catch {}
-      accLoadingConfig.value.delete(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
-    }
+// 选中账户后拉该账户可用的主页/像素（deployItems 填模板默认值）
+const ensureAccConfig = async (id) => {
+  if (accPages.value[id]) return
+  const acc = accounts.value.find(a => a.act_id === id)
+  const credId = acc?.fb_credential_id
+  deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
+  if (credId) {
+    accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
+    try {
+      const [pages, pixels] = await Promise.all([
+        GET('/fb/credentials/' + credId + '/pages').catch(() => []),
+        GET('/fb/credentials/' + credId + '/pixels').catch(() => []),
+      ])
+      accPages.value[id] = pages; accPixels.value[id] = pixels
+    } catch {}
+    accLoadingConfig.value.delete(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
   }
 }
+const toggleAcc = async (id) => {
+  const s = new Set(selectedAccs.value); s.has(id) ? s.delete(id) : s.add(id); selectedAccs.value = s
+  if (s.has(id)) await ensureAccConfig(id)
+}
+// 批量选择：跟帖模式排除无主页权限账户；并行拉各账户配置
+const _selectableAccs = () => filteredDeployAccounts.value.filter(a => !reuseDeployPage.value || accManagesReusePage(a.act_id))
+const deploySelectAll = () => {
+  const s = new Set(_selectableAccs().map(a => a.act_id))
+  selectedAccs.value = s
+  _selectableAccs().forEach(a => ensureAccConfig(a.act_id))
+}
+const deploySelectActive = () => {
+  const s = new Set(_selectableAccs().filter(a => a.account_status === 1).map(a => a.act_id))
+  selectedAccs.value = s
+  _selectableAccs().filter(a => s.has(a.act_id)).forEach(a => ensureAccConfig(a.act_id))
+}
+const deployClearSel = () => { selectedAccs.value = new Set() }
 const startDeploy = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('launch.selectAccFirst'))
   const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
@@ -1012,7 +1005,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>{{ t('launch.countries') }}</label>
           <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
             :placeholder="t('launch.countriesPlaceholder')" style="width:100%" size="small">
-            <el-option v-for="c in COUNTRIES" :key="c.v" :value="c.v" :label="t(c.l) + ' (' + c.v + ')'" />
+            <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
           </el-select>
         </div>
         <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
@@ -1274,6 +1267,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
       </div>
+      <div class="acc-batch-row">
+        <button class="op sm" @click="deploySelectAll">{{ t('launch.deploySelectAll') }}</button>
+        <button class="op sm" @click="deploySelectActive">{{ t('launch.deploySelectActive') }}</button>
+        <button class="op sm" @click="deployClearSel">{{ t('launch.deployClear') }}</button>
+      </div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
@@ -1511,6 +1509,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .ad-preview-link{font-size:12px;color:var(--ac);text-decoration:none;margin-left:auto}
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.acc-batch-row{display:flex;gap:6px;margin-bottom:2px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
 .acc-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}
 .acc-row.on{background:rgba(10,132,255,.08)}
@@ -1607,11 +1606,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 /* Dayparting 时段网格 */
 .dpa-tools{display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap}
 .dpa-tools .op.sm{padding:2px 8px;font-size:11px}
-.dpa-grid{display:grid;grid-template-columns:32px 1fr;grid-auto-rows:auto;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:8px;background:var(--bg2)}
+.dpa-grid{display:grid;grid-template-columns:32px 1fr;grid-auto-rows:auto;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:8px;background:var(--bg2);overflow-x:auto;min-width:0}
+.dpa-row{grid-column:2;display:grid;grid-template-columns:repeat(24,minmax(14px,1fr));gap:2px}
 .dpa-corner{grid-column:1;grid-row:1}
 .dpa-hhdr{grid-column:2;grid-row:1;display:flex;justify-content:space-between;font-size:9px;color:var(--t3);padding:0 2px 3px}
 .dpa-rhdr{grid-column:1;font-size:10px;color:var(--t3);display:flex;align-items:center;justify-content:center}
-.dpa-row{grid-column:2;display:grid;grid-template-columns:repeat(24,1fr);gap:2px}
 .dpa-cell{height:16px;border-radius:3px;background:var(--bg3);border:1px solid var(--bd);cursor:pointer;transition:background .1s}
 .dpa-cell.on{background:var(--ac);border-color:var(--ac)}
 .dpa-cell:hover{outline:1px solid var(--t3)}

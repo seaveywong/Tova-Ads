@@ -109,6 +109,8 @@ a { color: var(--ac); text-decoration: none; }
   /* 水平 label+input 表单行 → 堆叠（Landing/Guard/Settings/AdminTeams/Members/Tokens/AuditLog 共用 .form-l） */
   .form-l { flex-direction: column !important; align-items: stretch !important; gap: 4px !important; }
   .form-l > label { width: auto !important; text-align: left !important; }
+  /* 抽屉内水平表单行（.form .row，LaunchTemplates 编辑器等）同款堆叠 */
+  .form .row:not(.keep-h) { flex-direction: column !important; align-items: stretch !important; }
   /* el-drawer 在手机上撑满宽度（无论 size 写多少 px） */
   .el-drawer.rtl { width: 100% !important; max-width: 100% !important; }
 }

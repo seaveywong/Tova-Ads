@@ -231,7 +231,7 @@ const save = async () => {
 
 const archive = async (p) => {
   try {
-    await ElMessageBox.confirm(t('landing.archiveConfirm', { title: p.title }), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('landing.archiveConfirm', { title: p.title }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/landing/pages/${p.id}`); ElMessage.success(t('landing.archived')); await loadPages()
   } catch {}
 }
@@ -304,7 +304,7 @@ const loadSubcodes = async (pid) => {
 const setSubStatus = (s) => { subStatus.value = s; loadSubcodes(subPage.value.id) }
 const onSubSearch = () => loadSubcodes(subPage.value.id)
 const archiveSub = async (s) => {
-  try { await ElMessageBox.confirm(t('landing.subArchiveConfirm', { slug: s.slug }), t('landing.subArchiveTitle'), { type: 'warning' })
+  try { await ElMessageBox.confirm(t('landing.subArchiveConfirm', { slug: s.slug }), t('landing.subArchiveTitle'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/subcodes/${s.id}`); ElMessage.success(t('landing.archived')); await loadSubcodes(subPage.value.id)
   } catch(e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('landing.archiveFail') + '：' + e.message) }
 }
@@ -439,7 +439,7 @@ const addSubdomain = async () => {
 }
 const removeSubdomain = async (host) => {
   try {
-    await ElMessageBox.confirm(t('landing.subDelConfirm', { host }), t('common.confirm'), { type: 'warning' })
+    await ElMessageBox.confirm(t('landing.subDelConfirm', { host }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     const r = await DELETE(`/landing/pages/${editingId.value}/subdomains/${host}`)
     form.value.bound_subdomains = r.bound_subdomains || []
     ElMessage.success(t('common.done'))
@@ -475,7 +475,7 @@ const syncPixels = async () => {
 }
 const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '', test_event_code: p.test_event_code || '' } }
 const delPixel = async (p) => {
-  try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
+  try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
   catch {}
 }
 const savePixel = async () => {
@@ -565,7 +565,7 @@ const uploadLandingTpl = async () => {
   tplUploading.value = false
 }
 const delLandingTpl = async (tpl) => {
-  try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
+  try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
 }
 const downloadTplRef = () => {
   const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'

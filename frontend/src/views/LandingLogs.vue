@@ -5,8 +5,9 @@ import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
+import { fmtTime as tzFmtTime } from '../composables/useTz'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const route = useRoute()
 
 const EVENT_TYPES = computed(() => [
@@ -202,11 +203,8 @@ const onDateManual = () => { preset.value = '' }  // 手动改日期 → 取消�
 const prev = () => { if (offset.value > 0) { offset.value = Math.max(0, offset.value - limit); load() } }
 const next = () => { if (offset.value + limit < total.value) { offset.value += limit; load() } }
 
-const fmtTime = (iso) => {
-  if (!iso) return '-'
-  try { return new Date(iso).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }
-  catch (e) { return iso }
-}
+// 时间显示走用户显示时区（useTz，设置页可切换），不再硬编码 Asia/Shanghai
+const fmtTime = (iso) => iso ? tzFmtTime(iso) : '-'
 const goSlug = (slug) => { fSlug.value = slug; offset.value = 0; load() }
 const goAct = (actId) => { if (!actId) return; fAct.value = actId; offset.value = 0; load() }
 const goAd = (adId) => { if (!adId) return; fAd.value = adId; offset.value = 0; load() }
