@@ -199,6 +199,7 @@ const fetchLanding = async () => {
   try { landing.value = await GET(`/dashboard/landing?${rangeQuery()}`) }
   catch (e) { /* 落地页加载失败不阻断主看板 */ }
   finally { landingLoading.value = false }
+  loadLandingTrend()
 }
 // 落地页 KPI 卡（可点击展开子码明细，参照广告版 KPI）
 const landingKpiExpanded = ref(null)
@@ -252,10 +253,63 @@ const filteredLanding = computed(() => {
   })
 })
 const landingStateLabel = (s) => ({ good: t('dashboard.stateGood'), waste: t('dashboard.stateWaste'), watch: t('dashboard.stateWatch'), no_data: '—' }[s] || '—')
+// ── KPI 本币/USD 切换（localStorage 持久，默认 USD）──
+const spendUnit = ref(localStorage.getItem('dash_spend_unit') || 'usd')
+watch(spendUnit, (v) => localStorage.setItem('dash_spend_unit', v))
+const multiCurrency = computed(() => new Set((data.value.accounts || []).map(a => a.currency).filter(Boolean)).size > 1)
+// 本币汇总：多币种直接相加（仅供粗略参考，hover 有提示）；USD 用后端换算值
+const totalSpendNative = computed(() => (data.value.accounts || []).reduce((s, a) => s + (a.spend || 0), 0))
+const kpiSpendDisplay = computed(() => spendUnit.value === 'usd'
+  ? fmtUsd(data.value.total_spend)
+  : fmt(totalSpendNative.value))
 const barWidth = (count, arr) => {
   const mx = Math.max(...(arr || []).map(a => a.count), 1)
   return Math.max(4, (count / mx * 100)) + '%'
 }
+
+// ── 落地页趋势（访问/通过/屏蔽 三线，GET /dashboard/landing-trend）──
+const landingTrend = ref({ labels: [], visits: [], clicks: [], blocked: [] })
+const ltVisitsCanvas = ref(null)
+const ltClicksCanvas = ref(null)
+const ltBlockedCanvas = ref(null)
+let _ltCharts = []
+const loadLandingTrend = async () => {
+  try {
+    let q = (showCustom.value && customFrom.value && customTo.value)
+      ? `date_from=${customFrom.value}&date_to=${customTo.value}`
+      : `date_preset=${datePreset.value}`
+    landingTrend.value = await GET(`/dashboard/landing-trend?${q}`)
+  } catch { landingTrend.value = { labels: [], visits: [], clicks: [], blocked: [] } }
+}
+const renderLandingTrend = () => {
+  _ltCharts.forEach(c => c?.destroy())
+  _ltCharts = []
+  const d = landingTrend.value
+  if (!d.labels?.length) return
+  const dark = document.documentElement.dataset.theme !== 'light'
+  const gridColor = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)'
+  const textColor = dark ? '#8e8e93' : '#6c6c70'
+  const mk = (canvas, label, data, color) => {
+    if (!canvas) return
+    _ltCharts.push(new Chart(canvas, {
+      type: 'line',
+      data: { labels: d.labels.map(x => x.length >= 10 ? x.slice(5, 10) : x), datasets: [{ label, data, borderColor: color,
+        backgroundColor: color.replace(')', ',.08)').replace('rgb', 'rgba'),
+        fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
+                  x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 45 } } },
+        plugins: { legend: { display: false } } },
+    }))
+  }
+  mk(ltVisitsCanvas.value, t('dashboard.kpiVisits'), d.visits, 'rgb(10,132,255)')
+  mk(ltClicksCanvas.value, t('dashboard.kpiPass'), d.clicks, 'rgb(48,209,88)')
+  mk(ltBlockedCanvas.value, t('dashboard.kpiBlocked'), d.blocked, 'rgb(255,69,58)')
+}
+watch(landingTrend, () => nextTick(renderLandingTrend))
+const _ltThemeObserver = new MutationObserver(() => nextTick(renderLandingTrend))
+_ltThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
 // 格式化：数字走中央 useFormat.fmtNum；金额保留 0→'—'（"该范围内无消耗"提示语义，真零≠无数据场景不适用于消耗列）
 import { fmtNum, fmtUsd as _fmtUsdRaw } from '../composables/useFormat'
@@ -371,7 +425,7 @@ const forceRefresh = async () => {
 // KPI 卡点击展开
 const kpiExpanded = ref(null)
 const cards = computed(() => [
-  { label: t('dashboard.kpiTotalSpend'), value: fmtUsd(data.value.total_spend), color: 'blue', mode: 'spend', clickable: true },
+  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, color: 'blue', mode: 'spend', clickable: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : '' },
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), color: 'green', mode: 'conv', clickable: true },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), color: 'orange', mode: 'cpa', clickable: true },
   { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'purple', mode: 'roas', clickable: true },
@@ -710,7 +764,7 @@ onMounted(() => {
   ;['ads', 'landing'].forEach(id => { const el = document.getElementById(id); if (el) obs.observe(el) })
   _sectionObserver = obs
 })
-onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); if (_sectionObserver) _sectionObserver.disconnect(); _themeObserver.disconnect(); _charts.forEach(c => c?.destroy()) })
+onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); if (_sectionObserver) _sectionObserver.disconnect(); _themeObserver.disconnect(); _ltThemeObserver.disconnect(); _charts.forEach(c => c?.destroy()); _ltCharts.forEach(c => c?.destroy()) })
 </script>
 
 <template>
@@ -750,7 +804,12 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     </div>
 
     <section id="ads" class="dash-section ads">
-      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secAds') }}</span><span class="dash-sub">{{ t('dashboard.secAdsSub') }}</span></div>
+      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secAds') }}</span><span class="dash-sub">{{ t('dashboard.secAdsSub') }}</span>
+        <div class="unit-toggle" :title="multiCurrency && spendUnit === 'native' ? t('dashboard.multiCurHint') : ''">
+          <button class="ut-btn" :class="{ on: spendUnit === 'usd' }" @click="spendUnit = 'usd'">{{ t('dashboard.unitUsd') }}</button>
+          <button class="ut-btn" :class="{ on: spendUnit === 'native' }" @click="spendUnit = 'native'">{{ t('dashboard.unitNative') }}</button>
+        </div>
+      </div>
       <div class="stat-grid" v-loading="loading">
         <div v-for="(card, i) in cards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: kpiExpanded === i }]" @click="toggleKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
@@ -868,7 +927,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       <div v-if="activeNotif" class="notif-drawer">
         <div class="nd-head">
           <span class="nd-level" :class="activeNotif.level">{{ ({critical:t('dashboard.levelCritical'),warning:t('dashboard.levelWarning'),info:t('dashboard.levelInfo')})[activeNotif.level] || t('dashboard.levelNotice') }}</span>
-          <span v-if="activeNotif.event_type" class="nd-event">{{ ({rule_pause:t('dashboard.evAutoPause'),account_permission_error:t('dashboard.evPermissionDenied'),token_expired:t('dashboard.evTokenInvalid'),token_rate_limited:t('dashboard.evTokenThrottled'),orphan_account:t('dashboard.evAccountOrphan'),inspection_stalled:t('dashboard.evInspectStalled'),coverage_lost:t('dashboard.evCoverageLost'),budget_progress_50:t('dashboard.evBudgetProgress'),budget_progress_75:t('dashboard.evBudgetProgress'),budget_progress_90:t('dashboard.evBudgetProgress'),budget_progress_98:t('dashboard.evBudgetProgress'),account_status_change:t('dashboard.evAccountStatusChange'),sentinel_pause:t('dashboard.evSentinelPause')})[activeNotif.event_type] || activeNotif.event_type }}</span>
+          <span v-if="activeNotif.event_type" class="nd-event">{{ notifEventLabel(activeNotif.event_type) || activeNotif.event_type }}</span>
           <span class="nd-time">{{ fmtTime(activeNotif.created_at) }}</span>
         </div>
         <div class="nd-body">
@@ -921,7 +980,15 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
         <div v-if="!landingKpiDetail.rows.length" class="empty">{{ t('dashboard.noSubcodeData') }}</div>
       </div>
-      <div class="trend-placeholder"><el-icon><TrendCharts /></el-icon><span>{{ t('dashboard.landingTrendSoon') }}</span></div>
+      <div class="trend-section">
+        <div class="trend-bar"><span class="trend-title">{{ t('dashboard.landingTrendTitle') }}</span></div>
+        <div class="trend-grid" v-if="landingTrend.labels?.length">
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.kpiVisits') }}</div><div class="tc-canvas"><canvas ref="ltVisitsCanvas"></canvas></div></div>
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.kpiPass') }}</div><div class="tc-canvas"><canvas ref="ltClicksCanvas"></canvas></div></div>
+          <div class="trend-card"><div class="tc-label">{{ t('dashboard.kpiBlocked') }}</div><div class="tc-canvas"><canvas ref="ltBlockedCanvas"></canvas></div></div>
+        </div>
+        <div v-else class="trend-empty">{{ t('dashboard.noLandingTrendData') }}</div>
+      </div>
       <div class="card" v-loading="landingLoading">
         <div class="card-header">
           <span class="card-title">{{ t('dashboard.subcodePerformance') }}</span>
@@ -1012,6 +1079,10 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .dash-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--ac); }
 .dash-section.landing .dash-title::before { background: var(--success); }
 .dash-sub { font-size: 12px; color: var(--t3); }
+/* KPI 本币/USD 切换 */
+.unit-toggle { margin-left: auto; display: flex; gap: 2px; }
+.ut-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
+.ut-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 
 /* 趋势占位（第二批填充）*/
 .trend-placeholder { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 28px; background: var(--bg3); border: 1px dashed var(--bd2, var(--bd)); border-radius: var(--rs); color: var(--t3); font-size: 13px; }
@@ -1100,8 +1171,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .stat-card.clickable:hover { border-color: var(--ac); transform: translateY(-1px); }
 .stat-card.active { border-color: var(--ac); background: var(--bg3); }
 .stat-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-.blue::before { background: #0a84ff; } .green::before { background: #30d158; } .orange::before { background: #ff9f0a; }
-.purple::before { background: #bf5af2; } .red::before { background: #ff453a; } .cyan::before { background: #64d2ff; } .teal::before { background: #5ac8fa; } .indigo::before { background: #5e5ce6; }
+/* KPI 卡色条：走 CSS 变量（主题自适应）；main.css 无对应变量的（purple/cyan/teal/indigo）在主题变量基础上补 */
+.blue::before { background: var(--ac); } .green::before { background: var(--success); } .orange::before { background: var(--warning); }
+.purple::before { background: var(--purple, #bf5af2); } .red::before { background: var(--error); } .cyan::before { background: var(--cyan, #64d2ff); } .teal::before { background: var(--teal, #5ac8fa); } .indigo::before { background: var(--indigo, #5e5ce6); }
 .stat-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
 .stat-value { font-size: 24px; font-weight: 600; color: var(--t1); letter-spacing: -0.02em; }
 .stat-sub { font-size: 10px; color: var(--t3); margin-top: -2px; }

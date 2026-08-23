@@ -6,7 +6,7 @@ POST /leads/subscribe — 订阅该租户所有主页的 leadgen webhook（page-
 """
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
@@ -110,16 +110,83 @@ def _get_active_cred(db: Session, tenant_id: int):
     ).first()
 
 
+def _sync_leads_run(tenant_id: int, forms: list):
+    """后台任务：逐表单拉 FB leads → 插新/回填 stub + 通知（dedup_recent 防轮询 spam）。"""
+    from ..core.database import SuperSessionLocal
+    db = SuperSessionLocal()
+    try:
+        cred = _get_active_cred(db, tenant_id)
+        if not cred:
+            return
+        fb = FbClient(decrypt(cred.access_token_enc))
+        synced, enriched = 0, 0
+        for f in forms:
+            try:
+                leads_data = fb.get_leads(f["form_id"])
+            except FbApiError:
+                continue
+            for ld in leads_data:
+                lid = ld.get("id")
+                if not lid:
+                    continue
+                field_data = ld.get("field_data", [])
+                existing = db.query(Lead).filter(Lead.lead_id == lid).first()
+                if existing:
+                    # webhook stub 先存了 → 回填 field_data（+ 补 ad_id/created_time）
+                    if field_data and not (existing.field_data_json and existing.field_data_json != "[]"):
+                        existing.field_data_json = json.dumps(field_data)
+                        if ld.get("ad_id") and not existing.ad_id:
+                            existing.ad_id = str(ld["ad_id"])
+                        if not existing.created_time:
+                            existing.created_time = _parse_created_time(ld.get("created_time"))
+                        enriched += 1
+                else:
+                    db.add(Lead(
+                        tenant_id=tenant_id,
+                        page_id=f.get("page_id"),
+                        ad_id=str(ld.get("ad_id")) if ld.get("ad_id") else None,
+                        form_id=f["form_id"],
+                        lead_id=lid,
+                        field_data_json=json.dumps(field_data),
+                        created_time=_parse_created_time(ld.get("created_time")),
+                    ))
+                    synced += 1
+        # 新 lead 到达通知（sync 批次聚合一条，1h dedup 防轮询 spam——landing_health_alert 同款模式）
+        if synced > 0:
+            from ..core.notify_utils import emit_notification, dedup_recent
+            from ..core.log_utils import write_log, new_trace_id
+            try:
+                if not dedup_recent(db, tenant_id, "leads_new", None, 60):
+                    _tid = new_trace_id()
+                    write_log(db, tenant_id=tenant_id, trace_id=_tid, actor_type="system",
+                              action_type="leads_new", source="leads_sync",
+                              target_type="lead", result="success",
+                              metadata={"synced": synced, "forms": len(forms)})
+                    emit_notification(
+                        db, tenant_id=tenant_id, level="info",
+                        event_type="leads_new",
+                        title=f"新潜客 × {synced}",
+                        body=f"Instant Form 同步到 {synced} 条新潜客（{len(forms)} 个表单）。\n"
+                             f"到 AdManager → 潜客 查看或导出。",
+                        roles=["owner", "operator"], trace_id=_tid,
+                    )
+            except Exception:
+                pass   # 通知失败不阻断同步
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @router.post("/sync")
 def sync_leads(
     form_id: str = "",
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
-    """从 FB 拉潜客数据。form_id 空=拉该租户所有已部署的 Instant Form 表单。
-
-    webhook 先存的 stub（field_data 空）这里回填答案；新 lead 直接插。
-    """
+    """从 FB 拉潜客数据（后台任务执行，立即返回）。form_id 空=拉该租户所有已部署的 Instant Form 表单。"""
     forms = []
     if form_id:
         # 归属校验：form_id 必须属于本租户已部署的表单（否则可拉别家表单的潜客进自己租户）
@@ -137,68 +204,9 @@ def sync_leads(
         ).all()
         forms = [{"form_id": t.fb_form_id, "page_id": t.fb_page_id} for t in tpls]
     if not forms:
-        return {"synced": 0, "enriched": 0, "error": "no forms to sync (deploy an Instant Form first)"}
-    cred = _get_active_cred(db, user.tenant_id)
-    if not cred:
-        return {"synced": 0, "enriched": 0, "error": "no active FB credential"}
-    fb = FbClient(decrypt(cred.access_token_enc))
-    synced, enriched, errors = 0, 0, []
-    for f in forms:
-        try:
-            leads_data = fb.get_leads(f["form_id"])
-        except FbApiError as e:
-            errors.append({"form_id": f["form_id"], "error": e.friendly})
-            continue
-        for ld in leads_data:
-            lid = ld.get("id")
-            if not lid:
-                continue
-            field_data = ld.get("field_data", [])
-            existing = db.query(Lead).filter(Lead.lead_id == lid).first()
-            if existing:
-                # webhook stub 先存了 → 回填 field_data（+ 补 ad_id/created_time）
-                if field_data and not (existing.field_data_json and existing.field_data_json != "[]"):
-                    existing.field_data_json = json.dumps(field_data)
-                    if ld.get("ad_id") and not existing.ad_id:
-                        existing.ad_id = str(ld["ad_id"])
-                    if not existing.created_time:
-                        existing.created_time = _parse_created_time(ld.get("created_time"))
-                    enriched += 1
-            else:
-                db.add(Lead(
-                    tenant_id=user.tenant_id,
-                    page_id=f.get("page_id"),
-                    ad_id=str(ld.get("ad_id")) if ld.get("ad_id") else None,
-                    form_id=f["form_id"],
-                    lead_id=lid,
-                    field_data_json=json.dumps(field_data),
-                    created_time=_parse_created_time(ld.get("created_time")),
-                ))
-                synced += 1
-        # 新 lead 到达通知（sync 批次聚合一条，1h dedup 防轮询 spam——landing_health_alert 同款模式）
-        if synced > 0:
-            from ..core.notify_utils import emit_notification, dedup_recent
-            from ..core.log_utils import write_log, new_trace_id
-            try:
-                if not dedup_recent(db, user.tenant_id, "leads_new", None, 60):
-                    _tid = new_trace_id()
-                    write_log(db, tenant_id=user.tenant_id, trace_id=_tid, actor_type="system",
-                              action_type="leads_new", source="leads_sync",
-                              target_type="lead", result="success",
-                              metadata={"synced": synced, "forms": len(forms)})
-                    emit_notification(
-                        db, tenant_id=user.tenant_id, level="info",
-                        event_type="leads_new",
-                        title=f"新潜客 × {synced}",
-                        body=f"Instant Form 同步到 {synced} 条新潜客（{len(forms)} 个表单）。\n"
-                             f"到 AdManager → 潜客 查看或导出。",
-                        roles=["owner", "operator"], trace_id=_tid,
-                    )
-            except Exception:
-                pass   # 通知失败不阻断同步
-    db.commit()
-    return {"synced": synced, "enriched": enriched,
-            "forms_checked": len(forms), "errors": errors}
+        return {"started": False, "synced": 0, "enriched": 0, "error": "no forms to sync (deploy an Instant Form first)"}
+    background_tasks.add_task(_sync_leads_run, user.tenant_id, forms)
+    return {"started": True, "forms": len(forms)}
 
 
 @router.post("/subscribe")

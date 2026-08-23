@@ -625,6 +625,78 @@ def landing_overview(
     }
 
 
+@router.get("/landing-trend")
+def landing_trend(
+    date_preset: str = "last_7d",
+    date_from: str = "",
+    date_to: str = "",
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """落地页趋势：landing_events 按业务日聚合 访问/通过/屏蔽 三序列。
+
+    事件口径与 /dashboard/landing 相同（访问=visit+redirect，通过=redirect|click 去重 ip，屏蔽=block）。
+    30s 内存缓存（同 _CACHE 样板）。
+    """
+    cache_key = f"ltrend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}"
+    now = _time.time()
+    if cache_key in _CACHE:
+        entry = _CACHE[cache_key]
+        if now - entry[0] < _CACHE_TTL:
+            return entry[1]
+
+    today = _business_today()
+    if date_from and date_to:
+        since, until = date_from, date_to
+    else:
+        if date_preset == "today":
+            since = until = today
+        elif date_preset == "yesterday":
+            y = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+            since = until = y
+        elif date_preset == "last_2d":
+            since = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d"); until = today
+        elif date_preset == "last_7d":
+            since = (datetime.now(BUSINESS_TZ) - timedelta(days=6)).strftime("%Y-%m-%d"); until = today
+        elif date_preset == "last_30d":
+            since = (datetime.now(BUSINESS_TZ) - timedelta(days=29)).strftime("%Y-%m-%d"); until = today
+        else:
+            since = until = today
+    utc_start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ).astimezone(timezone.utc)
+    utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ).astimezone(timezone.utc) + timedelta(days=1)
+
+    rows = db.execute(text("""
+        SELECT (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::date::text AS day,
+               SUM(CASE WHEN e.event_type IN ('visit','redirect') THEN 1 ELSE 0 END) AS visits,
+               COUNT(DISTINCT CASE WHEN e.event_type IN ('redirect','click') THEN e.ip_hash END) AS clicks,
+               SUM(CASE WHEN e.event_type = 'block' THEN 1 ELSE 0 END) AS blocked
+        FROM landing_events e
+        WHERE e.tenant_id = :tid
+          AND e.created_at >= :s AND e.created_at < :e
+          AND e.event_type IN ('visit','redirect','click','block')
+        GROUP BY day ORDER BY day
+    """), {"tid": user.tenant_id, "s": utc_start, "e": utc_end}).fetchall()
+
+    by_day = {r.day: r for r in rows}
+    labels, visits, clicks, blocked = [], [], [], []
+    d0 = datetime.strptime(since, "%Y-%m-%d")
+    n_days = (datetime.strptime(until, "%Y-%m-%d") - d0).days
+    for i in range(n_days + 1):
+        day = (d0 + timedelta(days=i)).strftime("%Y-%m-%d")
+        r = by_day.get(day)
+        labels.append(day)
+        visits.append(int(r.visits or 0) if r else 0)
+        clicks.append(int(r.clicks or 0) if r else 0)
+        blocked.append(int(r.blocked or 0) if r else 0)
+
+    result = {
+        "date_preset": date_preset or "custom",
+        "labels": labels, "visits": visits, "clicks": clicks, "blocked": blocked,
+    }
+    _CACHE[cache_key] = (now, result)
+    return result
+
+
 @router.get("/export")
 def dashboard_export(
     source: str = "accounts",        # accounts（账户汇总）/ ads（广告级）/ landing（子码级）

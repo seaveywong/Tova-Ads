@@ -64,7 +64,13 @@ const load = async () => {
 const loadActors = async () => { try { actors.value = await GET('/logs/actors') } catch {} }
 onMounted(() => { load(); loadActors() })
 const setTab = (k) => { tab.value = k; fTrace.value = ''; page.value = 1; load() }
-const goPage = (n) => { page.value = Math.min(Math.max(1, n), totalPages()); load() }
+const goPage = (n) => { page.value = Math.min(Math.max(1, n), totalPages()); jumpPage.value = ''; load() }
+const jumpPage = ref('')
+const doJump = () => {
+  const n = parseInt(jumpPage.value, 10)
+  if (isNaN(n)) return
+  goPage(n)
+}
 const onDateChange = () => { page.value = 1; load() }
 
 // 行内展开 trace（el-table expand）
@@ -138,6 +144,8 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         <span class="pager-info">{{ t('audit.pagerInfo', { total: total, page: page, pages: totalPages() }) }}</span>
         <div class="pager-ops">
           <button class="btn" :disabled="page <= 1 || loading" @click="goPage(page - 1)">{{ t('audit.prevPage') }}</button>
+          <input v-model="jumpPage" type="number" min="1" :max="totalPages()" class="jump-input" :placeholder="t('audit.jumpPh')" @keyup.enter="doJump" />
+          <button class="btn" @click="doJump">{{ t('audit.jumpGo') }}</button>
           <button class="btn" :disabled="page >= totalPages() || loading" @click="goPage(page + 1)">{{ t('audit.nextPage') }}</button>
         </div>
       </div>
@@ -220,7 +228,9 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .filters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
 .pager{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap}
 .pager-info{font-size:12px;color:var(--t3)}
-.pager-ops{display:flex;gap:6px}
+.pager-ops{display:flex;gap:6px;align-items:center}
+.jump-input{width:64px;background:var(--bg3);color:var(--t1);border:1px solid var(--bd);border-radius:var(--rs);padding:5px 8px;font-size:12px}
+.jump-input:focus{outline:none;border-color:var(--ac)}
 .filter-item{display:flex;align-items:center;gap:6px}
 .flabel{font-size:11px;color:var(--t3);font-weight:500}
 .input{padding:6px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:7px;color:var(--t1);font-size:12px;font-family:inherit;box-sizing:border-box;min-width:180px;transition:border-color .15s}

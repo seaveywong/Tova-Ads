@@ -306,7 +306,7 @@ onMounted(() => {
   }
 })
 const loadTplPages = async () => { try { const r = await GET('/fb/assets'); tplPages.value = r.pages || [] } catch {} }
-onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 
 // #2 dirty-check：编辑抽屉关闭前确认
 let _formSnapshot = ''
@@ -846,18 +846,25 @@ const startDeploy = async () => {
 const openProgress = async (jobId) => {
   progressOpen.value = true; activeJob.value = null
   await pollJob(jobId)
-  if (pollTimer) clearInterval(pollTimer)
-  pollTimer = setInterval(() => pollJob(jobId), 2500)
+  if (pollTimer) clearTimeout(pollTimer)
+  startPoll(jobId, 0)
+}
+// 前 12 次（30s）每 2.5s，之后每 10s；终态由 pollJob 停止
+const startPoll = (jobId, n) => {
+  pollTimer = setTimeout(async () => {
+    await pollJob(jobId)
+    if (pollTimer) startPoll(jobId, n + 1)
+  }, n < 12 ? 2500 : 10000)
 }
 const pollJob = async (jobId) => {
   try {
     activeJob.value = await GET('/launch-templates/jobs/' + jobId)
-    if (['completed','partial_failed','failed'].includes(activeJob.value.status)) { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+    if (['completed','partial_failed','failed'].includes(activeJob.value.status)) { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
   } catch {}
 }
 const retryItem = async (it) => {
   try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success(t('launch.retrySubmitted'))
-    if (!pollTimer) pollTimer = setInterval(() => pollJob(activeJob.value.id), 2500) } catch (e) { showError(e, t('launch.retryFail')) }
+    if (!pollTimer) startPoll(activeJob.value.id, 0) } catch (e) { showError(e, t('launch.retryFail')) }
 }
 const statusText = (s) => itemStatus(s).label
 const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
@@ -1308,7 +1315,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     </el-drawer>
 
     <!-- 进度 -->
-    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearInterval(pollTimer);pollTimer=null}">
+    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearTimeout(pollTimer);pollTimer=null}">
       <div v-if="activeJob" class="prog">
         <div class="prog-head">
           <span>{{ activeJob.template_name }}</span>

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -61,11 +61,35 @@ const loadAccounts = async () => {
   try { accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]; await load(); await loadRedirectMap() }
   catch (e) { ElMessage.error(e.message || t('adm.loadAccountsFail')) }
 }
-const load = async () => {
+const load = async (refresh = false) => {
   loading.value = true
-  try { const params = new URLSearchParams(curRange.value); data.value = await GET(`/ads/list?${params.toString()}`); drillCampaign.value = ''; drillAdset.value = '' }
+  try {
+    const params = new URLSearchParams(curRange.value)
+    if (refresh) params.set('refresh', '1')
+    data.value = await GET(`/ads/list?${params.toString()}`)
+    drillCampaign.value = ''; drillAdset.value = ''
+    // 后台刷：立即返回了缓存 → 轮询 refresh-status，完成后自动更新列表
+    if (refresh && data.value.refreshing) watchRefreshDone()
+  }
   catch (e) { ElMessage.error(e.message || t('common.fail')) }
   loading.value = false
+}
+// 后台刷新轮询：每 3s 查 /ads/refresh-status，running=false 时重拉列表；上限 20 次防死循环
+let _refreshPoller = null
+const watchRefreshDone = () => {
+  if (_refreshPoller) return
+  ElMessage.info(t('adm.bgRefreshing'))
+  let n = 0
+  _refreshPoller = setInterval(async () => {
+    n++
+    let done = false
+    try { const st = await GET('/ads/refresh-status'); done = !st.running }
+    catch { done = true }  // 状态端点失败也别死循环
+    if (done || n >= 20) {
+      clearInterval(_refreshPoller); _refreshPoller = null
+      load()
+    }
+  }, 3000)
 }
 const statusMatch = (s) => statusFilter.value === 'all' ? true : (statusFilter.value === 'active' ? s === 'ACTIVE' : (s === 'PAUSED' || (s && s.includes('PAUSED'))))
 const actMatch = (item) => !selectedActs.value.length ? true : selectedActs.value.includes(item.act_id)
@@ -101,6 +125,7 @@ const drillToAdset = (c) => { drillCampaign.value = c.id; tab.value = 'adset'; i
 const drillToAd = (s) => { drillAdset.value = s.id; tab.value = 'ad'; if (s.act_id && !selectedActs.value.includes(s.act_id)) selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
 onMounted(loadAccounts)
+onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null } })
 
 const selected = ref(new Set())
 const opLoading = ref(false)
@@ -219,9 +244,24 @@ const loadLeads = async () => {
 const syncLeads = async () => {
   opLoading.value = true
   try {
+    let baseTotal = 0
+    try { baseTotal = (await GET('/leads')).total || 0 } catch {}
     const r = await POST('/leads/sync')
     if (r.error) ElMessage.warning(t('adm.leadsErr', { msg: r.error }))
-    else { ElMessage.success(t('adm.leadsSynced', { n: (r.synced || 0) + (r.enriched || 0) })); await loadLeads() }
+    else if (!r.started) { await loadLeads() }
+    else {
+      // 后台跑：3s 轮询 /leads，total 涨了或满 10 次（30s）就停
+      ElMessage.info(t('adm.bgRefreshing'))
+      let n = 0
+      const timer = setInterval(async () => {
+        n++
+        let stop = n >= 10
+        try { const lr = await GET('/leads'); if ((lr.total || 0) > baseTotal) stop = true }
+        catch { stop = true }
+        if (stop) { clearInterval(timer); opLoading.value = false; await loadLeads() }
+      }, 3000)
+      return
+    }
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
   opLoading.value = false
 }
@@ -241,7 +281,7 @@ const subscribeLeads = async () => {
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <button class="ctrl-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load()" style="margin-left:auto">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
+      <button class="ctrl-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load(true)" style="margin-left:auto">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">

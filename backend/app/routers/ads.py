@@ -4,7 +4,7 @@
 """
 import json
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
@@ -39,6 +39,97 @@ def _id_of(v):
 # ad_id → act_id 反查表（5min 模块缓存——诊断面板每次打开不再 json.loads 全部账户 ads_json）
 _AD_ACT_MAP: dict = {}   # {tenant_id: (built_at, {ad_id: act_id})}
 _AD_ACT_TTL = 300
+
+# 后台刷新状态（gunicorn 多 worker 各自一份，可接受——同租户并发刷只是多花 FB 配额）
+# {tenant_id: {"running": bool, "started_at": ts, "done": n, "total": n}}
+_REFRESH_STATE: dict = {}
+
+# list_ads 聚合段 30s 内存缓存（照 dashboard _CACHE 样板）：slug 反查 + landing 聚合
+_AGG_CACHE: dict = {}
+_AGG_CACHE_TTL = 30
+
+
+def _bg_refresh(tenant_id: int, act_id: str):
+    """后台逐账户刷 ads_cache（advisory lock 112 单实例互斥）。"""
+    from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+    st = _REFRESH_STATE.get(tenant_id)
+    if st and st.get("running"):
+        return
+    lock = None
+    db = None
+    _REFRESH_STATE[tenant_id] = {"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "done": 0, "total": 0}
+    try:
+        lock = acquire_run_lock(112)
+        db = SuperSessionLocal()
+        acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
+            Account.tenant_id == tenant_id, Account.is_managed == True,  # noqa: E712
+            Account.account_status == 1).all()]
+        _REFRESH_STATE[tenant_id]["total"] = len(acts)
+        for a in acts:
+            fb = client_for_account(db, tenant_id, a, "read")
+            if fb:
+                _sync_one(db, tenant_id, a, fb)
+            _REFRESH_STATE[tenant_id]["done"] += 1
+        db.commit()
+    except Exception:
+        if db:
+            db.rollback()
+    finally:
+        if db:
+            db.close()
+        if lock:
+            release_run_lock(lock, 112)
+        _REFRESH_STATE[tenant_id]["running"] = False
+
+
+def _agg_cached(tenant_id: int, act_id: str, date_from: str, date_to: str, db) -> tuple:
+    """slug 反查 + landing 聚合（30s 缓存），返回 (slug_map, landing_map)。"""
+    import time as _t
+    from sqlalchemy import text as _text
+    key = f"agg:{tenant_id}:{act_id}:{date_from}:{date_to}"
+    now = _t.time()
+    ent = _AGG_CACHE.get(key)
+    if ent and now - ent[0] < _AGG_CACHE_TTL:
+        return ent[1], ent[2]
+    slug_map = {}
+    try:
+        _ev_rows = db.execute(_text("""
+            SELECT DISTINCT ON (ad_id) ad_id, slug
+            FROM landing_events
+            WHERE tenant_id = :tid AND ad_id IS NOT NULL AND ad_id != ''
+              AND slug IS NOT NULL AND slug != ''
+            ORDER BY ad_id, created_at DESC
+        """), {"tid": tenant_id}).fetchall()
+        for _r in _ev_rows:
+            slug_map[str(_r.ad_id)] = _r.slug
+    except Exception:
+        pass
+    for _r in db.query(LandingAdLink.ad_id, LandingAdLink.slug).filter(
+        LandingAdLink.tenant_id == tenant_id,
+        LandingAdLink.ad_id.isnot(None),
+        LandingAdLink.ad_id != "",
+        LandingAdLink.status.notin_(["archived", "deleted"]),
+    ).all():
+        slug_map.setdefault(str(_r.ad_id), _r.slug)
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    _BZ = _tz(_td(hours=8))
+    _us = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc)
+    _ue = _dt.strptime(date_to, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc) + _td(days=1)
+    landing = {}
+    for _r in db.execute(_text("""
+        SELECT ad_id,
+               SUM(CASE WHEN event_type IN ('visit','redirect') THEN 1 ELSE 0 END) AS lv,
+               COUNT(DISTINCT CASE WHEN event_type IN ('redirect','click') THEN ip_hash END) AS lp
+        FROM landing_events
+        WHERE tenant_id = :tid AND ad_id IS NOT NULL AND ad_id != ''
+          AND created_at >= :s AND created_at < :e
+        GROUP BY ad_id
+    """), {"tid": tenant_id, "s": _us, "e": _ue}).fetchall():
+        landing[str(_r.ad_id)] = {"visits": int(_r.lv or 0), "pass": int(_r.lp or 0)}
+    if len(_AGG_CACHE) > 200:
+        _AGG_CACHE.clear()
+    _AGG_CACHE[key] = (now, slug_map, landing)
+    return slug_map, landing
 
 
 def _ad_act_lookup(db: Session, tenant_id: int) -> dict:
@@ -119,25 +210,21 @@ def list_ads(
     refresh: int = 0,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """广告管理器列表：读 ads_cache（跨账户汇总，0 FB）+ perf 消耗。
 
-    act_id 空=全部账户汇总；refresh=1 强制重拉（单/全部）。
+    act_id 空=全部账户汇总；refresh=1 起后台刷新（立即返回当前缓存 + refreshing=true）。
     """
     if not date_from:
         date_from = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
     if not date_to:
         date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    # 手动刷新（强制重拉 FB → 更新 ads_cache）——只刷 managed 账户
+    refreshing = False
     if refresh:
-        acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
-            Account.account_status == 1).all()]
-        for a in acts:
-            fb = client_for_account(db, user.tenant_id, a, "read")
-            if fb:
-                _sync_one(db, user.tenant_id, a, fb)
-        db.commit()
+        # 改后台刷：立即返回缓存，前端轮询 /ads/refresh-status 直到完成
+        background_tasks.add_task(_bg_refresh, user.tenant_id, act_id)
+        refreshing = True
     # 读缓存——只看 managed 账户（已移除的不显示广告）
     managed_ids = {a.act_id for a in db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
@@ -186,23 +273,8 @@ def list_ads(
                 it["lifetime_budget_amount"] = from_minor_units(it["lifetime_budget"], cur)
         return items
 
-    # 落地访问/通过 按广告聚合（visit+redirect=访问, redirect+click=通过；和仪表盘同口径）
-    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    from sqlalchemy import text as _text
-    _BZ = _tz(_td(hours=8))
-    _us = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc)
-    _ue = _dt.strptime(date_to, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc) + _td(days=1)
-    _landing = {}
-    for _r in db.execute(_text("""
-        SELECT ad_id,
-               SUM(CASE WHEN event_type IN ('visit','redirect') THEN 1 ELSE 0 END) AS lv,
-               COUNT(DISTINCT CASE WHEN event_type IN ('redirect','click') THEN ip_hash END) AS lp
-        FROM landing_events
-        WHERE tenant_id = :tid AND ad_id IS NOT NULL AND ad_id != ''
-          AND created_at >= :s AND created_at < :e
-        GROUP BY ad_id
-    """), {"tid": user.tenant_id, "s": _us, "e": _ue}).fetchall():
-        _landing[str(_r.ad_id)] = {"visits": int(_r.lv or 0), "pass": int(_r.lp or 0)}
+    # 落地聚合 + 子码反查（30s 缓存，口径同仪表盘：visit+redirect=访问, redirect+click=通过）
+    _slug_map, _landing = _agg_cached(user.tenant_id, act_id, date_from, date_to, db)
     for ad in all_ads:
         _ls = _landing.get(str(ad.get("id")))
         ad["landing_visits"] = _ls["visits"] if _ls else 0
@@ -215,43 +287,25 @@ def list_ads(
             if not _sid and isinstance(_cr.get("data"), list) and _cr["data"]:
                 _sid = (_cr["data"][0] or {}).get("effective_object_story_id") or ""
         ad["object_story_id"] = _sid
-
-    # 子码（slug）展示：手动投放期一个子码常铺多个广告，绑定表 LandingAdLink.ad_id 只能存一个广告
-    # （slug 唯一 + 单字段 + 首次点击绑死不覆盖）→ 不够用。改从 landing_events 实际流量反查：
-    # 每广告最近一次访问落在哪个子码就显示哪个（反映当前真实投放的子码，覆盖所有共用子码的广告）。
-    # 绑定表留作兜底（配了子码但还没流量的广告）。
-    _slug_map = {}
-    try:
-        from sqlalchemy import text as _slug_text
-        _ev_rows = db.execute(_slug_text("""
-            SELECT DISTINCT ON (ad_id) ad_id, slug
-            FROM landing_events
-            WHERE tenant_id = :tid AND ad_id IS NOT NULL AND ad_id != ''
-              AND slug IS NOT NULL AND slug != ''
-            ORDER BY ad_id, created_at DESC
-        """), {"tid": user.tenant_id}).fetchall()
-        for _r in _ev_rows:
-            _slug_map[str(_r.ad_id)] = _r.slug
-    except Exception:
-        pass
-    # 兜底：绑定表里有、但 events 还没流量的广告
-    for _r in db.query(LandingAdLink.ad_id, LandingAdLink.slug).filter(
-        LandingAdLink.tenant_id == user.tenant_id,
-        LandingAdLink.ad_id.isnot(None),
-        LandingAdLink.ad_id != "",
-        LandingAdLink.status.notin_(["archived", "deleted"]),
-    ).all():
-        _slug_map.setdefault(str(_r.ad_id), _r.slug)
-    for ad in all_ads:
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
 
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": str(caches[0].updated_at) if caches and caches[0].updated_at else "",
+        "refreshing": refreshing,
         "campaigns": _conv_budget(_attach_perf(all_campaigns, camp_perf)),
         "adsets": _conv_budget(_attach_perf(all_adsets, adset_perf)),
         "ads": _attach_perf(all_ads, perf),
     }
+
+
+@router.get("/refresh-status")
+def ads_refresh_status(
+    user: CurrentUser = Depends(require_permission("ads.read")),
+):
+    """后台刷新进度（本 worker 进程内；多 worker 下读到的可能是旧态，前端轮询有上限兜底）。"""
+    st = _REFRESH_STATE.get(user.tenant_id)
+    return st or {"running": False, "done": 0, "total": 0}
 
 
 @router.post("/refresh")

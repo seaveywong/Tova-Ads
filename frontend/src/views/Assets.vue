@@ -22,6 +22,7 @@ const toggleAi = (v) => { aiOn.value = v; localStorage.setItem('tova_ai_on', v ?
 const uploadOpen = ref(false)
 const uploadFiles = ref([])  // [{file, name, tags, country, uploadTagsStr, countryStr, status}]
 const uploadSaving = ref(false)
+const uploadProgress = ref({ now: 0, total: 0 })
 // 预览大图/视频
 const previewAsset = ref(null)
 const openPreview = (a) => { previewAsset.value = a }
@@ -132,7 +133,10 @@ const submitUpload = async () => {
   if (!uploadFiles.value.length) return ElMessage.warning(t('assets.selectFileFirst'))
   uploadSaving.value = true
   let ok = 0, fail = 0
+  const total = uploadFiles.value.length
+  uploadProgress.value = { now: 0, total }
   for (const item of uploadFiles.value) {
+    uploadProgress.value.now++
     item.status = 'uploading'
     try {
       const fd = new FormData()
@@ -503,7 +507,7 @@ const countryLabel = (code) => {
       </div>
       <template #footer>
         <button class="btn" @click="uploadOpen = false">{{ t('common.cancel') }}</button>
-        <button class="btn primary" :disabled="uploadSaving || !uploadFiles.length" @click="submitUpload">{{ uploadSaving ? t('assets.uploadingDots') : t('assets.uploadN', { n: uploadFiles.length }) }}</button>
+        <button class="btn primary" :disabled="uploadSaving || !uploadFiles.length" @click="submitUpload">{{ uploadSaving ? t('assets.uploadingProgress', { n: uploadProgress.now, m: uploadProgress.total }) : t('assets.uploadN', { n: uploadFiles.length }) }}</button>
       </template>
     </el-drawer>
 
