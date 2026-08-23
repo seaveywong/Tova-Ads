@@ -155,7 +155,7 @@ const loadDashboard = async (fresh = false) => {
   try {
     const [dash, notifs, creds] = await Promise.all([
       GET(`/dashboard?${rangeQuery()}${fresh ? '&fresh=true' : ''}`),
-      GET(`/notifications?limit=50`).catch(() => []),
+      GET(`/notifications?limit=50`).then(r => Array.isArray(r) ? r : (r?.items || [])).catch(() => []),
       GET('/fb/credentials').catch(() => []),
     ])
     data.value = dash

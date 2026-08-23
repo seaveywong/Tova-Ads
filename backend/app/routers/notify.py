@@ -22,6 +22,8 @@ def list_notifications(
     date_preset: str = "",
     date_from: str = "",
     date_to: str = "",
+    offset: int = 0,
+    limit: int = 100,
 ):
     """站内信列表（角色订阅过滤 + 级别/未读 + 日期范围，RLS 隔离）。
 
@@ -64,13 +66,18 @@ def list_notifications(
         query = query.filter(Notification.level == level)
     if unread_only:
         query = query.filter(Notification.read_at == None)  # noqa: E711
-    notifs = query.order_by(Notification.created_at.desc()).limit(100).all()
-    return [
-        {"id": n.id, "level": n.level, "event_type": n.event_type,
-         "title": n.title, "body": n.body, "read": n.read_at is not None,
-         "roles": n.roles, "created_at": str(n.created_at), "trace_id": n.trace_id}
-        for n in notifs
-    ]
+    notifs = query.order_by(Notification.created_at.desc()).limit(limit).offset(offset).all()
+    total = query.count()
+    return {
+        "items": [
+            {"id": n.id, "level": n.level, "event_type": n.event_type,
+             "title": n.title, "body": n.body, "read": n.read_at is not None,
+             "roles": n.roles, "created_at": str(n.created_at), "trace_id": n.trace_id}
+            for n in notifs
+        ],
+        "total": total, "offset": offset, "limit": limit,
+        "has_more": offset + len(notifs) < total,
+    }
 
 
 @router.get("/unread-count")

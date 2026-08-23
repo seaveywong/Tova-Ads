@@ -337,6 +337,7 @@ def trend_data(
     date_to: str = "",
     granularity: str = "",
     act_ids: str = "",
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -344,7 +345,16 @@ def trend_data(
 
     时间范围：跟看板一致（date_preset 或 date_from/date_to）。
     颗粒度：5min/30min/hour → perf_snapshot_ticks 聚合；day → perf_snapshots 聚合。
+    30s 内存缓存（前端与 /dashboard 成对请求，缓存收益直接翻倍）；fresh=True 跳过。
     """
+    # 缓存命中（key 含全部筛选维度）
+    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}"
+    _tnow = _time.time()
+    if not fresh and _tkey in _CACHE:
+        _te = _CACHE[_tkey]
+        if _tnow - _te[0] < _CACHE_TTL:
+            return _te[1]
+
     today = _business_today()
     if date_from and date_to:
         since, until = date_from, date_to
@@ -386,7 +396,9 @@ def trend_data(
             labels.append(r.snapshot_date or "?")
             spend.append(s); conv.append(c)
             cpa.append(round(s / c, 2) if c > 0 else None)
-        return {"labels": labels, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": "day"}
+        result = {"labels": labels, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": "day"}
+        _CACHE[_tkey] = (_tnow, result)
+        return result
 
     # ── tick 粒度（5min/30min/hour）──
     trunc_map = {"5min": "minute", "30min": "minute", "hour": "hour"}
@@ -425,7 +437,9 @@ def trend_data(
         c = int(r.conversions or 0)
         spend.append(s); conv.append(c)
         cpa.append(round(s / c, 2) if c > 0 else None)
-    return {"labels": raw_times, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": granularity}
+    result = {"labels": raw_times, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": granularity}
+    _CACHE[_tkey] = (_tnow, result)
+    return result
 
 
 @router.get("/ads")

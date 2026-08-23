@@ -17,6 +17,9 @@ from ..schemas.fb import StoreCredentialIn, FbCredentialOut, ImportAccountsIn
 
 router = APIRouter(prefix="/fb", tags=["fb"])
 
+# assets-summary 1h 进程内缓存 {tenant_id: (built_at, data, cred_sig)}
+_ASSETS_SUMMARY_CACHE: dict = {}
+
 
 def _cred_to_dict(c: FbCredential, db: Session = None) -> dict:
     """令牌 → 前端展示 dict（完整字段 + 关联账户数）。
@@ -702,13 +705,24 @@ def list_credential_pixels(
 
 @router.get("/credentials/assets-summary")
 def credentials_assets_summary(
+    fresh: bool = False,   # 手动刷新绕过缓存
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """全部令牌的资产计数：账户(DB 已导入) + 主页/BM(FB)。像素不在此列。"""
+    """全部令牌的资产计数：账户(DB 已导入) + 主页/BM(FB)。像素不在此列。
+
+    主页/BM 是准静态数据（串行调 FB 每令牌两次，令牌多时展开很慢）——1h 进程内缓存，
+    fresh=true 绕过（令牌刷新/重导后自动失效部分：令牌集合 hash 变了也绕过）。
+    """
+    import time as _t
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id, FbCredential.status == "active"
     ).all()
+    _sig = ",".join(str(c.id) for c in creds) + f":{len(creds)}"
+    ent = _ASSETS_SUMMARY_CACHE.get(user.tenant_id)
+    _now = _t.time()
+    if not fresh and ent and _now - ent[0] < 3600 and ent[2] == _sig:
+        return ent[1]
     out: dict = {}
     for c in creds:
         acct_count = db.query(Account).filter(
@@ -724,6 +738,7 @@ def credentials_assets_summary(
         except FbApiError as e:
             out[c.id] = {"accounts": acct_count, "pages": None,
                          "businesses": None, "error": e.friendly}
+    _ASSETS_SUMMARY_CACHE[user.tenant_id] = (_now, out, _sig)
     return out
 
 

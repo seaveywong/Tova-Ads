@@ -36,6 +36,32 @@ def _id_of(v):
     return v
 
 
+# ad_id → act_id 反查表（5min 模块缓存——诊断面板每次打开不再 json.loads 全部账户 ads_json）
+_AD_ACT_MAP: dict = {}   # {tenant_id: (built_at, {ad_id: act_id})}
+_AD_ACT_TTL = 300
+
+
+def _ad_act_lookup(db: Session, tenant_id: int) -> dict:
+    import time as _t
+    ent = _AD_ACT_MAP.get(tenant_id)
+    now = _t.time()
+    if ent and now - ent[0] < _AD_ACT_TTL:
+        return ent[1]
+    m = {}
+    for cr in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
+        try:
+            for _a in json.loads(cr.ads_json or "[]"):
+                _aid = str(_id_of(_a.get("id")) if isinstance(_a, dict) else _a.get("id"))
+                if _aid:
+                    m[_aid] = cr.act_id
+        except Exception:
+            continue
+    _AD_ACT_MAP[tenant_id] = (now, m)
+    if len(_AD_ACT_MAP) > 100:
+        _AD_ACT_MAP.clear()
+    return m
+
+
 def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to: str) -> dict:
     """ad 级 perf 聚合 → {ad_id: {spend, conv, impressions, clicks, reach}}。act_id 空=跨账户全部。"""
     q = db.query(PerfSnapshot.ad_id, func.sum(PerfSnapshot.spend), func.sum(PerfSnapshot.conversions),
@@ -458,19 +484,10 @@ def diagnose_ad(
     from sqlalchemy import func as _f, text as _ft
     import json as _json
 
-    # 1. 找到这个广告属于哪个账户
+    # 1. 找到这个广告属于哪个账户（反查表 5min 缓存——原每次诊断 json.loads 全部账户 ads_json）
     _ad_short = ad_id.replace("act_", "").strip()
-    _act_id = None
-    for cr in db.query(AdsCache).filter(AdsCache.tenant_id == user.tenant_id).all():
-        try:
-            for _a in _json.loads(cr.ads_json or "[]"):
-                if str(_a.get("id")) == _ad_short or str(_a.get("id")) == ad_id:
-                    _act_id = cr.act_id
-                    break
-        except Exception:
-            continue
-        if _act_id:
-            break
+    _act_id = _ad_act_lookup(db, user.tenant_id).get(_ad_short) or \
+              _ad_act_lookup(db, user.tenant_id).get(ad_id)
     if not _act_id:
         raise HTTPException(404, "广告不在缓存中，请先刷新广告列表")
 

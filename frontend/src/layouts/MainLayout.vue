@@ -88,7 +88,8 @@ const toggleNotifs = async () => {
   if (notifOpen.value) {
     try {
       const all = await GET('/notifications?limit=20')
-      recentNotifs.value = (all || []).filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).slice(0, 10)
+      const items = Array.isArray(all) ? all : (all?.items || [])
+      recentNotifs.value = items.filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).slice(0, 10)
     } catch {}
   }
 }
@@ -164,7 +165,8 @@ onMounted(async () => {
     if (document.hidden) return
     try {
       const all = await GET('/notifications?unread_only=true&limit=50')
-      unreadCount.value = (all || []).filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).length
+      const items = Array.isArray(all) ? all : (all?.items || [])
+      unreadCount.value = items.filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).length
     } catch {}
   }
   poll(); pollTimer = setInterval(poll, 30000)
