@@ -5,9 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
-import { isSuperadminSync } from '../router'
 const { t, locale } = useI18n()
-const isSuper = isSuperadminSync()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
 // 自定义 overlay 用 EP 的 nextZIndex 取 z-index，保证在 el-drawer(2000+) 之上，
@@ -23,11 +21,8 @@ const importOpen = ref(false)
 const importTab = ref('oauth')
 const importForm = ref({ access_token: '', alias: '', token_type: 'operate' })
 const importing = ref(false)
-const appConfigOpen = ref(false)
 const apps = ref([])
 const appLoading = ref(false)
-const appForm = ref({ app_id: '', app_secret: '', name: '', is_system: false })
-const appEditing = ref(null)
 
 const drawerOpen = ref(false)
 const drawerToken = ref(null)
@@ -283,19 +278,6 @@ const commitLoadIds = async () => {
 
 // App
 const loadApps = async () => { appLoading.value = true; try { apps.value = await GET('/fb/apps') } catch { apps.value = [] }; appLoading.value = false }
-const openAppConfig = async () => { popOverlay(); appConfigOpen.value = true; await loadApps() }
-const saveApp = async () => {
-  if (!appForm.value.app_id.trim() || !appForm.value.app_secret.trim()) { ElMessage.warning(t('tokens.fillAppIdSecret')); return }
-  try {
-    if (appEditing.value) await POST(`/fb/apps/${appEditing.value}`, { ...appForm.value })
-    else await POST('/fb/apps', { ...appForm.value })
-    ElMessage.success(t('common.savedOk')); appForm.value = { app_id:'', app_secret:'', name:'', is_system:false }; appEditing.value = null; await loadApps()
-  } catch { ElMessage.error(t('common.fail')) }
-}
-const editApp = (a) => { appEditing.value = a.id; appForm.value = { app_id: a.app_id, app_secret: '', name: a.name||'', is_system: a.is_system } }
-const deleteApp = async (a) => { try { await ElMessageBox.confirm(t('tokens.deleteAppConfirm', { name: a.name||a.app_id }), t('common.confirm'), {type:'warning'}); await DELETE(`/fb/apps/${a.id}`); ElMessage.success(t('tokens.deleted')); await loadApps() } catch {} }
-const systemApps = computed(() => apps.value.filter(a => a.is_system))
-const myApps = computed(() => apps.value.filter(a => !a.is_system))
 const _oauthUrl = async (a) => {
   try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); return r.url || '' }
   catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return '' }
@@ -350,8 +332,6 @@ const deleteToken = async (tk) => {
       <div class="bar-r">
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
         <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
-        <!-- 审核期间隐藏"配置 App"入口（reviewer 建议：避免迷惑 Meta 审核员）。后续取消该功能时删：本按钮 + appConfig 弹窗 + openAppConfig/saveApp/editApp/deleteApp -->
-        <!-- <button class="btn" @click="openAppConfig">{{ t('tokens.configApp') }}</button> -->
         <button class="btn" @click="refreshAll">{{ refreshAllLabel }}</button>
       </div>
     </div>
@@ -584,36 +564,6 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
-    <div v-if="appConfigOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="appConfigOpen=false">
-      <div class="modal wide">
-        <div class="m-title">{{ t('tokens.appConfigTitle') }}</div>
-        <div class="app-list" v-loading="appLoading">
-          <div v-for="a in apps" :key="a.id" class="app-row">
-            <span class="app-n">{{ a.name || a.app_id }}</span>
-            <span v-if="a.is_system" class="badge sys">{{ t('tokens.systemLevel') }}</span>
-            <span class="app-id">{{ a.app_id }}</span>
-            <div class="app-ops"><button class="mb" @click="editApp(a)">{{ t('tokens.editShort') }}</button><button class="mb danger" @click="deleteApp(a)">{{ t('tokens.deleteShort') }}</button></div>
-          </div>
-          <div v-if="!apps.length && !appLoading" class="empty">{{ t('tokens.noApps') }}</div>
-        </div>
-        <div class="app-form">
-          <div class="form-h">
-            {{ appEditing ? t('tokens.editApp') : (appForm.is_system ? t('tokens.addSystemApp') : t('tokens.addApp')) }}
-            <a v-if="isSuper && !appEditing" class="sys-toggle" @click="appForm.is_system = !appForm.is_system">
-              {{ appForm.is_system ? t('tokens.backToNormalApp') : t('tokens.addSystemAppArrow') }}
-            </a>
-          </div>
-          <div class="af-row"><label>{{ t('common.name') }}</label><input v-model="appForm.name" class="input" :placeholder="t('tokens.appNameOptional')" /></div>
-          <div class="af-row"><label>App ID</label><input v-model="appForm.app_id" class="input" :placeholder="t('common.required')" /></div>
-          <div class="af-row"><label>Secret</label><input v-model="appForm.app_secret" class="input" type="password" :placeholder="t('common.required')" /></div>
-        </div>
-        <div class="m-foot">
-          <button v-if="appEditing" class="btn" @click="appEditing=null; appForm={app_id:'',app_secret:'',name:'',is_system:false}">{{ t('common.cancel') }}</button>
-          <button class="btn primary" @click="saveApp">{{ appEditing ? t('tokens.updateBtn') : t('common.add') }}</button>
-          <button class="btn" @click="appConfigOpen=false">{{ t('common.close') }}</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -750,18 +700,6 @@ const deleteToken = async (tk) => {
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .badge{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--acg);color:var(--ac)}.badge.sys{background:rgba(48,209,88,.12);color:var(--success)}
 
-.app-list{margin-bottom:12px;max-height:220px;overflow-y:auto}
-.app-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
-.app-row:last-child{border-bottom:none}
-.app-n{font-size:13px;color:var(--t1);min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.app-id{font-size:10px;color:var(--t3);font-family:'SF Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}
-.app-ops{margin-left:auto;display:flex;gap:3px}
-.app-form{border-top:1px solid var(--bd);padding-top:12px}
-.form-h{font-size:11px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;letter-spacing:.5px;display:flex;align-items:center;justify-content:space-between}
-.sys-toggle{font-size:11px;text-transform:none;letter-spacing:0;color:var(--ac);cursor:pointer;text-decoration:underline}
-.af-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.af-row label{font-size:12px;color:var(--t3);width:70px;text-align:right;flex-shrink:0}
-.af-row .input{flex:1;min-width:0}
 .af-ck{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);margin:12px 0 4px;padding-left:70px;cursor:pointer}
 .af-ck input{width:14px;height:14px;cursor:pointer}
 .af-btns{display:flex;gap:8px;margin-top:14px}
