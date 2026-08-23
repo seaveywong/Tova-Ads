@@ -5,7 +5,7 @@
 """
 import time as _time
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
 from ..core.database import get_db, SuperSessionLocal
@@ -623,3 +623,87 @@ def landing_overview(
         "rows": rows,
         "block_detail": block_detail,
     }
+
+
+@router.get("/export")
+def dashboard_export(
+    source: str = "accounts",        # accounts（账户汇总）/ ads（广告级）/ landing（子码级）
+    date_preset: str = "today",
+    date_from: str = "",
+    date_to: str = "",
+    act_id: str = "",                # ads 数据源必传（与 /dashboard/ads 对齐）
+    conversion_category: str = "",
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    """报表 CSV 导出（BOM UTF-8，Excel 直开）。列口径与页面一致。"""
+    from ..services.csv_export import build_csv
+    from ..core.i18n import req_locale
+    en = req_locale(request) == "en"
+
+    # 区间解析（与 dashboard 主端点同一套预设）
+    today = _business_today()
+    if date_from and date_to:
+        since, until = date_from, date_to
+    elif date_preset == "yesterday":
+        since = until = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+    elif date_preset == "last_2d":
+        since = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d"); until = today
+    elif date_preset == "last_7d":
+        since = (datetime.now(BUSINESS_TZ) - timedelta(days=6)).strftime("%Y-%m-%d"); until = today
+    elif date_preset == "last_30d":
+        since = (datetime.now(BUSINESS_TZ) - timedelta(days=29)).strftime("%Y-%m-%d"); until = today
+    else:
+        since = until = today
+
+    if source == "landing":
+        data = landing_overview(date_preset=date_preset, date_from=date_from,
+                                date_to=date_to, user=user, db=db)
+        headers = (["Subcode", "Ad ID", "Account", "Account ID", "Domain", "Visits", "Pass(CTA)",
+                    "Blocked", "Pass %", "Block %", "Spend(USD)", "Conv", "CPC", "CVR %"] if en else
+                   ["子码", "广告ID", "账户", "账户ID", "域名", "访问", "通过", "屏蔽",
+                    "通过率%", "屏蔽率%", "消耗(USD)", "转化", "CPC", "CVR%"])
+        rows = [[r["slug"], r["ad_id"], r["account"], r["act_id"], r["domain"],
+                 r["visits"], r["clicks"], r["blocked"], r["pass_rate"], r["block_rate"],
+                 r["spend_usd"], r["conversions"], r["cpc"], r["cvr"]] for r in data["rows"]]
+        return build_csv("landing_report", headers, rows)
+
+    if source == "ads":
+        if not act_id:
+            raise HTTPException(400, "act_id 必填" if not en else "act_id required")
+        # 区间拉宽（业务日 → snapshot_date 范围）
+        data = ad_breakdown(act_id=act_id, date_preset=date_preset, user=user, db=db)
+        # ad_breakdown 只取 today；导出需要区间 → 直接查
+        rows_q = db.query(PerfSnapshot).filter(
+            PerfSnapshot.tenant_id == user.tenant_id,
+            PerfSnapshot.act_id == act_id,
+            PerfSnapshot.snapshot_date >= since,
+            PerfSnapshot.snapshot_date <= until,
+        ).all()
+        headers = (["Date", "Ad ID", "Spend(USD)", "Spend(native)", "Currency", "Conv",
+                    "CPA", "ROAS", "Impr", "Clicks", "Reach", "Freq", "CTR %", "CPC"] if en else
+                   ["日期", "广告ID", "消耗(USD)", "消耗(本币)", "币种", "转化",
+                    "CPA", "ROAS", "展示", "点击", "触达", "频次", "CTR%", "CPC"])
+        rows = [[r.snapshot_date, r.ad_id, r.spend, r.spend_native, r.currency,
+                 r.conversions, r.cpa, r.roas, r.impressions, r.clicks,
+                 r.reach, r.frequency, r.ctr, r.cpc] for r in rows_q]
+        return build_csv(f"ads_{act_id}", headers, rows)
+
+    # 默认：账户汇总（复用 dashboard 主查询逻辑，走 fresh=True 拿当前区间）
+    data = dashboard(date_preset=date_preset, date_from=date_from, date_to=date_to,
+                     conversion_category=conversion_category, fresh=True, user=user, db=db)
+    headers = (["Account", "Account ID", "Currency", "Status", "Spend(native)", "Spend(USD)",
+                "Conv", "CPA", "ROAS", "Impr", "Clicks", "Reach", "CTR %", "CPC",
+                "Balance(USD)"] if en else
+               ["账户", "账户ID", "币种", "状态", "消耗(本币)", "消耗(USD)",
+                "转化", "CPA", "ROAS", "展示", "点击", "触达", "CTR%", "CPC",
+                "可用额度(USD)"])
+    rows = []
+    for a in data.get("accounts", []):
+        rows.append([a.get("name"), a.get("act_id"), a.get("currency"),
+                     a.get("account_status"), a.get("spend"), a.get("spend_usd"),
+                     a.get("conversions"), a.get("cpa"), a.get("roas"),
+                     a.get("impressions"), a.get("clicks"), a.get("reach"),
+                     a.get("ctr"), a.get("cpc"), a.get("balance")])
+    return build_csv("dashboard_report", headers, rows)

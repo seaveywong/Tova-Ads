@@ -6,7 +6,7 @@ POST /leads/subscribe — 订阅该租户所有主页的 leadgen webhook（page-
 """
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
@@ -56,6 +56,51 @@ def list_leads(
     total = q.count()  # 真实总数（limit 前），给前端准确显示
     rows = q.order_by(Lead.created_time.desc().nullslast()).limit(min(max(limit, 1), 500)).all()
     return {"items": [_lead_dict(r) for r in rows], "total": total}
+
+
+@router.get("/export")
+def export_leads(
+    page_id: str = "", ad_id: str = "", form_id: str = "",
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    """潜客列表 CSV 导出（BOM UTF-8）。筛选条件与列表一致；上限 2000 行。"""
+    from ..services.csv_export import build_csv
+    from ..core.i18n import req_locale
+    en = req_locale(request) == "en"
+    q = db.query(Lead).filter(Lead.tenant_id == user.tenant_id)
+    if page_id:
+        q = q.filter(Lead.page_id == page_id)
+    if ad_id:
+        q = q.filter(Lead.ad_id == ad_id)
+    if form_id:
+        q = q.filter(Lead.form_id == form_id)
+    rows = q.order_by(Lead.created_time.desc().nullslast()).limit(2000).all()
+    headers = (["Time", "Page ID", "Ad ID", "Form ID", "Name", "Contact", "Answers"] if en else
+               ["时间", "主页ID", "广告ID", "表单ID", "姓名", "联系方式", "问卷答案"])
+    out = []
+    for r in rows:
+        fd = {}
+        try:
+            for f in json.loads(r.field_data_json or "[]"):
+                name = f.get("name", "")
+                vals = f.get("values") or []
+                if name == "full_name":
+                    fd["name"] = " ".join(vals)
+                elif name in ("email", "phone_number"):
+                    fd.setdefault("contact", []).append(" ".join(vals))
+                else:
+                    fd.setdefault("answers", []).append(f"{name}: {' '.join(vals)}")
+        except Exception:
+            pass
+        out.append([
+            r.created_time or "", r.page_id or "", r.ad_id or "", r.form_id or "",
+            fd.get("name", ""),
+            "; ".join(fd.get("contact", [])),
+            " | ".join(fd.get("answers", [])),
+        ])
+    return build_csv("leads", headers, out)
 
 
 def _get_active_cred(db: Session, tenant_id: int):
@@ -130,6 +175,27 @@ def sync_leads(
                     created_time=_parse_created_time(ld.get("created_time")),
                 ))
                 synced += 1
+        # 新 lead 到达通知（sync 批次聚合一条，1h dedup 防轮询 spam——landing_health_alert 同款模式）
+        if synced > 0:
+            from ..core.notify_utils import emit_notification, dedup_recent
+            from ..core.log_utils import write_log, new_trace_id
+            try:
+                if not dedup_recent(db, user.tenant_id, "leads_new", None, 60):
+                    _tid = new_trace_id()
+                    write_log(db, tenant_id=user.tenant_id, trace_id=_tid, actor_type="system",
+                              action_type="leads_new", source="leads_sync",
+                              target_type="lead", result="success",
+                              metadata={"synced": synced, "forms": len(forms)})
+                    emit_notification(
+                        db, tenant_id=user.tenant_id, level="info",
+                        event_type="leads_new",
+                        title=f"新潜客 × {synced}",
+                        body=f"Instant Form 同步到 {synced} 条新潜客（{len(forms)} 个表单）。\n"
+                             f"到 AdManager → 潜客 查看或导出。",
+                        roles=["owner", "operator"], trace_id=_tid,
+                    )
+            except Exception:
+                pass   # 通知失败不阻断同步
     db.commit()
     return {"synced": synced, "enriched": enriched,
             "forms_checked": len(forms), "errors": errors}
