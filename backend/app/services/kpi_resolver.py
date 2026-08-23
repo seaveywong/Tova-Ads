@@ -146,7 +146,10 @@ def resolve_kpi(db: Session, tenant_id: int, campaign_id: str, objective: str,
                 "conversions": _action_count(actions, field),
                 "source": "rule", "target_cpa": target_cpa}
 
-    # L5：语义兜底——找第一个非零 action（跳过劣质字段），AI 纠偏只调一次
+    # L5：语义兜底——找第一个非零 action（跳过劣质字段），AI 纠偏只调一次。
+    # actions 只含本次 insights 返回的字段——L5 候选若不在 actions 里，计数必为 0，
+    # 不能因此把 conversions 判 0（click_no_conv 误停）：L4 有 field 但 actions 缺时按 field 返回 0 计数，
+    # L5 全 miss 时也返回 rule 字段而非空（调用方规则仍可判定"无数据"而非"零转化"）。
     poor_set = set(mapping.get("poor_fallback_types", []))
     first_hit = None
     for f in mapping.get("fallback_priority", []):
@@ -166,6 +169,15 @@ def resolve_kpi(db: Session, tenant_id: int, campaign_id: str, objective: str,
         return {"kpi_field": f, "kpi_label": field_label(f, mapping),
                 "conversions": cnt, "source": "fallback",
                 "target_cpa": target_cpa}
+    # L5 无非零命中：若 L4 objective 维度有 field，退回它（计数 0 但字段可信，
+    # 语义好过 kpi_field=""——规则层至少知道在盯什么）；否则真空。
+    obj_fallback = by_obj.get(obj)
+    if obj_fallback:
+        return {"kpi_field": obj_fallback, "kpi_label": field_label(obj_fallback, mapping),
+                "conversions": 0, "source": "rule", "target_cpa": target_cpa}
+    return {"kpi_field": "", "kpi_label": "未知",
+            "conversions": 0, "source": "default",
+            "target_cpa": target_cpa}
     return {"kpi_field": "", "kpi_label": "未知",
             "conversions": 0, "source": "default",
             "target_cpa": target_cpa}

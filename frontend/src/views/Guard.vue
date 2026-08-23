@@ -42,6 +42,19 @@ const RULE_TYPES = computed(() => ({
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
 const LANDING_METRIC = computed(() => ({ pass: t('guard.lm.pass_short'), visit: t('guard.lm.visit_short') }))
+// category 显示翻译表（DB 存的是建规则时的语言文本，按已知值映射到当前 locale；映射不到原样显示）
+const CAT_LABELS = computed(() => [
+  [t('guard.cat.bleed'), 'bleed'], [t('guard.cat.cost'), 'cost'], [t('guard.cat.decline'), 'decline'],
+])
+const catLabel = (c) => {
+  if (!c) return ''
+  const zh = { '空耗止损': 'bleed', '成本超标': 'cost', '效果下滑': 'decline' }
+  const key = zh[c] || CAT_LABELS.value.find(([label]) => label === c)?.[1]
+  const en = { bleed: 'Bleed', cost: 'Cost', decline: 'Decline' }
+  // 显示当前语言；后端仍按原文匹配（_evaluate_rule 用 category 前缀分类）
+  const cur = { bleed: t('guard.cat.bleed'), cost: t('guard.cat.cost'), decline: t('guard.cat.decline') }
+  return cur[key] || c
+}
 
 const rules = ref([])
 const loading = ref(true)
@@ -192,7 +205,7 @@ const doInspect = async (force = false) => {
       <div v-for="r in rules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
-          <span class="cat-tag">{{ r.category }}</span>
+          <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
           <span class="action-tag">{{ ACTIONS[r.action] || r.action }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />

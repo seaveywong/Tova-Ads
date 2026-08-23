@@ -147,9 +147,13 @@ def run_account_status_sync():
                 except Exception:
                     pass
                 synced += 1
+                # 每 25 个账户提交一次——中途异常不再丢掉已处理账户的余额/状态更新
+                if synced % 25 == 0:
+                    db.commit()
               except Exception as e:
                 # 单账户异常不阻断同 cred 其他账户同步（照搬巡检 per-account 容错）
                 logger.warning(f"[AccountSync] 账户 {raw.get('account_id','')} 处理异常: {e}")
+                db.rollback()
                 continue
         db.commit()
         logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复")

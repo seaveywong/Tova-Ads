@@ -1,4 +1,5 @@
 """配置中心（SSOT）—— 所有配置从环境变量/.env 读，单一来源。"""
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +16,16 @@ class Settings(BaseSettings):
     app_env: str = "development"
     # FB 凭证加密（Fernet）
     fb_cred_key: str = "placeholder"
+
+    @model_validator(mode="after")
+    def _fail_fast_on_weak_secrets(self):
+        """生产环境弱密钥直接拒启（jwt_secret<32 或 fb_cred_key 是占位符=加密形同虚设）。"""
+        if self.app_env == "production":
+            if len(self.jwt_secret or "") < 32:
+                raise ValueError("production 环境 jwt_secret 必须 ≥32 字符")
+            if not self.fb_cred_key or self.fb_cred_key in ("placeholder", "") or len(self.fb_cred_key) < 32:
+                raise ValueError("production 环境必须配置真实 Fernet fb_cred_key")
+        return self
     # Cloudflare API
     cf_api_token: str = ""
     cf_account_id: str = ""

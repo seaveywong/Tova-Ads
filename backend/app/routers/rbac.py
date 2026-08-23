@@ -132,6 +132,10 @@ def update_role(role_id: int, body: RoleIn,
             ).first()
             if conflict:
                 raise HTTPException(400, "角色名已存在")
+            # 改名同步迁移成员引用（membership.role 存名字，不同步则一批成员权限静默清零）
+            db.query(TenantMembership).filter(
+                TenantMembership.tenant_id == user.tenant_id, TenantMembership.role == role.name
+            ).update({"role": new_name}, synchronize_session=False)
             role.name = new_name
     role.description = body.description
     role.permissions = body.permissions

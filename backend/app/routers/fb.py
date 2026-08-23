@@ -85,7 +85,9 @@ def store_credential(
         existing.access_token_enc = encrypt(body.access_token)
         existing.alias = body.alias or existing.alias
         existing.status = "active"
-        existing.token_type = getattr(body, 'token_type', None) or existing.token_type or "user"
+        # 请求显式带了 token_type 才覆盖；未传保留旧值（schema 默认 "user" 会把 manage 静默降级）
+        _tt_set = getattr(body, "_token_type_set", False)
+        existing.token_type = ((body.token_type if _tt_set and body.token_type else None) or existing.token_type or "user")
         existing.token_source = body.token_source
         existing.permission_snapshot = perm_snapshot or existing.permission_snapshot
         existing.consecutive_fails = 0
@@ -102,7 +104,7 @@ def store_credential(
             fb_user_id=me.get("id"),
             fb_user_name=me.get("name"),
             status="active",
-            token_type=getattr(body, 'token_type', None) or "user",
+            token_type=body.token_type or "user",
             token_source=body.token_source,
             permission_snapshot=perm_snapshot,
             consecutive_fails=0,

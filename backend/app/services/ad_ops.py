@@ -4,6 +4,7 @@
 写操作绑死账户 token（client_for_account op_kind="write"），不轮换（防孤儿）。
 """
 import time
+import hashlib
 import logging
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -123,7 +124,7 @@ def set_status(db: Session, tenant_id: int, act_id: str, node_id: str,
     fields = _LEVEL_FIELDS.get(level, _LEVEL_FIELDS["ad"])
 
     # PG advisory lock（target 级，防并发写同一条）
-    lock_key = abs(hash(f"ad_status:{node_id}")) % (2**31)
+    lock_key = int(hashlib.md5(f"ad_status:{node_id}".encode()).hexdigest()[:8], 16)  # 跨 worker 稳定（hash() 受 PYTHONHASHSEED 随机，不同 worker 锁不互斥）
     lock = acquire_run_lock(lock_key)
     if not lock:
         return {"success": False, "error": "该广告正在被其他操作处理"}
@@ -190,7 +191,7 @@ def set_budget(db: Session, tenant_id: int, act_id: str, node_id: str,
     fb = FbClient(decrypt(cred.access_token_enc))
     fields = _LEVEL_FIELDS.get(level, _LEVEL_FIELDS["adset"])
 
-    lock_key = abs(hash(f"ad_budget:{node_id}")) % (2**31)
+    lock_key = int(hashlib.md5(f"ad_budget:{node_id}".encode()).hexdigest()[:8], 16)
     lock = acquire_run_lock(lock_key)
     if not lock:
         return {"success": False, "error": "该广告正在被其他操作处理"}
@@ -247,7 +248,7 @@ def delete_node(db: Session, tenant_id: int, act_id: str, node_id: str,
         return {"success": False, "error": "无可用写令牌（operate/manage）"}
     fb = FbClient(decrypt(cred.access_token_enc))
 
-    lock_key = abs(hash(f"ad_delete:{node_id}")) % (2**31)
+    lock_key = int(hashlib.md5(f"ad_delete:{node_id}".encode()).hexdigest()[:8], 16)
     lock = acquire_run_lock(lock_key)
     if not lock:
         return {"success": False, "error": "该广告正在被其他操作处理"}

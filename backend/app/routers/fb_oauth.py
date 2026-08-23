@@ -192,6 +192,8 @@ def oauth_callback(request: Request):
             pass
         return _done_page(True)
     except Exception as e:
-        return _done_page(False, str(e)[:80])
+        # 不把原始异常渲染到公开页（可能带 URL/token 碎片）——记日志，页面只给通用提示
+        logger.error("[OAuth callback] 异常: %s", repr(e)[:500])
+        return _done_page(False, "授权流程异常，请重试；若持续失败请联系管理员查看日志。")
     finally:
         db.close()
