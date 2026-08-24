@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
-import { GET, POST, DELETE } from '../api'
+import { GET, POST, DELETE, downloadFile } from '../api'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
@@ -578,6 +578,18 @@ const copySpendActIds = () => {
   if (!ids) { ElMessage.info(t('dashboard.noSpendAccounts')); return }
   navigator.clipboard?.writeText(ids).then(() => ElMessage.success(t('dashboard.copiedSpendIds', { n: accs.length }))).catch(() => {})
 }
+// CSV 导出（账户汇总/落地页子码，当前日期范围；列头语言走 X-Locale）
+const exporting = ref(false)
+const exportAccounts = async () => {
+  exporting.value = true
+  try { await downloadFile(`/dashboard/export?source=accounts&${rangeQuery()}`) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  exporting.value = false
+}
+const exportLanding = async () => {
+  try { await downloadFile(`/dashboard/export?source=landing&${rangeQuery()}`) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
 // 复选框选中（充值/余额明细用：勾选账户 → 复制选中 ID）
 const selectedIds = ref(new Set())
 const toggleSelect = (act_id) => {
@@ -795,6 +807,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</button>
           <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
           <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">📋 {{ t('dashboard.copySpendBtn') }}</button>
+          <button class="refresh-btn" :disabled="exporting" @click="exportAccounts">⬇ {{ exporting ? t('common.loading') : t('common.exportCsv') }}</button>
         </div>
       </div>
     <div class="anchor-strip">
@@ -941,7 +954,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     </el-drawer>
 
     <section id="landing" class="dash-section landing">
-      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span></div>
+      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span><button class="refresh-btn" style="margin-left:auto" @click="exportLanding">⬇ {{ t('common.exportCsv') }}</button></div>
       <div v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
         <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" @click="toggleLandingKpi(i)">
           <span class="stat-label">{{ card.label }}</span>

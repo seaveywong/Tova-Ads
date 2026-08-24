@@ -60,6 +60,10 @@ def _bg_refresh(tenant_id: int, act_id: str):
     _REFRESH_STATE[tenant_id] = {"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "done": 0, "total": 0}
     try:
         lock = acquire_run_lock(112)
+        if not lock:
+            # 别的 worker 正在刷（pg_try 拿不到=已有人持有）——不重复跑，避免并发写同租户 cache
+            _REFRESH_STATE[tenant_id] = {"running": False, "started_at": "", "done": 0, "total": 0}
+            return
         db = SuperSessionLocal()
         acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
             Account.tenant_id == tenant_id, Account.is_managed == True,  # noqa: E712

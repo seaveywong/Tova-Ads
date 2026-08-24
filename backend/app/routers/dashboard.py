@@ -327,6 +327,8 @@ def dashboard(
     }
 
     _CACHE[cache_key] = (now, result)
+    if len(_CACHE) > 500:   # key 含日期字符串只增不减——防长期运行无界增长
+        _CACHE.clear()
     return result
 
 
@@ -398,6 +400,8 @@ def trend_data(
             cpa.append(round(s / c, 2) if c > 0 else None)
         result = {"labels": labels, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": "day"}
         _CACHE[_tkey] = (_tnow, result)
+    if len(_CACHE) > 500:
+        _CACHE.clear()
         return result
 
     # ── tick 粒度（5min/30min/hour）──
@@ -439,6 +443,8 @@ def trend_data(
         cpa.append(round(s / c, 2) if c > 0 else None)
     result = {"labels": raw_times, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": granularity}
     _CACHE[_tkey] = (_tnow, result)
+    if len(_CACHE) > 500:
+        _CACHE.clear()
     return result
 
 
@@ -694,6 +700,8 @@ def landing_trend(
         "labels": labels, "visits": visits, "clicks": clicks, "blocked": blocked,
     }
     _CACHE[cache_key] = (now, result)
+    if len(_CACHE) > 500:   # key 含日期字符串只增不减——防长期运行无界增长
+        _CACHE.clear()
     return result
 
 
@@ -744,12 +752,10 @@ def dashboard_export(
     if source == "ads":
         if not act_id:
             raise HTTPException(400, "act_id 必填" if not en else "act_id required")
-        # 区间拉宽（业务日 → snapshot_date 范围）
-        data = ad_breakdown(act_id=act_id, date_preset=date_preset, user=user, db=db)
-        # ad_breakdown 只取 today；导出需要区间 → 直接查
         rows_q = db.query(PerfSnapshot).filter(
             PerfSnapshot.tenant_id == user.tenant_id,
             PerfSnapshot.act_id == act_id,
+            PerfSnapshot.ad_id.isnot(None),          # 排除账户级汇总行（ad_id 空）
             PerfSnapshot.snapshot_date >= since,
             PerfSnapshot.snapshot_date <= until,
         ).all()
@@ -760,7 +766,8 @@ def dashboard_export(
         rows = [[r.snapshot_date, r.ad_id, r.spend, r.spend_native, r.currency,
                  r.conversions, r.cpa, r.roas, r.impressions, r.clicks,
                  r.reach, r.frequency, r.ctr, r.cpc] for r in rows_q]
-        return build_csv(f"ads_{act_id}", headers, rows)
+        import re as _re
+        return build_csv(f"ads_{_re.sub(r'[^0-9a-zA-Z_-]', '', act_id)}", headers, rows)
 
     # 默认：账户汇总（复用 dashboard 主查询逻辑，走 fresh=True 拿当前区间）
     data = dashboard(date_preset=date_preset, date_from=date_from, date_to=date_to,

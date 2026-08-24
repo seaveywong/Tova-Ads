@@ -178,9 +178,6 @@ def resolve_kpi(db: Session, tenant_id: int, campaign_id: str, objective: str,
     return {"kpi_field": "", "kpi_label": "未知",
             "conversions": 0, "source": "default",
             "target_cpa": target_cpa}
-    return {"kpi_field": "", "kpi_label": "未知",
-            "conversions": 0, "source": "default",
-            "target_cpa": target_cpa}
 
 
 def target_cpa_for(db: Session, tenant_id: int, campaign_id: str) -> Optional[float]:

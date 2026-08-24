@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { GET, POST, DELETE } from '../api'
+import { GET, POST, DELETE, downloadFile } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
@@ -125,7 +125,7 @@ const drillToAdset = (c) => { drillCampaign.value = c.id; tab.value = 'adset'; i
 const drillToAd = (s) => { drillAdset.value = s.id; tab.value = 'ad'; if (s.act_id && !selectedActs.value.includes(s.act_id)) selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
 onMounted(loadAccounts)
-onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null } })
+onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null } })
 
 const selected = ref(new Set())
 const opLoading = ref(false)
@@ -253,17 +253,23 @@ const syncLeads = async () => {
       // 后台跑：3s 轮询 /leads，total 涨了或满 10 次（30s）就停
       ElMessage.info(t('adm.bgRefreshing'))
       let n = 0
-      const timer = setInterval(async () => {
+      if (_leadsTimer) clearInterval(_leadsTimer)
+      _leadsTimer = setInterval(async () => {
         n++
         let stop = n >= 10
         try { const lr = await GET('/leads'); if ((lr.total || 0) > baseTotal) stop = true }
         catch { stop = true }
-        if (stop) { clearInterval(timer); opLoading.value = false; await loadLeads() }
+        if (stop) { clearInterval(_leadsTimer); _leadsTimer = null; opLoading.value = false; await loadLeads() }
       }, 3000)
       return
     }
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
   opLoading.value = false
+}
+let _leadsTimer = null
+const exportLeads = async () => {
+  try { await downloadFile('/leads/export') }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const subscribeLeads = async () => {
   opLoading.value = true
@@ -338,6 +344,7 @@ const subscribeLeads = async () => {
       <div class="leads-bar">
         <span class="rd-cnt">{{ t('adm.leadsCount', { n: leads.length }) }}</span>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
+        <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads">🔔 {{ t('adm.leadsSubscribe') }}</button>
         <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
       </div>

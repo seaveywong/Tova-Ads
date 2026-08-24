@@ -28,6 +28,7 @@ export default {
     custom: '自定义',
     query: '查询',
     refresh: '刷新',
+    exportCsv: '导出 CSV',
     loading: '加载中…',
     operation: '操作',
     action: '操作',

@@ -67,3 +67,22 @@ export const POST = (p, b) => api('POST', p, b)
 export const PUT = (p, b) => api('PUT', p, b)
 export const PATCH = (p, b) => api('PATCH', p, b)
 export const DELETE = (p) => api('DELETE', p)
+
+// CSV/文件下载：fetch + Bearer + X-Locale（后端按 locale 出列头）→ blob 落盘
+export async function downloadFile(path, fallbackName = 'export.csv') {
+  const res = await fetch(BASE + path, { headers: headers() })
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`
+    try { const j = await res.json(); msg = j.detail || msg } catch {}
+    throw new Error(msg)
+  }
+  const blob = await res.blob()
+  const cd = res.headers.get('Content-Disposition') || ''
+  const m = cd.match(/filename="?([^";]+)"?/)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = m ? m[1] : fallbackName
+  a.click()
+  URL.revokeObjectURL(url)
+}

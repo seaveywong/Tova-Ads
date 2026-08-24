@@ -112,18 +112,25 @@ def _get_active_cred(db: Session, tenant_id: int):
 
 def _sync_leads_run(tenant_id: int, forms: list):
     """后台任务：逐表单拉 FB leads → 插新/回填 stub + 通知（dedup_recent 防轮询 spam）。"""
+    import logging
+    _log = logging.getLogger("toveads.leads")
     from ..core.database import SuperSessionLocal
     db = SuperSessionLocal()
     try:
         cred = _get_active_cred(db, tenant_id)
         if not cred:
+            _log.warning("[LeadsSync] tenant=%s 无活跃令牌，后台同步跳过", tenant_id)
             return
         fb = FbClient(decrypt(cred.access_token_enc))
         synced, enriched = 0, 0
+        fb_errors = []
         for f in forms:
             try:
                 leads_data = fb.get_leads(f["form_id"])
-            except FbApiError:
+            except FbApiError as e:
+                # 异步化后无同步响应可带错误——必须记日志（否则失败完全静默）
+                _log.warning("[LeadsSync] form=%s 拉取失败: %s", f["form_id"], e.friendly)
+                fb_errors.append({"form_id": f["form_id"], "error": e.friendly})
                 continue
             for ld in leads_data:
                 lid = ld.get("id")
@@ -172,9 +179,31 @@ def _sync_leads_run(tenant_id: int, forms: list):
                     )
             except Exception:
                 pass   # 通知失败不阻断同步
+        # 全部表单都拉失败（如 token 失效）→ warning 通知（否则异步化后用户完全无感知）
+        if fb_errors and synced == 0 and len(fb_errors) == len(forms):
+            from ..core.notify_utils import emit_notification, dedup_recent
+            from ..core.log_utils import write_log, new_trace_id
+            try:
+                if not dedup_recent(db, tenant_id, "leads_sync_failed", None, 360):
+                    _tid = new_trace_id()
+                    write_log(db, tenant_id=tenant_id, trace_id=_tid, actor_type="system",
+                              action_type="leads_sync_failed", source="leads_sync",
+                              target_type="lead", result="fail",
+                              metadata={"errors": str(fb_errors)[:200]})
+                    emit_notification(
+                        db, tenant_id=tenant_id, level="warning",
+                        event_type="leads_sync_failed",
+                        title="潜客同步失败",
+                        body="全部表单拉取失败（常见原因：令牌失效/权限不足）。\n"
+                             f"错误：{fb_errors[0]['error'][:120]}",
+                        roles=["owner", "operator"], trace_id=_tid,
+                    )
+            except Exception:
+                pass
         db.commit()
     except Exception:
         db.rollback()
+        _log.exception("[LeadsSync] tenant=%s 后台同步异常", tenant_id)
     finally:
         db.close()
 

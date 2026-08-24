@@ -26,6 +26,7 @@ export default {
     custom: 'Custom',
     query: 'Query',
     refresh: 'Refresh',
+    exportCsv: 'Export CSV',
     loading: 'Loading…',
     operation: 'Action',
     action: 'Action',
