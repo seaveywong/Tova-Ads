@@ -47,7 +47,7 @@ def ensure_image_hash_for_account(fb: FbClient, db, asset, act_id: str, filepath
     result = fb.upload_ad_image(act_id, image_bytes, asset.filename or "image.jpg")
     h = result.get("hash")
     if not h:
-        raise FbApiError(f"上传图片到 act_{act_id} 未返回 hash", 0)
+        raise FbApiError("no_id", f"上传图片到 act_{act_id} 未返回 hash")
     cache[act_id] = h
     asset.fb_image_hashes = json.dumps(cache, ensure_ascii=False)
     # 也兼容旧单列（首个账户）
@@ -123,7 +123,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     camp = fb.post(f"{act}/campaigns", camp_payload)
     campaign_id = camp.get("id")
     if not campaign_id:
-        raise FbApiError(f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）", 0)
+        raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
 
     # 2. AdSet（目标感知 + 受众）
     adset_payload = build_adset(
@@ -141,7 +141,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     adset = fb.post(f"{act}/adsets", adset_payload)
     adset_id = adset.get("id")
     if not adset_id:
-        raise FbApiError(f"FB 创建 adset 未返回 id（响应：{str(adset)[:200]}）", 0)
+        raise FbApiError("no_id", f"FB 创建 adset 未返回 id（响应：{str(adset)[:200]}）")
 
     # 3. 创意链接（子码集成）
     effective_url = landing_url
@@ -159,7 +159,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
             pf = fb.get(page_id, {"fields": "messaging_feature_status"})
             mfs = (pf.get("messaging_feature_status") or {})
             if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
-                raise FbApiError("主页未开启 messaging，无法投放私信广告", 0)
+                raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
         except FbApiError:
             raise
         except Exception:
@@ -183,7 +183,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         })
         creative_id = cr.get("id")
         if not creative_id:
-            raise FbApiError(f"建 creative(object_story_id) 未返回 id：{str(cr)[:200]}", 0)
+            raise FbApiError("no_id", f"建 creative(object_story_id) 未返回 id：{str(cr)[:200]}")
         ad = fb.post(f"{act}/ads", {
             "name": f"{name_prefix} 广告", "adset_id": adset_id, "status": "PAUSED",
             "creative": {"creative_id": creative_id},
@@ -195,7 +195,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         })
     ad_id = ad.get("id")
     if not ad_id:
-        raise FbApiError(f"FB 创建 ad 未返回 id（响应：{str(ad)[:200]}）", 0)
+        raise FbApiError("no_id", f"FB 创建 ad 未返回 id（响应：{str(ad)[:200]}）")
 
     # 子码标注广告名（可追溯）+ 回绑 ad_id
     if subcode_slug and subcode_link is not None:

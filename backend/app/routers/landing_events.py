@@ -387,9 +387,11 @@ def route_next(body: RouteNextIn, dry_run: bool = False):
             _candidate_acts = [c for c in [_derived_act, _clean_act(body.act_id),
                                            (link.act_id if link else None)] if c]
             for _act in _candidate_acts:
+                # tenant 过滤：同账户被两团队导入时不能 fire 他租户的像素（SuperSession 绕 RLS，必须显式过滤）
                 pixel_ids = [p.pixel_id for p in db.query(LandingPixel).filter(
-                    LandingPixel.act_id == _act, LandingPixel.status == "active"
-                ).all()]
+                    LandingPixel.act_id == _act, LandingPixel.status == "active",
+                    LandingPixel.tenant_id == (page.tenant_id if page else None),
+                ).all()] if page else []
                 if pixel_ids:
                     break
         if not pixel_ids and page and page.pixel_ids:

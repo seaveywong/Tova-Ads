@@ -600,17 +600,17 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 if is_reuse and _page_for_token:
                     fb = client_for_account_page(sdb, tenant_id, item.act_id, _page_for_token, "write")
                     if not fb:
-                        raise FbApiError(f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）", 0)
+                        raise FbApiError("no_id", f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
                 else:
                     fb = client_for_account(sdb, tenant_id, item.act_id, "write")
                     if not fb:
-                        raise FbApiError(f"act_{item.act_id} 未绑定写令牌", 0)
+                        raise FbApiError("no_id", f"act_{item.act_id} 未绑定写令牌")
                 # per-account 图片 hash（FB hash 按账户）
                 image_hash = ""
                 if asset and asset.type == "image":
                     filepath = os.path.join(ASSET_DIR, asset.storage_key)
                     if not os.path.exists(filepath):
-                        raise FbApiError(f"素材文件丢失: {asset.storage_key}", 0)
+                        raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
                     image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
                     sdb.commit()  # 持久化 hash 缓存
                 page_id = item.page_id or tpl.page_id
@@ -810,11 +810,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             if is_reuse and _page_for_token:
                 fb = client_for_account_page(sdb, tenant_id, it.act_id, _page_for_token, "write")
                 if not fb:
-                    raise FbApiError(f"act_{it.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）", 0)
+                    raise FbApiError("no_id", f"act_{it.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
             else:
                 fb = client_for_account(sdb, tenant_id, it.act_id, "write")
                 if not fb:
-                    raise FbApiError(f"act_{it.act_id} 未绑定写令牌", 0)
+                    raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
             image_hash = ""
             if asset and asset.type == "image":
                 filepath = os.path.join(ASSET_DIR, asset.storage_key)

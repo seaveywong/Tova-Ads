@@ -98,7 +98,7 @@ async def fb_webhook_receive(request: Request):
                 if not lead_id:
                     continue
                 lid = str(lead_id)
-                if db.query(Lead).filter(Lead.lead_id == lid).first():
+                if db.query(Lead).filter(Lead.lead_id == lid, Lead.tenant_id == tenant_id).first():
                     continue
                 # form_id → tenant 反查（LeadFormTemplate.fb_form_id）
                 tenant_id = None

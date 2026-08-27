@@ -438,6 +438,15 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         lib = _pick_domain_from_lib(db, user.tenant_id)
         if lib:
             roots = [lib]
+    # 域名白名单校验：请求指定的每个根域必须属于本租户域名库（active）——
+    # 否则可传平台域名/他租户域名到 get_zone_id 命中后绑定（跨租户接管/钓鱼载体）
+    if roots:
+        from ..models.landing_lib import LandingDomain as _LD
+        allowed = {_domain_root(r.domain) for r in db.query(LandingDomain).filter(
+            _LD.tenant_id == user.tenant_id, _LD.status == "active").all()}
+        bad = [_domain_root(r) for r in roots if _domain_root(r) not in allowed]
+        if bad:
+            raise HTTPException(400, f"域名不在本团队域名库中：{', '.join(sorted(set(bad)))}")
     bound = []
     sub_prefix = (body.subdomain_prefix or "").strip().lower()
     for root in roots:

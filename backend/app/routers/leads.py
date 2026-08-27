@@ -137,7 +137,8 @@ def _sync_leads_run(tenant_id: int, forms: list):
                 if not lid:
                     continue
                 field_data = ld.get("field_data", [])
-                existing = db.query(Lead).filter(Lead.lead_id == lid).first()
+                existing = db.query(Lead).filter(
+                    Lead.lead_id == lid, Lead.tenant_id == tenant_id).first()
                 if existing:
                     # webhook stub 先存了 → 回填 field_data（+ 补 ad_id/created_time）
                     if field_data and not (existing.field_data_json and existing.field_data_json != "[]"):

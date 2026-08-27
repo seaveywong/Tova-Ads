@@ -400,8 +400,8 @@ def trend_data(
             cpa.append(round(s / c, 2) if c > 0 else None)
         result = {"labels": labels, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": "day"}
         _CACHE[_tkey] = (_tnow, result)
-    if len(_CACHE) > 500:
-        _CACHE.clear()
+        if len(_CACHE) > 500:
+            _CACHE.clear()
         return result
 
     # ── tick 粒度（5min/30min/hour）──

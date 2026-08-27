@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.log_utils import write_log, new_trace_id
 from ..models.guard import GuardRule, GuardAllowance
 from ..models.fb import Account
@@ -274,15 +274,15 @@ def guard_status(user: CurrentUser = Depends(require_permission("ads.pause")),
 
 @router.post("/inspect")
 def manual_inspect(force: bool = False,
-                   user: CurrentUser = Depends(require_permission("rules.edit"))):
-    """手动触发巡检。force=True 跳过冷却。"""
+                   user: CurrentUser = Depends(require_superadmin)):
+    """手动触发巡检（平台级——返回全平台各租户执行明细，只能超管）。force=True 跳过冷却。"""
     from ..services.guard_engine import run_inspection
     return run_inspection(force=force)
 
 
 @router.post("/sentinel-patrol")
-def manual_sentinel_patrol(user: CurrentUser = Depends(require_permission("ads.pause"))):
-    """手动触发哨兵巡逻：armed 账户的 ACTIVE 系列直接全停（kill-switch，不走规则）。"""
+def manual_sentinel_patrol(user: CurrentUser = Depends(require_superadmin)):
+    """手动触发哨兵巡逻（平台级 kill-switch——会停全平台 armed 账户，只能超管）。"""
     from ..services.guard_engine import run_sentinel_patrol
     return run_sentinel_patrol()
 
@@ -418,8 +418,8 @@ def manual_watchdog(user: CurrentUser = Depends(require_permission("rules.read")
 
 
 @router.post("/keepalive/run")
-def manual_keepalive(user: CurrentUser = Depends(require_permission("ads.pause"))):
-    """手动触发保活扫描（不等每日 02:17 cron）。
+def manual_keepalive(user: CurrentUser = Depends(require_superadmin)):
+    """手动触发保活扫描（平台级花钱操作——全租户扫描建广告，只能超管）。
     检查 warming/团队开关账户连续 idle_days 天无消耗 → 建 $5 主页赞。
     返回 {checked, created, skipped, failed}。"""
     from ..services.guard_engine import run_keepalive

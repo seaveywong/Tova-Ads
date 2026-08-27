@@ -608,6 +608,14 @@ const runKeepaliveNow = async () => {
         <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">{{ t('settings.bindTelegram') }}</a>
         <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, t('settings.bindLinkCopied'))">{{ t('settings.cannotOpenCopy') }}</span>
         <span v-if="!tgBot.configured" class="tg-warn">{{ t('settings.tgBotNotConfigured') }}</span>
+        <!-- widget 打不开时的兜底：向 bot 发 /start 拿 chat_id 手动绑 -->
+        <div class="tg-manual">
+          <span class="tg-manual-hint">{{ t('settings.tgManualHint') }}</span>
+          <div class="tg-manual-row">
+            <input v-model="tgManual.chat_id" class="input tg-manual-input" :placeholder="t('settings.tgManualPh')" @keyup.enter="bindTgManual" />
+            <button class="btn" :disabled="tgManual.saving" @click="bindTgManual">{{ tgManual.saving ? t('common.saving') : t('settings.tgManualBind') }}</button>
+          </div>
+        </div>
       </div>
 
       <!-- 验证 Bot 配置（owner/超管） -->
@@ -733,6 +741,11 @@ const runKeepaliveNow = async () => {
 .tg-bound-badge{color:var(--success);font-size:13px;font-weight:500}
 .tg-unbind-btn{color:var(--error);border-color:var(--error)}
 .tg-warn{color:var(--warning);font-size:12px}
+.tg-manual{margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd);width:100%}
+.tg-manual-hint{font-size:11px;color:var(--t3);display:block;margin-bottom:6px}
+.tg-manual-row{display:flex;gap:8px;align-items:center}
+.tg-manual-input{flex:1;min-width:0;max-width:240px}
+@media (max-width:768px){.tg-manual-row{flex-direction:column;align-items:stretch}.tg-manual-input{max-width:none}}
 .tg-verify{margin-top:10px;padding-top:10px;border-top:1px solid var(--bd);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tg-verify .btn{margin-top:0}
 .tg-verify-hint{font-size:11px;color:var(--t3)}

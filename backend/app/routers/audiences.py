@@ -138,6 +138,15 @@ def delete_audience(aid: int, user: CurrentUser = Depends(require_permission("ad
         SavedAudience.id == aid, SavedAudience.tenant_id == user.tenant_id).first()
     if not row:
         raise HTTPException(404, "受众模板不存在")
+    # 引用检查：投放模板还挂着该受众时删除 = 部署静默退回 FB 最宽默认定向（用户无感知）
+    from ..models.launch_template import LaunchTemplate
+    _ref = db.query(LaunchTemplate.id).filter(
+        LaunchTemplate.tenant_id == user.tenant_id,
+        LaunchTemplate.audience_id == aid,
+        LaunchTemplate.status != "archived",
+    ).first()
+    if _ref:
+        raise HTTPException(400, "该受众仍被投放模板引用，请先在模板中移除引用再删除")
     db.delete(row)
     trace_id = new_trace_id()
     write_log(db, tenant_id=user.tenant_id, trace_id=trace_id, actor_type="user",

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, DELETE, downloadFile } from '../api'
+import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
@@ -20,6 +21,7 @@ const customTo = ref('')
 const tab = ref('campaign')
 const data = ref({ campaigns: [], adsets: [], ads: [], currency: 'USD' })
 const loading = ref(false)
+const _loadGuard = useLatest()
 const drillCampaign = ref('')
 const drillAdset = ref('')
 const statusFilter = ref('all')
@@ -62,17 +64,20 @@ const loadAccounts = async () => {
   catch (e) { ElMessage.error(e.message || t('adm.loadAccountsFail')) }
 }
 const load = async (refresh = false) => {
+  const isLatest = _loadGuard.next()
   loading.value = true
   try {
     const params = new URLSearchParams(curRange.value)
     if (refresh) params.set('refresh', '1')
-    data.value = await GET(`/ads/list?${params.toString()}`)
+    const r = await GET(`/ads/list?${params.toString()}`)
+    if (!isLatest()) return   // 快速切日期/轮询完成回调并发时旧响应后到——丢弃
+    data.value = r
     drillCampaign.value = ''; drillAdset.value = ''
     // 后台刷：立即返回了缓存 → 轮询 refresh-status，完成后自动更新列表
     if (refresh && data.value.refreshing) watchRefreshDone()
   }
-  catch (e) { ElMessage.error(e.message || t('common.fail')) }
-  loading.value = false
+  catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.fail')) }
+  if (isLatest()) loading.value = false
 }
 // 后台刷新轮询：每 3s 查 /ads/refresh-status，running=false 时重拉列表；上限 20 次防死循环
 let _refreshPoller = null
@@ -110,10 +115,10 @@ const curList = computed(() => {
   }
   return arr.slice().sort((a, b) => {
     if (sortKey.value === '_status_rank') { const d = statusRank(a.effective_status) - statusRank(b.effective_status); return sortDir.value === 'desc' ? d : -d }
-    const sa = statusRank(a.effective_status), sb = statusRank(b.effective_status)
-    if (sa !== sb) return sa - sb
+    // 用户主动选了排序列：该列为主排序，状态仅作同值兜底（否则"消耗降序"时 PAUSED 永远压底，找不到已停的高消耗）
     let va = Number(a[sortKey.value] || 0), vb = Number(b[sortKey.value] || 0)
-    return sortDir.value === 'desc' ? vb - va : va - vb
+    if (va !== vb) return sortDir.value === 'desc' ? vb - va : va - vb
+    return statusRank(a.effective_status) - statusRank(b.effective_status)
   })
 })
 const drillName = computed(() => {

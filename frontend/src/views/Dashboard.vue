@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { GET, POST, DELETE, downloadFile } from '../api'
+import { useLatest } from '../composables/useLatest'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
@@ -13,6 +14,7 @@ import DatePresetBar from '../components/DatePresetBar.vue'
 const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(true)
+const _dashGuard = useLatest()
 const refreshing = ref(false)
 const datePreset = ref('today')
 const data = ref({
@@ -155,6 +157,7 @@ const fmtAgo = (iso) => {
 const ERR_LABEL = { uncovered: 'dashboard.covUncovered', cross_tz: 'dashboard.covCrossTz' }
 const mapErr = (e) => (e && ERR_LABEL[e]) ? t(ERR_LABEL[e]) : (e || '')
 const loadDashboard = async (fresh = false) => {
+  const isLatest = _dashGuard.next()
   loading.value = true
   try {
     const [dash, notifs, creds] = await Promise.all([
@@ -162,6 +165,7 @@ const loadDashboard = async (fresh = false) => {
       GET(`/notifications?limit=50`).then(r => Array.isArray(r) ? r : (r?.items || [])).catch(() => []),
       GET('/fb/credentials').catch(() => []),
     ])
+    if (!isLatest()) return   // 快速切日期/60s 自动刷新并发时旧响应后到——丢弃
     data.value = dash
     lastUpdated.value = new Date().toISOString()
     recentNotifs.value = notifs
@@ -170,7 +174,7 @@ const loadDashboard = async (fresh = false) => {
     totalTokens.value = allCreds.length
     fetchLanding()
   } catch (e) {
-    import('element-plus').then(m => m.ElMessage.error(e.message))
+    if (isLatest()) import('element-plus').then(m => m.ElMessage.error(e.message))
   } finally {
     loading.value = false
   }
@@ -315,7 +319,7 @@ _ltThemeObserver.observe(document.documentElement, { attributes: true, attribute
 import { fmtNum, fmtUsd as _fmtUsdRaw } from '../composables/useFormat'
 const fmt = fmtNum
 const fmtUsd = (n) => (n == null || n === 0) ? '—' : _fmtUsdRaw(n)
-const fmtPct = (n) => n == null || n === 0 ? '—' : Number(n).toFixed(2) + '%'
+const fmtPct = (n) => n == null ? '—' : Number(n).toFixed(2) + '%'   // 0 是真信号（如通过率0%=全被屏蔽），只有 null 才是"无数据"
 const fmtSpendDual = (native, usd, cur) => {
   if (native == null) return { native: '—', usd: '—' }
   if (cur === 'USD') return { native: fmtUsd(native), usd: '' }
@@ -354,6 +358,8 @@ const taskCards = computed(() => {
 const toggleCard = (i) => {
   const card = taskCards.value[i]
   if (!card.detailAccounts?.length) return
+  // 切换展开面板时清空勾选——selectedIds 是各面板共享的，残留会让"复制选中"带出旧选择
+  if (expandedCard.value !== i) selectedIds.value = new Set()
   expandedCard.value = expandedCard.value === i ? null : i
 }
 const columnLabel = (col) => ({
@@ -521,6 +527,7 @@ const toggleKpi = (i) => {
     kpiExpanded.value = null
   } else {
     detailSearch.value = ''  // 切换卡片时清空搜索
+    selectedIds.value = new Set()  // 清空勾选（面板间共享，防残留）
     kpiExpanded.value = i
   }
 }

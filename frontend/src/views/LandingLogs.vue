@@ -5,6 +5,7 @@ import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
+import { useLatest } from '../composables/useLatest'
 import { fmtTime as tzFmtTime } from '../composables/useTz'
 
 const { t } = useI18n()
@@ -130,6 +131,7 @@ const total = ref(0)
 const offset = ref(0)
 const limit = 50
 const loading = ref(false)
+const _logGuard = useLatest()
 
 const loadPages = async () => {
   try { pages.value = await GET('/landing/pages') } catch (e) {}
@@ -178,14 +180,16 @@ const loadStats = async () => {
 }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
 const load = async () => {
+  const isLatest = _logGuard.next()
   loading.value = true
   loadStats()  // 并行刷新分布（非阻塞）
   try {
     const r = await GET('/landing/logs?' + new URLSearchParams(buildParams()).toString())
+    if (!isLatest()) return   // 筛选连点时旧响应后到——丢弃
     items.value = r.items || []
     total.value = r.total || 0
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  loading.value = false
+  } catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.opFail')) }
+  if (isLatest()) loading.value = false
 }
 const search = () => { offset.value = 0; load() }
 const reset = () => {
@@ -202,6 +206,15 @@ const setPreset = (k) => {
 const onDateManual = () => { preset.value = '' }  // 手动改日期 → 取消快捷高亮
 const prev = () => { if (offset.value > 0) { offset.value = Math.max(0, offset.value - limit); load() } }
 const next = () => { if (offset.value + limit < total.value) { offset.value += limit; load() } }
+const jumpTo = ref('')
+const goPage = () => {
+  const n = parseInt(jumpTo.value, 10)
+  if (!n || n < 1) return
+  const maxPage = Math.ceil(total.value / limit)
+  offset.value = Math.min(n, maxPage - 1) * limit
+  jumpTo.value = ''
+  load()
+}
 
 // 时间显示走用户显示时区（useTz，设置页可切换），不再硬编码 Asia/Shanghai
 const fmtTime = (iso) => iso ? tzFmtTime(iso) : '-'
@@ -233,16 +246,18 @@ const pageTitle = () => {
 onMounted(async () => {
   if (route.query.slug) fSlug.value = route.query.slug
   if (route.query.page_id) fPage.value = String(route.query.page_id)
+  if (route.query.ad_id) fAd.value = String(route.query.ad_id)   // AdManager「查看落地日志」深链
   await loadPages()
   await loadAccounts()
   await loadRedirectMap()
   setPreset('today')  // 默认今日（与其他看板一致；之前无默认=加载全量）
 })
 watch(() => route.query, (q) => {
-  // 进日志 tab：有 slug/page_id 就预筛，没有就清空（避免残留上次子码过滤）
+  // 进日志 tab：有 slug/page_id/ad_id 就预筛，没有就清空（避免残留上次子码过滤）
   if (q.tab === 'logs') {
     fSlug.value = q.slug || ''
     fPage.value = q.page_id ? String(q.page_id) : ''
+    fAd.value = q.ad_id ? String(q.ad_id) : ''
     offset.value = 0; load()
   }
 })
@@ -326,6 +341,8 @@ watch(() => route.query, (q) => {
       <button class="ctrl-btn sm" :disabled="offset === 0" @click="prev">{{ t('lplogs.prevPage') }}</button>
       <span class="pg-info">{{ offset + 1 }}–{{ Math.min(offset + limit, total) }} / {{ t('lplogs.totalUnit', { n: total }) }}</span>
       <button class="ctrl-btn sm" :disabled="offset + limit >= total" @click="next">{{ t('lplogs.nextPage') }}</button>
+      <input v-model="jumpTo" class="jump-inp" type="number" min="1" :max="Math.ceil(total/limit)" :placeholder="t('audit.jumpPh')" @keyup.enter="goPage" />
+      <button class="ctrl-btn sm" @click="goPage">{{ t('audit.jumpGo') }}</button>
     </div>
 
     <el-dialog v-model="redirectDialog" :title="t('lplogs.redirectDialogTitle', { adId: redirectAd })" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
@@ -400,8 +417,9 @@ watch(() => route.query, (q) => {
 .src-bot { color: #a78bfa; font-size: 11px; font-weight: 500 }
 .muted { color: var(--t3) }
 .empty { padding: 40px; text-align: center; color: var(--t3); font-size: 13px }
-.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; flex-wrap: wrap }
 .pg-info { font-size: 12px; color: var(--t3) }
+.jump-inp{width:64px;background:var(--bg3);color:var(--t1);border:1px solid var(--bd);border-radius:var(--rs);padding:5px 8px;font-size:12px}
 .stats-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; padding: 7px 10px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px }
 .stats-label { font-size: 12px; color: var(--t3); margin-right: 4px }
 .stats-win { color: var(--t2); margin-left: 4px }

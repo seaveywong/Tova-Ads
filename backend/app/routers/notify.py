@@ -80,17 +80,30 @@ def list_notifications(
     }
 
 
+def _visible_scope(user, db):
+    """该用户可见通知的过滤条件（与 list 同口径：只算自己角色订阅的）。"""
+    from sqlalchemy import or_, func
+    role = (user.role or "owner").lower()
+    padded = func.concat(",", func.coalesce(Notification.roles, ""), ",")
+    return db.query(Notification).filter(
+        Notification.tenant_id == user.tenant_id,
+        or_(
+            Notification.roles.is_(None),
+            Notification.roles == "",
+            padded.like(f"%,{role},%"),
+        ),
+    )
+
+
 @router.get("/unread-count")
 def unread_count(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """未读数（顶栏红点用）。"""
-    count = db.query(Notification).filter(
-        Notification.tenant_id == user.tenant_id,
+    """未读数（顶栏红点用）——与列表同口径（只数自己角色可见的）。"""
+    return {"unread": _visible_scope(user, db).filter(
         Notification.read_at == None,  # noqa: E711
-    ).count()
-    return {"unread": count}
+    ).count()}
 
 
 @router.post("/read")
@@ -99,10 +112,10 @@ def mark_read(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """标记已读（ids 列表 or all）。"""
+    """标记已读（ids 列表 or all）。只影响该用户可见口径——批量已读不清掉
+    定向发别的角色（如 finance）的告警红点。"""
     ids = body.get("ids")
-    query = db.query(Notification).filter(
-        Notification.tenant_id == user.tenant_id,
+    query = _visible_scope(user, db).filter(
         Notification.read_at == None,  # noqa: E711
     )
     if ids:

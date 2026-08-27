@@ -6,12 +6,14 @@ import { GET, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { accountStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
+import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import DatePresetBar from '../components/DatePresetBar.vue'
 
 const { t } = useI18n()
 const router = useRouter()
+const _reqGuard = useLatest()
 const accounts = ref([])
 const loading = ref(true)
 const isSuper = ref(isSuperadminSync())
@@ -46,10 +48,18 @@ const batchRemove = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   try {
     await ElMessageBox.confirm(t('ads.batchRemoveConfirm', { n: selectedAccs.value.size }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
-    accLoading.value = true
-    for (const actId of selectedAccs.value) { await DELETE(`/fb/accounts/${actId}`) }
-    ElMessage.success(t('ads.removed', { n: selectedAccs.value.size })); selectedAccs.value.clear(); await load()
-  } catch(e) {} finally { accLoading.value = false }
+  } catch { return }
+  accLoading.value = true
+  const errs = []; let ok = 0
+  for (const actId of selectedAccs.value) {
+    try { await DELETE(`/fb/accounts/${actId}`); ok++ }
+    catch (e) { errs.push(`${actId}: ${e.message || e}`) }
+  }
+  selectedAccs.value.clear()
+  await load()   // 无论部分失败与否都刷新（被删的和残留的都要如实显示）
+  accLoading.value = false
+  if (errs.length) showError(t('ads.batchRemoveResult', { ok, fail: errs.length, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
+  else ElMessage.success(t('ads.removed', { n: ok }))
 }
 const batchSyncLabel = ref(t('ads.batchSync'))
 const batchSync = async () => {
@@ -81,15 +91,18 @@ const boundTokenTitle = (a) => {
   const pool = a.pool_aliases ? ' · ' + t('ads.rotatingToken', { aliases: a.pool_aliases }) : ''
   return `${alias} · ${state}${pool}`
 }
-const cpa = (a) => (a.recent_conversions > 0) ? (a.recent_spend / a.recent_conversions).toFixed(2) : '-'
+const cpa = (a) => (a.recent_conversions > 0) ? fmtMoney((a.recent_spend / a.recent_conversions), a.currency) : '-'
 
 const load = async () => {
+  const isLatest = _reqGuard.next()
   loading.value = true
   try {
     const ps = new URLSearchParams(curRange.value)
-    accounts.value = await GET('/fb/accounts?' + ps.toString())
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  loading.value = false
+    const r = await GET('/fb/accounts?' + ps.toString())
+    if (!isLatest()) return   // 快速切日期时旧响应后到——丢弃
+    accounts.value = r
+  } catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.opFail')) }
+  if (isLatest()) loading.value = false
 }
 const openLoad = async () => {
   loadOpen.value = true; loadLoading.value = true
@@ -181,7 +194,7 @@ onMounted(async () => {
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
         <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
-          <div class="acc-name">{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
+          <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: a.act_id } })">{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
         </div>
         <div>{{ fmtMoney(a.balance, a.currency) }}<span v-if="a.balance_usd != null && a.currency !== 'USD'" class="sub"> ≈${{ a.balance_usd }}</span></div>
@@ -258,6 +271,8 @@ onMounted(async () => {
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .acc-name { font-weight: 600; color: var(--t1) }
+.acc-name.clk { cursor: pointer }
+.acc-name.clk:hover { color: var(--ac); text-decoration: underline }
 .acc-id { font-size: 11px; color: var(--t3); cursor: pointer }
 .sub { color: var(--t3); font-size: 11px }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: var(--t3); vertical-align: middle }

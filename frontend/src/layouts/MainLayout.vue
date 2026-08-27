@@ -104,6 +104,12 @@ const loadGuard = async () => {
   } catch {}
 }
 const toggleSentinel = async (val) => {
+  // disarm=关闭自动急停保护（资金安全行为）——必须确认；arm=开启保护，不拦
+  if (!val) {
+    try {
+      await ElMessageBox.confirm(t('layout.sentinelDisarmConfirm'), t('layout.sentinelTitle'), { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
+    } catch { return }
+  }
   try {
     await POST(`/guard/sentinel/${val ? 'arm' : 'disarm'}`, {})
     sentinelOn.value = val

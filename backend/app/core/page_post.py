@@ -35,7 +35,7 @@ def get_or_create_page_post(db, fb: FbClient, tenant_id: int, page_id: str,
 
     page_token = fb.get_page_access_token(page_id)
     if not page_token:
-        raise FbApiError(f"拿不到主页 {page_id} 的 access token（令牌不管该页或缺 pages_manage_posts）", 0)
+        raise FbApiError("no_id", f"拿不到主页 {page_id} 的 access token（令牌不管该页或缺 pages_manage_posts）")
     pfb = FbClient(page_token)
     if link:
         # 链接帖（投放/保活：链接 + 文案；picture 在 /feed 会 invalid_param → 不传，FB 用链接 OG 图）
@@ -46,7 +46,7 @@ def get_or_create_page_post(db, fb: FbClient, tenant_id: int, page_id: str,
         r = pfb.post(f"{page_id}/photos", {"url": image_url, "message": message or "", "published": "true"})
         post_id = r.get("post_id") or r.get("id")
     if not post_id:
-        raise FbApiError(f"建主页帖未返回 id：{str(r)[:200]}", 0)
+        raise FbApiError("no_id", f"建主页帖未返回 id：{str(r)[:200]}")
     db.add(PagePost(tenant_id=tenant_id, page_id=page_id, post_id=post_id,
                     asset_id=asset_id, message=message, link=link, body_hash=bh))
     db.flush()

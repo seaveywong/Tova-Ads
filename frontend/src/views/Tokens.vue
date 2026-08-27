@@ -145,10 +145,13 @@ const drawerAccounts = computed(() => {
   if (!list) return []
   return [...list].sort((a, b) => (a.account_status === 1 ? 0 : 1) - (b.account_status === 1 ? 0 : 1))
 })
+// BM 角色：FB 返回中文（完全/基本）或英文（ADMIN/EMPLOYEE 等）——按关键词识别"完全控制"排序，显示按 locale 译
+const bmFullControl = (role) => /完全|ADMIN|FULL/i.test(role || '')
+const bmRoleLabel = (role) => bmFullControl(role) ? t('tokens.bmFullControl') : (role || '—')
 const drawerBusinesses = computed(() => {
   const list = drawerToken.value && assetCache.value[drawerToken.value.id]?.businesses
   if (!list) return []
-  return [...list].sort((a, b) => (a.role === '完全' ? 0 : 1) - (b.role === '完全' ? 0 : 1))
+  return [...list].sort((a, b) => (bmFullControl(a.role) ? 0 : 1) - (bmFullControl(b.role) ? 0 : 1))
 })
 const drawerPages = computed(() => {
   const list = drawerToken.value && assetCache.value[drawerToken.value.id]?.pages
@@ -157,7 +160,10 @@ const drawerPages = computed(() => {
 })
 
 const refreshAllLabel = ref(t('tokens.refreshAll'))
+const refreshAllRunning = ref(false)
 const refreshAll = async () => {
+  if (refreshAllRunning.value) return   // 串行 check 耗时长——防重复触发并发
+  refreshAllRunning.value = true
   let ok = 0, fail = 0, done = 0
   const total = tokens.value.length
   for (const tk of tokens.value) {
@@ -167,6 +173,7 @@ const refreshAll = async () => {
     done++
   }
   refreshAllLabel.value = t('tokens.refreshAll')
+  refreshAllRunning.value = false
   await load()
   await loadAtRisk()
   // 刷新令牌=状态+资产都新：清资产缓存（下次开抽屉重拉最新主页/账户/BM）、刷新汇总计数、开着的抽屉也重拉
@@ -332,7 +339,7 @@ const deleteToken = async (tk) => {
       <div class="bar-r">
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
         <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
-        <button class="btn" @click="refreshAll">{{ refreshAllLabel }}</button>
+        <button class="btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
       </div>
     </div>
 
@@ -470,7 +477,7 @@ const deleteToken = async (tk) => {
                 <span class="ai-name">{{ b.name }}</span>
                 <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(b.id)">{{ b.id }}</span>
               </div>
-              <span class="st-tag" :class="b.role==='完全'?'ok':'off'">{{ b.role }}</span>
+              <span class="st-tag" :class="bmFullControl(b.role)?'ok':'off'">{{ bmRoleLabel(b.role) }}</span>
               <el-dropdown trigger="click" @click.stop>
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>

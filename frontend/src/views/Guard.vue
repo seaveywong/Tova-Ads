@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isSuperadminSync } from '../router'
+const isSuper = isSuperadminSync()
 
 const { t } = useI18n()
 
@@ -195,8 +197,8 @@ const doInspect = async (force = false) => {
     <div class="bar">
       <div class="bar-l"></div>
       <div class="bar-r">
-        <button class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
-        <button class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
+        <button v-if="isSuper" class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
+        <button v-if="isSuper" class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
         <button class="btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
       </div>
     </div>

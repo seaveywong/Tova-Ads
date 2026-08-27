@@ -429,8 +429,15 @@ def delete_asset(aid: int, user: CurrentUser = Depends(require_permission("asset
     a = db.query(Asset).filter(Asset.id == aid, Asset.tenant_id == user.tenant_id).first()
     if not a:
         raise HTTPException(404, "素材不存在")
-    if (a.usage_count or 0) > 0:
-        raise HTTPException(400, f"该素材被 {a.usage_count} 个投放模板引用，请先移除引用")
+    # 实时引用检查（usage_count 无递增方是死计数——查真实模板引用）
+    from ..models.launch_template import LaunchTemplate
+    _refs = db.query(LaunchTemplate.id).filter(
+        LaunchTemplate.tenant_id == user.tenant_id,
+        LaunchTemplate.asset_id == aid,
+        LaunchTemplate.status != "archived",
+    ).count()
+    if _refs > 0:
+        raise HTTPException(400, f"该素材被 {_refs} 个投放模板引用，请先移除引用")
     # 硬删本地文件
     try:
         os.remove(os.path.join(ASSET_DIR, a.storage_key))

@@ -1229,7 +1229,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       </div>
 
       <template #footer>
-        <button class="btn" @click="editOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn" @click="onEditBeforeClose(() => { editOpen = false })">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="saving" @click="saveTpl">{{ saving ? t('launch.saving') : t('common.save') }}</button>
       </template>
     </el-drawer>
@@ -1308,7 +1308,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
       </div>
       <template #footer>
-        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}</span>
+        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl"> · {{ t('launch.totalBudgetHint', { total: (selectedAccs.size * Number(deployTpl.budget_usd || 0)).toFixed(0), per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
         <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="deploying||!selectedAccs.size" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
       </template>

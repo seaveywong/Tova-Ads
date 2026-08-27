@@ -193,7 +193,7 @@ def setup_webhook(user=Depends(require_superadmin)):
         url = f"https://api.tovaads.com/telegram/webhook/{secret}"
         resp = httpx.post(
             f"https://api.telegram.org/bot{token}/setWebhook",
-            json={"url": url, "allowed_updates": ["callback_query"]},
+            json={"url": url, "allowed_updates": ["callback_query", "message"]},  # message：/start 深链绑定依赖
             timeout=15,
         )
         return {"success": resp.json().get("ok"), "webhook_url": url, "telegram": resp.json()}

@@ -99,6 +99,15 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
     支持：购物/潜在客户/互动(主页赞/帖子互动/消息)/流量/ awareness。
     """
     from ..core.fb_tokens import client_for_account
+    # 目标账户校验（与 deploy_template 同款）：必须已显式导入且属于本租户——
+    # 否则令牌"能管"就能对任意 act_id 花钱（违反显式导入硬规则 + 无止损覆盖）
+    from ..models.fb import Account as _Acc
+    _acc = db.query(_Acc).filter(
+        _Acc.tenant_id == user.tenant_id, _Acc.act_id == body.act_id,
+        _Acc.is_managed == True,  # noqa: E712
+    ).first()
+    if not _acc:
+        raise HTTPException(400, f"账户 {body.act_id} 未导入或不属于当前团队")
     fb = client_for_account(db, user.tenant_id, body.act_id, "write")  # 创建广告用写令牌(operate/manage)
     if not fb:
         raise HTTPException(400, "未绑定 FB 凭证")

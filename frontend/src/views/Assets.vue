@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -36,6 +36,7 @@ const editingName = ref('')
 const analyzingIds = ref(new Set())
 const analyzeElapsed = ref({})  // {id: 秒}
 let _analyzeTimer = null
+onUnmounted(() => { if (_analyzeTimer) { clearInterval(_analyzeTimer); _analyzeTimer = null } })
 const _tickAnalyze = () => {
   for (const id of analyzingIds.value) {
     analyzeElapsed.value[id] = (analyzeElapsed.value[id] || 0) + 1
@@ -158,6 +159,7 @@ const submitUpload = async () => {
       ok++
     } catch (e) {
       item.status = 'fail'
+      item.error = e.message || ''   // 失败原因存 item（列表 title 显示，可自救）
       fail++
     }
   }
@@ -209,11 +211,16 @@ const analyze = async (a) => {
   analyzeElapsed.value[a.id] = 0
   if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
   try {
+    // AI 分析可跑几分钟（绕 api 层 30s 超时用裸 fetch），但要有兜底中止——
+    // 否则请求挂起时按钮永久 disabled + 计时器永久走
+    const _abort = new AbortController()
+    const _abortTimer = setTimeout(() => _abort.abort('timeout'), 300000)   // 5min 上限
     const r = await fetch(BASE + '/assets/' + a.id + '/analyze', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'Content-Type': 'application/json' },
       body: JSON.stringify({ purpose, depth: aiDepth.value, style: aiStyle.value }),
-    })
+      signal: _abort.signal,
+    }).finally(() => clearTimeout(_abortTimer))
     const text = await r.text()
     const data = JSON.parse(text)
     if (!r.ok) throw new Error(data.detail || t('assets.analyzeFailed'))
@@ -328,6 +335,7 @@ const changeCountry = async (a, code) => {
   try {
     const r = await PUT('/assets/' + a.id, { country: code })
     Object.assign(a, r)
+    ElMessage.success(t('assets.countrySaved'))
   } catch (e) { ElMessage.error(e.message || t('assets.changeCountryFailed')) }
 }
 
@@ -501,7 +509,7 @@ const countryLabel = (code) => {
           </select>
           <input v-model="item.uploadTagsStr" class="upload-tags-input" :placeholder="t('assets.tagsInputPh')" />
           <span v-if="item.status === 'done'" class="upload-status done">✓ {{ t('assets.uploadDone') }}</span>
-          <span v-if="item.status === 'fail'" class="upload-status fail">✗ {{ t('common.fail') }}</span>
+          <span v-if="item.status === 'fail'" class="upload-status fail" :title="item.error || ''">✗ {{ t('common.fail') }}</span>
           <span v-if="item.status === 'uploading'" class="upload-status uploading">{{ t('assets.uploadingDots') }}</span>
         </div>
       </div>
