@@ -25,6 +25,7 @@ class User(Base):
     timezone = Column(Text, default="Asia/Shanghai")  # 用户显示时区（仅前端展示，不影响广告账户）
     locale = Column(Text, default="zh", nullable=False)  # 界面语言 'zh'/'en'（通知渲染 + 报错翻译用）
     last_active_at = Column(DateTime(timezone=True))
+    pwd_changed_at = Column(DateTime(timezone=True))  # 改密/改邮箱时间戳：iat 早于此的 JWT 全部失效
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

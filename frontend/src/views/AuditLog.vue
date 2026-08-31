@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET } from '../api'
 import { isSuperadminSync } from '../router'
@@ -7,7 +7,8 @@ import { ElMessage } from 'element-plus'
 import { fmtTime } from '../composables/useTz'
 import { dateShortcuts, presetRange } from '../composables/useDateRange'
 const { t } = useI18n()
-const pickerShortcuts = dateShortcuts()
+// locale 响应：切语言时 shortcut 文案跟着变（dateShortcuts 内部 t 一次性求值会冻结）
+const pickerShortcuts = computed(() => dateShortcuts())
 
 const isSuper = ref(isSuperadminSync())
 

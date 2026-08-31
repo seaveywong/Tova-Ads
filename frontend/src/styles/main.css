@@ -113,4 +113,8 @@ a { color: var(--ac); text-decoration: none; }
   .form .row:not(.keep-h) { flex-direction: column !important; align-items: stretch !important; }
   /* el-drawer 在手机上撑满宽度（无论 size 写多少 px） */
   .el-drawer.rtl { width: 100% !important; max-width: 100% !important; }
+  /* el-dialog 定宽（720px 等）在手机上溢出/关闭钮出屏 */
+  .el-dialog { width: 92vw !important; max-width: 92vw !important; margin-top: 8vh !important; }
+  /* 小点击目标放大到可点（>=32px） */
+  .more-btn, .dots-btn, .mb, .allow-btn { min-height: 32px; min-width: 36px; }
 }

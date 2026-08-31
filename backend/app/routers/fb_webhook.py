@@ -57,7 +57,7 @@ async def fb_webhook_verify(request: Request):
             verify_token = get_webhook_config(db)["verify_token"]
         finally:
             db.close()
-        if hmac.compare_digest(p.get("hub.verify_token", ""), verify_token):
+        if hmac.compare_digest(p.get("hub.verify_token", "").encode(), (verify_token or "").encode()):
             return Response(content=p.get("hub.challenge", ""), media_type="text/plain")
     return Response(content="Forbidden", status_code=403)
 

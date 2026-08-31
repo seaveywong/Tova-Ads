@@ -166,7 +166,10 @@ def ingest_event(body: EventIngestIn, request: Request):
         # deleted 不复活（硬删状态，配置已清，走页级）；手动归档但绑过广告的也不动。
         if body.slug and body.ad_id and "{{" not in str(body.ad_id):
             # 不绑占位符（FB 没填 {{ad.id}} 时来的字面量，绑了就永远卡住拿不到真实广告）
+            # slug → page 归属校验：伪造别的页 slug 抢绑自己 ad_id 会使真实首绑永久失效
             link = db.query(LandingAdLink).filter(LandingAdLink.slug == body.slug).first()
+            if link and link.page_id != page.id:
+                link = None   # slug 属于别的落地页——拒绝（防跨页劫持 reserved 子码）
             if link and not link.ad_id and link.status in ("reserved", "active", "archived"):
                 link.ad_id = body.ad_id
                 if body.act_id and "{{" not in str(body.act_id):

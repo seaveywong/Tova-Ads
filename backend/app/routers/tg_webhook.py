@@ -5,6 +5,7 @@ import httpx
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi.responses import Response
 from ..core.database import SuperSessionLocal
 from ..core.encryption import decrypt
 from ..core.deps import require_superadmin
@@ -74,7 +75,10 @@ async def tg_webhook(secret: str, request: Request):
         if not bot_token:
             raise HTTPException(status_code=404, detail="Not found")
 
-        update = await request.json()
+        try:
+            update = await request.json()
+        except Exception:
+            return Response(content="Bad JSON", status_code=200)   # TG 对非 2xx 会重试放大——静默吞掉畸形请求
 
         # ── /start deep link 绑定（用户点 https://t.me/bot?start=<token> → 自动绑定 chat_id）──
         msg = update.get("message") or {}

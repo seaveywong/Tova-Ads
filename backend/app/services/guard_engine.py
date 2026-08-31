@@ -471,7 +471,9 @@ def run_inspection(force: bool = False):
                             _local_date_expr = _ft("({} AT TIME ZONE 'UTC' AT TIME ZONE '{}')::date".format(
                                 "landing_events.created_at", _tz))
                             # 通过量（click + redirect）—— 按 ip_hash 去重（同一人多次点击算1，减少误差）
+                            # tenant 过滤：SuperSession 绕 RLS，同 ad_id 双租户导入时不能互串归因
                             landing_clicks = db.query(_f.count(_f.distinct(LandingEvent.ip_hash))).filter(
+                                LandingEvent.tenant_id == tenant_id,
                                 LandingEvent.ad_id == ad_id,
                                 LandingEvent.event_type.in_(["click", "redirect"]),
                                 LandingEvent.ip_hash.isnot(None),
@@ -479,6 +481,7 @@ def run_inspection(force: bool = False):
                             ).scalar() or 0
                             # 访问量（visit + redirect）
                             landing_visits = db.query(_f.count(LandingEvent.id)).filter(
+                                LandingEvent.tenant_id == tenant_id,
                                 LandingEvent.ad_id == ad_id,
                                 LandingEvent.event_type.in_(["visit", "redirect"]),
                                 _local_date_expr == acc_today,
@@ -488,6 +491,7 @@ def run_inspection(force: bool = False):
 
                     # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）
                     whitelisted = db.query(GuardAllowance).filter(
+                        GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
                         GuardAllowance.act_id == acc.act_id,
                         GuardAllowance.ad_id == ad_id,
                         GuardAllowance.allowance_date == acc_today,

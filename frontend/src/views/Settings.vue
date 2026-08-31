@@ -41,12 +41,10 @@ const sched = ref({
   sentinel_minutes: 3,
   multipliers: { inspect: 1, watchdog: 2, account_sync: 6, budget: 3, reassociate: 24, subcode: 12 },
   effective: { inspect: 5, watchdog: 10, account_sync: 30, budget: 15, reassociate: 120, subcode: 60, sentinel: 3 },
-  task_labels: {
-    inspect: t('settings.taskInspect'), watchdog: t('settings.taskWatchdog'), account_sync: t('settings.taskAccountSync'),
-    budget: t('settings.taskBudget'), reassociate: t('settings.taskReassociate'), subcode: t('settings.taskSubcode'),
-    sentinel: t('settings.taskSentinel'),
-  },
+  task_labels: {},   // 占位——真实标签走 taskLabel(k)（locale 响应，一次性求值会冻结）
 })
+const _TASK_LABEL_KEYS = { inspect: 'settings.taskInspect', watchdog: 'settings.taskWatchdog', account_sync: 'settings.taskAccountSync', budget: 'settings.taskBudget', reassociate: 'settings.taskReassociate', subcode: 'settings.taskSubcode', sentinel: 'settings.taskSentinel' }
+const taskLabel = (k) => t(_TASK_LABEL_KEYS[k] || '') || k
 const schedSaving = ref(false)
 const ka = ref({ enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' })
 const kaSaving = ref(false)
@@ -315,7 +313,7 @@ const resetWebhookToken = async () => {
   whSaving.value = false
 }
 
-onMounted(async () => { await loadSched(); await loadAi(); await loadCf(); await loadWebhook(); await loadRetention(); await loadFx(); await loadTg(); _setupObserver() })
+onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -481,13 +479,13 @@ const runKeepaliveNow = async () => {
       </div>
       <div class="task-head"><span>{{ t('settings.taskCol') }}</span><span>{{ t('settings.multiplierCol') }}</span><span>{{ t('settings.effectiveCol') }}</span></div>
       <div v-for="k in TASK_ORDER" :key="k" class="task-row">
-        <span class="task-name">{{ sched.task_labels?.[k] || k }}</span>
+        <span class="task-name">{{ taskLabel(k) }}</span>
         <input v-model.number="sched.multipliers[k]" type="number" min="1" step="0.5" class="mult-input" />
         <span class="eff">{{ t('settings.minSuffix', { n: effOf(k) }) }}</span>
       </div>
       <div class="sentinel-sep"></div>
       <div class="task-row sentinel-row">
-        <span class="task-name">{{ sched.task_labels?.sentinel || t('settings.taskSentinel') }}</span>
+        <span class="task-name">{{ taskLabel('sentinel') }}</span>
         <input v-model.number="sched.sentinel_minutes" type="number" min="1" max="10" class="mult-input" />
         <span class="eff">{{ t('settings.minSuffix', { n: sched.sentinel_minutes }) }}</span>
       </div>

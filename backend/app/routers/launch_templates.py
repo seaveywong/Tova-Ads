@@ -536,10 +536,12 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
 
 
 def _reap_stale_jobs():
-    """启动时回收孤儿 job：重启/崩溃后 running 的 job 永卡（FB 侧广告可能已建在花钱）→ 标 failed 告警。"""
+    """启动时回收孤儿 job：重启/崩溃后 BackgroundTask 全死，任何 pending/running 都是孤儿
+    （FB 侧广告可能已建在花钱）→ 标 failed 提示重试。
+    60s 宽限：多 worker 依次启动，后启动的 worker 不能误回收先启动 worker 刚接的新 job。"""
     sdb = SuperSessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
         stale = sdb.query(LaunchJob).filter(
             LaunchJob.status.in_(("pending", "running")),
             LaunchJob.created_at < cutoff,
@@ -762,7 +764,16 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         raise HTTPException(404, "item 不存在")
     if it.status != "fail":
         raise HTTPException(400, f"只能重试失败的 item（当前 {it.status}）")
-    it.status = "pending"; it.error = None
+    # 原子抢占：UPDATE ... WHERE status='fail' 判 rowcount——双击并发时只有一个请求能置 pending
+    # （原 check-then-write：两请求都读到 fail 都通过 → 两个后台任务 = 同账户两份广告）
+    from sqlalchemy import text as _text
+    claimed = db.execute(
+        _text("UPDATE launch_job_items SET status='pending', error=NULL WHERE id=:id AND status='fail'"),
+        {"id": item_id},
+    ).rowcount
+    db.commit()
+    if not claimed:
+        raise HTTPException(409, "该 item 正在被其他请求重试")
     if body.page_id:
         it.page_id = body.page_id
     if body.pixel_id:

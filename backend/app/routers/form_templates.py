@@ -343,7 +343,10 @@ def ai_generate_message(body: AiGenerateMsgIn,
     """AI 从素材文案生成 Messenger welcome_text + ice_breakers（文本模型）。
 
     输出语言跟随素材分析语言（asset.ai_language），让消息贴合该素材的文案语言。
+    租户级 20/h 配额（与 form 端点同款，防刷爆共享 key）。
     """
+    if not _ai_quota_ok(db, user.tenant_id, "msg"):
+        raise HTTPException(429, "AI 生成太频繁（租户每小时限 20 次），请稍后再试")
     ai = AiClient()
     if not ai.is_configured():
         raise HTTPException(400, "AI 未配置（缺 ai_api_key）")

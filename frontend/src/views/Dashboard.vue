@@ -114,7 +114,7 @@ watch(datePreset, () => {
 const searchQuery = ref('')
 const statusFilter = ref('all') // all / ok / error
 
-const fuse = computed(() => new Fuse(data.value.accounts, {
+const fuse = computed(() => new Fuse(data.value.accounts || [], {
   keys: ['name', 'act_id'],
   threshold: 0.3,
   ignoreLocation: true,
@@ -494,7 +494,7 @@ const kpiDetail = computed(() => {
     }
   }
   // 账户明细模式（spend/conv/cpa/roas/balance；balance 不 filter——余额是账户属性不依赖快照）
-  let accs = mode === 'balance' ? [...data.value.accounts] : data.value.accounts.filter(a => !a.error)
+  let accs = mode === 'balance' ? [...(data.value.accounts || [])] : (data.value.accounts || []).filter(a => !a.error)
   if (mode === 'spend') accs.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))
   else if (mode === 'conv') accs.sort((a, b) => (a.conversions || 0) - (b.conversions || 0))  // 低在上（无转化需关注）
   else if (mode === 'cpa') accs.sort((a, b) => (b.cpa || 0) - (a.cpa || 0))  // 高在上（成本高需关注）
@@ -593,9 +593,13 @@ const exportAccounts = async () => {
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   exporting.value = false
 }
+const exportLandingBusy = ref(false)
 const exportLanding = async () => {
+  if (exportLandingBusy.value) return   // 双击防重
+  exportLandingBusy.value = true
   try { await downloadFile(`/dashboard/export?source=landing&${rangeQuery()}`) }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  exportLandingBusy.value = false
 }
 // 复选框选中（充值/余额明细用：勾选账户 → 复制选中 ID）
 const selectedIds = ref(new Set())

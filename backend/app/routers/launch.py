@@ -74,7 +74,8 @@ class LaunchAdIn(BaseModel):
     page_id: str = ""
     pixel_id: str = ""
     landing_url: str = ""
-    daily_budget: int = 200000  # VND ~$8
+    daily_budget_usd: float = 0   # 预算按 USD 意图传，按账户币种换算成 minor units（0=用 FB 端默认）
+    daily_budget: int = 0         # 兼容旧调用方：直接传本币 minor units（与 daily_budget_usd 二选一）
     budget_mode: str = "ABO"
     bid_strategy: str = "LOWEST_COST_WITHOUT_CAP"
     name_prefix: str = "Tova Ads"
@@ -114,11 +115,23 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
     trace_id = new_trace_id()
     act = f"act_{body.act_id}"
 
+    # 预算解析：daily_budget_usd（意图 USD，按账户币种换算 minor units）优先；
+    # daily_budget 直传本币 minor units。都不传=FB 端默认。
+    # （原默认 200000 注释写 VND——USD 账户会当 $2,000/天，250 倍意图）
+    _daily_budget_fb = body.daily_budget
+    if body.daily_budget_usd > 0:
+        from ..core.ad_ops import usd_to_fb_amount
+        from ..models.perf import CurrencyRate
+        _cur = (_acc.currency or "USD").upper()
+        _cr = db.query(CurrencyRate).filter(CurrencyRate.code == _cur).first()
+        _rate = _cr.rate_to_usd if _cr else 1.0
+        _daily_budget_fb = usd_to_fb_amount(body.daily_budget_usd, _acc.currency or "USD", _rate)
+
     try:
         # 1. Campaign（目标感知）
         camp_payload = build_campaign(
             name=body.name_prefix, objective=body.objective,
-            daily_budget=body.daily_budget if body.budget_mode.upper() == "CBO" else None,
+            daily_budget=_daily_budget_fb if body.budget_mode.upper() == "CBO" else None,
             budget_mode=body.budget_mode, bid_strategy=body.bid_strategy,
         )
         camp = fb.post(f"{act}/campaigns", camp_payload)
@@ -144,7 +157,7 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
             )
         adset_payload = build_adset(
             name=f"{body.name_prefix} 组", campaign_id=campaign_id,
-            daily_budget=body.daily_budget, objective=body.objective,
+            daily_budget=_daily_budget_fb, objective=body.objective,
             conversion_goal=body.conversion_goal, page_id=body.page_id,
             pixel_id=body.pixel_id, landing_url=body.landing_url,
             bid_strategy=body.bid_strategy, budget_mode=body.budget_mode,
@@ -235,6 +248,17 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
                   raw_error=str(e.raw), friendly_error=e.friendly)
         db.commit()
         raise HTTPException(400, f"创建失败：{e.friendly}")
+    except Exception as e:
+        # build_adset/build_creative 对缺 pixel/page 抛 ValueError——campaign 已建则响应带 ID 供清理
+        _camp = locals().get("campaign_id")
+        write_log(db, tenant_id=user.tenant_id, trace_id=trace_id, actor_type="user",
+                  actor_user_id=user.id, target_type="ad", action_type="create",
+                  source="internal", result="fail",
+                  trigger_detail=f"orphan_campaign={_camp or ''}",
+                  friendly_error=str(e)[:300])
+        db.commit()
+        raise HTTPException(400, f"创建失败（内部错误）：{str(e)[:200]}"
+                              + (f"（FB 侧已建 campaign {_camp}，可手动删除）" if _camp else ""))
 
 
 # ── Lead Form（Instant Forms）创建 ── 详见 02_附录_表单字段.md

@@ -72,7 +72,7 @@ const load = async (refresh = false) => {
     const r = await GET(`/ads/list?${params.toString()}`)
     if (!isLatest()) return   // 快速切日期/轮询完成回调并发时旧响应后到——丢弃
     data.value = r
-    drillCampaign.value = ''; drillAdset.value = ''
+    if (refresh) { drillCampaign.value = ''; drillAdset.value = '' }   // 只在用户主动刷新时清下钻——后台刷新完成自动 load 不踢用户出当前视图
     // 后台刷：立即返回了缓存 → 轮询 refresh-status，完成后自动更新列表
     if (refresh && data.value.refreshing) watchRefreshDone()
   }
@@ -272,9 +272,13 @@ const syncLeads = async () => {
   opLoading.value = false
 }
 let _leadsTimer = null
+const exportLeadsBusy = ref(false)
 const exportLeads = async () => {
+  if (exportLeadsBusy.value) return
+  exportLeadsBusy.value = true
   try { await downloadFile('/leads/export') }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  exportLeadsBusy.value = false
 }
 const subscribeLeads = async () => {
   opLoading.value = true

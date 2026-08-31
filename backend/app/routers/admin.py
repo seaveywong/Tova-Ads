@@ -278,6 +278,14 @@ def change_tenant_member_role(tid: int, mid: int, body: ChangeRoleIn,
         raise HTTPException(404, "成员不存在")
     if m.user_id == user.id and m.role == "owner" and body.role != "owner":
         raise HTTPException(400, "不能取消自己的 owner 角色")
+    # 最后 owner 保护（与 rbac.change_member_role 同款——超管误操作把团队降成零 owner 锁死）
+    if m.role == "owner" and body.role != "owner":
+        owner_count = db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == tid,
+            TenantMembership.role == "owner",
+        ).count()
+        if owner_count <= 1:
+            raise HTTPException(400, "不能降级最后一个 owner（团队会失去管理者）")
     role = db.query(Role).filter(Role.tenant_id == tid, Role.name == body.role).first()
     if not role:
         raise HTTPException(400, f"角色 '{body.role}' 不存在于该团队")

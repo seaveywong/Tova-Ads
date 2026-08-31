@@ -61,7 +61,8 @@ const batchRemove = async () => {
   if (errs.length) showError(t('ads.batchRemoveResult', { ok, fail: errs.length, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
   else ElMessage.success(t('ads.removed', { n: ok }))
 }
-const batchSyncLabel = ref(t('ads.batchSync'))
+const batchSyncBase = computed(() => t('ads.batchSync'))   // locale 响应
+const batchSyncLabel = ref('')
 const batchSync = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   accLoading.value = true
@@ -75,7 +76,7 @@ const batchSync = async () => {
     catch (e) { fail++; errs.push(`${a.act_id} (${a.name || ''}): ${e.message || e}`) }
     done++
   }
-  batchSyncLabel.value = t('ads.batchSync')
+  batchSyncLabel.value = ''
   if (fail) {
     showError(t('ads.batchSyncResult', { ok, fail, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
   } else {
@@ -178,7 +179,7 @@ onMounted(async () => {
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>
-      <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel }}</button>
+      <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel || batchSyncBase }}</button>
       <button class="batch-btn" @click="batchWarmup(true)" :disabled="accLoading">{{ t('ads.warmupArm') }}</button>
       <button class="batch-btn" @click="batchWarmup(false)" :disabled="accLoading">{{ t('ads.warmupDisarm') }}</button>
       <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">{{ t('ads.batchRemove') }}</button>

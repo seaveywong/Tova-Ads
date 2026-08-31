@@ -11,6 +11,9 @@ from ..core.ai_client import AiClient, AiError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
+# /ai/copy 租户级 30/h 配额（进程内存滑窗，防刷爆共享 key）
+_COPY_QUOTA: dict = {}
+
 # 地区 → 语言（ISO 639-1）。上传指定 country 时自动推导文案语言（命中目标投放地区）。
 # 与 1.0 一致：支持切换语言；country 优先推导，language 可显式覆盖。
 REGION_LANG: dict[str, str] = {
@@ -92,6 +95,16 @@ def gen_copy(body: GenCopyIn, user: CurrentUser = Depends(require_permission("ad
     与 1.0 一致：支持切换语言；上传指定国家、后续可改（country 是入参，随时重调）。
     返回 {language, locale, headlines, bodies}。
     """
+    if body.count < 1 or body.count > 10:
+        raise HTTPException(400, "count 取值 1-10")
+    # 租户级 30/h 配额（防刷爆共享 key，进程内存滑窗——与 form_templates._AI_QUOTA 同款）
+    import time as _t
+    _key = f"{user.tenant_id}"
+    _now = _t.time()
+    _hits = [ts for ts in _COPY_QUOTA.get(_key, []) if _now - ts < 3600]
+    if len(_hits) >= 30:
+        raise HTTPException(429, "AI 生成太频繁（每小时限 30 次），请稍后再试")
+    _hits.append(_now); _COPY_QUOTA[_key] = _hits[-30:]
     ai = AiClient()
     if not ai.is_configured():
         raise HTTPException(400, "AI 未配置")

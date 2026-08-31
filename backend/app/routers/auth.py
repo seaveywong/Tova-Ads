@@ -37,8 +37,12 @@ def register(body: RegisterIn, db: Session = Depends(get_system_db)):
     if inv.expires_at and inv.expires_at < datetime.now(timezone.utc):
         raise HTTPException(400, "邀请码已过期")
     email_lc = body.email.strip().lower()
+    if not email_lc or "@" not in email_lc:
+        raise HTTPException(400, "邮箱格式不对")
     if db.query(User).filter(User.email == email_lc).first():
         raise HTTPException(400, "邮箱已注册")
+    if len(body.password or "") < 8:
+        raise HTTPException(400, "密码至少 8 位")
 
     user = User(email=email_lc, password_hash=hash_password(body.password))
     db.add(user)
@@ -209,6 +213,7 @@ def update_my_email(body: UpdateEmailIn, user: CurrentUser = Depends(get_current
     if not verify_password(body.old_password, u.password_hash):
         raise HTTPException(403, "旧密码不正确")
     u.email = new
+    u.pwd_changed_at = datetime.now(timezone.utc)   # 邮箱=登录凭证，变更后旧 JWT 全部失效
     db.commit()
     return {"email": new}
 
@@ -223,6 +228,7 @@ def update_my_password(body: UpdatePasswordIn, user: CurrentUser = Depends(get_c
     if not u or not verify_password(body.old_password, u.password_hash):
         raise HTTPException(400, "旧密码错误")
     u.password_hash = hash_password(body.new_password)
+    u.pwd_changed_at = datetime.now(timezone.utc)   # 改密后旧 JWT 全部失效（防接管后改密踢不掉人）
     if u.status == "must_change_password":
         u.status = "active"  # 首次改密 → 激活
     db.commit()

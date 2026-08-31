@@ -631,17 +631,23 @@ def publish_landing(
 @router.get("/projects")
 def list_cf_projects(
     user: CurrentUser = Depends(require_permission("landing.manage")),
+    db: Session = Depends(get_db),
 ):
-    """列 CF Pages 项目。"""
+    """列 CF Pages 项目——只返回本租户落地页对应的 CF 项目（原返回全平台项目+全部域名）。
+
+    domains 剥掉：那是 CF 侧项目级信息，含其他租户绑定的域名。"""
     from ..core.cf_client import CfClient
+    from ..models.launch import LandingPage as _LP
     cf_token = settings.cf_api_token
     cf_account = settings.cf_account_id
     if not cf_token or not cf_account:
         raise HTTPException(500, "CF 未配置")
+    my_names = {p.project_name for p in db.query(_LP.project_name).filter(
+        _LP.tenant_id == user.tenant_id, _LP.project_name.isnot(None)).all()}
     cf = CfClient(cf_token, cf_account)
     projects = cf.list_projects()
-    return [{"name": p.get("name"), "subdomain": p.get("subdomain"),
-             "domains": p.get("domains", [])} for p in projects]
+    return [{"name": p.get("name"), "subdomain": p.get("subdomain")}
+            for p in projects if p.get("name") in my_names]
 
 
 # ── 落地页记录 CRUD（Phase A：列表/详情/改/归档）──

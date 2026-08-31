@@ -43,6 +43,21 @@ def get_current_user(
     if not user or user.status not in ("active", "must_change_password"):
         raise HTTPException(401, "用户不可用")
 
+    # 改密/改邮箱后旧 JWT 全部失效（iat 早于 pwd_changed_at 的 token 拒绝）
+    # pwd_changed_at NULL = 上线后从未改过密 → 不失效存量 token（平滑上线）
+    # 比较取整秒：pwd_changed_at 含微秒，同秒内改密后立刻登录的新 token（iat=整秒）不能被误杀
+    if user.pwd_changed_at is not None:
+        from datetime import datetime as _dt, timezone as _tz
+        iat = payload.get("iat")
+        if iat is not None:
+            try:
+                token_time = _dt.fromtimestamp(int(iat), tz=_tz.utc)
+                changed_at = user.pwd_changed_at.replace(microsecond=0, tzinfo=user.pwd_changed_at.tzinfo or _tz.utc)
+                if token_time < changed_at:
+                    raise HTTPException(401, "凭证已变更，请重新登录")
+            except (ValueError, OSError, OverflowError):
+                pass   # iat 异常时交由签名校验兜底（decode 已过）
+
     tenant_id = payload.get("tenant_id")
     is_super = bool(payload.get("is_superadmin", False))
 
