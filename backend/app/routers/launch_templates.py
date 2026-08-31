@@ -536,12 +536,13 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
 
 
 def _reap_stale_jobs():
-    """启动时回收孤儿 job：重启/崩溃后 BackgroundTask 全死，任何 pending/running 都是孤儿
+    """启动时回收孤儿 job：重启/崩溃后 BackgroundTask 全死，pending/running 是孤儿
     （FB 侧广告可能已建在花钱）→ 标 failed 提示重试。
-    60s 宽限：多 worker 依次启动，后启动的 worker 不能误回收先启动 worker 刚接的新 job。"""
+    判据 = 心跳超时（runner 每 item touch created_at）：超 10 分钟无心跳才算死——
+    单 worker 崩溃重启不会误杀其他 worker 正在跑的长任务（误杀 → 用户重试 = 双份广告）。"""
     sdb = SuperSessionLocal()
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
         stale = sdb.query(LaunchJob).filter(
             LaunchJob.status.in_(("pending", "running")),
             LaunchJob.created_at < cutoff,
@@ -595,6 +596,11 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 post_content = {}
         for item in items:
             try:
+                # 心跳：每 item 开工时 touch job 创建时间——reap 按"无心跳超时"判孤儿，
+                # 单 worker 崩溃重启时其他 worker 正在跑的长任务不会被误标 failed
+                from sqlalchemy import text as _t
+                sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
+                            {"jid": job_id})
                 item.status = "creating"; sdb.commit()
                 # 跟帖(reuse)：选能管该帖主页的写令牌（多令牌场景扫候选池，不只 priority 最高）
                 is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)

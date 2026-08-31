@@ -635,6 +635,7 @@ def list_cf_projects(
 ):
     """列 CF Pages 项目——只返回本租户落地页对应的 CF 项目（原返回全平台项目+全部域名）。
 
+    CF 项目名发布时按 tovaads-landing-{页id} 规范生成（页记录无 project_name 列，按 id 推导）。
     domains 剥掉：那是 CF 侧项目级信息，含其他租户绑定的域名。"""
     from ..core.cf_client import CfClient
     from ..models.launch import LandingPage as _LP
@@ -642,8 +643,8 @@ def list_cf_projects(
     cf_account = settings.cf_account_id
     if not cf_token or not cf_account:
         raise HTTPException(500, "CF 未配置")
-    my_names = {p.project_name for p in db.query(_LP.project_name).filter(
-        _LP.tenant_id == user.tenant_id, _LP.project_name.isnot(None)).all()}
+    my_names = {f"tovaads-landing-{r.id}" for r in db.query(_LP.id).filter(
+        _LP.tenant_id == user.tenant_id).all()}
     cf = CfClient(cf_token, cf_account)
     projects = cf.list_projects()
     return [{"name": p.get("name"), "subdomain": p.get("subdomain")}

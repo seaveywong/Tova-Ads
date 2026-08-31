@@ -116,16 +116,18 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
     act = f"act_{body.act_id}"
 
     # 预算解析：daily_budget_usd（意图 USD，按账户币种换算 minor units）优先；
-    # daily_budget 直传本币 minor units。都不传=FB 端默认。
-    # （原默认 200000 注释写 VND——USD 账户会当 $2,000/天，250 倍意图）
+    # daily_budget 直传本币 minor units。ABO 必须有正预算（FB 无"端默认"），否则建完
+    # campaign 后 adset 必失败 → 孤儿 campaign。
     _daily_budget_fb = body.daily_budget
     if body.daily_budget_usd > 0:
         from ..core.ad_ops import usd_to_fb_amount
         from ..models.perf import CurrencyRate
         _cur = (_acc.currency or "USD").upper()
         _cr = db.query(CurrencyRate).filter(CurrencyRate.code == _cur).first()
-        _rate = _cr.rate_to_usd if _cr else 1.0
+        _rate = _cr.rate if _cr else 1.0   # CurrencyRate.rate = 1 USD 兑本币（rate_to_usd 列不存在）
         _daily_budget_fb = usd_to_fb_amount(body.daily_budget_usd, _acc.currency or "USD", _rate)
+    if body.budget_mode.upper() == "ABO" and (_daily_budget_fb or 0) <= 0:
+        raise HTTPException(400, "ABO 需要日预算：传 daily_budget_usd（按账户币种换算）或 daily_budget（本币 minor units）")
 
     try:
         # 1. Campaign（目标感知）
@@ -248,6 +250,8 @@ def launch_ad(body: LaunchAdIn, user: CurrentUser = Depends(require_permission("
                   raw_error=str(e.raw), friendly_error=e.friendly)
         db.commit()
         raise HTTPException(400, f"创建失败：{e.friendly}")
+    except HTTPException:
+        raise   # try 块内的业务 400（受众/子码不存在等）原样透传——不走 internal 兜底误标审计
     except Exception as e:
         # build_adset/build_creative 对缺 pixel/page 抛 ValueError——campaign 已建则响应带 ID 供清理
         _camp = locals().get("campaign_id")

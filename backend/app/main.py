@@ -66,8 +66,13 @@ app.add_middleware(
 
 @app.middleware("http")
 async def sliding_renew_middleware(request: Request, call_next):
-    """滑动续期：带合法 token 的请求 → 响应头返新 token，前端存它 → 活跃用永不掉线。"""
+    """滑动续期：带合法 token 的请求 → 响应头返新 token，前端存它 → 活跃用永不掉线。
+
+    错误响应绝不续期：renew_token 只验签名不验 pwd_changed_at——若 401（凭证已变更）
+    也续期，被盗 token 在受害者改密后仍能拿到 iat=now 的新 token，失效机制被整体绕过。"""
     resp = await call_next(request)
+    if resp.status_code >= 400:
+        return resp
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
         try:
