@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, PUT } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -32,6 +32,7 @@ const refreshGroups = () => {
   matrixGrouped.value = groups
 }
 watch(() => mapping.value, () => { if (mapping.value) refreshGroups() })
+const hasMatrix = computed(() => Object.keys(matrixGrouped.value).length > 0)
 
 const resetDefault = async () => {
   try {
@@ -55,6 +56,7 @@ const resetDefault = async () => {
 
     <div v-loading="loading">
       <div v-if="tab==='matrix'" class="tab-content">
+        <div v-if="!hasMatrix" class="empty-state">{{ t('kpi.matrixEmpty') }}</div>
         <div v-for="(items, obj) in matrixGrouped" :key="obj" class="obj-group">
           <div class="obj-head">{{ obj }}</div>
           <div v-for="item in items" :key="item.og" class="obj-row">
@@ -112,6 +114,7 @@ const resetDefault = async () => {
 .reset-btn:hover{background:rgba(255,69,58,.08)}
 .tab-content{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:14px}
 .hint{font-size:11px;color:var(--t3);margin-bottom:12px}
+.empty-state{text-align:center;color:var(--t3);font-size:12px;padding:28px 0}
 
 .obj-group{margin-bottom:14px}
 .obj-head{font-size:13px;font-weight:600;color:var(--ac);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--bd)}

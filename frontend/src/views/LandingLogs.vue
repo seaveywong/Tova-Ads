@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { GET, POST } from '../api'
 import { ElMessage } from 'element-plus'
@@ -7,6 +7,10 @@ import { useI18n } from 'vue-i18n'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { useLatest } from '../composables/useLatest'
 import { fmtTime as tzFmtTime } from '../composables/useTz'
+import { usePlatform } from '../composables/usePlatform'
+import { countryLabel as _countryLabel } from '../composables/useCountries'
+import DatePresetBar from '../components/DatePresetBar.vue'
+import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -28,24 +32,8 @@ const REASON_LABEL = computed(() => ({
 }))
 const reasonLabel = (r) => REASON_LABEL.value[r] || r || ''
 
-// 国家码 → 国名（CF 给的是 2 字母 ISO 码；国名英文通用，zh/en 共用）
-const COUNTRY = {
-  US: 'United States', GB: 'United Kingdom', CA: 'Canada', AU: 'Australia', NZ: 'New Zealand', IE: 'Ireland',
-  DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', PT: 'Portugal', NL: 'Netherlands', BE: 'Belgium',
-  CH: 'Switzerland', AT: 'Austria', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland',
-  RO: 'Romania', GR: 'Greece', CZ: 'Czechia', HU: 'Hungary', BG: 'Bulgaria', RU: 'Russia', UA: 'Ukraine',
-  TR: 'Turkey', IL: 'Israel', AE: 'UAE', SA: 'Saudi Arabia', QA: 'Qatar', KW: 'Kuwait', EG: 'Egypt',
-  ZA: 'South Africa', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', MA: 'Morocco',
-  BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CL: 'Chile', CO: 'Colombia', PE: 'Peru', VE: 'Venezuela',
-  IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', LK: 'Sri Lanka', NP: 'Nepal',
-  ID: 'Indonesia', TH: 'Thailand', VN: 'Vietnam', PH: 'Philippines', MY: 'Malaysia', SG: 'Singapore', KH: 'Cambodia',
-  MM: 'Myanmar', LA: 'Laos', JP: 'Japan', KR: 'South Korea', CN: 'China', HK: 'Hong Kong', TW: 'Taiwan', MO: 'Macao',
-}
-const countryLabel = (c) => {
-  if (!c) return ''
-  const name = COUNTRY[String(c).toUpperCase()]
-  return name ? `${name} ${c}` : c
-}
+// 国家码 → 国名：中央 useCountries registry（zh/en 双语，未知码原样返回）
+const countryLabel = (c) => (c ? _countryLabel(c) : '')
 // 设备类型（英文通用）
 const DEVICE = { desktop: 'Desktop', tablet: 'Tablet', mobile: 'Mobile' }
 const PLATFORM_ZH = { android: 'Android', ios: 'iOS', windows: 'Win', mac: 'Mac', linux: 'Linux', chrome: 'ChromeOS' }
@@ -124,6 +112,14 @@ const fFrom = ref('')
 const fTo = ref('')
 const fQ = ref('')
 
+// 平台切换：只预筛账户下拉（行不过滤——落地事件跨平台，保持既定口径）
+const { platform } = usePlatform()
+const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
+const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
+watch(platform, () => {
+  if (fAct.value && !platAccounts.value.some(a => a.act_id === fAct.value)) { fAct.value = ''; search() }
+})
+
 const pages = ref([])
 const accounts = ref([])
 const items = ref([])
@@ -192,18 +188,25 @@ const load = async () => {
   if (isLatest()) loading.value = false
 }
 const search = () => { offset.value = 0; load() }
+// 文本框 300ms debounce 即搜（回车立即搜）
+let _debTimer = null
+const debounceSearch = () => {
+  if (_debTimer) clearTimeout(_debTimer)
+  _debTimer = setTimeout(() => search(), 300)
+}
+onUnmounted(() => { if (_debTimer) clearTimeout(_debTimer) })
 const reset = () => {
   fPage.value = ''; fAct.value = ''; fSlug.value = ''; fAd.value = ''; fEvent.value = ''; fDecision.value = ''; fSource.value = ''
   fFrom.value = ''; fTo.value = ''; fQ.value = ''; preset.value = ''; offset.value = 0; load()
 }
-// 日期快捷（按北京业务日，和后端查询基准对齐）
+// 日期快捷（按北京业务日，和后端查询基准对齐）；自定义区间收进 DatePresetBar
 const preset = ref('')
 const setPreset = (k) => {
   const r = presetRange(k)
   if (r) { fFrom.value = r[0]; fTo.value = r[1] }
   preset.value = k; offset.value = 0; load()
 }
-const onDateManual = () => { preset.value = '' }  // 手动改日期 → 取消快捷高亮
+const onCustomRange = ({ from, to }) => { fFrom.value = from; fTo.value = to; offset.value = 0; load() }
 const prev = () => { if (offset.value > 0) { offset.value = Math.max(0, offset.value - limit); load() } }
 const next = () => { if (offset.value + limit < total.value) { offset.value += limit; load() } }
 const jumpTo = ref('')
@@ -267,36 +270,33 @@ watch(() => route.query, (q) => {
   <div class="page">
     <div class="ctrl-bar">
       <h2 class="title">{{ t('lplogs.pageTitle') }} <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
-      <button v-for="opt in DATE_PRESETS" :key="opt.key" class="ctrl-btn sm" :class="{ on: preset === opt.key }" @click="setPreset(opt.key)">{{ opt.label }}</button>
-      <input type="date" v-model="fFrom" class="date-input" @change="onDateManual" />
-      <span class="sep">—</span>
-      <input type="date" v-model="fTo" class="date-input" @change="onDateManual" />
-      <select v-model="fPage" class="sel" @change="search">
-        <option value="">{{ t('lplogs.allLandingPages') }}</option>
-        <option v-for="p in pages" :key="p.id" :value="p.id">{{ p.title }}</option>
-      </select>
-      <select v-model="fAct" class="sel" @change="search">
-        <option value="">{{ t('lplogs.allAccounts') }}</option>
-        <option v-for="a in accounts" :key="a.act_id" :value="a.act_id">{{ a.name }}</option>
-      </select>
-      <select v-model="fEvent" class="sel" @change="search">
-        <option v-for="o in EVENT_TYPES" :key="o.v" :value="o.v">{{ o.l }}</option>
-      </select>
-      <select v-model="fDecision" class="sel" @change="search">
-        <option v-for="o in DECISIONS" :key="o.v" :value="o.v">{{ o.l }}</option>
-      </select>
-      <select v-model="fSource" class="sel" @change="search">
-        <option value="">{{ t('lplogs.allSources') }}</option>
-        <option value="controlled">{{ t('lplogs.adPrefix') }}·{{ t('lplogs.srcControlled') }}</option>
-        <option value="external">{{ t('lplogs.adPrefix') }}·{{ t('lplogs.srcExternal') }}</option>
-        <option value="crawler">{{ t('lplogs.srcCrawlerShort') }}</option>
-        <option value="placeholder">{{ t('lplogs.srcPlaceholder') }}</option>
-        <option value="unknown">{{ t('lplogs.directAccess') }}</option>
-      </select>
-      <input v-model="fSlug" class="txt" :placeholder="t('lplogs.subcode')" @keyup.enter="search" />
-      <input v-model="fAd" class="txt" :placeholder="t('lplogs.adId')" @keyup.enter="search" />
-      <input v-model="fQ" class="txt q" :placeholder="t('lplogs.searchPlaceholder')" @keyup.enter="search" />
-      <button class="ctrl-btn primary" @click="search">{{ t('common.search') }}</button>
+      <PlatformSeg v-model="platform" size="small" />
+      <DatePresetBar :presets="DATE_PRESETS" v-model="preset" @preset="setPreset" @custom="onCustomRange" />
+      <el-select v-model="fPage" class="fl-sel w-lg" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
+        <el-option :value="''" :label="t('lplogs.allLandingPages')" />
+        <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
+      </el-select>
+      <el-select v-model="fAct" class="fl-sel w-lg" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
+        <el-option :value="''" :label="t('lplogs.allAccounts')" />
+        <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" />
+      </el-select>
+      <el-select v-model="fEvent" class="fl-sel" @change="search">
+        <el-option v-for="o in EVENT_TYPES" :key="o.v" :value="o.v" :label="o.l" />
+      </el-select>
+      <el-select v-model="fDecision" class="fl-sel" @change="search">
+        <el-option v-for="o in DECISIONS" :key="o.v" :value="o.v" :label="o.l" />
+      </el-select>
+      <el-select v-model="fSource" class="fl-sel w-src" @change="search">
+        <el-option :value="''" :label="t('lplogs.allSources')" />
+        <el-option value="controlled" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcControlled')" />
+        <el-option value="external" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcExternal')" />
+        <el-option value="crawler" :label="t('lplogs.srcCrawlerShort')" />
+        <el-option value="placeholder" :label="t('lplogs.srcPlaceholder')" />
+        <el-option value="unknown" :label="t('lplogs.directAccess')" />
+      </el-select>
+      <input v-model="fSlug" class="txt" :placeholder="t('lplogs.subcode')" @input="debounceSearch" @keyup.enter="search" />
+      <input v-model="fAd" class="txt" :placeholder="t('lplogs.adId')" @input="debounceSearch" @keyup.enter="search" />
+      <input v-model="fQ" class="txt q" :placeholder="t('lplogs.searchPlaceholder')" @input="debounceSearch" @keyup.enter="search" />
       <button class="ctrl-btn" @click="reset">{{ t('lplogs.reset') }}</button>
     </div>
     <div class="stats-bar" v-if="stats">
@@ -366,12 +366,17 @@ watch(() => route.query, (q) => {
 .cnt { font-size: 13px; color: var(--t3); font-weight: 400 }
 .pg-title { font-size: 14px; color: var(--t2); font-weight: 500 }
 .pg-slug { font-size: 12px; color: var(--ac); font-family: monospace }
-.date-input, .sel, .txt { height: 32px; padding: 0 10px; background: var(--bg2); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark }
-.sel { min-width: 96px }
+.txt { height: 32px; padding: 0 10px; background: var(--bg2); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark }
 .txt { width: 96px }
 .txt.q { width: 180px }
-.date-input:focus, .sel:focus, .txt:focus { outline: none; border-color: var(--ac) }
-.sep { color: var(--t3); font-size: 12px }
+.txt:focus { outline: none; border-color: var(--ac) }
+.txt::placeholder { color: var(--t3) }
+/* el-select 筛选（与 .txt 同 32px 高，默认尺寸） */
+.fl-sel { width: 108px; flex-shrink: 0 }
+.fl-sel.w-lg { width: 150px }
+.fl-sel.w-src { width: 128px }
+.fl-sel :deep(.el-input__wrapper) { height: 32px; min-height: 32px; border-radius: var(--rs); box-shadow: 0 0 0 1px var(--bd) inset; background: var(--bg2) }
+.fl-sel :deep(.el-input__inner) { height: 32px; line-height: 30px; font-size: 13px }
 .ctrl-btn { height: 32px; padding: 0 14px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap }
 .ctrl-btn:hover { color: var(--t1); border-color: var(--bd2) }
 .ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac) }

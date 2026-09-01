@@ -117,6 +117,8 @@ const HUMAN = {
 }
 const fmtN = (n) => Number(n).toLocaleString()
 const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r))
+// action-tag 分色：observe=中性灰 / pause 系=warning / scale=success
+const actionTagCls = (a) => a === 'observe' ? 'act-observe' : a === 'scale' ? 'act-scale' : 'act-pause'
 // 命中时间格式化
 const hitLabel = (r) => {
   const h = r.hits
@@ -140,10 +142,20 @@ const onTypeChange = () => {
   if (scale && !['scale', 'observe'].includes(form.value.action)) form.value.action = 'scale'
   if (!scale && form.value.action === 'scale') form.value.action = 'pause'
 }
+// dirty-guard：打开时快照，关闭（点背景/取消）时有改动先确认，防误触丢编辑
+let _formSnapshot = ''
+const snapForm = () => { _formSnapshot = JSON.stringify(form.value) }
+const confirmDiscard = async () => {
+  if (JSON.stringify(form.value) === _formSnapshot) { editOpen.value = false; return }
+  try { await ElMessageBox.confirm(t('guard.discardConfirm'), t('guard.discardTitle'), { type: 'warning', confirmButtonText: t('guard.discard'), cancelButtonText: t('common.cancel') }) }
+  catch { return }  // 留在编辑弹窗
+  editOpen.value = false
+}
 const openCreate = () => {
   editing.value = null
   form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
   onTypeChange()
+  snapForm()
   editOpen.value = true
 }
 const openEdit = (r) => {
@@ -159,6 +171,7 @@ const openEdit = (r) => {
     action: r.action,
     scope_act_ids: r.scope_act_id ? r.scope_act_id.split(',').map(s => s.trim()).filter(Boolean) : [],
   }
+  snapForm()
   editOpen.value = true
 }
 const save = async () => {
@@ -240,11 +253,10 @@ const doInspect = async (force = false) => {
           <span class="rule-name">{{ r.name }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
-          <span class="action-tag">{{ ACTIONS[r.action] || r.action }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
         </div>
         <div class="rule-body">
-          <span class="rule-cond">{{ humanText(r) }} <span class="rule-arrow">→</span> <span class="rule-do">{{ ACTIONS[r.action] || r.action }}</span></span>
+          <span class="rule-cond">{{ humanText(r) }} <span class="rule-arrow">→</span> <span :class="['action-tag', actionTagCls(r.action)]">{{ ACTIONS[r.action] || r.action }}</span></span>
           <span v-if="hitLabel(r)" class="rule-hit" :class="{ active: r.hits?.count > 0 }">{{ hitLabel(r) }}</span>
           <span v-else class="rule-hit idle">{{ t('guard.noHits') }}</span>
         </div>
@@ -263,7 +275,7 @@ const doInspect = async (force = false) => {
       </div>
     </div>
 
-    <div v-if="editOpen" class="overlay" @click.self="editOpen=false">
+    <div v-if="editOpen" class="overlay" @click.self="confirmDiscard">
       <div class="modal">
         <div class="m-title">{{ editing ? t('guard.editTitle') : t('guard.createTitle') }}</div>
         <div class="form-l"><label>{{ t('guard.ruleName') }}</label><input v-model="form.name" class="input" :placeholder="t('guard.ruleNamePh')" /></div>
@@ -276,7 +288,7 @@ const doInspect = async (force = false) => {
           <div class="params-grid">
             <div v-for="sp in currentSchema.params" :key="sp.key" class="param-row">
               <span class="param-label">{{ sp.label }}</span>
-              <input v-model.number="form.params[sp.key]" type="number" class="input param-input" />
+              <input v-model.number="form.params[sp.key]" type="number" class="input param-input" :placeholder="sp.def" />
               <span class="param-unit">{{ sp.unit }}</span>
             </div>
           </div>
@@ -314,7 +326,7 @@ const doInspect = async (force = false) => {
             </el-option>
           </el-select>
         </div>
-        <div class="m-foot"><button class="btn" @click="editOpen=false">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
+        <div class="m-foot"><button class="btn" @click="confirmDiscard">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
       </div>
     </div>
   </div>
@@ -343,14 +355,16 @@ const doInspect = async (force = false) => {
 .cat-tag,.scope-tag,.action-tag{font-size:10px;padding:1px 7px;border-radius:9px;white-space:nowrap;line-height:1.5}
 .cat-tag{background:rgba(10,132,255,.12);color:var(--ac)}
 .scope-tag{background:var(--bg3);color:var(--t3)}
-.action-tag{background:rgba(255,159,10,.12);color:var(--warning)}
+.action-tag.act-observe{background:var(--bg3);color:var(--t3)}
+.action-tag.act-pause{background:rgba(255,159,10,.12);color:var(--warning)}
+.action-tag.act-scale{background:rgba(48,209,88,.12);color:var(--success)}
+.rule-body .action-tag{font-weight:600}
 .rule-head .el-switch{margin-left:auto}
 .rule-body{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;flex-wrap:wrap}
 .rule-type{color:var(--t2)}
 .rule-params{color:var(--t1);font-variant-numeric:tabular-nums}
 .rule-cond{color:var(--t1);font-size:12.5px}
 .rule-arrow{color:var(--t3);margin:0 4px}
-.rule-do{color:var(--warning);font-weight:500}
 .rule-hit{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--t3);font-variant-numeric:tabular-nums}
 .rule-hit.active{background:rgba(255,69,58,.12);color:var(--error)}
 .rule-hit.idle{opacity:.6}

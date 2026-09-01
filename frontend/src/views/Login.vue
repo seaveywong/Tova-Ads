@@ -68,8 +68,8 @@ const login = async () => {
 }
 .lang-toggle:hover { background: var(--acg); color: var(--ac); }
 .login-card {
-  width: 360px;
-  padding: 40px;
+  width: min(360px, 92vw);
+  padding: 32px 28px;
   background: var(--bg2);
   border-radius: var(--rs2);
   border: 1px solid var(--bd);

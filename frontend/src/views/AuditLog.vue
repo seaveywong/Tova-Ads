@@ -27,6 +27,8 @@ const actors = ref([])
 const fAction = ref('')
 const fUser = ref(0)
 const fTrace = ref('')
+// trace 检索模式下后端忽略其他筛选（buildParams 直返），前端同步禁用+变灰避免误解
+const traceActive = computed(() => !!fTrace.value.trim())
 const expandedRowIds = ref([])
 const PAGE_SIZE = 50
 const page = ref(1)
@@ -41,7 +43,7 @@ const buildParams = (forCount = false) => {
     if (!forCount) { p.limit = 200 }
     return p
   }
-  if (fAction.value.trim()) p.action_type = fAction.value.trim()
+  if (fAction.value) p.action_type = String(fAction.value).trim()
   if (fUser.value) p.actor_user_id = fUser.value
   if (dateRange.value && dateRange.value.length === 2) {
     p.date_from = dateRange.value[0]; p.date_to = dateRange.value[1]
@@ -73,6 +75,7 @@ const doJump = () => {
   goPage(n)
 }
 const onDateChange = () => { page.value = 1; load() }
+const onActionChange = () => { page.value = 1; load() }
 
 // 行内展开 trace（el-table expand）
 const onExpandChange = async (row, expandedRows) => {
@@ -118,13 +121,16 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
       </div>
 
       <div class="filters">
-        <div class="filter-item">
+        <div class="filter-item" :class="{ dim: traceActive }">
           <span class="flabel">{{ t('audit.fieldAction') }}</span>
-          <input v-model="fAction" class="input" :placeholder="t('audit.actionPlaceholder')" @keyup.enter="load" />
+          <el-select v-model="fAction" filterable allow-create default-first-option clearable size="small"
+            :placeholder="t('audit.actionPlaceholder')" style="width:220px" :disabled="traceActive" @change="onActionChange">
+            <el-option v-for="(lk, ak) in ACTION_ZH" :key="ak" :value="ak" :label="t(lk) + ' · ' + ak" />
+          </el-select>
         </div>
-        <div class="filter-item">
+        <div class="filter-item" :class="{ dim: traceActive }">
           <span class="flabel">{{ t('audit.fieldUser') }}</span>
-          <select v-model="fUser" class="sel" @change="load">
+          <select v-model="fUser" class="sel" :disabled="traceActive" @change="load">
             <option :value="0">{{ t('common.all') }}</option>
             <option v-for="a in actors" :key="a.id" :value="a.id">{{ a.email }}</option>
           </select>
@@ -133,10 +139,10 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
           <span class="flabel">{{ t('audit.fieldTrace') }}</span>
           <input v-model="fTrace" class="input mono" :placeholder="t('audit.tracePlaceholder')" @keyup.enter="load" />
         </div>
-        <div class="filter-item">
+        <div class="filter-item" :class="{ dim: traceActive }">
           <span class="flabel">{{ t('audit.fieldDate') }}</span>
           <el-date-picker v-model="dateRange" type="daterange" size="small" value-format="YYYY-MM-DD"
-            :start-placeholder="t('audit.dateStart')" :end-placeholder="t('audit.dateEnd')" style="width:240px" :shortcuts="pickerShortcuts" @change="onDateChange" />
+            :start-placeholder="t('audit.dateStart')" :end-placeholder="t('audit.dateEnd')" style="width:240px" :shortcuts="pickerShortcuts" :disabled="traceActive" @change="onDateChange" />
         </div>
         <button v-if="fAction || fUser || fTrace || (dateRange && dateRange.length)" class="clear" @click="resetFilters">{{ t('audit.clear') }}</button>
       </div>
@@ -233,6 +239,8 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 .jump-input{width:64px;background:var(--bg3);color:var(--t1);border:1px solid var(--bd);border-radius:var(--rs);padding:5px 8px;font-size:12px}
 .jump-input:focus{outline:none;border-color:var(--ac)}
 .filter-item{display:flex;align-items:center;gap:6px}
+.filter-item.dim{opacity:.45;pointer-events:none}
+.filter-item.dim .flabel{color:var(--t3)}
 .flabel{font-size:11px;color:var(--t3);font-weight:500}
 .input{padding:6px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:7px;color:var(--t1);font-size:12px;font-family:inherit;box-sizing:border-box;min-width:180px;transition:border-color .15s}
 .input:focus{border-color:var(--ac);outline:none}

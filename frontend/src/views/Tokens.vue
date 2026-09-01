@@ -525,6 +525,19 @@ const commitLoadIds = async () => {
   if (!ids.length) { ElMessage.warning(t('tokens.pasteIds')); return }
   await doImport(ids)
 }
+// 关闭载入账户 modal：有勾选未导入时先确认（防点背景/取消误丢一排勾选）
+const confirmCloseLoad = async () => {
+  if (!loadSelectedCount.value) { loadOpen.value = false; return }
+  try { await ElMessageBox.confirm(t('tokens.closeLoadConfirm', { n: loadSelectedCount.value }), t('common.confirm'), { type: 'warning', confirmButtonText: t('common.close'), cancelButtonText: t('common.cancel') }) }
+  catch { return }
+  loadOpen.value = false
+}
+const confirmCloseTtLoad = async () => {
+  if (!ttLoadSelectedCount.value) { ttLoadOpen.value = false; return }
+  try { await ElMessageBox.confirm(t('tokens.closeLoadConfirm', { n: ttLoadSelectedCount.value }), t('common.confirm'), { type: 'warning', confirmButtonText: t('common.close'), cancelButtonText: t('common.cancel') }) }
+  catch { return }
+  ttLoadOpen.value = false
+}
 
 // App
 const loadApps = async () => { appLoading.value = true; try { apps.value = await GET('/fb/apps') } catch { apps.value = [] }; appLoading.value = false }
@@ -692,7 +705,7 @@ const deleteToken = async (tk) => {
         <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>
         <span>{{ t('tokens.type') }}</span><span></span>
       </div>
-      <div v-for="tk in sortedTokens" :key="tk.id" class="row" :class="statusMeta(tk).dot" @click="openDrawer(tk)">
+      <div v-for="tk in sortedTokens" :key="tk.id" class="row" :class="statusMeta(tk).dot" :title="t('tokens.openDetailTip')" @click="openDrawer(tk)">
         <span class="c-st"><span class="dot" :class="statusMeta(tk).dot"></span>{{ statusMeta(tk).label }}</span>
         <span class="c-nm" @click.stop>
           <input v-if="editId===tk.id" v-model="editAlias" class="inp" @keyup.enter="saveEdit(tk)" @blur="saveEdit(tk)" />
@@ -722,6 +735,7 @@ const deleteToken = async (tk) => {
             </template>
           </el-dropdown>
         </span>
+        <span class="row-chevron">›</span>
       </div>
       <div v-if="!tokens.length && !loading" class="empty empty-cta">
         <div class="empty-title">{{ t('tokens.emptyTitle') }}</div>
@@ -833,7 +847,7 @@ const deleteToken = async (tk) => {
       <div v-if="drawerToken && assetCache[drawerToken.id]?.error" class="asset-err">{{ t('tokens.assetReadPartialShort') }}{{ assetCache[drawerToken.id].error }}</div>
     </el-drawer>
 
-    <div v-if="loadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="loadOpen=false">
+    <div v-if="loadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="confirmCloseLoad">
       <div class="modal wide">
         <div class="m-title">{{ t('tokens.importAccounts') }}</div>
         <div class="m-tabs">
@@ -857,7 +871,7 @@ const deleteToken = async (tk) => {
             <div v-if="!filteredLoadable.length && !loadLoading" class="drawer-empty">{{ t('tokens.noMatchAccounts') }}</div>
           </div>
           <div class="m-foot">
-            <button class="btn" @click="loadOpen=false">{{ t('common.cancel') }}</button>
+            <button class="btn" @click="confirmCloseLoad">{{ t('common.cancel') }}</button>
             <button class="btn primary" :disabled="loadImporting" @click="commitLoadList">{{ t('tokens.importSelected') }}</button>
           </div>
         </div>
@@ -865,14 +879,14 @@ const deleteToken = async (tk) => {
           <div class="hint-left">{{ t('tokens.idImportHint') }}</div>
           <textarea v-model="loadIdText" class="input load-area" placeholder="act_1234567890&#10;9876543210&#10;..."></textarea>
           <div class="m-foot">
-            <button class="btn" @click="loadOpen=false">{{ t('common.cancel') }}</button>
+            <button class="btn" @click="confirmCloseLoad">{{ t('common.cancel') }}</button>
             <button class="btn primary" :disabled="loadImporting" @click="commitLoadIds">{{ t('common.import') }}</button>
           </div>
         </div>
       </div>
     </div>
 
-    <div v-if="ttLoadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="ttLoadOpen=false">
+    <div v-if="ttLoadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="confirmCloseTtLoad">
       <div class="modal wide">
         <div class="m-title">{{ t('tokens.importAccounts') }} · TikTok</div>
         <div class="hint-left">{{ t('tokens.ttLoadHint') }}</div>
@@ -888,7 +902,7 @@ const deleteToken = async (tk) => {
           <div v-if="!filteredTtLoadable.length && !ttLoadLoading" class="drawer-empty">{{ t('tokens.ttNoLoadable') }}</div>
         </div>
         <div class="m-foot">
-          <button class="btn" @click="ttLoadOpen=false">{{ t('common.cancel') }}</button>
+          <button class="btn" @click="confirmCloseTtLoad">{{ t('common.cancel') }}</button>
           <button class="btn primary" :disabled="ttLoadImporting" @click="commitTtLoad">{{ t('tokens.importSelected') }}</button>
         </div>
       </div>
@@ -981,9 +995,9 @@ const deleteToken = async (tk) => {
 .mb:hover{color:var(--ac);border-color:var(--ac)}
 .mb.danger:hover{color:var(--error);border-color:var(--error)}
 
-/* 8 列：状态|名称|FB用户|账户|主页|BM|类型|操作 */
+/* 9 列：状态|名称|FB用户|账户|主页|BM|类型|操作|› */
 .tbl{border:1px solid var(--bd);border-radius:8px;overflow-x:auto}
-.row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) 52px 52px 52px 64px 36px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
+.row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) 52px 52px 52px 64px 36px 12px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
 .row.head{color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg2);cursor:default;padding:8px 14px}
 .row:not(.head):hover{background:var(--bg3)}
 .row.err{opacity:.65}
@@ -1011,6 +1025,8 @@ const deleteToken = async (tk) => {
 .tag.rotate{background:rgba(48,209,88,.1);color:var(--success);font-size:11px;padding:1px 5px}
 
 .c-op{display:flex;justify-content:center;align-items:center}
+.row-chevron{color:var(--t3);font-size:16px;line-height:1;justify-self:end;transition:color .15s,transform .15s}
+.row:hover .row-chevron{color:var(--ac);transform:translateX(2px)}
 .dots-btn{border:none;background:transparent;color:var(--t3);font-size:16px;cursor:pointer;padding:0 6px;border-radius:4px;line-height:1;transition:.15s}
 .dots-btn:hover{background:var(--bg3);color:var(--t1)}
 .dots-btn.small{font-size:14px;padding:0 4px}
@@ -1133,5 +1149,13 @@ const deleteToken = async (tk) => {
 .tt-cell-v{display:flex;align-items:center;gap:6px}
 .tt-val{font-size:12px;color:var(--t2)}
 .btn.tt-reauth{padding:3px 10px;font-size:11px}
-@media (max-width:720px){.tt-card{grid-template-columns:1fr 1fr;row-gap:10px}}
+@media (max-width:768px){
+  /* TT 卡片纵向堆叠：状态+操作一行，其余换行铺开 */
+  .tt-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  .tt-card .c-st{order:1}
+  .tt-card .c-op{order:2;margin-left:auto}
+  .tt-card .tt-main{order:3;flex:1 1 100%}
+  .tt-card > .st-tag{order:4}
+  .tt-card .tt-cell{order:5}
+}
 </style>

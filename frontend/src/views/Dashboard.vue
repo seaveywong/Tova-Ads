@@ -13,6 +13,7 @@ import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
+import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -116,13 +117,20 @@ watch(datePreset, () => {
 
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
-const { platform, setPlatform } = usePlatform()
-const platOpts = computed(() => [
-  { v: 'all', label: t('common.all') }, { v: 'fb', label: 'Facebook' }, { v: 'tt', label: 'TikTok' },
-])
+const { platform } = usePlatform()
+// 分区范围 chip：平台≠all 时显示 "Facebook · N 账户"（后端已按平台过滤 accounts，直接取长度）
+const scopeChip = computed(() => {
+  if (platform.value === 'all') return ''
+  const plat = platform.value === 'fb' ? 'Facebook' : 'TikTok'
+  return `${plat} · ${t('dashboard.scopeAccounts', { n: (data.value.accounts || []).length })}`
+})
 watch(platform, () => {
   // 平台切换：所选账户可能不属于新平台——先清再拉，防"选中但永不匹配"的空数据
-  if (platform.value !== 'all' && selectedActs.value.length) selectedActs.value = []
+  if (platform.value !== 'all' && selectedActs.value.length) {
+    const n = selectedActs.value.length
+    selectedActs.value = []
+    ElMessage.info(t('dashboard.clearedActs', { n }))
+  }
   loadDashboard()
   loadTrend()
 })
@@ -211,10 +219,10 @@ const landingCards = computed(() => {
     { label: t('dashboard.kpiVisits'), value: fmt(tk.visits), color: 'blue', mode: 'visits', clickable: true },
     { label: t('dashboard.kpiPass'), value: fmt(tk.clicks), color: 'green', mode: 'clicks', clickable: true },
     { label: t('dashboard.kpiBlocked'), value: fmt(tk.blocked), color: 'red', mode: 'blocked', clickable: (tk.blocked || 0) > 0 },
-    { label: t('dashboard.kpiPassRate'), value: fmtPct(tk.pass_rate), color: 'cyan', mode: 'pass_rate', clickable: true },
+    { label: t('dashboard.kpiPassRate'), value: fmtPct(tk.pass_rate), color: 'gray', mode: 'pass_rate', clickable: true },
     { label: t('dashboard.kpiBlockRate'), value: fmtPct(tk.block_rate), color: 'orange', mode: 'block_rate', clickable: (tk.blocked || 0) > 0 },
-    { label: t('dashboard.kpiSpend'), value: fmtUsd(tk.spend_usd), color: 'purple', mode: 'spend', clickable: true },
-    { label: t('dashboard.kpiCpc'), value: tk.cpc ? '$'+tk.cpc : '—', color: 'teal', mode: 'cpc', clickable: true },
+    { label: t('dashboard.kpiSpend'), value: fmtUsd(tk.spend_usd), color: 'blue', mode: 'spend', clickable: true },
+    { label: t('dashboard.kpiCpc'), value: tk.cpc ? '$'+tk.cpc : '—', color: 'gray', mode: 'cpc', clickable: true },
   ]
 })
 const toggleLandingKpi = (i) => {
@@ -427,15 +435,16 @@ const forceRefresh = async () => {
 
 // KPI 卡点击展开
 const kpiExpanded = ref(null)
+// KPI 卡语义 3 色：红=自动暂停、橙=警告类（CPA）、绿=正向转化；其余中性 --ac(blue)/灰(gray)
 const cards = computed(() => [
   { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, color: 'blue', mode: 'spend', clickable: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : '' },
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), color: 'green', mode: 'conv', clickable: true },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), color: 'orange', mode: 'cpa', clickable: true },
-  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'purple', mode: 'roas', clickable: true },
+  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'gray', mode: 'roas', clickable: true },
   { label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), color: 'red', mode: 'pause', clickable: data.value.pause_count > 0 },
-  { label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count), color: 'cyan', mode: 'allowance', clickable: data.value.allowance_count > 0 },
-  { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), color: 'teal', mode: 'balance', clickable: true },
-  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || a.error === 'cross_tz').length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'indigo', mode: 'coverage', clickable: true },
+  { label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count), color: 'gray', mode: 'allowance', clickable: data.value.allowance_count > 0 },
+  { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), color: 'gray', mode: 'balance', clickable: true },
+  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || a.error === 'cross_tz').length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'gray', mode: 'coverage', clickable: true },
 ])
 const kpiDetail = computed(() => {
   if (kpiExpanded.value === null) return null
@@ -695,6 +704,11 @@ const lastInspectedDisplay = computed(() => {
   const latest = new Date(Math.max(...times))
   return fmtTime(latest.toISOString())
 })
+// 移动端：两个时间戳合并为一个图标 + tooltip（桌面仍分行显示）
+const sysTimesTitle = computed(() => [
+  lastUpdated.value ? `${t('dashboard.dataUpdated')} ${fmtAgo(lastUpdated.value)}` : '',
+  lastInspectedDisplay.value ? `${t('dashboard.lastInspect')} ${lastInspectedDisplay.value}` : '',
+].filter(Boolean).join('\n'))
 const updateCountdown = () => {
   const state = inspectState.value
   if (state === 'idle') { countdown.value = t('dashboard.cdWaitingFirst'); return }
@@ -772,36 +786,48 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <div class="top-loader" :class="{ active: appLoading }"><div class="top-loader-bar"></div></div>
 
     <div class="sticky-top">
-    <div class="date-bar">
-        <el-radio-group :model-value="platform" size="small" class="plat-seg" @update:model-value="setPlatform">
-          <el-radio-button v-for="p in platOpts" :key="p.v" :value="p.v">{{ p.label }}</el-radio-button>
-        </el-radio-group>
-        <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
-        <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
-                   :title="t('dashboard.convCatTitle')">
-          <el-option value="all" :label="t('dashboard.convAll')" />
-          <el-option value="shopping" :label="t('dashboard.convShopping')" />
-          <el-option value="messaging" :label="t('dashboard.convMessaging')" />
-          <el-option value="leads" :label="t('dashboard.convLeads')" />
-          <el-option value="engagement" :label="t('dashboard.convEngagement')" />
-          <el-option value="traffic" :label="t('dashboard.convTraffic')" />
-        </el-select>
+      <div class="filter-row r1">
+        <PlatformSeg v-model="platform" size="small" />
+        <div class="fg-sep">
+          <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
+        </div>
+      </div>
+      <div class="filter-row r2">
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('dashboard.convCat') }}</span>
+          <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
+                     :placeholder="t('dashboard.convCat')" :title="t('dashboard.convCatTitle')">
+            <el-option value="all" :label="t('dashboard.convAll')" />
+            <el-option value="shopping" :label="t('dashboard.convShopping')" />
+            <el-option value="messaging" :label="t('dashboard.convMessaging')" />
+            <el-option value="leads" :label="t('dashboard.convLeads')" />
+            <el-option value="engagement" :label="t('dashboard.convEngagement')" />
+            <el-option value="traffic" :label="t('dashboard.convTraffic')" />
+          </el-select>
+        </div>
         <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
                    @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
                    :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
           <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="platPrefix(a) + a.name" />
         </el-select>
         <div class="sys-info">
-          <span v-if="lastUpdated" class="sync-time">{{ t('dashboard.dataUpdated') }} {{ fmtAgo(lastUpdated) }}</span>
-          <span v-if="lastInspectedDisplay" class="sync-time">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
+          <span v-if="lastUpdated" class="sync-time hide-m">{{ t('dashboard.dataUpdated') }} {{ fmtAgo(lastUpdated) }}</span>
+          <span v-if="lastInspectedDisplay" class="sync-time hide-m">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
+          <span v-if="sysTimesTitle" class="sync-time only-m sys-times" :title="sysTimesTitle"><el-icon><Clock /></el-icon></span>
           <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
-          <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</button>
+          <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">
+            <el-icon><Refresh /></el-icon><span class="btn-txt">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</span>
+          </button>
           <button v-if="isSuper" class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
-          <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">📋 {{ t('dashboard.copySpendBtn') }}</button>
-          <button class="refresh-btn" :disabled="exporting" @click="exportAccounts">⬇ {{ exporting ? t('common.loading') : t('common.exportCsv') }}</button>
+          <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">
+            <el-icon><Document /></el-icon><span class="btn-txt">{{ t('dashboard.copySpendBtn') }}</span>
+          </button>
+          <button class="refresh-btn" :disabled="exporting" @click="exportAccounts" :title="t('common.exportCsv')">
+            <el-icon><Download /></el-icon><span class="btn-txt">{{ exporting ? t('common.loading') : t('common.exportCsv') }}</span>
+          </button>
         </div>
       </div>
-    <div class="anchor-strip">
+      <div class="anchor-strip">
       <button class="anchor-btn" :class="{ active: activeSection === 'ads' }" @click="scrollToSection('ads')">{{ t('dashboard.secAds') }}</button>
       <button class="anchor-btn" :class="{ active: activeSection === 'landing' }" @click="scrollToSection('landing')">{{ t('dashboard.secLanding') }}</button>
     </div>
@@ -809,6 +835,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 
     <section id="ads" class="dash-section ads">
       <div class="dash-head"><span class="dash-title">{{ t('dashboard.secAds') }}</span><span class="dash-sub">{{ t('dashboard.secAdsSub') }}</span>
+        <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
         <div class="unit-toggle" :title="multiCurrency && spendUnit === 'native' ? t('dashboard.multiCurHint') : ''">
           <button class="ut-btn" :class="{ on: spendUnit === 'usd' }" @click="spendUnit = 'usd'">{{ t('dashboard.unitUsd') }}</button>
           <button class="ut-btn" :class="{ on: spendUnit === 'native' }" @click="spendUnit = 'native'">{{ t('dashboard.unitNative') }}</button>
@@ -945,7 +972,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     </el-drawer>
 
     <section id="landing" class="dash-section landing">
-      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span><button class="refresh-btn" style="margin-left:auto" @click="exportLanding">⬇ {{ t('common.exportCsv') }}</button></div>
+      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span>
+        <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
+        <button class="refresh-btn" style="margin-left:auto" @click="exportLanding"><el-icon><Download /></el-icon><span class="btn-txt">{{ t('common.exportCsv') }}</span></button></div>
       <div v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
         <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" @click="toggleLandingKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
@@ -1083,14 +1112,14 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .dash-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--ac); }
 .dash-section.landing .dash-title::before { background: var(--success); }
 .dash-sub { font-size: 12px; color: var(--t3); }
+/* 平台范围 chip（平台≠all 时显示 "Facebook · N 账户"） */
+.scope-chip { display: inline-flex; align-items: center; align-self: center; height: 20px; padding: 0 9px; border-radius: 10px; background: var(--bg3); color: var(--t2); font-size: 11px; white-space: nowrap; }
 /* KPI 本币/USD 切换 */
 .unit-toggle { margin-left: auto; display: flex; gap: 2px; }
 .ut-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
 .ut-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 
-/* 趋势占位（第二批填充）*/
-.trend-placeholder { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 28px; background: var(--bg3); border: 1px dashed var(--bd2, var(--bd)); border-radius: var(--rs); color: var(--t3); font-size: 13px; }
-.trend-placeholder .el-icon { font-size: 20px; color: var(--ac); }
+/* 趋势区 */
 .trend-section { margin-bottom: 14px; }
 .trend-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .trend-title { font-size: 13px; font-weight: 600; color: var(--t1); }
@@ -1103,26 +1132,19 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .tc-label { font-size: 11px; color: var(--t3); margin-bottom: 4px; }
 .tc-canvas { height: 120px; }
 .trend-empty { text-align: center; color: var(--t3); padding: 24px; font-size: 13px; background: var(--bg2); border: 1px dashed var(--bd); border-radius: 8px; }
-.trend-chart { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; margin-bottom: 12px; }
-.trend-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
-.sparkline { flex: 1; height: 28px; }
 
 /* 分区内子块标题（区别于分区大标题）*/
 .block-title { font-size: 14px; font-weight: 600; color: var(--t1); }
 .task-block { display: flex; flex-direction: column; gap: 8px; }
 
-.date-bar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.plat-seg { margin-right: 6px; }
-.date-bar .filter-select { width: 110px; }
-.date-bar .act-filter { width: 180px; }
-.date-btn { padding: 6px 14px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; cursor: pointer; transition: all 0.15s; }
-.date-btn:hover { color: var(--t1); border-color: var(--bd2); }
-.date-btn.active { background: var(--ac); color: #fff; border-color: var(--ac); }
-.date-btn.apply { background: var(--ac); color: #fff; border-color: var(--ac); margin-left: 4px; }
-.custom-range { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
-.date-input { background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); padding: 5px 10px; font-size: 13px; color-scheme: dark; }
-.date-input:focus { outline: none; border-color: var(--ac); }
-.date-sep { color: var(--t3); font-size: 13px; }
+/* sticky 筛选区两行式：r1=平台分段+日期条（竖分隔线隔开）、r2=转化分类+账户+系统信息 */
+.filter-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.filter-row.r2 { gap: 8px; margin-top: 8px; }
+.fg-sep { display: flex; align-items: center; flex-wrap: wrap; border-left: 1px solid var(--bd); padding-left: 12px; min-height: 30px }
+.labeled-select { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
+.ls-label { font-size: 12px; color: var(--t3); white-space: nowrap }
+.filter-row .filter-select { width: 120px; }
+.filter-row .act-filter { width: 180px; }
 .sync-time { font-size: 11px; color: var(--t3); }
 .sync-time.countdown {
   font-family: 'SF Mono', 'Fira Code', monospace; font-variant-numeric: tabular-nums;
@@ -1140,17 +1162,27 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 /* 系统信息区 */
 .sys-info { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .refresh-btn {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 12px; background: var(--acg); color: var(--ac);
   border: 1px solid var(--ac); border-radius: var(--rs);
   font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
 }
+.refresh-btn .el-icon { font-size: 14px }
 .refresh-btn:hover { background: var(--ac); color: #fff; }
 .refresh-btn:disabled { opacity: 0.6; cursor: wait; }
-.refresh-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
-.refresh-btn.primary:hover { filter: brightness(1.08); background: var(--ac); }
 .refresh-btn.force { color: var(--warning); border-color: rgba(255,159,10,.5); background: transparent; }
 .refresh-btn.force:hover { background: rgba(255,159,10,.12); border-color: var(--warning); }
 .refresh-btn.force:disabled { opacity: .6; }
+/* 移动端：sys-info 文字按钮收成图标 + 两时间戳合并为一个 tooltip 入口 */
+.sync-time.only-m, .sys-times { display: none }
+@media (max-width: 768px) {
+  .sys-info { gap: 8px }
+  .sys-info .btn-txt { display: none }
+  .sys-info .refresh-btn { padding: 5px 8px }
+  .sync-time.hide-m { display: none }
+  .sys-times { display: inline-flex; align-items: center; cursor: help }
+  .sys-times .el-icon { font-size: 13px; color: var(--t3) }
+}
 /* 顶部加载进度条（数据加载/采集时显示，仿 1.0）*/
 .top-loader { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.25s; }
 .top-loader.active { opacity: 1; }
@@ -1176,9 +1208,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .stat-card.clickable:hover { border-color: var(--ac); transform: translateY(-1px); }
 .stat-card.active { border-color: var(--ac); background: var(--bg3); }
 .stat-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-/* KPI 卡色条：走 CSS 变量（主题自适应）；main.css 无对应变量的（purple/cyan/teal/indigo）在主题变量基础上补 */
+/* KPI 卡语义 3 色条：蓝=--ac 中性、绿=正向、橙=警告、红=危险、灰=其余中性 */
 .blue::before { background: var(--ac); } .green::before { background: var(--success); } .orange::before { background: var(--warning); }
-.purple::before { background: var(--purple, #bf5af2); } .red::before { background: var(--error); } .cyan::before { background: var(--cyan, #64d2ff); } .teal::before { background: var(--teal, #5ac8fa); } .indigo::before { background: var(--indigo, #5e5ce6); }
+.red::before { background: var(--error); } .gray::before { background: var(--bd2); }
 .stat-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
 .stat-value { font-size: 24px; font-weight: 600; color: var(--t1); letter-spacing: -0.02em; }
 .stat-sub { font-size: 10px; color: var(--t3); margin-top: -2px; }
@@ -1192,9 +1224,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .kpi-detail-panel .detail-table td { cursor: pointer; }
 .kpi-detail-panel .detail-table tbody tr:hover { background: var(--bg3); }
 
-/* section 容器（KPI/任务/落地页 统一：标题 + 内容，gap 10px）*/
-.kpi-section, .task-section { display: flex; flex-direction: column; gap: 10px; }
-.section-title { font-size: 16px; font-weight: 600; color: var(--t1); }
+/* 任务卡 */
 .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
 .task-card {
   display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
@@ -1239,10 +1269,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-header { padding: 12px 16px; border-bottom: 1px solid var(--bd); display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; color: var(--t1); }
 .detail-close { cursor: pointer; color: var(--t3); font-size: 18px; }
 .detail-close:hover { color: var(--t1); }
-/* 平台小标（账户名前的 FB/TT chip，品牌色调在明暗主题均可读） */
-.plat-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 6px; line-height: 16px; vertical-align: 1px; }
-.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
-.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
+/* 平台小标（plat-chip）已收敛到 main.css 全局类 */
 .detail-table { width: 100%; border-collapse: collapse; }
 .detail-table th { padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--t3); border-bottom: 1px solid var(--bd); white-space: nowrap; }
 .detail-table th.left { text-align: left; } .detail-table th.right { text-align: right; }
@@ -1253,9 +1280,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-table tbody tr.selected-row { background: var(--acg); }
 .detail-table tbody tr.selected-row td { color: var(--ac); font-weight: 500; }
 
-/* 落地页流量 */
-.landing-section { display: flex; flex-direction: column; gap: 10px; }
-/* 落地页汇总卡复用 .stat-grid/.stat-card（和广告版 KPI 卡同款）*/
+/* 落地页流量：汇总卡复用 .stat-grid/.stat-card（和广告版 KPI 卡同款）*/
 .text-danger { color: var(--error) !important; }
 .pill.good { background: rgba(48,209,88,0.1); color: var(--success); }
 .pill.waste { background: rgba(255,69,58,0.1); color: var(--error); }
@@ -1272,8 +1297,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .bar-fill.danger { background: var(--error); }
 .bar-val { width: 44px; text-align: right; color: var(--t1); font-family: 'SF Mono', 'Fira Code', monospace; flex-shrink: 0; }
 
-/* 两列 */
-.bottom-grid { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+/* 卡片 */
 .card { background: var(--bg2); border-radius: var(--rs); border: 1px solid var(--bd); overflow: hidden; box-shadow: var(--shadow-card); }
 .card-header { padding: 14px 20px; border-bottom: 1px solid var(--bd); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .card-title { font-size: 16px; font-weight: 600; color: var(--t1); white-space: nowrap; }
@@ -1305,7 +1329,6 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .acc-table td.left { text-align: left; } .acc-table td.right { text-align: right; } .acc-table td.center { text-align: center; }
 .acc-table tbody tr { cursor: pointer; transition: background 0.1s; }
 .acc-table tbody tr:hover { background: var(--bg3); }
-.acc-table tbody tr.error-row { background: rgba(255,69,58,0.04); cursor: default; }
 .acc-table tbody tr.removed-row { opacity: .55; cursor: default; }
 .acc-table tbody tr.removed-row:hover { background: transparent; }
 .acc-name { font-weight: 500; color: var(--t1); font-size: 13px; }
@@ -1314,10 +1337,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .allow-btn { padding: 3px 10px; border: 1px solid var(--bd); background: transparent; color: var(--t2); border-radius: 4px; font-size: 11px; cursor: pointer; white-space: nowrap; }
 .allow-btn:hover { color: var(--success); border-color: var(--success); }
 .allow-btn.remove:hover { color: var(--error); border-color: var(--error); }
-.usd-eq { color: var(--t3) !important; font-size: 12px; }
 .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; white-space: nowrap; }
-.pill.ok { background: rgba(48,209,88,0.1); color: var(--success); }
-.pill.error { background: rgba(255,69,58,0.1); color: var(--error); }
 
 /* 告警 */
 .notif-list { padding: 6px 4px; max-height: 280px; overflow-y: auto; }
@@ -1339,13 +1359,6 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .nd-body-val { color: var(--t1); word-break: break-word; cursor: pointer; transition: color 0.15s; }
 .nd-body-val:hover { color: var(--ac); }
 .nd-body-empty { padding: 8px; color: var(--t3); }
-.nd-meta { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-.nd-meta div { font-size: 12px; color: var(--t3); display: flex; gap: 8px; }
-.nd-meta label { color: var(--t3); min-width: 46px; }
-.nd-meta code { font-family: 'SF Mono', monospace; color: var(--t2); }
-.nd-actions { display: flex; gap: 8px; }
-.nd-btn { padding: 5px 12px; background: var(--acg); color: var(--ac); border: 1px solid var(--ac); border-radius: var(--rs); font-size: 12px; cursor: pointer; transition: all 0.15s; }
-.nd-btn:hover { background: var(--ac); color: #fff; }
 .notif-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
 .notif-dot.critical { background: var(--error); }
 .notif-dot.warning { background: var(--warning); }
@@ -1353,8 +1366,6 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .notif-content { flex: 1; min-width: 0; }
 .notif-text { font-size: 13.5px; color: var(--t1); line-height: 1.45; }
 .notif-meta { font-size: 11px; color: var(--t3); margin-top: 5px; }
-.notif-arrow { font-size: 14px; color: var(--t3); margin-top: 5px; transition: transform 0.2s; }
-.notif-arrow.rotated { transform: rotate(180deg); }
 .ack-btn { padding: 3px 12px; background: var(--acg); color: var(--ac); border: 1px solid var(--ac); border-radius: var(--rs); font-size: 11px; cursor: pointer; flex-shrink: 0; margin-top: 2px; transition: all 0.15s; }
 .ack-btn:hover { background: var(--ac); color: #fff; }
 .acked-tag { font-size: 11px; color: var(--t3); flex-shrink: 0; margin-top: 4px; }
@@ -1370,5 +1381,5 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .empty { padding: 40px; text-align: center; color: var(--t3); font-size: 14px; }
 
 @media (max-width: 1280px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } .block-detail .block-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 768px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } .bottom-grid { grid-template-columns: 1fr; } .block-detail .block-grid { grid-template-columns: 1fr; } .landing-summary { gap: 14px; } }
+@media (max-width: 768px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } .block-detail .block-grid { grid-template-columns: 1fr; } }
 </style>

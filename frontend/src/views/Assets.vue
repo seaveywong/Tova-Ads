@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -15,6 +15,15 @@ const loading = ref(false)
 const fType = ref('')
 const fTag = ref('')
 const fSearch = ref('')
+// 名称搜索 300ms debounce（el-input clearable 清空也走 model 变化 → 同一节流）
+let _searchTimer = null
+watch(fSearch, () => {
+  if (_searchTimer) clearTimeout(_searchTimer)
+  _searchTimer = setTimeout(load, 300)
+})
+const loadNow = () => { if (_searchTimer) { clearTimeout(_searchTimer); _searchTimer = null } load() }
+const clearFilters = () => { fType.value = ''; fTag.value = ''; fSearch.value = ''; if (_searchTimer) { clearTimeout(_searchTimer); _searchTimer = null } load() }
+const hasActiveFilter = computed(() => !!(fType.value || fTag.value || fSearch.value.trim()))
 // AI 识别开关（per-user；关=只手填，开=显示 AI分析按钮）
 const aiOn = ref(localStorage.getItem('tova_ai_on') === '1')
 const toggleAi = (v) => { aiOn.value = v; localStorage.setItem('tova_ai_on', v ? '1' : '0') }
@@ -36,7 +45,7 @@ const editingName = ref('')
 const analyzingIds = ref(new Set())
 const analyzeElapsed = ref({})  // {id: 秒}
 let _analyzeTimer = null
-onUnmounted(() => { if (_analyzeTimer) { clearInterval(_analyzeTimer); _analyzeTimer = null } })
+onUnmounted(() => { if (_analyzeTimer) { clearInterval(_analyzeTimer); _analyzeTimer = null }; if (_searchTimer) clearTimeout(_searchTimer) })
 const _tickAnalyze = () => {
   for (const id of analyzingIds.value) {
     analyzeElapsed.value[id] = (analyzeElapsed.value[id] || 0) + 1
@@ -206,16 +215,21 @@ const editTags = async (a) => {
 
 // AI 分析（raw fetch，绕 30s 超时——视频抽帧+视觉可能更久）
 const _lastPurpose = ref('')  // 记上次投放目的，批量分析同目的省得重输
-const analyze = async (a) => {
-  // 先问投放目的（自由文本，可选）→ 注入 AI prompt；重新分析时回填该素材上次的目的
-  let purpose = a.ai_purpose || _lastPurpose.value || ''
-  try {
-    const g = await ElMessageBox.prompt(t('assets.purposePrompt'), t('assets.purposeTitle'), {
-      confirmButtonText: t('assets.analyze'), cancelButtonText: t('assets.analyzeNoGoal'),
-      inputType: 'textarea', inputValue: purpose, inputPlaceholder: t('assets.purposePlaceholder'),
-    })
-    purpose = (g.value || '').trim(); _lastPurpose.value = purpose
-  } catch { /* 点"直接分析"= 用回填/上次目的或空 */ }
+const analyze = async (a, presetPurpose) => {
+  // 投放目的（自由文本，可选）→ 注入 AI prompt。presetPurpose=批量模式整批共用不弹窗；单个模式弹窗并回填上次值
+  let purpose
+  if (presetPurpose !== undefined) {
+    purpose = presetPurpose
+  } else {
+    purpose = a.ai_purpose || _lastPurpose.value || ''
+    try {
+      const g = await ElMessageBox.prompt(t('assets.purposePrompt'), t('assets.purposeTitle'), {
+        confirmButtonText: t('assets.analyze'), cancelButtonText: t('assets.analyzeNoGoal'),
+        inputType: 'textarea', inputValue: purpose, inputPlaceholder: t('assets.purposePlaceholder'),
+      })
+      purpose = (g.value || '').trim(); _lastPurpose.value = purpose
+    } catch { /* 点"直接分析"= 用回填/上次目的或空 */ }
+  }
   analyzingIds.value.add(a.id)
   analyzeElapsed.value[a.id] = 0
   if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
@@ -251,12 +265,23 @@ const batchAnalyzing = ref(false)
 const batchAnalyze = async () => {
   if (!selCount.value) return
   if (analyzingIds.value.size > 0) return ElMessage.warning(t('assets.someAnalyzing'))
+  // 投放目的整批只问一次：有上次值直接沿用，没有才弹一次；循环内逐个分析不再弹窗
+  let purpose = _lastPurpose.value
+  if (!purpose) {
+    try {
+      const g = await ElMessageBox.prompt(t('assets.purposePrompt'), t('assets.purposeTitle'), {
+        confirmButtonText: t('assets.analyze'), cancelButtonText: t('assets.analyzeNoGoal'),
+        inputType: 'textarea', inputPlaceholder: t('assets.purposePlaceholder'),
+      })
+      purpose = (g.value || '').trim(); _lastPurpose.value = purpose
+    } catch { purpose = '' }   // 点"直接分析"= 空目的
+  }
   batchAnalyzing.value = true
   const ids = [...selected.value]
   let ok = 0, fail = 0
   for (const id of ids) {
     const a = assets.value.find(x => x.id === id)
-    if (a) await analyze(a).then(() => { ok++ }).catch(() => { fail++ })
+    if (a) await analyze(a, purpose).then(() => { ok++ }).catch(() => { fail++ })
   }
   batchAnalyzing.value = false
   if (fail) ElMessage.warning(t('assets.batchDonePartial', { ok, fail }))
@@ -400,7 +425,7 @@ const countryLabel = (code) => {
         <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable size="small" style="width:140px" @change="load">
           <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
         </el-select>
-        <input v-model="fSearch" class="search-input" :placeholder="t('assets.searchNamePh')" @keyup.enter="load" />
+        <el-input v-model="fSearch" :placeholder="t('assets.searchNamePh')" clearable size="small" style="width:180px" @keyup.enter="loadNow" />
       </div>
       <div class="bar-r">
         <div class="ai-toggle" :title="aiOn ? t('assets.aiOnTitle') : t('assets.aiOffTitle')">
@@ -487,7 +512,11 @@ const countryLabel = (code) => {
           <button class="op danger" @click="remove(a)">{{ t('common.delete') }}</button>
         </div>
       </div>
-      <div v-if="!assets.length && !loading" class="empty">{{ t('assets.empty') }}</div>
+      <div v-if="!assets.length && !loading" class="empty">
+        <div>{{ hasActiveFilter ? t('assets.emptyFiltered') : t('assets.empty') }}</div>
+        <button v-if="hasActiveFilter" class="btn empty-cta" @click="clearFilters">{{ t('assets.clearFilter') }}</button>
+        <button v-else class="btn primary empty-cta" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
+      </div>
     </div>
 
     <!-- 批量打标签弹窗 -->
@@ -621,8 +650,6 @@ const countryLabel = (code) => {
 .seg { padding: 5px 12px; border: none; background: transparent; color: var(--t3); font-size: 12px; border-radius: 5px; cursor: pointer; font-family: inherit; }
 .seg.on { background: var(--bg2); color: var(--t1); }
 .seg:hover { color: var(--t1); }
-.search-input { padding: 5px 10px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 6px; color: var(--t1); font-size: 12px; width: 160px; }
-.search-input:focus { border-color: var(--ac); outline: none; }
 
 .btn { padding: 7px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t1); border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
 .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
@@ -699,7 +726,8 @@ const countryLabel = (code) => {
 .op.primary-op { color: var(--ac); }
 .op.primary-op:hover { background: rgba(10,132,255,.12); }
 .op:disabled { opacity: .5; cursor: wait; }
-.empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--t3); font-size: 14px; }
+.empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--t3); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.empty-cta { align-self: center; }
 
 /* 上传抽屉 */
 .drop-zone { border: 2px dashed var(--bd); border-radius: 10px; padding: 30px; text-align: center; margin-bottom: 14px; transition: border-color .15s; }

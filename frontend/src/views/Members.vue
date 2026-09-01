@@ -228,7 +228,7 @@ const permLabel = (key) => {
         <div class="form-l"><label>{{ t('members.password') }}</label><input v-model="inviteForm.password" class="input" type="password" autocomplete="new-password" :placeholder="t('members.passwordPlaceholder')" /></div>
         <div class="form-l"><label>{{ t('members.colRole') }}</label>
           <select v-model="inviteForm.role" class="input">
-            <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}（{{ t('members.permCount', { n: r.permissions.length }) }}）</option>
+            <option v-for="r in roles" :key="r.id" :value="r.name">{{ roleLabel(r.name) }}（{{ t('members.permCount', { n: r.permissions.length }) }}）</option>
           </select>
         </div>
         <div class="m-foot"><button class="btn" @click="inviteOpen=false">{{ t('common.cancel') }}</button><button class="btn primary" :disabled="inviteSaving" @click="submitInvite">{{ inviteSaving ? t('members.inviting') : t('members.invite') }}</button></div>

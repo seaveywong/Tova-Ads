@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { GET, PATCH, PUT, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
@@ -8,6 +9,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbErrorText } from '../composables/useFbError'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 // 时区
 const TZ_OPTIONS = computed(() => [
@@ -428,7 +431,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]) })   // 并行——原 7 串行吃满 7 个 RTT
+onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -522,8 +525,26 @@ const anchorSections = computed(() => {
   if (isSuper.value || (myPerms.value || []).includes('ads.pause')) secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
   return secs
 })
-// Tab 模式：点哪个显示哪个部分（不再长页滚动 + IntersectionObserver）
-const scrollToSection = (id) => { activeSection.value = id }
+// 分组展示：个人（账户/时区/TG）vs 平台（其余超管/运营项）
+const PERSONAL_SECTIONS = ['sec-account', 'sec-tz', 'sec-tg']
+const anchorGroups = computed(() => [
+  { key: 'personal', label: t('settings.grpPersonal'), items: anchorSections.value.filter(s => PERSONAL_SECTIONS.includes(s.id)) },
+  { key: 'platform', label: t('settings.grpPlatform'), items: anchorSections.value.filter(s => !PERSONAL_SECTIONS.includes(s.id)) },
+].filter(g => g.items.length))
+// Tab 切换：点哪个显示哪个分区（Tab 模式，不再长页滚动 + IntersectionObserver）
+const switchSection = (id) => {
+  activeSection.value = id
+  router.replace({ query: { ...route.query, sec: id } })   // 分区进 URL：可刷新还原/分享定位
+}
+// URL ?sec= → 当前分区。权限加载后校验（非超管带超管 sec 等），非法回落账户分区
+const applySectionFromUrl = () => {
+  const q = route.query.sec
+  if (!q) return
+  if (anchorSections.value.some(s => s.id === q)) { activeSection.value = q; return }
+  activeSection.value = 'sec-account'
+  if (q !== 'sec-account') router.replace({ query: { ...route.query, sec: 'sec-account' } })
+}
+watch(() => route.query.sec, () => applySectionFromUrl())
 const kaResultOpen = ref(false)
 const kaResult = ref(null)
 const kaResMeta = (r) => ({
@@ -546,9 +567,13 @@ const runKeepaliveNow = async () => {
 
 <template>
   <div class="page">
-    <!-- 锚点导航：sticky 横条，点跳对应卡片（移动端横向滚动） -->
+    <!-- 分区导航：sticky 横条按「个人/平台」分组（移动端横向滚动） -->
     <div class="anchor-strip">
-      <button v-for="s in anchorSections" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="scrollToSection(s.id)">{{ s.label }}</button>
+      <template v-for="(g, gi) in anchorGroups" :key="g.key">
+        <span v-if="gi > 0" class="anchor-sep"></span>
+        <span class="anchor-group-label">{{ g.label }}</span>
+        <button v-for="s in g.items" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="switchSection(s.id)">{{ s.label }}</button>
+      </template>
     </div>
 
     <div v-if="activeSection==='sec-account'" id="sec-account" class="card">
@@ -573,7 +598,7 @@ const runKeepaliveNow = async () => {
       </el-select>
     </div>
 
-    <div v-if="sSuper && sched && activeSection==='sec-schedule'" id="sec-schedule" class="card">
+    <div v-if="isSuper && sched && activeSection==='sec-schedule'" id="sec-schedule" class="card">
       <div class="t">{{ t('settings.scheduleTitle') }}</div>
       <div class="d">{{ t('settings.scheduleDesc') }}</div>
       <div class="base-row">
@@ -596,7 +621,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="schedSaving" @click="saveSched">{{ t('settings.saveAndApply') }}</button>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-guard-tuning'" id="sec-guard-tuning" class="card">
+    <div v-if="isSuper && activeSection==='sec-guard-tuning'" id="sec-guard-tuning" class="card">
       <div class="t">{{ t('settings.gtTitle') }}</div>
       <div class="d">{{ t('settings.gtDesc') }}</div>
       <template v-if="gt.guard_concurrency !== null">
@@ -610,7 +635,7 @@ const runKeepaliveNow = async () => {
       </template>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-ai'" id="sec-ai" class="card">
+    <div v-if="isSuper && activeSection==='sec-ai'" id="sec-ai" class="card">
       <div class="t">{{ t('settings.aiTitle') }}</div>
       <div class="d">{{ t('settings.aiDesc') }}</div>
       <div class="sub-t">{{ t('settings.aiTextModelTitle') }}</div>
@@ -649,7 +674,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-cf'" id="sec-cf" class="card">
+    <div v-if="isSuper && activeSection==='sec-cf'" id="sec-cf" class="card">
       <div class="t">{{ t('settings.cfTitle') }}</div>
       <div class="d">{{ t('settings.cfDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
@@ -658,7 +683,7 @@ const runKeepaliveNow = async () => {
     </div>
 
     <!-- 邮箱转发（超管）：状态行 + 目的地邮箱 + 别名映射 -->
-    <div v-if="sSuper && activeSection==='sec-email'" id="sec-email" class="card">
+    <div v-if="isSuper && activeSection==='sec-email'" id="sec-email" class="card">
       <div class="t">{{ t('settings.emTitle') }}</div>
       <div class="d">{{ t('settings.emDesc', { domain: em.domain || 'tovaads.com' }) }}</div>
 
@@ -720,7 +745,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-webhook'" id="sec-webhook" class="card">
+    <div v-if="isSuper && activeSection==='sec-webhook'" id="sec-webhook" class="card">
       <div class="t">{{ t('settings.whTitle') }}</div>
       <div class="d">{{ t('settings.whDesc') }}</div>
       <div class="wh-url-row">
@@ -742,7 +767,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-retention'" id="sec-retention" class="card">
+    <div v-if="isSuper && activeSection==='sec-retention'" id="sec-retention" class="card">
       <div class="t">{{ t('settings.retentionTitle') }}</div>
       <div class="d">{{ t('settings.retentionDesc') }}</div>
       <div class="ret-head"><span>{{ t('settings.retDataCol') }}</span><span>{{ t('settings.retDaysCol') }}</span><span>{{ t('settings.retDescCol') }}</span></div>
@@ -758,7 +783,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="sSuper && activeSection==='sec-fx'" id="sec-fx" class="card">
+    <div v-if="isSuper && activeSection==='sec-fx'" id="sec-fx" class="card">
       <div class="t">{{ t('settings.fxTitle') }}</div>
       <div class="d">{{ t('settings.fxDesc') }}</div>
       <div class="fx-grid">
@@ -804,7 +829,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="sSuper || (myPerms || []).includes('ads.pause') && activeSection==='sec-keepalive'" id="sec-keepalive" class="card">
+    <div v-if="(isSuper || (myPerms || []).includes('ads.pause')) && activeSection==='sec-keepalive'" id="sec-keepalive" class="card">
       <div class="t">{{ t('settings.keepaliveTitle') }}</div>
       <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
@@ -851,6 +876,8 @@ const runKeepaliveNow = async () => {
 .page{display:flex;flex-direction:column;gap:14px}
 /* 锚点导航 */
 .anchor-strip{position:sticky;top:0;z-index:50;display:flex;gap:4px;overflow-x:auto;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--bd)}
+.anchor-group-label{font-size:10px;color:var(--t3);align-self:center;padding:0 2px;white-space:nowrap;flex-shrink:0}
+.anchor-sep{width:1px;align-self:stretch;background:var(--bd);margin:2px 4px;flex-shrink:0}
 .anchor-btn{padding:4px 12px;background:transparent;color:var(--t3);border:1px solid transparent;border-radius:var(--rs);font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit}
 .anchor-btn:hover{color:var(--t1);background:var(--bg2)}
 .anchor-btn.active{background:var(--ac);color:#fff}

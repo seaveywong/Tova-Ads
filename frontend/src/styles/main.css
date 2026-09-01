@@ -21,7 +21,7 @@
   --topbar-bg: rgba(26,26,46,0.85);
   --t1: #e4e4ef;
   --t2: #9898b0;
-  --t3: #6c6c84;
+  --t3: #83839c;
   --ac: #0a84ff;
   --ach: #409cff;
   --acg: rgba(10,132,255,0.12);
@@ -79,6 +79,26 @@ body {
 }
 
 a { color: var(--ac); text-decoration: none; }
+
+/* ── 全局按钮三态（primary=实心 / outline=描边 / ghost=幽灵），页面 scoped .btn 定义不冲突（同名键覆盖） ── */
+.btn {
+  padding: 6px 16px; border-radius: var(--rs); font-size: 13px; cursor: pointer;
+  border: 1px solid var(--bd); background: var(--bg2); color: var(--t2);
+  transition: all .15s; font-family: inherit; white-space: nowrap;
+}
+.btn:hover { color: var(--t1); border-color: var(--bd2) }
+.btn:disabled { opacity: .5; cursor: wait }
+.btn.primary { background: var(--ac); border-color: var(--ac); color: #fff }
+.btn.primary:hover { filter: brightness(1.08); color: #fff }
+.btn.outline { background: transparent; border-color: var(--ac); color: var(--ac) }
+.btn.outline:hover { background: var(--ac); color: #fff }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--t3) }
+.btn.ghost:hover { color: var(--t1); background: var(--bg3) }
+
+/* ── 平台小标（账户名/选项前的 FB/TT chip，Ads/AdManager/Dashboard/LandingLogs 共用一份） ── */
+.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; vertical-align: middle; }
+.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
+.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 3px; }

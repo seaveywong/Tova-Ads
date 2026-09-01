@@ -5,6 +5,7 @@ export default {
   zh: {
     loadFail: '加载失败', nameRequired: '填规则名', created: '已创建', deleted: '已删', toggleFail: '开关失败', inspectFail: '巡检失败',
     delConfirm: '删除规则「{name}」？',
+    discardTitle: '未保存的修改', discardConfirm: '规则修改尚未保存，确定放弃？', discard: '放弃修改',
     disableTitle: '确认停用', disableConfirm: '停用规则「{name}」？该规则将停止评估，名下广告失去此条保护。',
     forceTitle: '强制重检', forceConfirm: '强制重检跳过冷却直接调 Facebook API 评估全部广告，频繁触发可能被 FB 限流。继续？', forceContinue: '继续重检',
     inspectLockBusy: '巡检正在后台执行（与定时任务共用锁），请稍后再试', inspectError: '巡检执行异常：{msg}', inspectSummary: '评估 {evaluated} 条 · 命中 {hits} · 暂停 {paused}', inspectSummaryDetail: '{summary}（已停：{names}{more}）', andMore: ' 等',
@@ -32,6 +33,7 @@ export default {
   en: {
     loadFail: 'Failed to load', nameRequired: 'Enter a rule name', created: 'Created', deleted: 'Deleted', toggleFail: 'Toggle failed', inspectFail: 'Inspection failed',
     delConfirm: 'Delete rule "{name}"?',
+    discardTitle: 'Unsaved changes', discardConfirm: 'Rule edits are not saved yet. Discard them?', discard: 'Discard changes',
     disableTitle: 'Confirm disable', disableConfirm: 'Disable rule "{name}"? It will stop evaluating and its ads will lose this protection.',
     forceTitle: 'Force re-inspect', forceConfirm: 'Force re-inspect skips the cooldown and calls the Facebook API to evaluate all ads. Frequent triggers may get rate-limited by FB. Continue?', forceContinue: 'Re-inspect',
     inspectLockBusy: 'Inspection is already running in the background (shared lock with the cron job). Try again shortly.', inspectError: 'Inspection failed: {msg}', inspectSummary: 'Evaluated {evaluated} · Hit {hits} · Paused {paused}', inspectSummaryDetail: '{summary} (paused: {names}{more})', andMore: ' etc.',

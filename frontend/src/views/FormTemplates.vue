@@ -64,9 +64,18 @@ const blankForm = () => ({
   welcome_message: '', block_display_for_non_targeted: false,
 })
 const openFormNew = () => { editingForm.value = null; fMeta.value = { name: '', description: '', locale: 'en_US' }; fCfg.value = blankForm(); formOpen.value = true }
-const openFormEdit = (t) => { editingForm.value = t; fMeta.value = { name: t.name, description: t.description, locale: t.locale }; fCfg.value = { ...blankForm(), ...(t.config||{}) }; formOpen.value = true }
-const addQuestion = () => fCfg.value.custom_questions.push({ key: '', label: '', placeholder: '', options: [] })
+const openFormEdit = (t) => {
+  editingForm.value = t; fMeta.value = { name: t.name, description: t.description, locale: t.locale }
+  const cfg = { ...blankForm(), ...(t.config || {}) }
+  // _keyAuto：key 仍处自动态（服务端原值为空）时 label 改动可继续同步 slug
+  cfg.custom_questions = (cfg.custom_questions || []).map(q => ({ ...q, _keyAuto: !q.key }))
+  fCfg.value = cfg; formOpen.value = true
+}
+const addQuestion = () => fCfg.value.custom_questions.push({ key: '', label: '', placeholder: '', options: [], _keyAuto: true })
 const removeQuestion = (i) => fCfg.value.custom_questions.splice(i, 1)
+// q.key 自动 slug：label 变化且 key 未被手改（_keyAuto）时同步生成英文 key；手改后不再覆盖
+const slugifyKey = (label) => String(label || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+const syncQKey = (q) => { if (q._keyAuto) q.key = slugifyKey(q.label) }
 const addOption = (q) => q.options.push({ key: '', value: '' })
 const removeOption = (q, i) => q.options.splice(i, 1)
 const toggleContact = (v) => {
@@ -80,7 +89,10 @@ const saveForm = async () => {
   if (!fCfg.value.privacy_url.trim()) return ElMessage.warning(t('formtpl.needPrivacyUrl'))
   saving.value = true
   try {
-    const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, config: fCfg.value }
+    // 剥掉前端内部标记（_keyAuto），不进 config 存储/FB 请求
+    const cfgOut = JSON.parse(JSON.stringify(fCfg.value))
+    cfgOut.custom_questions = (cfgOut.custom_questions || []).map(({ _keyAuto, ...q }) => q)
+    const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, config: cfgOut }
     if (editingForm.value) { await PUT('/form-templates/forms/' + editingForm.value.id, body); ElMessage.success(t('common.saved')) }
     else { await POST('/form-templates/forms', body); ElMessage.success(t('common.create') + t('common.success')) }
     formOpen.value = false; await load()
@@ -119,7 +131,7 @@ const aiGenerate = async (a) => {
     const cfg = r.config || {}
     if (cfg.form_title) fCfg.value.form_title = cfg.form_title
     if (cfg.description) fCfg.value.description = cfg.description
-    if (cfg.custom_questions) fCfg.value.custom_questions = cfg.custom_questions
+    if (cfg.custom_questions) fCfg.value.custom_questions = cfg.custom_questions.map(q => ({ ...q, _keyAuto: !q.key }))
     if (cfg.extra_contact_fields) fCfg.value.extra_contact_fields = cfg.extra_contact_fields
     if (cfg.thank_you_title) fCfg.value.thank_you_title = cfg.thank_you_title
     if (cfg.thank_you_body) fCfg.value.thank_you_body = cfg.thank_you_body
@@ -208,6 +220,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     <!-- 表单编辑抽屉 -->
     <el-drawer v-model="formOpen" :title="editingForm?t('formtpl.editForm'):t('formtpl.newForm')" direction="rtl" size="640px" :destroy-on-close="true">
       <div class="form">
+        <button class="btn ai-top-btn" :disabled="aiLoading" @click="openAssetPicker('form')">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAssetForm') }}</button>
         <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="fMeta.name" class="inp" :placeholder="t('formtpl.tplNamePh')" /></div>
         <hr class="sep" />
         <div class="sec-title">{{ t('formtpl.secFormInfo') }}</div>
@@ -235,14 +248,12 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
           </label>
         </div>
         <hr class="sep" />
-        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secCustomQuestions') }}</span><button class="btn sm" @click="addQuestion">{{ t('formtpl.addQuestion') }}</button>
-          <button class="btn sm ghost" @click="openAssetPicker('form')" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button>
-        </div>
+        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secCustomQuestions') }}</span><button class="btn sm" @click="addQuestion">{{ t('formtpl.addQuestion') }}</button></div>
         <div v-for="(q,i) in fCfg.custom_questions" :key="i" class="question-block">
           <div class="qb-head"><span>{{ t('formtpl.questionN', { n: i+1 }) }}</span><button class="del-btn" @click="removeQuestion(i)">✕</button></div>
-          <input v-model="q.label" class="inp" :placeholder="t('formtpl.questionTextPh')" />
+          <input v-model="q.label" class="inp" :placeholder="t('formtpl.questionTextPh')" @input="syncQKey(q)" />
           <input v-model="q.placeholder" class="inp sm-mt" :placeholder="t('formtpl.questionHintPh')" />
-          <input v-model="q.key" class="inp sm-mt" :placeholder="t('formtpl.questionKeyPh')" />
+          <input v-model="q.key" class="inp sm-mt" :placeholder="t('formtpl.questionKeyPh')" @input="q._keyAuto = false" />
           <div v-if="q.options && q.options.length" class="options-list">
             <div v-for="(o,oi) in q.options" :key="oi" class="option-row">
               <input v-model="o.value" class="inp sm" :placeholder="t('formtpl.optionTextPh')" />
@@ -269,13 +280,13 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     <!-- 消息编辑抽屉 -->
     <el-drawer v-model="msgOpen" :title="editingMsg?t('formtpl.editMsg'):t('formtpl.newMsg')" direction="rtl" size="560px" :destroy-on-close="true">
       <div class="form">
+        <button class="btn ai-top-btn" :disabled="aiLoading" @click="openAssetPicker('msg')">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAssetMsg') }}</button>
         <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="mCfg.name" class="inp" /></div>
         <hr class="sep" />
         <div class="sec-title">{{ t('formtpl.secWelcome') }}</div>
         <div class="row"><label>{{ t('formtpl.mainText') }}</label><textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" :placeholder="t('formtpl.welcomeTextPh')"></textarea></div>
         <hr class="sep" />
-        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button>
-          <button class="btn sm ghost" @click="openAssetPicker('msg')" :disabled="aiLoading" style="margin-left:auto">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAsset') }}</button></div>
+        <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button></div>
         <div v-for="(ib,i) in mCfg.ice_breakers" :key="i" class="ib-block">
           <div class="qb-head"><span>{{ t('formtpl.quickReplyN', { n: i+1 }) }}</span><button class="del-btn" @click="removeIB(i)">✕</button></div>
           <input v-model="ib.title" class="inp" :placeholder="t('formtpl.ibButtonTextPh')" />
@@ -349,6 +360,8 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
+.ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
+.ai-top-btn:hover{background:rgba(10,132,255,.14)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:6px}

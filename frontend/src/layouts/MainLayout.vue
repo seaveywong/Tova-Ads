@@ -6,7 +6,6 @@ import { GET, POST, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
 import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
-import { usePlatform } from '../composables/usePlatform'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 
@@ -22,14 +21,7 @@ const { locale, toggle: toggleLocale } = useLocale()
 const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin' }
 const roleLabel = (r) => (r && ROLE_KEY[r]) ? t(ROLE_KEY[r]) : (r || '')
 
-// 平台切换器（纯前端：localStorage 持久；各页读 usePlatform 过滤数据，不发请求不换 token）
-const { platform, setPlatform } = usePlatform()
-const PLATFORMS = computed(() => [
-  { v: 'all', label: t('common.all') },
-  { v: 'fb', label: 'Facebook' },
-  { v: 'tt', label: 'TikTok' },
-])
-const platformLabel = computed(() => PLATFORMS.value.find(p => p.v === platform.value)?.label || t('common.all'))
+// 平台切换已下放各数据页页头（components/PlatformSeg.vue），顶栏不再承载
 
 // 移动端侧边栏抽屉态
 const isMobile = ref(false)
@@ -303,21 +295,6 @@ watch(() => route.path, () => { sidebarOpen.value = false })
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-dropdown trigger="click" @command="setPlatform">
-            <span class="team-switcher plat-switcher" :title="t('layout.platformFilter')">
-              <span class="plat-dot" :class="platform"></span>
-              <span class="plat-name"><span class="plat-k">{{ t('layout.platformKey') }}</span>{{ platformLabel }}</span>
-              <el-icon class="caret"><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-for="p in PLATFORMS" :key="p.v" :command="p.v" :disabled="platform === p.v">
-                  <span>{{ p.label }}</span>
-                  <span v-if="platform === p.v" class="cur-mark">{{ t('layout.current') }}</span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
           <span class="lang-toggle" @click="toggleLocale"
                 :title="locale === 'zh' ? t('layout.langToEn') : t('layout.langToZh')">
             {{ locale === 'zh' ? 'EN' : '中' }}
@@ -456,13 +433,6 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .team-chip { display: none; }
 .mute-role { color: var(--t3); font-size: 11px; margin-left: 4px; }
 .cur-mark { color: var(--ac); font-size: 11px; margin-left: 6px; }
-/* 平台切换器（壳同 team-switcher） */
-.plat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--t3); }
-.plat-dot.fb { background: #1877f2; }
-.plat-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%); }
-.plat-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plat-k { color: var(--t3); margin-right: 4px; }
-@media (max-width: 768px) { .plat-name { display: none; } }
 .topbar-icon {
   font-size: 20px; color: var(--t2); cursor: pointer;
   transition: color 0.15s;

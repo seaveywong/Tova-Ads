@@ -619,11 +619,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     <div class="bar">
       <div class="bar-l">{{ t('landing.totalPages', { n: pages.length }) }}</div>
       <div class="bar-r">
-        <el-dropdown trigger="click" @command="cmd => { if(cmd==='pixels')openPixels(); else if(cmd==='templates')openLandingTemplates(); else if(cmd==='domains')openDomains(); }">
+        <button class="btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
+        <el-dropdown trigger="click" @command="cmd => { if(cmd==='templates')openLandingTemplates(); else if(cmd==='domains')openDomains(); }">
           <button class="btn">{{ t('landing.tools') }} ▾</button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="pixels">{{ t('landing.pixelLib') }}</el-dropdown-item>
               <el-dropdown-item command="templates">{{ t('landing.templates') }}</el-dropdown-item>
               <el-dropdown-item v-if="isSuper" command="domains">{{ t('landing.domainMgmt') }}</el-dropdown-item>
             </el-dropdown-menu>
@@ -668,10 +668,13 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
         </div>
       </div>
-      <div v-if="!pages.length && !loading" class="empty">{{ t('landing.emptyCreate') }}</div>
+      <div v-if="!pages.length && !loading" class="empty">
+        <div>{{ t('landing.emptyCreate') }}</div>
+        <button class="btn primary empty-cta-btn" @click="openCreate">+ {{ t('landing.newLink') }}</button>
+      </div>
     </div>
 
-    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-text="saving ? t('landing.deployingCloud') : ''">
+    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-loading-text="saving ? t('landing.deployingCloud') : ''">
       <div class="lp-section">
         <div class="lp-section-title">{{ t('landing.secBasic') }}</div>
         <div class="lp-section-body">
@@ -1098,7 +1101,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .sub-tab.trash.on{background:var(--error)}
 .sub-search{flex:1;min-width:0;padding:6px 10px;font-size:12px}
 .sub-sort{padding:6px 8px;font-size:12px;background:var(--bg2);color:var(--t2);border:1px solid var(--bd);border-radius:6px}
-.empty{text-align:center;color:var(--t3);padding:32px;font-size:13px;background:var(--bg2);border:1px dashed var(--bd);border-radius:8px}
+.empty{text-align:center;color:var(--t3);padding:32px;font-size:13px;background:var(--bg2);border:1px dashed var(--bd);border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.empty-cta-btn{margin-top:2px}
 .form-l{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .form-l > label{font-size:12px;color:var(--t3);width:84px;text-align:right;flex-shrink:0}
 .opt-hint{font-size:10px;color:var(--t3);opacity:.7;font-weight:400}
@@ -1169,7 +1173,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .rule-row{display:flex;align-items:center;gap:8px}
 .rule-row > label{font-size:11px;color:var(--t2);width:84px;flex-shrink:0;text-align:right}
 .sub-list{display:flex;flex-direction:column;gap:0;margin-top:8px}
-.sub-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px}
+.sub-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px;flex-wrap:wrap;row-gap:4px}
 .sub-item{padding:4px 0;border-bottom:1px solid var(--bd)}
 .sub-target{display:flex;gap:6px;align-items:center;padding:6px 0}
 .sub-target-input{flex:1}

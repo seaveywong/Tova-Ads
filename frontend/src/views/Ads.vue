@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
@@ -9,7 +9,10 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
+import { usePlatform } from '../composables/usePlatform'
+import Fuse from 'fuse.js'
 import DatePresetBar from '../components/DatePresetBar.vue'
+import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -17,6 +20,21 @@ const _reqGuard = useLatest()
 const accounts = ref([])
 const loading = ref(true)
 const isSuper = ref(isSuperadminSync())
+
+// 平台切换（纯前端过滤列表）+ 账户搜索（Fuse 模糊，照 Dashboard fuseAcc 用法）
+const { platform } = usePlatform()
+const searchQ = ref('')
+const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
+const filteredAccounts = computed(() => {
+  if (!searchQ.value.trim()) return platAccounts.value
+  const fuseAcc = new Fuse(platAccounts.value, { keys: ['name', 'act_id'], threshold: 0.3 })
+  return fuseAcc.search(searchQ.value.trim()).map(r => r.item)
+})
+// 切平台：勾选里已不可见的账户清掉（防批量操作打到隐藏行）
+watch(platform, () => {
+  const ids = new Set(platAccounts.value.map(a => a.act_id))
+  selectedAccs.value = new Set([...selectedAccs.value].filter(id => ids.has(id)))
+})
 
 const datePreset = ref('today')
 const showCustom = ref(false)
@@ -42,7 +60,7 @@ const statusDot = (s) => accountStatus(s).cls
 const selectedAccs = ref(new Set())
 const accLoading = ref(false)
 const toggleAcc = (id) => { selectedAccs.value.has(id) ? selectedAccs.value.delete(id) : selectedAccs.value.add(id); selectedAccs.value = new Set(selectedAccs.value) }
-const selectAllAccs = () => { if (selectedAccs.value.size === accounts.value.length) { selectedAccs.value.clear() } else { selectedAccs.value = new Set(accounts.value.map(a => a.act_id)) }; selectedAccs.value = new Set(selectedAccs.value) }
+const selectAllAccs = () => { if (selectedAccs.value.size === filteredAccounts.value.length) { selectedAccs.value.clear() } else { selectedAccs.value = new Set(filteredAccounts.value.map(a => a.act_id)) }; selectedAccs.value = new Set(selectedAccs.value) }
 const isAccSelected = (id) => selectedAccs.value.has(id)
 const batchRemove = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
@@ -196,8 +214,10 @@ onMounted(async () => {
 <template>
   <div class="page">
     <div class="date-bar">
-      <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ accounts.length }}</span></h2>
+      <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ filteredAccounts.length }}</span></h2>
+      <PlatformSeg v-model="platform" size="small" />
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
+      <input v-model="searchQ" class="acc-search" :placeholder="t('ads.searchPh')" />
       <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
       <button class="refresh-btn" :disabled="syncing" @click="syncCampaigns">{{ syncing ? t('common.loading') : t('ads.syncCampaigns') }}</button>
     </div>
@@ -211,11 +231,11 @@ onMounted(async () => {
     </div>
     <div class="tbl" v-loading="loading || accLoading">
       <div class="row head">
-        <div><input type="checkbox" :checked="selectedAccs.size === accounts.length && accounts.length > 0" @click="selectAllAccs" /></div>
+        <div><input type="checkbox" :checked="selectedAccs.size === filteredAccounts.length && filteredAccounts.length > 0" @click="selectAllAccs" /></div>
         <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
-      <div v-for="a in accounts" :key="a.act_id" class="row">
+      <div v-for="a in filteredAccounts" :key="a.act_id" class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
         <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
@@ -251,10 +271,15 @@ onMounted(async () => {
           </el-dropdown>
         </div>
       </div>
-      <div v-if="!accounts.length && !loading" class="empty empty-cta">
-        <div class="empty-title">{{ t('ads.emptyTitle') }}</div>
-        <div class="empty-step">{{ t('ads.emptyStep1') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLink') }}</router-link> {{ t('ads.emptyStep1b') }}</div>
-        <div class="empty-step">{{ t('ads.emptyStep2') }}</div>
+      <div v-if="!filteredAccounts.length && !loading" class="empty" :class="{ 'empty-cta': !accounts.length }">
+        <template v-if="accounts.length">
+          <div class="empty-title">{{ t('ads.noMatch') }}</div>
+        </template>
+        <template v-else>
+          <div class="empty-title">{{ t('ads.emptyTitle') }}</div>
+          <div class="empty-step">{{ t('ads.emptyStep1') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLink') }}</router-link> {{ t('ads.emptyStep1b') }}</div>
+          <div class="empty-step">{{ t('ads.emptyStep2') }}</div>
+        </template>
       </div>
     </div>
 
@@ -288,12 +313,18 @@ onMounted(async () => {
 .date-input { background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); padding: 5px 10px; font-size: 13px; color-scheme: dark }
 .date-input:focus { outline: none; border-color: var(--ac) }
 .date-sep { color: var(--t3); font-size: 13px }
-.refresh-btn { padding: 0 16px; height: 32px; line-height: 30px; background: var(--ac); color: #fff; border: 1px solid var(--ac); border-radius: var(--rs); font-size: 13px; cursor: pointer; box-sizing: border-box }
-.refresh-btn:hover { filter: brightness(1.08) }
+/* 按钮方言：默认=描边（次要动作），.primary=实心（唯一主行动「载入账户」） */
+.refresh-btn { padding: 0 16px; height: 32px; line-height: 30px; background: transparent; color: var(--ac); border: 1px solid var(--ac); border-radius: var(--rs); font-size: 13px; cursor: pointer; box-sizing: border-box }
+.refresh-btn:hover { background: var(--ac); color: #fff }
+.refresh-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac) }
+.refresh-btn.primary:hover { filter: brightness(1.08); background: var(--ac) }
 .cnt { font-size: 13px; color: var(--t3); font-weight: 400 }
 .rng { color: var(--t3); font-weight: 400; font-size: 11px }
+.acc-search { height: 32px; padding: 0 10px; background: var(--bg2); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark; width: 150px }
+.acc-search:focus { outline: none; border-color: var(--ac) }
+.acc-search::placeholder { color: var(--t3) }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd) }
+.row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1080px }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .acc-name { font-weight: 600; color: var(--t1) }
@@ -330,8 +361,5 @@ onMounted(async () => {
 .load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px }
 .lm-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .load-row code { color: var(--t3); font-size: 11px }
-/* 平台 chip（照 AdManager 配色：FB 蓝 / TT 红） */
-.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; vertical-align: middle }
-.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff }
-.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d }
+/* 平台 chip 用 main.css 全局 .plat-chip */
 </style>

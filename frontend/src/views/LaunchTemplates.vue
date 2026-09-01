@@ -8,13 +8,16 @@ import { showError } from '../composables/useError'
 import { jobStatus, itemStatus, fbAdStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
 import { fmtUsd } from '../composables/useFormat'
-import { COUNTRIES as ALL_COUNTRIES } from '../composables/useCountries'
+import { COUNTRIES as ALL_COUNTRIES, countryName } from '../composables/useCountries'
 
 const { t } = useI18n()
 const route = useRoute()
 
 const list = ref([])
 const loading = ref(false)
+// 平台筛选（模板列表顶部 chip）：all / fb / tt——也是新建模板的默认平台来源之一
+const platFilter = ref('all')
+const filteredList = computed(() => platFilter.value === 'all' ? list.value : list.value.filter(x => (x.platform || 'fb') === platFilter.value))
 const editOpen = ref(false)
 const editing = ref(null)
 const form = ref({})
@@ -411,6 +414,25 @@ const saveAsAudience = async () => {
 // #3 预检结构化展示
 const preflightResult = ref(null)
 const preflightVisible = ref(false)
+// 预检值友好化：targeting 展开已知子键（countries→国家名、age_min/max→"18-65"、genders→性别），
+// 其余对象（geo_locations / attribution_spec / object_story_spec 等）保持 JSON 原样
+const GENDER_TXT = { 0: 'genderAll', 1: 'genderMale', 2: 'genderFemale' }
+const pfVal = (k, v) => {
+  if (v === null || v === undefined || v === '') return '—'
+  if (k === 'targeting' && v && typeof v === 'object' && !Array.isArray(v)) {
+    const parts = []
+    const geo = v.geo_locations || v.geo
+    if (geo?.countries?.length) parts.push(t('launch.countries') + '：' + geo.countries.map(c => countryName(c) || c).join(' · '))
+    else if (geo) parts.push('geo：' + JSON.stringify(geo))
+    if (v.age_min != null || v.age_max != null) parts.push(t('launch.age') + '：' + (v.age_min ?? 18) + '-' + (v.age_max ?? 65))
+    if (Array.isArray(v.genders) && v.genders.length) parts.push(t('launch.gender') + '：' + v.genders.map(g => t('launch.' + (GENDER_TXT[g] || 'genderAll'))).join('/'))
+    const rest = { ...v }
+    delete rest.geo_locations; delete rest.geo; delete rest.age_min; delete rest.age_max; delete rest.genders
+    if (Object.keys(rest).length) parts.push(JSON.stringify(rest))
+    return parts.join('  ·  ')
+  }
+  return JSON.stringify(v)
+}
 // #4 per-account page/pixel loading
 const accLoadingConfig = ref(new Set())
 // 表单/消息模板
@@ -586,18 +608,8 @@ const setPostSource = (src) => {
   form.value.post_source = src
   if (src !== 'reuse') { reuseNeedManualPage.value = false; manualPageForPost.value = '' }
 }
-// 平台切换（TK P3）：tt = TikTok 三件套链路——跟帖/主页是 FB 专属，切 tt 强制回"新建帖"语义
-const setPlatform = (p) => {
-  if (form.value.platform === p) return
-  form.value.platform = p
-  if (p === 'tt') {
-    form.value.post_source = 'new'
-    form.value.reuse_post_ref = ''
-    form.value.page_id = ''
-    reusePostPreview.value = null
-    reuseNeedManualPage.value = false
-  }
-}
+// 平台：编辑器内只读 chip（不可中途切——TT/FB 三件套结构不同，切平台=换链路）；
+// 平台选择在两处：列表筛选 chip + 「+ 新建模板」下拉（openNew(p)）
 const isTt = computed(() => form.value.platform === 'tt')
 const clearReusePost = () => { form.value.reuse_post_ref = ''; reusePostPreview.value = null; reuseNeedManualPage.value = false }
 // 卡片完整性判断（列表用，不需打开编辑器）
@@ -611,8 +623,8 @@ const _tplMissing = (tpl) => {
 }
 const _tplReady = (tpl) => _tplMissing(tpl).length === 0
 
-// 编辑
-const openNew = () => { editing.value = null; form.value = blankForm(); editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
+// 编辑（openNew(p)：p='fb'/'tt' 建模板时定平台；缺省 fb）
+const openNew = (p) => { editing.value = null; form.value = blankForm(); if (p) form.value.platform = p; editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
 const openEdit = async (tpl) => {
   editing.value = tpl
   const f = blankForm()
@@ -845,6 +857,13 @@ const copyTpl = async (tpl) => {
     await load()
   } catch (e) { showError(e, t('launch.copyFail')) }
 }
+// 卡片 ⋯ 下拉分发（部署保留主按钮，其余操作收进来）
+const onCardCmd = (cmd, tpl) => {
+  if (cmd === 'edit') openEdit(tpl)
+  else if (cmd === 'copy') copyTpl(tpl)
+  else if (cmd === 'preflight') preflight(tpl)
+  else if (cmd === 'archive') removeTpl(tpl)
+}
 // 预检
 const preflighting = ref(false)
 const preflight = async (tpl) => {
@@ -982,15 +1001,28 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
   <div class="page">
     <div class="bar">
       <div class="t">{{ t('launch.title') }}</div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="seg plat-filter">
+          <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
+          <button :class="{on:platFilter==='fb'}" @click="platFilter='fb'">Facebook</button>
+          <button :class="{on:platFilter==='tt'}" @click="platFilter='tt'">TikTok</button>
+        </div>
         <button class="btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
-        <button class="btn primary" @click="openNew">+ {{ t('launch.newTemplate') }}</button>
+        <el-dropdown trigger="click" @command="p => openNew(p)">
+          <button class="btn primary">+ {{ t('launch.newTemplate') }} ▾</button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="fb">📘 {{ t('launch.newTplFb') }}</el-dropdown-item>
+              <el-dropdown-item command="tt">🎵 {{ t('launch.newTplTt') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
     <div class="d">{{ t('launch.subtitle') }}</div>
 
     <div class="grid" v-loading="loading">
-      <div v-for="tpl in list" :key="tpl.id" class="card">
+      <div v-for="tpl in filteredList" :key="tpl.id" class="card">
         <div class="card-head">
           <span class="card-name">{{ tpl.name }}</span>
           <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
@@ -1002,21 +1034,27 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
-          <button class="op" @click="openEdit(tpl)">{{ t('common.edit') }}</button>
-          <button class="op" @click="copyTpl(tpl)" :title="t('launch.copyVariant')">{{ t('common.copy') }}</button>
-          <button class="op" :disabled="preflighting" @click="preflight(tpl)" :title="t('launch.preflightTitle')">{{ t('launch.preflight') }}</button>
-          <button class="op danger" @click="removeTpl(tpl)">{{ t('launch.archive') }}</button>
+          <el-dropdown trigger="click" @command="cmd => onCardCmd(cmd, tpl)">
+            <button class="op dots" @click.stop>⋯</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="edit">{{ t('common.edit') }}</el-dropdown-item>
+                <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
+                <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
+                <el-dropdown-item command="archive" divided>{{ t('launch.archive') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
-      <div v-if="!list.length && !loading" class="empty">{{ t('launch.emptyHint') }}</div>
+      <div v-if="!filteredList.length && !loading" class="empty">{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</div>
     </div>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
     <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
-      <!-- 平台切换（TK P3）：fb=FB 三件套 / tt=TikTok 三件套（决定部署链路与术语） -->
-      <div class="plat-seg">
-        <button :class="['plat-btn',{on:form.platform!=='tt'}]" @click="setPlatform('fb')">📘 Facebook</button>
-        <button :class="['plat-btn',{on:form.platform==='tt'}]" @click="setPlatform('tt')">🎵 TikTok</button>
+      <!-- 平台（建模板时已定，编辑器内只读展示——FB/TT 三件套链路不同，不可中途切） -->
+      <div class="plat-ro-row">
+        <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? '🎵 TikTok' : '📘 Facebook' }}</span>
       </div>
       <div v-if="isTt" class="tt-hint">ℹ️ {{ t('launch.ttSwitchNote') }}</div>
       <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶（FB 专属：TT 无主页帖） -->
@@ -1092,11 +1130,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
-        </div>
-        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
-          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
-          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
         </div>
       </div>
 
@@ -1371,6 +1404,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </div>
         </template>
         </template>
+        <!-- 像素（新建帖/跟帖都要——转化追踪依赖；原在①系列，现与落地页/子码同区） -->
+        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
+          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
+          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
+        </div>
       </div>
 
       <template #footer>
@@ -1441,22 +1480,22 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             </template>
             <template v-else-if="deployTpl?.platform === 'tt'">
               <label>{{ t('launch.ttPixelLabel') }}</label>
-              <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
-                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.autoPick') }) }}</option>
-                <option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id">{{ (p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')' }}</option>
-              </select>
+              <el-select v-model="deployItems[a.act_id].pixel_id" size="small" style="width:100%">
+                <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.autoPick') })" />
+                <el-option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id" :label="(p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')'" />
+              </el-select>
             </template>
             <template v-else>
               <label>{{ t('launch.page') }}</label>
-              <select v-model="deployItems[a.act_id].page_id" class="inp sm">
-                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') }) }}</option>
-                <option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
-              </select>
+              <el-select v-model="deployItems[a.act_id].page_id" size="small" filterable style="width:100%">
+                <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') })" />
+                <el-option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id" :label="p.name + ' (' + p.id + ')'" />
+              </el-select>
               <label>{{ t('launch.pixel') }}</label>
-              <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
-                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.none') }) }}</option>
-                <option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id">{{ p.name }} ({{ p.id }})</option>
-              </select>
+              <el-select v-model="deployItems[a.act_id].pixel_id" size="small" filterable style="width:100%">
+                <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.none') })" />
+                <el-option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id" :label="p.name + ' (' + p.id + ')'" />
+              </el-select>
             </template>
           </div>
         </div>
@@ -1501,15 +1540,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         </div>
         <div class="pf-section">
           <div class="pf-title">{{ t('launch.pfCampaign') }}</div>
-          <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
         </div>
         <div class="pf-section">
           <div class="pf-title">{{ preflightResult.platform === 'tt' ? t('launch.levelAdGroup') : t('launch.pfAdSet') }}</div>
-          <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
         </div>
         <div class="pf-section">
           <div class="pf-title">{{ t('launch.pfCreative') }}</div>
-          <div class="pf-fields"><div v-for="(v,k) in preflightResult.creative" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
+          <div class="pf-fields"><div v-for="(v,k) in preflightResult.creative" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
         </div>
         <div v-if="preflightResult.notes" class="pf-notes">
           <div v-for="n in preflightResult.notes" :key="n" class="pf-note">· {{ n }}</div>
@@ -1635,6 +1674,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .op.primary{color:var(--ac);border-color:var(--ac)}
 .op.primary.sm{padding:2px 6px;font-size:10px}
 .op.danger{color:var(--error)}
+.op.dots{font-size:15px;line-height:1;padding:3px 10px}
 .op:hover{background:var(--bg3)}
 .empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px}
 
@@ -1695,10 +1735,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .ps-btn{flex:none;padding:9px 18px;border:none;background:transparent;color:var(--t3);font-size:14px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;transition:color .15s}
 .ps-btn:hover{color:var(--t2)}
 .ps-btn.on{color:var(--ac);border-bottom-color:var(--ac);font-weight:600}
-/* 平台切换（fb/tt，TK P3） */
-.plat-seg{display:flex;gap:6px;margin-bottom:10px}
-.plat-btn{flex:1;padding:8px;border:1px solid var(--bd);background:var(--bg3);color:var(--t3);border-radius:8px;cursor:pointer;font-size:14px;font-family:inherit;font-weight:500}
-.plat-btn.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1);font-weight:600}
+/* 平台只读 chip（编辑器内；平台在建模板时定） */
+.plat-ro-row{display:flex;align-items:center;margin-bottom:10px}
+.plat-ro{display:inline-flex;align-items:center;gap:4px;padding:4px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid}
+.plat-ro.fb{color:#5aa2ff;border-color:rgba(24,119,242,.35);background:rgba(24,119,242,.08)}
+.plat-ro.tt{color:#ff6f8d;border-color:rgba(254,44,85,.35);background:rgba(254,44,85,.08)}
+.plat-filter button{flex:none}
 .tt-hint{font-size:11px;color:var(--t3);padding:6px 10px;background:var(--bg3);border-radius:6px;margin-bottom:10px;line-height:1.5}
 .reuse-selected{display:flex;align-items:center;gap:8px}
 .reuse-selected-block{display:flex;flex-direction:column;gap:6px}
