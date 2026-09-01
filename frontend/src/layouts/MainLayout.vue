@@ -333,7 +333,14 @@ watch(() => route.path, () => { sidebarOpen.value = false })
       </header>
 
       <main class="content">
-        <RouterView />
+        <!-- keep-alive 缓存重数据页：切 Tab 即回显不重拉（Dashboard 有 60s 自动刷新兜新鲜度）。
+             exclude 依赖 route.query 深链的 5 页（缓存后 onMounted 不重跑会丢 query 语义）：
+             AdManager(?act)/Landing(?tab)/LandingLogs(?tab,slug,ad_id)/LaunchTemplates(?reuse_post)/Tokens(?oauth) -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive :exclude="['AdManager', 'Landing', 'LandingLogs', 'LaunchTemplates', 'Tokens']" :max="12">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </main>
     </div>
   </div>

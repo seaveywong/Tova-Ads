@@ -46,6 +46,25 @@ const routes = [
 
 const router = createRouter({ history: createWebHashHistory(), routes })
 
+// 空闲时预取全部路由 chunk（含各自 CSS）——所有 view 都是懒加载，
+// 首访每个 Tab 要现拉 JS+CSS（慢）；快速切换多 Tab 时 chunk/CSS 加载竞态
+// 会渲染出无样式纯文本。登录后空闲一次拉全，之后切换零网络等待、无竞态。
+let _prefetched = false
+export function prefetchRoutes() {
+  if (_prefetched || typeof window === 'undefined') return
+  _prefetched = true
+  const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 1200))
+  idle(() => {
+    const walk = (rs) => rs.forEach((r) => {
+      if (typeof r.component === 'function' && r.component) {
+        try { r.component().catch(() => {}) } catch {}
+      }
+      if (r.children) walk(r.children)
+    })
+    walk(routes)
+  })
+}
+
 // 从 JWT 同步解析 is_superadmin（路由守卫/导航过滤用，权威，不依赖异步 /auth/me 或 localStorage 时序）
 // token payload 由后端 create_access_token 签发，含 is_superadmin 字段（见 security.py）
 export function isSuperadminSync() {
