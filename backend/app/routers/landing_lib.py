@@ -126,6 +126,7 @@ class PixelUpdate(BaseModel):
     platform: str | None = None
     tt_access_token: str | None = None  # 传则更新，不传则保持
     test_event_code: str | None = None
+    fb_capi_enabled: bool | None = None  # FB CAPI S2S 灰度开关（实验性；验证去重后再开）
 
 
 @router.get("/pixels")
@@ -159,6 +160,7 @@ def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
                     "note": p.note, "status": p.status, "act_count": act_count,
                     "platform": p.platform or "fb",
                     "tt_has_token": bool(p.tt_access_token_enc) if (p.platform or "fb") == "tt" else False,
+                    "fb_capi_enabled": bool(p.fb_capi_enabled) if (p.platform or "fb") == "fb" else False,
                     "test_event_code": p.test_event_code or "",   # 编辑回显（测试码定期过期，明文可见便于更新）
                     **u})
     return out
@@ -186,7 +188,15 @@ def create_pixel(body: PixelIn, user: CurrentUser = Depends(require_permission("
               action_type="create", source="user", result="success",
               metadata={"pixel_id": body.pixel_id})
     db.commit()
-    return {"id": row.id, "trace_id": tid, "pixel_id": row.pixel_id, "pixel_name": row.pixel_name}
+    # TK 像素自动点亮：token + test_event_code 齐备 → 建完立即发一条测试事件（失败不影响创建）
+    auto_test = None
+    if body.platform == "tt" and row.tt_access_token_enc and row.test_event_code:
+        try:
+            auto_test = {"attempted": True, **_fire_tt_test_event(row)}
+        except Exception as e:
+            auto_test = {"attempted": True, "ok": False, "code": None, "message": str(e)[:200]}
+    return {"id": row.id, "trace_id": tid, "pixel_id": row.pixel_id, "pixel_name": row.pixel_name,
+            "auto_test": auto_test}
 
 
 @router.put("/pixels/{pid}")
@@ -208,22 +218,9 @@ def update_pixel(pid: int, body: PixelUpdate,
     return {"id": row.id, "pixel_name": row.pixel_name, "status": row.status}
 
 
-@router.post("/pixels/{pid}/test-s2s")
-def test_pixel_s2s(pid: int,
-                   user: CurrentUser = Depends(require_permission("landing.manage")),
-                   db: Session = Depends(get_db)):
-    """测试 TK S2S 事件：用 test_event_code 发一个测试事件 → TK Events Manager Test Events 标签秒级可见。"""
+def _fire_tt_test_event(row: LandingPixel) -> dict:
+    """用像素已配置的 test_event_code 发一个测试转化事件（手动测试端点 + 建像素自动点亮共用）。"""
     import uuid as _uuid
-    row = db.query(LandingPixel).filter(
-        LandingPixel.id == pid, LandingPixel.tenant_id == user.tenant_id).first()
-    if not row:
-        raise HTTPException(404, "像素不存在")
-    if (row.platform or "fb") != "tt":
-        raise HTTPException(400, "仅 TK 像素支持测试")
-    if not row.tt_access_token_enc:
-        raise HTTPException(400, "请先配置 Events API Token")
-    if not row.test_event_code:
-        raise HTTPException(400, "请先配置 Test Event Code（从 TK Events Manager → Test Events 标签复制）")
     from ..core.encryption import decrypt
     from ..core.tk_events import TkEventsClient
     token = decrypt(row.tt_access_token_enc)
@@ -239,7 +236,26 @@ def test_pixel_s2s(pid: int,
     ok = code == 0
     return {"ok": ok, "code": code, "message": result.get("message", ""),
             "event_id": event_id,
-            "hint": "请到 TK Events Manager → 该像素 → Test Events 标签查看（秒级可见）" if ok else "TK API 返回错误，请检查 token/test_code 是否正确"}
+            "hint": "请到 TK Events Manager → 该像素 → Test Events 标签查看（秒级可见）" if ok
+                    else "TK API 返回错误，请检查 token/test_code 是否正确"}
+
+
+@router.post("/pixels/{pid}/test-s2s")
+def test_pixel_s2s(pid: int,
+                   user: CurrentUser = Depends(require_permission("landing.manage")),
+                   db: Session = Depends(get_db)):
+    """测试 TK S2S 事件：用 test_event_code 发一个测试事件 → TK Events Manager Test Events 标签秒级可见。"""
+    row = db.query(LandingPixel).filter(
+        LandingPixel.id == pid, LandingPixel.tenant_id == user.tenant_id).first()
+    if not row:
+        raise HTTPException(404, "像素不存在")
+    if (row.platform or "fb") != "tt":
+        raise HTTPException(400, "仅 TK 像素支持测试")
+    if not row.tt_access_token_enc:
+        raise HTTPException(400, "请先配置 Events API Token")
+    if not row.test_event_code:
+        raise HTTPException(400, "请先配置 Test Event Code（从 TK Events Manager → Test Events 标签复制）")
+    return _fire_tt_test_event(row)
 
 
 @router.delete("/pixels/{pid}")
@@ -549,9 +565,10 @@ var LP_PIXELS=(_info.p&&_info.p.length)?_info.p.split(',').filter(Boolean):(__LP
 var LP_TARGET_URL=_info.t||"__LP_TARGET_URL__";
 var _rawConv=_info.c?_info.c.split(','):(__LP_CONV_EVENT_JSON__||[]);
 var LP_CONV=(Array.isArray(_rawConv)?_rawConv:[_rawConv]).filter(Boolean);
+var _eid=_info.eid||'';
 LP_PIXELS.forEach(function(pid){if(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');}});
 var _cta=document.getElementById('cta');if(_cta&&LP_TARGET_URL)_cta.href=LP_TARGET_URL;
-function trackConversion(){if(!window.fbq||!Array.isArray(LP_PIXELS)||!LP_CONV.length)return;LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt);});});}
+function trackConversion(){if(!window.fbq||!Array.isArray(LP_PIXELS)||!LP_CONV.length)return;LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});}
 function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion();setTimeout(function(){window.location.href=LP_TARGET_URL;},300);return false;}
 </script>
 </head>
@@ -577,7 +594,8 @@ function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion
         "   __LP_PIXELS_JSON__     像素 ID 数组（fallback，运行时被 _d.p 覆盖）\n"
         "   __LP_CONV_EVENT_JSON__ 转化事件（fallback，运行时被 _d.c 覆盖）\n\n"
         "3. 多转化事件：LP_CONV 是数组（如 ['Purchase','Contact']），\n"
-        "   CTA 点击时 forEach 对每个像素 fire 每个事件。\n\n"
+        "   CTA 点击时 forEach 对每个像素 fire 每个事件。\n"
+        "   fire 带 eventID=_d.eid（与后端 S2S/CAPI 同 UUID，平台按 event_id 去重防双计）。\n\n"
         "4. CTA 跳转：goNext() 先 trackConversion() 再 setTimeout 300ms 跳 LP_TARGET_URL。\n\n"
         "5. 规则：\n"
         "   - zip 根目录必须有 index.html\n"

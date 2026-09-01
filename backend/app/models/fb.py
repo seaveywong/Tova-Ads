@@ -44,6 +44,8 @@ class Account(Base):
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
     fb_credential_id = Column(BigInteger, ForeignKey("fb_credentials.id"))
+    platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（存量行全部 'fb'）
+    tt_credential_id = Column(BigInteger, ForeignKey("tt_credentials.id"))  # TT 主令牌（platform='tt' 时用）
     act_id = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
     currency = Column(Text, nullable=False, default="USD")

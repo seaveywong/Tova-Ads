@@ -4,6 +4,11 @@
 - 账户特定操作（铺广告/dashboard/账户 insights）→ client_for_account：按 accounts.fb_credential_id 选。
 - 聚合操作（列资产/导入）→ iter_tenant_clients：遍历所有 active token。
 - token 无关操作（兴趣搜索）→ first_client：任一 active。
+
+TikTok（TK 接入 P0）：accounts.platform 分发——'fb' 走原逻辑不动；'tt' 在
+client_for_account/cred_for_account_op fail-fast（TtClient P1 接入）；聚合函数
+（iter_tenant_clients/first_client/run_with_fallback/reassociate）已留 TT 分支，
+TtClient（core/tt_client.py）合入前该分支为空集，FB 行为逐字节不变。
 """
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -12,22 +17,50 @@ from .fb_client import FbClient
 from ..models.fb import FbCredential, Account
 
 
-def iter_tenant_clients(db: Session, tenant_id: int) -> list[tuple[FbCredential, FbClient]]:
-    """租户的所有 active token → [(cred, FbClient), ...]。聚合操作用（合并多 token 的资产）。"""
+def _tt_client_cls():
+    """TtClient（P1 提供 core/tt_client.py）。未合入时返回 None——所有 TT 分支据此静默降级为空集。"""
+    try:
+        from .tt_client import TtClient
+        return TtClient
+    except ImportError:
+        return None
+
+
+def _iter_tt_creds(db: Session, tenant_id: int) -> list:
+    """租户 active 的 TikTok 凭证（按 id 序）。models 层 P0 已就绪，无需 TtClient。"""
+    from ..models.tt import TtCredential
+    return db.query(TtCredential).filter(
+        TtCredential.tenant_id == tenant_id, TtCredential.status == "active"
+    ).order_by(TtCredential.id).all()
+
+
+def iter_tenant_clients(db: Session, tenant_id: int) -> list:
+    """租户的所有 active token → [(cred, client), ...]。聚合操作用（合并多 token 的资产）。
+    FB 在前（存量调用序不变），TT 凭证并入候选池尾部（TtClient 合入后自动生效）。"""
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
     ).all()
-    return [(c, FbClient(decrypt(c.access_token_enc))) for c in creds]
+    pairs = [(c, FbClient(decrypt(c.access_token_enc))) for c in creds]
+    TtClient = _tt_client_cls()
+    if TtClient is not None:
+        for tc in _iter_tt_creds(db, tenant_id):
+            pairs.append((tc, TtClient(decrypt(tc.access_token_enc))))
+    return pairs
 
 
-def first_client(db: Session, tenant_id: int) -> Optional[FbClient]:
-    """任一 active token（token 无关操作，如兴趣搜索）。无则 None。"""
+def first_client(db: Session, tenant_id: int) -> Optional[object]:
+    """任一 active token（token 无关操作，如兴趣搜索）。无则 None。
+    FB 优先（存量租户必有 FB 时行为不变）；租户只有 TT 凭证时返 TtClient。"""
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
     ).order_by(FbCredential.id).all()
-    if not creds:
-        return None
-    return FbClient(decrypt(creds[0].access_token_enc))
+    if creds:
+        return FbClient(decrypt(creds[0].access_token_enc))
+    TtClient = _tt_client_cls()
+    if TtClient is not None:
+        for tc in _iter_tt_creds(db, tenant_id):
+            return TtClient(decrypt(tc.access_token_enc))
+    return None
 
 
 def _is_cred_available(c) -> bool:
@@ -89,6 +122,12 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
         Account.tenant_id == tenant_id, Account.act_id == act_id,
     ).first()
 
+    # 平台分发：TT 账户不走 FB 令牌池（平台列随账户行一并取回，无额外往返）。
+    # TtClient P1 接入前 fail-fast，防止误用 FB token 打 TT 账户。
+    if acc and (acc.platform or "fb") == "tt":
+        raise NotImplementedError(
+            f"账户 {act_id} 是 TikTok 账户（platform='tt'），FB 令牌分发不可用；TikTok 客户端 P1 接入中")
+
     # 优先：account_fb_credentials 候选池（多令牌同账户）
     if acc:
         pool_creds = db.query(FbCredential).join(
@@ -132,7 +171,8 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
 
 def client_for_account(db: Session, tenant_id: int, act_id: str,
                        op_kind: str = "read") -> Optional[FbClient]:
-    """按账户选 client（绑定优先 + RR 兜底）。op_kind: read 任意可用 / pause 管理+操作 / write 操作。"""
+    """按账户选 client（绑定优先 + RR 兜底）。op_kind: read 任意可用 / pause 管理+操作 / write 操作。
+    TT 账户（platform='tt'）在此 fail-fast（NotImplementedError）——TtClient 分发口 P1 接。"""
     cred = cred_for_account_op(db, tenant_id, act_id, op_kind)
     return FbClient(decrypt(cred.access_token_enc)) if cred else None
 
@@ -298,24 +338,28 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
     return {"checked": len(orphans), "rebound": rebound,
             "active_creds": len(creds), "covered_acts": len(act_to_creds),
             "still_orphan": still_orphan,
-            "new_discovered": discovered, "new_links": new_links}
+            "new_discovered": discovered, "new_links": new_links,
+            "tt": _reassociate_tt_accounts(db, tenant_id)}
 
 
 def run_with_fallback(db: Session, tenant_id: int, act_id: str, op_fn):
     """token fallback 执行器（照搬 1.0 _run_with_token_fallback 思路）。
 
-    op_fn(fb) -> result。按"账户绑定的 token 优先"排序，遇 token_expired/permissions
+    op_fn(client) -> result。按"账户绑定的 token 优先"排序，遇 token_expired/permissions
     错误轮换其他 active token；全失败抛最后一个错。返回 (result, used_cred)。
     只对【读操作 / 幂等操作】用——写操作（建广告）若中途换 token 会产生孤儿对象，应绑死 token + 失败告警。
+    平台分发：account.platform='tt' → 遍历 tt_credentials（TtClient 未合入时无候选，返 (None, None)）。
     """
+    acc = db.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id == act_id,
+    ).first()
+    if acc and (acc.platform or "fb") == "tt":
+        return _run_with_fallback_tt(db, tenant_id, acc, op_fn)
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
     ).order_by(FbCredential.id).all()
     if not creds:
         return None, None
-    acc = db.query(Account).filter(
-        Account.tenant_id == tenant_id, Account.act_id == act_id,
-    ).first()
     bound_id = acc.fb_credential_id if acc else None
     # 绑定 token 优先
     ordered = sorted(creds, key=lambda c: 0 if c.id == bound_id else 1)
@@ -333,3 +377,96 @@ def run_with_fallback(db: Session, tenant_id: int, act_id: str, op_fn):
                 continue
             raise
     raise last_err
+
+
+def _run_with_fallback_tt(db: Session, tenant_id: int, acc, op_fn):
+    """run_with_fallback 的 TikTok 分支：遍历 tt_credentials（主令牌优先），token 类错误轮换。
+    TtClient（core/tt_client.py）未合入或无 active TT 凭证时返 (None, None)——调用方按
+    无可用令牌处理，与 FB 无凭证路径同语义。"""
+    TtClient = _tt_client_cls()
+    if TtClient is None:
+        return None, None
+    creds = _iter_tt_creds(db, tenant_id)
+    if not creds:
+        return None, None
+    ordered = sorted(creds, key=lambda c: 0 if c.id == acc.tt_credential_id else 1)
+    last_err = None
+    for cred in ordered:
+        client = TtClient(decrypt(cred.access_token_enc))
+        try:
+            return op_fn(client), cred
+        except Exception as e:
+            last_err = e
+            # 仅 token/权限类错误轮换（TtApiError.category 与 FB 同名分类，P1 接入时对齐）
+            cat = getattr(e, "category", None)
+            if cat in ("token_expired", "permissions", "permission_denied") and len(ordered) > 1:
+                continue
+            raise
+    raise last_err
+
+
+def _reassociate_tt_accounts(db: Session, tenant_id: int) -> dict:
+    """TT 账户孤儿重绑（照 FB reassociate 模式；候选池=account_tt_credentials priority 序）。
+    无池内候选 → 记 still_orphan（不并入 FB 的 still_orphan 告警链，TT 告警 P1 接）。
+    TtClient 合入后：API 覆盖扫描为已导入 TT 账户补候选池链接（同 FB 规则——
+    令牌能管但未显式导入的广告主不自动纳管，只出现在载入列表）。"""
+    from ..models.tt import TtCredential, AccountTtCredential
+    res = {"checked": 0, "rebound": 0, "still_orphan": [], "new_links": 0}
+    tt_creds = _iter_tt_creds(db, tenant_id)
+    if not tt_creds:
+        return res
+    active_ids = {c.id for c in tt_creds}
+    orphans = db.query(Account).filter(
+        Account.tenant_id == tenant_id,
+        Account.is_managed == True,  # 只重绑在管账户（同 FB）
+        Account.platform == "tt",
+        (Account.tt_credential_id.is_(None)) | (Account.tt_credential_id.notin_(active_ids)),
+    ).all()
+    res["checked"] = len(orphans)
+    rebound = 0
+    for acc in orphans:
+        cand = db.query(TtCredential).join(
+            AccountTtCredential, AccountTtCredential.tt_credential_id == TtCredential.id
+        ).filter(
+            AccountTtCredential.account_id == acc.id,
+            AccountTtCredential.status == "active",
+            TtCredential.status == "active",
+        ).order_by(AccountTtCredential.priority, TtCredential.id).first()
+        if cand:
+            acc.tt_credential_id = cand.id
+            rebound += 1
+        else:
+            res["still_orphan"].append({"act_id": acc.act_id, "name": acc.name})
+    res["rebound"] = rebound
+    if rebound:
+        db.commit()
+    TtClient = _tt_client_cls()
+    if TtClient is not None and hasattr(TtClient, "get_ad_accounts"):
+        existing = {a.act_id: a for a in db.query(Account).filter(
+            Account.tenant_id == tenant_id, Account.platform == "tt").all()}
+        new_links = 0
+        for c in tt_creds:
+            try:
+                client = TtClient(decrypt(c.access_token_enc))
+                for a in client.get_ad_accounts():
+                    # TikTok 广告主对象主键字段 advertiser_id（P1 接入 TtClient 时核对字段名）
+                    aid = str(a.get("advertiser_id") or a.get("account_id") or "").strip()
+                    acc = existing.get(aid) if aid else None
+                    if not acc:
+                        continue  # 未导入：不纳管（与 FB 一致）
+                    has_link = db.query(AccountTtCredential).filter(
+                        AccountTtCredential.account_id == acc.id,
+                        AccountTtCredential.tt_credential_id == c.id,
+                    ).first()
+                    if not has_link:
+                        db.add(AccountTtCredential(
+                            tenant_id=tenant_id, account_id=acc.id,
+                            tt_credential_id=c.id, priority=0, status="active",
+                        ))
+                        new_links += 1
+            except Exception:
+                continue  # 单 cred 读失败不阻断
+        res["new_links"] = new_links
+        if new_links:
+            db.commit()
+    return res

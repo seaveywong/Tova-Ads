@@ -425,22 +425,42 @@ def route_next(body: RouteNextIn, dry_run: bool = False):
                 tt_conversion_events = _json.loads(page.tt_conversion_events)
             except Exception:
                 pass
-        # 生成 event_id（TK S2S 双发去重要求；浏览器+后端必须同 UUID）
+        # FB CAPI 灰度像素（landing_pixels.fb_capi_enabled，默认关；SuperSession 绕 RLS 必须显式过滤租户）
+        fb_capi_pixels = []
+        if pixel_ids and page:
+            fb_capi_pixels = [p.pixel_id for p in db.query(LandingPixel).filter(
+                LandingPixel.tenant_id == page.tenant_id,
+                LandingPixel.pixel_id.in_(pixel_ids),
+                LandingPixel.platform == "fb",
+                LandingPixel.fb_capi_enabled.is_(True),
+            ).all()]
+        # 生成 event_id（S2S 双发去重要求；浏览器+后端必须同 UUID）。
+        # FB CAPI 与 TK 共用同一 UUID（各平台各自去重）；字段名沿用 tt_event_id——worker 契约
         import uuid as _uuid
-        tt_event_id = str(_uuid.uuid4()) if tt_pixel_ids else ""
+        tt_event_id = str(_uuid.uuid4()) if (tt_pixel_ids or fb_capi_pixels) else ""
         # S2S 在 route_next 直接 fire（不依赖 beacon 回程；route_next 已持有全部数据）
-        # dry_run（自检/发布探测）不触发——否则每次发布/健康检查都向 TikTok 发一条假 CompletePayment
-        if not dry_run and tt_pixel_ids and tt_conversion_events and tt_event_id:
+        # dry_run（自检/发布探测）不触发——否则每次发布/健康检查都向平台发一条假转化
+        if not dry_run and tt_event_id and page:
             try:
-                from ..core.tk_events import send_tt_s2s_for_visit
-                send_tt_s2s_for_visit(db, page.tenant_id, tt_pixel_ids, tt_conversion_events, tt_event_id)
+                if tt_pixel_ids and tt_conversion_events:
+                    from ..core.tk_events import send_tt_s2s_for_visit
+                    send_tt_s2s_for_visit(db, page.tenant_id, tt_pixel_ids, tt_conversion_events, tt_event_id)
             except Exception as e:
                 import logging as _lg
                 _lg.getLogger(__name__).warning(f"[TK S2S] route_next 触发失败: {e}")
+            # FB CAPI（实验性灰度，默认关）：同 event_id 服务器端双发，失败只记日志不阻塞路由
+            try:
+                if fb_capi_pixels and conversion_events:
+                    from ..core.tk_events import send_fb_capi_for_visit
+                    send_fb_capi_for_visit(db, page.tenant_id, fb_capi_pixels, conversion_events, tt_event_id)
+            except Exception as e:
+                import logging as _lg
+                _lg.getLogger(__name__).warning(f"[FB CAPI] route_next 触发失败: {e}")
         return {"target_url": target_url, "mode": mode,
                 "pixel_ids": pixel_ids, "tt_pixel_ids": tt_pixel_ids,
                 "tt_conversion_events": tt_conversion_events,
                 "tt_event_id": tt_event_id,
+                "fb_capi_pixels": fb_capi_pixels,
                 "conversion_event": conversion_event,
                 "conversion_events": conversion_events}
     finally:

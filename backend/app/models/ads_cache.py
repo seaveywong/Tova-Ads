@@ -9,6 +9,7 @@ class AdsCache(Base):
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
     act_id = Column(Text, nullable=False)
+    platform = Column(Text, nullable=False, server_default="fb")  # fb / tt
     campaigns_json = Column(Text)
     adsets_json = Column(Text)
     ads_json = Column(Text)

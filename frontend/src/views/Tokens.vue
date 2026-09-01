@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
@@ -54,6 +54,72 @@ const healthLoading = ref(false)
 const health = ref(null)
 const cleaning = ref(false)
 
+// ── TikTok 分区（TT 令牌：24h access 自动续期 + 365d refresh 授权寿命）──
+const platform = ref('fb')
+const ttLoading = ref(false)
+const ttCreds = ref([])
+const ttApp = ref(null)                     // { configured, app_id }
+const ttAppForm = ref({ app_id: '', app_secret: '' })
+const ttAppSaving = ref(false)
+const nowTick = ref(Date.now())
+let ttTimer = null
+
+const loadTt = async () => {
+  ttLoading.value = true
+  try { ttCreds.value = await GET('/tt/credentials') }
+  catch (e) { ElMessage.error(e.message || t('tokens.ttLoadFail')); ttCreds.value = [] }
+  ttLoading.value = false
+}
+const loadTtApp = async () => {
+  try { ttApp.value = await GET('/tt/apps') } catch { ttApp.value = { configured: false, app_id: '' } }
+}
+const switchPlatform = (p) => {
+  platform.value = p
+  if (p === 'tt') { loadTt(); if (isSuper.value) loadTtApp() }
+}
+const connectTikTok = async () => {
+  try {
+    const r = await GET('/tt/oauth/start')
+    if (r.url) window.location.href = r.url
+  } catch (e) { ElMessage.error(t('tokens.ttStartFail') + (e.message || '')) }
+}
+const saveTtApp = async () => {
+  if (!ttAppForm.value.app_id.trim() || !ttAppForm.value.app_secret.trim()) return ElMessage.warning(t('tokens.ttAppFillBoth'))
+  ttAppSaving.value = true
+  try {
+    await POST('/tt/apps', { app_id: ttAppForm.value.app_id.trim(), app_secret: ttAppForm.value.app_secret.trim() })
+    ElMessage.success(t('tokens.ttAppSaved'))
+    ttAppForm.value = { app_id: '', app_secret: '' }
+    await loadTtApp()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  ttAppSaving.value = false
+}
+const parseTT = (s) => {
+  if (!s || s === 'None') return null
+  const d = new Date(s)
+  return isNaN(d) ? null : d
+}
+const ttAccessCountdown = (c) => {
+  const d = parseTT(c.expires_at)
+  if (!d) return { cls: 'off', text: '—' }
+  const ms = d.getTime() - nowTick.value
+  if (ms <= 0) return { cls: 'err', text: t('tokens.ttExpiredNow') }
+  const h = ms / 3600000
+  if (h < 3) return { cls: 'err', text: t('tokens.ttInMinutes', { n: Math.max(1, Math.floor(ms / 60000)) }) }
+  if (h < 12) return { cls: 'warn', text: t('tokens.ttInHours', { n: Math.floor(h) }) }
+  return { cls: 'ok', text: t('tokens.ttInHours', { n: Math.floor(h) }) }
+}
+const ttRefreshDays = (c) => {
+  const d = parseTT(c.refresh_expires_at)
+  if (!d) return { cls: 'off', days: null }
+  const days = Math.floor((d.getTime() - nowTick.value) / 86400000)
+  if (days < 0) return { cls: 'err', days: 0 }
+  return { cls: days < 30 ? 'err' : days < 60 ? 'warn' : 'ok', days }
+}
+const ttStatusMeta = (c) => c.status === 'active'
+  ? { dot: 'ok', label: t('status.tokenValid') }
+  : { dot: 'err', label: t('status.tokenInvalid') }
+
 const load = async () => {
   loading.value = true
   try { tokens.value = await GET('/fb/credentials') }
@@ -107,11 +173,14 @@ const runClean = async () => {
 }
 onMounted(() => {
   load(); loadSummary(); loadAtRisk(); loadApps()
+  // TT 倒计时用：30s 心跳让 access 过期倒计时/refresh 剩余天数活起来
+  ttTimer = setInterval(() => { nowTick.value = Date.now() }, 30000)
   // OAuth 回调处理（FB 授权后 302 回来 ?oauth=ok/fail&msg=）
   const st = route.query.oauth
   if (st === 'ok') ElMessage.success(t('tokens.oauthSuccess'))
   else if (st === 'fail') ElMessage.error(t('tokens.oauthFail', { msg: route.query.msg || t('common.fail') }))
 })
+onUnmounted(() => { if (ttTimer) clearInterval(ttTimer) })
 
 const statusOrder = (t) => {
   const s = t.status, f = t.consecutive_fails || 0
@@ -383,19 +452,69 @@ const deleteToken = async (tk) => {
 <template>
   <div class="page">
     <div class="bar">
-      <div class="bar-r">
+      <div class="seg">
+        <button class="seg-btn" :class="{on:platform==='fb'}" @click="switchPlatform('fb')">Facebook</button>
+        <button class="seg-btn" :class="{on:platform==='tt'}" @click="switchPlatform('tt')">TikTok</button>
+      </div>
+      <div v-if="platform==='fb'" class="bar-r">
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
         <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
         <button class="btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
         <button v-if="isSuper" class="btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
       </div>
+      <div v-else class="bar-r">
+        <button class="btn primary" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+      </div>
     </div>
 
-    <div v-if="atRiskAccounts.length" class="risk-banner" @click="atRiskOpen = !atRiskOpen">
+    <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
+      <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
+      <div v-if="isSuper" class="tt-app-card">
+        <div class="tt-app-title">{{ t('tokens.ttAppTitle') }}</div>
+        <div class="tt-app-hint">{{ t('tokens.ttAppHint', { appId: ttApp?.app_id || t('tokens.ttAppNotConfigured') }) }}</div>
+        <div class="tt-app-form">
+          <input v-model="ttAppForm.app_id" class="input" :placeholder="t('tokens.ttAppIdPh')" />
+          <input v-model="ttAppForm.app_secret" type="password" autocomplete="new-password" class="input" :placeholder="t('tokens.ttAppSecretPh')" />
+          <button class="btn primary" :disabled="ttAppSaving" @click="saveTtApp">{{ t('tokens.ttAppSave') }}</button>
+        </div>
+      </div>
+      <div v-if="ttCreds.length" class="tt-list">
+        <div v-for="c in ttCreds" :key="c.id" class="tt-card">
+          <span class="c-st"><span class="dot" :class="ttStatusMeta(c).dot"></span>{{ ttStatusMeta(c).label }}</span>
+          <div class="tt-main">
+            <span class="tt-alias">{{ c.alias || t('tokens.unnamed') }}</span>
+            <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(c.advertiser_id)">{{ c.advertiser_id || '—' }}</span>
+          </div>
+          <span class="st-tag off">{{ t('tokens.ttLinkedAccounts') }} {{ c.account_count ?? 0 }}</span>
+          <div class="tt-cell">
+            <label>{{ t('tokens.ttAccessExpires') }}</label>
+            <span class="st-tag" :class="ttAccessCountdown(c).cls">{{ ttAccessCountdown(c).text }}</span>
+          </div>
+          <div class="tt-cell">
+            <label>{{ t('tokens.ttLastRefresh') }}</label>
+            <span class="tt-val">{{ fmtTime(c.last_refreshed_at) }}</span>
+          </div>
+          <div class="tt-cell">
+            <label>{{ t('tokens.ttRefreshLeft') }}</label>
+            <span class="tt-cell-v">
+              <span class="st-tag" :class="ttRefreshDays(c).cls" :title="ttRefreshDays(c).cls==='err' ? t('tokens.ttReauthTip') : ''">{{ ttRefreshDays(c).days != null ? t('tokens.ttDaysUnit', { n: ttRefreshDays(c).days }) : '—' }}</span>
+              <button v-if="ttRefreshDays(c).cls === 'err'" class="btn tt-reauth" @click="connectTikTok">{{ t('tokens.ttReauth') }}</button>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="!ttLoading" class="empty empty-cta">
+        <div class="empty-title">{{ t('tokens.ttEmptyTitle') }}</div>
+        <div class="empty-step">{{ t('tokens.ttEmptyHint') }}</div>
+        <button class="btn primary empty-cta-btn" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+      </div>
+    </div>
+
+    <div v-if="platform==='fb' && atRiskAccounts.length" class="risk-banner" @click="atRiskOpen = !atRiskOpen">
       <span>⚠ {{ t('tokens.atRiskSummary', { n: atRiskAccounts.length }) }}</span>
       <span class="risk-toggle">{{ atRiskOpen ? t('tokens.collapse') : t('tokens.viewDetail') }}</span>
     </div>
-    <div v-if="atRiskOpen && atRiskAccounts.length" class="risk-list">
+    <div v-if="platform==='fb' && atRiskOpen && atRiskAccounts.length" class="risk-list">
       <div v-for="a in atRiskAccounts" :key="a.act_id" class="risk-row">
         <span class="ai-name">{{ a.name }}</span>
         <span class="ai-id blue" @click.stop="copyId(a.act_id)">{{ a.act_id }}</span>
@@ -404,7 +523,7 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
-    <div class="tbl" v-loading="loading">
+    <div v-if="platform==='fb'" class="tbl" v-loading="loading">
       <div class="row head">
         <span>{{ t('common.status') }}</span><span>{{ t('common.name') }}</span><span>{{ t('tokens.fbUser') }}</span>
         <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>
@@ -654,7 +773,11 @@ const deleteToken = async (tk) => {
 
 <style scoped>
 .page{width:100%}
-.bar{display:flex;justify-content:flex-end;margin-bottom:12px}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}
+.seg{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:3px}
+.seg-btn{padding:5px 16px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.seg-btn.on{background:var(--ac);color:#fff}
+.seg-btn:not(.on):hover{color:var(--t1)}
 .bar-r{display:flex;gap:8px}
 .risk-banner{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);cursor:pointer;margin-bottom:8px}
 .risk-banner:hover{background:rgba(255,159,10,.16)}
@@ -805,4 +928,23 @@ const deleteToken = async (tk) => {
 .empty-title{font-size:15px;color:var(--t2);font-weight:600;margin-bottom:10px}
 .empty-step{font-size:13px;color:var(--t3);line-height:1.7}
 .empty-cta-btn{margin-top:16px}
+
+/* TikTok 分区 */
+.tt-wrap{display:flex;flex-direction:column;gap:10px}
+.tt-note{font-size:11px;color:var(--t3);line-height:1.6}
+.tt-app-card{background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:12px 14px}
+.tt-app-title{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px}
+.tt-app-hint{font-size:11px;color:var(--t3);margin-bottom:8px;word-break:break-all}
+.tt-app-form{display:flex;gap:8px;flex-wrap:wrap}
+.tt-app-form .input{flex:1;min-width:160px}
+.tt-list{display:flex;flex-direction:column;gap:8px}
+.tt-card{display:grid;grid-template-columns:86px minmax(140px,1fr) auto auto auto auto;gap:14px;align-items:center;padding:12px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);font-size:13px}
+.tt-main{display:flex;align-items:center;gap:8px;overflow:hidden}
+.tt-alias{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt-cell{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.tt-cell label{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.03em}
+.tt-cell-v{display:flex;align-items:center;gap:6px}
+.tt-val{font-size:12px;color:var(--t2)}
+.btn.tt-reauth{padding:3px 10px;font-size:11px}
+@media (max-width:720px){.tt-card{grid-template-columns:1fr 1fr;row-gap:10px}}
 </style>

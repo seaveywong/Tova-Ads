@@ -765,12 +765,14 @@ def diagnose_ad(
                 _since = (datetime.now(tz) - timedelta(days=_hist_days)).strftime("%Y-%m-%d")
                 _history = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == _ad_short,
+                    PerfSnapshot.platform == "fb",
                     PerfSnapshot.snapshot_date >= _since,
                     PerfSnapshot.snapshot_date < acc_today,
                 ).order_by(PerfSnapshot.snapshot_date.desc()).all()
             if rule.rule_type == "budget_burn_fast":
                 _prev = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == _ad_short,
+                    PerfSnapshot.platform == "fb",
                     PerfSnapshot.snapshot_date == acc_today,
                 ).first()
                 _prev_spend = _prev.spend if _prev else None

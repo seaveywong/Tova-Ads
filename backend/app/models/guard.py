@@ -26,6 +26,7 @@ class GuardAllowance(Base):
     act_id = Column(Text, nullable=False)
     ad_id = Column(Text, nullable=False)
     allowance_date = Column(Text, nullable=False)
+    platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（加白按平台隔离）
     status = Column(Text, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint("act_id", "ad_id", "allowance_date", name="uq_allowance_act_ad_date"),)

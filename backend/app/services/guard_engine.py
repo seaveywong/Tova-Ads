@@ -804,6 +804,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 prev_snap = db.query(PerfSnapshot).filter(
                     PerfSnapshot.tenant_id == tenant_id,
                     PerfSnapshot.ad_id == ad_id,
+                    PerfSnapshot.platform == "fb",
                     PerfSnapshot.snapshot_date == biz_today,
                 ).first()
                 if prev_snap:
@@ -813,6 +814,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     history = db.query(PerfSnapshot).filter(
                         PerfSnapshot.tenant_id == tenant_id,
                         PerfSnapshot.ad_id == ad_id,
+                        PerfSnapshot.platform == "fb",
                         PerfSnapshot.snapshot_date >= since_date,
                         PerfSnapshot.snapshot_date < biz_today,
                     ).order_by(PerfSnapshot.snapshot_date.desc()).all()
@@ -1016,6 +1018,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 roas_val = float(ad.get("purchase_roas", 0) or 0)
                 snap = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == ad_id,
+                    PerfSnapshot.platform == "fb",
                     PerfSnapshot.snapshot_date == biz_today,
                 ).first()
                 if snap:
@@ -1037,6 +1040,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 else:
                     db.add(PerfSnapshot(
                         tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
+                        platform="fb",
                         snapshot_date=biz_today, spend=spend_usd_snap,
                         spend_native=spend, currency=acc.currency,
                         conversions=conv, cpa=cpa,

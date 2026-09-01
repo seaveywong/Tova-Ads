@@ -479,6 +479,7 @@ def ad_breakdown(
     rows = db.query(PerfSnapshot).filter(
         PerfSnapshot.tenant_id == user.tenant_id,
         PerfSnapshot.act_id == act_id,
+        PerfSnapshot.platform == "fb",
         PerfSnapshot.snapshot_date == today,
     ).all()
     return {
@@ -781,6 +782,7 @@ def dashboard_export(
         rows_q = db.query(PerfSnapshot).filter(
             PerfSnapshot.tenant_id == user.tenant_id,
             PerfSnapshot.act_id == act_id,
+            PerfSnapshot.platform == "fb",
             PerfSnapshot.ad_id.isnot(None),          # 排除账户级汇总行（ad_id 空）
             PerfSnapshot.snapshot_date >= since,
             PerfSnapshot.snapshot_date <= until,

@@ -52,6 +52,7 @@ class LaunchTemplate(Base):
     # 跟帖模式（Phase 2 UI）：new=每素材建帖 / reuse=复用已有帖
     post_source = Column(Text, default="new")
     reuse_post_ref = Column(Text)   # 跟帖引用的 post_id
+    platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（模板按平台隔离字段集）
     status = Column(Text, default="draft")             # draft/active/archived
     deploy_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

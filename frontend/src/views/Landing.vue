@@ -462,18 +462,18 @@ watch([() => form.value.subdomain_prefix, () => form.value.custom_domains], () =
 
 // ── 像素库管理 ──
 const pixelOpen = ref(false)
-const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' })
+const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '', fb_capi_enabled: false })
 const pixelSaving = ref(false)
 const syncing = ref(false)
 const pixelTesting = ref(false)
-const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' } }
+const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '', fb_capi_enabled: false } }
 const syncPixels = async () => {
   syncing.value = true
   try { const r = await POST('/landing-lib/pixels/sync', {}); ElMessage.success(t('landing.pixelSynced', { n: r.added || 0 })); await loadLib() }
   catch (e) { ElMessage.error(t('landing.syncFail') + '：' + (e.message || '')) }
   syncing.value = false
 }
-const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '', test_event_code: p.test_event_code || '' } }
+const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '', test_event_code: p.test_event_code || '', fb_capi_enabled: !!p.fb_capi_enabled } }
 const delPixel = async (p) => {
   try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
   catch {}
@@ -483,14 +483,19 @@ const savePixel = async () => {
   pixelSaving.value = true
   try {
     if (pixelForm.value.id) {
-      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined })
+      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined, fb_capi_enabled: pixelForm.value.platform === 'fb' ? pixelForm.value.fb_capi_enabled : false })
       ElMessage.success(t('common.saved'))
     } else {
-      await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined })
-      ElMessage.success(t('common.done'))
+      const r = await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined })
+      if (r?.auto_test?.attempted) {
+        if (r.auto_test.ok) ElMessage.success(t('landing.autoLitOk'))
+        else ElMessage.warning(t('landing.autoLitFail', { msg: r.auto_test.message || `code ${r.auto_test.code}` }))
+      } else {
+        ElMessage.success(t('common.done'))
+      }
     }
     await loadLib()
-    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '' }
+    pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '', fb_capi_enabled: false }
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   pixelSaving.value = false
 }
@@ -977,6 +982,10 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </select>
       </div>
       <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>
+      <div class="form-l" v-if="pixelForm.platform === 'fb' && pixelForm.id"><label>{{ t('landing.fbCapiLabel') }}</label>
+        <el-switch v-model="pixelForm.fb_capi_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+      </div>
+      <div class="pixel-hint" v-if="pixelForm.platform === 'fb' && pixelForm.id" style="margin:0 0 10px">{{ t('landing.fbCapiHint') }}</div>
       <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTtToken') }}</label><input v-model="pixelForm.tt_access_token" class="input" type="password" :placeholder="t('landing.fTtTokenPh')" /></div>
       <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTestCode') }}</label><input v-model="pixelForm.test_event_code" class="input" :placeholder="t('landing.fTestCodePh')" /></div>
       <div class="pixel-hint" v-if="pixelForm.platform === 'tt'" style="margin:0 0 10px">{{ t('landing.fTtTokenHint') }}</div>
@@ -989,6 +998,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <code>{{ p.pixel_id }}</code>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
           <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? t('landing.hasToken') : t('landing.noToken') }}</span>
+          <span v-if="(p.platform || 'fb') === 'fb' && p.fb_capi_enabled" class="tag ok" :title="t('landing.fbCapiLabel')">{{ t('landing.fbCapiTag') }}</span>
           <span class="tag">{{ t('landing.pixelPages', { n: p.usage_count }) }}</span>
           <button class="mb" style="margin-left:auto" @click="editPixel(p)">{{ t('common.edit') }}</button>
           <button class="mb danger" @click="delPixel(p)">{{ t('common.delete') }}</button>

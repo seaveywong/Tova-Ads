@@ -30,6 +30,7 @@ from .routers.assets import router as assets_router
 from .routers.backup import router as backup_router
 from .routers.fb_apps import router as fb_apps_router
 from .routers.fb_oauth import router as fb_oauth_router
+from .routers.tt_oauth import router as tt_oauth_router
 from .routers.ads import router as ads_router
 from .routers.settings import router as settings_router
 from .routers.rbac import router as rbac_router
@@ -144,6 +145,7 @@ from .routers.fb_webhook import router as fb_webhook_router
 app.include_router(leads_router)
 app.include_router(fb_webhook_router)
 app.include_router(fb_oauth_router)
+app.include_router(tt_oauth_router)
 app.include_router(ads_router)
 app.include_router(settings_router)
 app.include_router(launch_templates_router)
@@ -200,6 +202,9 @@ def _start_scheduler():
     # 汇率同步：每日 3:07 拉实时汇率（止损 to_usd 用，避免 VND/IDR 漂移致阈值误判）
     from .services.fx_sync import run_fx_sync
     _scheduler.add_job(run_fx_sync, "cron", hour=3, minute=7, id="fx_sync")
+    # TikTok 令牌自动续期：access_token 24h 过期，每 6h 刷剩 <12h 的凭证（refresh 即轮换，原子写回）
+    from .services.tt_token_refresh import run_tt_token_refresh
+    _scheduler.add_job(run_tt_token_refresh, "interval", hours=6, id="tt_token_refresh")
     _scheduler.start()
     print(f"[Scheduler] 已启动，间隔(分钟)={_eff}")
 
