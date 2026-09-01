@@ -5,7 +5,7 @@ import { useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
-import { jobStatus, itemStatus } from '../composables/useStatus'
+import { jobStatus, itemStatus, fbAdStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
 import { fmtUsd } from '../composables/useFormat'
 import { COUNTRIES as ALL_COUNTRIES } from '../composables/useCountries'
@@ -61,6 +61,15 @@ const landingPages = ref([])
 const progressOpen = ref(false)
 const activeJob = ref(null)
 let pollTimer = null
+// 受众库（SavedAudience 选择器——后端 CRUD 现成，此处接通消费端）
+const savedAudiences = ref([])
+// 模板已部署清单抽屉
+const depOpen = ref(false)
+const depTpl = ref(null)
+const depJobs = ref([])
+const depLoading = ref(false)
+const depJobDetail = ref(null)
+const depItemsLoading = ref(false)
 
 const OBJECTIVES = [
   { v: 'OUTCOME_SALES', l: 'launch.obj_sales' },
@@ -288,7 +297,7 @@ const onLandingChange = async () => {
   }
 }
 onMounted(() => {
-  load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages()
+  load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages(); loadAudiences()
   // 广告列表「复用此帖铺放」入口 → 预填跟帖模板
   const rp = route.query.reuse_post
   if (rp) {
@@ -342,6 +351,62 @@ const jobs = ref([])
 const loadJobs = async () => { try { jobs.value = await GET('/launch-templates/jobs?limit=20') } catch {} }
 const openHistory = async () => { historyOpen.value = true; await loadJobs() }
 const openJob = async (jobId) => { historyOpen.value = false; openProgress(jobId) }
+
+// 模板已部署清单（卡片「已部署 N」入口）
+const openDeployments = async (tpl) => {
+  depTpl.value = tpl; depOpen.value = true
+  depJobs.value = []; depJobDetail.value = null; depLoading.value = true
+  try { const r = await GET('/launch-templates/' + tpl.id + '/deployments'); depJobs.value = r.jobs || [] }
+  catch (e) { showError(e, t('common.opFail')) }
+  depLoading.value = false
+}
+// 展开/收起单次部署 → 拉 items（含 join ads_cache 的当前状态）
+const toggleDepJob = async (j) => {
+  if (depJobDetail.value?.id === j.id) { depJobDetail.value = null; return }
+  depJobDetail.value = null; depItemsLoading.value = true
+  try { depJobDetail.value = await GET(`/launch-templates/${depTpl.value.id}/deployments?job_id=${j.id}`) }
+  catch (e) { showError(e, t('common.opFail')) }
+  depItemsLoading.value = false
+}
+const copyAdId = (id) => { if (!id) return; navigator.clipboard?.writeText(id); ElMessage.success(t('launch.adIdCopied', { id })) }
+const liveStatusColor = (s) => {
+  const c = fbAdStatus(s).cls
+  return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--warning)' : 'var(--t3)'
+}
+
+// 受众库选择器
+const loadAudiences = async () => { try { savedAudiences.value = await GET('/audiences') } catch {} }
+const selectedSavedAud = computed(() => savedAudiences.value.find(a => a.id === form.value.audience_id) || null)
+const hasManualAudience = computed(() =>
+  (form.value.audience_countries || []).length > 0 || (form.value.audience_interests || []).length > 0)
+const audienceChip = computed(() => {
+  if (form.value.audience_id) {
+    const a = selectedSavedAud.value
+    return a ? a.name : `#${form.value.audience_id}`
+  }
+  const c = (form.value.audience_countries || []).join(',') || t('launch.defaultAudience')
+  return `${c} · ${t('launch.interestCount', { n: (form.value.audience_interests || []).length })}`
+})
+// 手动定向一键存为受众（POST /audiences 现成端点），下次模板直接下拉选用
+const saveAsAudience = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt(t('launch.audSaveNamePh'), t('launch.saveAsAudience'), {
+      confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
+      inputPattern: /\S+/, inputErrorMessage: t('launch.audNameRequired'),
+    })
+    const name = value.trim()
+    await POST('/audiences', {
+      name,
+      interests: form.value.audience_interests || [],
+      countries: form.value.audience_countries || [],
+      age_min: form.value.audience_age_min || 18,
+      age_max: form.value.audience_age_max || 65,
+      gender: form.value.audience_gender || 0,
+    })
+    await loadAudiences()
+    ElMessage.success(t('launch.audSaved', { name }))
+  } catch (e) { if (e !== 'cancel') showError(e, t('common.opFail')) }
+}
 
 // #3 预检结构化展示
 const preflightResult = ref(null)
@@ -666,8 +731,10 @@ const saveTpl = async () => {
       budget_mode: form.value.budget_mode, bid_strategy: form.value.bid_strategy,
       budget_usd: Number(form.value.budget_usd), name_prefix: form.value.name_prefix,
       optimization_goal: form.value.optimization_goal, billing_event: form.value.billing_event,
-      destination_type: form.value.destination_type, audience_id: form.value.audience_id,
-      audience_json: buildAudienceJson(), advanced_config: form.value.advanced_config,
+      destination_type: form.value.destination_type, audience_id: form.value.audience_id || 0,
+      // 选了保存受众 → 清内联 audience_json，部署走 SavedAudience 分支（内联非空会优先生效）
+      audience_json: form.value.audience_id ? '' : buildAudienceJson(),
+      advanced_config: form.value.advanced_config,
       asset_id: form.value.asset_id, headline: form.value.headline, body: form.value.body,
       page_id: form.value.page_id, pixel_id: form.value.pixel_id,
       landing_url: form.value.landing_url, cta_type: form.value.cta_type,
@@ -898,6 +965,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </span>
         </div>
         <div class="card-meta"><span class="card-obj">{{ objLabel(tpl.objective) }}</span><span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span></div>
+        <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
@@ -957,7 +1025,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       <!-- #8 summary strip：跨级概览 -->
       <div class="summary-strip">
         <span class="ss-chip" @click="editLevel='campaign'" :title="t('launch.gotoCampaign')">{{ t('launch.objColon') }}{{ t(OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective) }}</span>
-        <span class="ss-chip" @click="editLevel='adset'" :title="t('launch.gotoAdSet')">{{ t('launch.audienceColon') }}{{ (form.audience_countries||[]).join(',') || t('launch.defaultAudience') }} · {{ t('launch.interestCount', { n: (form.audience_interests||[]).length }) }}</span>
+        <span class="ss-chip" @click="editLevel='adset'" :title="t('launch.gotoAdSet')">{{ t('launch.audienceColon') }}{{ audienceChip }}</span>
         <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.assetColon') }}{{ editingAsset?.name || t('launch.notSelected') }}</span>
         <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.sourceColon') }}{{ form.post_source==='reuse' ? t('launch.postSourceReuse') : t('launch.postSourceNew') }}</span>
         <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
@@ -1005,6 +1073,27 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
+        <!-- 受众来源：保存的受众（SavedAudience，部署时用） / 自定义（下方手动定向） -->
+        <div class="row"><label>{{ t('launch.audienceSource') }}</label>
+          <el-select v-model="form.audience_id" filterable size="small" style="width:100%" :placeholder="t('launch.audienceCustom')">
+            <el-option :value="0" :label="t('launch.audienceCustom')" />
+            <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
+              :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
+          </el-select>
+          <span class="hint">{{ t('launch.audienceSourceHint') }}</span>
+        </div>
+        <div v-if="selectedSavedAud" class="saved-aud-card">
+          <div class="sa-head">
+            <span class="sa-name">{{ selectedSavedAud.name }}</span>
+            <span v-if="selectedSavedAud.status !== 'active'" class="sa-warn">⚠ {{ t('launch.audInactiveWarn') }}</span>
+          </div>
+          <div v-if="selectedSavedAud.note" class="sa-note">{{ selectedSavedAud.note }}</div>
+          <div class="sa-meta">{{ (selectedSavedAud.countries||[]).join(',') || t('launch.defaultAudience') }} · {{ selectedSavedAud.age_min }}-{{ selectedSavedAud.age_max }} · {{ t('launch.interestCount', { n: (selectedSavedAud.interests||[]).length }) }}</div>
+        </div>
+        <div v-else class="aud-actions-row">
+          <button class="btn sm ghost" :disabled="!hasManualAudience" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ t('launch.saveAsAudience') }}</button>
+        </div>
+        <template v-if="!form.audience_id">
         <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为） -->
         <div class="advantage-box">
           <div class="adv-row">
@@ -1052,6 +1141,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span v-if="!form.audience_interests.length" class="hint">{{ t('launch.addViaSearch') }}</span>
           </div>
         </div>
+        </template>
         </template>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.placement') }}</div>
@@ -1383,6 +1473,35 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
       </div>
     </el-dialog>
+
+    <!-- 模板已部署清单（卡片「已部署 N」入口；展开单次看明细+广告当前状态） -->
+    <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="640px">
+      <div v-loading="depLoading">
+        <div v-for="j in depJobs" :key="j.id" class="dep-job">
+          <div class="dep-job-head" @click="toggleDepJob(j)">
+            <span class="dep-job-time">{{ (j.created_at||'').slice(0,19).replace('T',' ') }}</span>
+            <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
+            <span class="dep-job-counts">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
+            <span class="dep-arrow" :class="{open: depJobDetail?.id === j.id}">▶</span>
+          </div>
+          <div v-if="depJobDetail?.id === j.id" class="dep-items" v-loading="depItemsLoading">
+            <div v-for="it in (depJobDetail.items||[])" :key="it.id" class="dep-item">
+              <span class="dot" :style="{background:statusColor(it.status)}"></span>
+              <span class="pi-act">{{ it.act_id }}</span>
+              <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
+              <span v-if="it.ad_id" class="dep-ad-id" :title="t('launch.clickCopyAdId')" @click="copyAdId(it.ad_id)">{{ it.ad_id }}</span>
+              <span v-if="it.status === 'success'" class="dep-live" :style="{color: liveStatusColor(it.live_status)}" :title="t('launch.liveStatusHint')">
+                {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
+              </span>
+              <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">{{ t('launch.fbAds') }}→</a>
+              <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,40) }}</span>
+            </div>
+            <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
+          </div>
+        </div>
+        <div v-if="!depJobs.length && !depLoading" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
+      </div>
+    </el-drawer>
     <!-- 表单预览 -->
     <el-dialog v-model="formPreviewOpen" :title="t('launch.formPreview')" width="400px" append-to-body>
       <div v-if="selectedFormTpl" class="phone-mockup">
@@ -1430,6 +1549,29 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .card-warn{font-size:11px;color:var(--warning);padding:2px 0}
 .card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap}
 .card-copy{font-size:11px;color:var(--t2);font-style:italic;max-height:32px;overflow:hidden}
+/* 已部署清单入口（卡片）+ 抽屉 */
+.card-dep{align-self:flex-start;background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:0;font-family:inherit}
+.card-dep:hover{text-decoration:underline}
+.dep-job{border:1px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:8px}
+.dep-job-head{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--bg3)}
+.dep-job-head:hover{background:var(--bg2)}
+.dep-job-time{font-size:12px;color:var(--t1);font-variant-numeric:tabular-nums}
+.dep-job-counts{font-size:11px;color:var(--t3);margin-left:auto}
+.dep-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block}
+.dep-arrow.open{transform:rotate(90deg)}
+.dep-items{border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:2px;padding:6px 0;max-height:40vh;overflow-y:auto}
+.dep-item{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px}
+.dep-ad-id{font-family:monospace;color:var(--ac);cursor:pointer;font-size:11px}
+.dep-ad-id:hover{text-decoration:underline}
+.dep-live{font-size:11px;white-space:nowrap}
+/* 受众来源选择器 */
+.saved-aud-card{border:1px solid var(--ac);background:rgba(10,132,255,.06);border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.sa-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sa-name{font-size:13px;font-weight:600;color:var(--ac)}
+.sa-warn{font-size:11px;color:var(--warning)}
+.sa-note{font-size:12px;color:var(--t2);line-height:1.5}
+.sa-meta{font-size:11px;color:var(--t3)}
+.aud-actions-row{display:flex;gap:6px}
 .card-ops{display:flex;gap:3px;margin-top:4px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
 .op.primary{color:var(--ac);border-color:var(--ac)}

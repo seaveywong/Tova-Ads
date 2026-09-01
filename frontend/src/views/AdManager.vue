@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { GET, POST, DELETE, downloadFile } from '../api'
+import { GET, POST, PATCH, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
@@ -318,12 +318,47 @@ const leadField = (l, names) => { const m = leadFieldMap(l); for (const n of nam
 const LEAD_SKIP = ['full_name', 'first_name', 'last_name', 'email', 'work_email', 'phone_number', 'phone', 'work_phone_number']
 const leadExtra = (l) => Object.entries(leadFieldMap(l)).filter(([k]) => !LEAD_SKIP.includes(k))
 const fmtLeadTime = (iso) => { if (!iso) return '-'; try { return new Date(iso).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', { hour12: false }) } catch { return iso } }
+// 轻 CRM：跟进状态（new/contacted/won/lost）+ 备注 + 筛选
+const LEAD_STATUSES = ['new', 'contacted', 'won', 'lost']
+const leadStatusFilter = ref('all')
+const LEAD_STATUS_LABEL = computed(() => ({ new: t('adm.leadStatus.new'), contacted: t('adm.leadStatus.contacted'), won: t('adm.leadStatus.won'), lost: t('adm.leadStatus.lost') }))
+const leadStatusLabel = (s) => LEAD_STATUS_LABEL.value[s || 'new'] || s
+const leadStatusFilterLabel = (s) => s === 'all' ? t('common.all') : leadStatusLabel(s)
 const switchLeadTab = () => { tab.value = 'lead'; selected.value = new Set(); if (!leads.value.length) loadLeads() }
 const loadLeads = async () => {
   leadsLoading.value = true
-  try { const r = await GET('/leads'); leads.value = r.items || [] }
+  try {
+    const q = leadStatusFilter.value !== 'all' ? '?status=' + encodeURIComponent(leadStatusFilter.value) : ''
+    const r = await GET('/leads' + q)
+    leads.value = r.items || []
+  }
   catch (e) { ElMessage.error(e.message || t('common.fail')) }
   leadsLoading.value = false
+}
+const setLeadStatus = async (l, status) => {
+  if ((l.status || 'new') === status) return
+  try {
+    const r = await PATCH('/leads/' + l.id, { status })
+    l.status = r.status; l.status_updated_at = r.status_updated_at
+    ElMessage.success(t('adm.leadStatusUpdated'))
+    // 筛选中把行改成不属于当前筛选的状态 → 重载让它消失（all/同筛选下原地更新即可）
+    if (leadStatusFilter.value !== 'all' && leadStatusFilter.value !== status) await loadLeads()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+const editLeadNote = async (l) => {
+  const name = leadField(l, ['full_name', 'first_name', 'last_name']) || l.lead_id
+  try {
+    const { value } = await ElMessageBox.prompt(t('adm.leadNotePrompt'), t('adm.leadNoteTitle', { name }), {
+      inputValue: l.note || '',
+      confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
+      inputType: 'textarea',
+      inputValidator: (v) => ((v || '').length > 2000) ? t('adm.leadNoteTooLong') : true,
+    })
+    const note = (value || '').trim()
+    const r = await PATCH('/leads/' + l.id, { note })
+    l.note = r.note; l.status_updated_at = r.status_updated_at
+    ElMessage.success(t('adm.leadNoteUpdated'))
+  } catch (e) { if (e && e.message) ElMessage.error(e.message || t('common.opFail')) }
 }
 const syncLeads = async () => {
   opLoading.value = true
@@ -432,19 +467,33 @@ const subscribeLeads = async () => {
     <div v-if="tab === 'lead'" class="leads-panel">
       <div class="leads-bar">
         <span class="rd-cnt">{{ t('adm.leadsCount', { n: leads.length }) }}</span>
+        <div class="sf-group">
+          <button v-for="s in ['all', ...LEAD_STATUSES]" :key="s" class="ctrl-btn sm" :class="{ on: leadStatusFilter === s }" @click="leadStatusFilter = s; loadLeads()">{{ leadStatusFilterLabel(s) }}</button>
+        </div>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
         <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads">🔔 {{ t('adm.leadsSubscribe') }}</button>
         <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
       </div>
       <div class="tbl" v-loading="leadsLoading">
-        <div class="row head lead-row"><div>{{ t('adm.lcolTime') }}</div><div>{{ t('adm.lcolName') }}</div><div>{{ t('adm.lcolEmail') }}</div><div>{{ t('adm.lcolPhone') }}</div><div>{{ t('adm.lcolSource') }}</div><div>{{ t('adm.lcolDetail') }}</div></div>
+        <div class="row head lead-row"><div>{{ t('adm.lcolTime') }}</div><div>{{ t('adm.lcolName') }}</div><div>{{ t('adm.lcolEmail') }}</div><div>{{ t('adm.lcolPhone') }}</div><div>{{ t('adm.lcolSource') }}</div><div>{{ t('adm.lcolStatus') }}</div><div>{{ t('adm.lcolNote') }}</div><div>{{ t('adm.lcolDetail') }}</div></div>
         <div v-for="l in leads" :key="l.lead_id" class="row lead-row">
           <div class="ld-time">{{ fmtLeadTime(l.created_time) }}</div>
           <div class="ld-name">{{ leadField(l, ['full_name', 'first_name', 'last_name']) || '-' }}</div>
           <div class="ld-email">{{ leadField(l, ['email', 'work_email']) || '-' }}</div>
           <div>{{ leadField(l, ['phone_number', 'phone', 'work_phone_number']) || '-' }}</div>
           <div class="ld-src"><code v-if="l.ad_id">{{ l.ad_id }}</code><span v-else-if="l.form_id" class="muted">form …{{ String(l.form_id).slice(-6) }}</span><span v-else class="muted">-</span></div>
+          <div class="ld-status">
+            <el-dropdown trigger="click" :disabled="opLoading" @command="cmd => setLeadStatus(l, cmd)" placement="bottom-start">
+              <span :class="['ld-st-tag', l.status || 'new']">{{ leadStatusLabel(l.status) }} ▾</span>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="s in LEAD_STATUSES" :key="s" :command="s"><span :class="['ld-st-dot', s]"></span>{{ LEAD_STATUS_LABEL[s] }}<span v-if="(l.status || 'new') === s" class="ld-st-cur">✓</span></el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+          <div class="ld-note"><span v-if="l.note" class="ld-note-txt" :title="l.note">{{ l.note }}</span><button class="ld-note-btn" :title="t('adm.lcolNote')" @click="editLeadNote(l)">✎</button></div>
           <div class="ld-extra"><span v-for="[k, v] in leadExtra(l)" :key="k" class="ld-chip">{{ fieldLabel(k) }}: {{ v }}</span></div>
         </div>
         <div v-if="!leads.length && !leadsLoading" class="empty">{{ t('adm.leadsEmpty') }}</div>
@@ -665,11 +714,28 @@ const subscribeLeads = async () => {
 .diag-empty { padding: 20px; text-align: center; color: var(--t3); font-size: 12px }
 .leads-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap }
 .leads-hint { font-size: 11px; color: var(--t3); margin-left: auto }
-.lead-row { grid-template-columns: 1.3fr 1fr 1.4fr 1.1fr 1fr 1.6fr }
+.lead-row { grid-template-columns: 1.3fr 1fr 1.4fr 1.1fr 1fr 0.95fr 1.4fr 1.5fr }
 .ld-time { color: var(--t3); font-size: 11px; white-space: nowrap }
 .ld-name { font-weight: 600; color: var(--t1) }
 .ld-email { color: var(--ac); font-size: 11px; word-break: break-all }
 .ld-src code { font-size: 11px; color: var(--t3) }
+.ld-status { min-width: 0 }
+.ld-st-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 10px; cursor: pointer; white-space: nowrap; line-height: 1.5; border: none }
+.ld-st-tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0 }
+.ld-st-tag.new { color: var(--success); background: rgba(48, 209, 88, .1) }
+.ld-st-tag.contacted { color: var(--ac); background: rgba(10, 132, 255, .1) }
+.ld-st-tag.won { color: var(--warning); background: rgba(255, 214, 10, .1) }
+.ld-st-tag.lost { color: var(--t2); background: var(--bg3) }
+.ld-st-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px }
+.ld-st-dot.new { background: var(--success) }
+.ld-st-dot.contacted { background: var(--ac) }
+.ld-st-dot.won { background: var(--warning) }
+.ld-st-dot.lost { background: var(--t3) }
+.ld-st-cur { margin-left: 8px; color: var(--ac) }
+.ld-note { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.ld-note-txt { flex: 1; font-size: 11px; color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ld-note-btn { flex-shrink: 0; border: none; background: none; color: var(--t3); cursor: pointer; font-size: 12px; padding: 2px; line-height: 1 }
+.ld-note-btn:hover { color: var(--ac) }
 .ld-extra { display: flex; flex-wrap: wrap; gap: 4px }
 .ld-chip { font-size: 10px; color: var(--t2); background: var(--bg3); padding: 1px 6px; border-radius: 8px; white-space: nowrap }
 </style>

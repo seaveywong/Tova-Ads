@@ -18,3 +18,7 @@ class Lead(Base):
     field_data_json = Column(Text)        # [{"name":"full_name","values":["张三"]}, ...]
     created_time = Column(DateTime(timezone=True))  # FB lead 创建时间
     fetched_at = Column(DateTime(timezone=True), server_default=func.now())  # 拉取/回调时间
+    # 轻 CRM 跟进字段（本地状态，不回写 FB）
+    status = Column(Text, nullable=False, server_default="new")  # new/contacted/won/lost
+    note = Column(Text)                   # 跟进备注（可空）
+    status_updated_at = Column(DateTime(timezone=True))  # 状态/备注最近更新时间

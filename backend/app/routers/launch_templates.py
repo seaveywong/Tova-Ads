@@ -21,6 +21,7 @@ from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink
 from ..models.audience import SavedAudience
+from ..models.ads_cache import AdsCache
 from ..models.fb import Account
 from ..models.perf import CurrencyRate
 import os
@@ -374,18 +375,19 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
             if not isinstance(interests, list):
                 interests = []
             resolved = [i for i in interests if isinstance(i, dict) and i.get("id")]
-            if not countries and not resolved:
-                return None  # 内联受众空 → 走 FB 默认
-            t = build_targeting(
-                countries=countries, interests=resolved,
-                age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
-                gender=a.get("gender") or 0, strategy=a.get("strategy") or "broad_interest",
-            )
-            # 用户指定语言（FB targeting.languages：[{id,name}] 或 [id] 透传）
-            langs = a.get("languages") or []
-            if langs and isinstance(langs, list):
-                t["languages"] = langs
-            return t
+            if countries or resolved:
+                t = build_targeting(
+                    countries=countries, interests=resolved,
+                    age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
+                    gender=a.get("gender") or 0, strategy=a.get("strategy") or "broad_interest",
+                )
+                # 用户指定语言（FB targeting.languages：[{id,name}] 或 [id] 透传）
+                langs = a.get("languages") or []
+                if langs and isinstance(langs, list):
+                    t["languages"] = langs
+                return t
+            # 内联受众空（无国家无兴趣）→ 落到 SavedAudience：显式选了受众的优先，
+            # 否则旧数据里残留的空 audience_json 会把 SavedAudience 静默顶掉（都不空=FB 默认）
         except Exception:
             pass
     # 2. SavedAudience
@@ -599,6 +601,30 @@ def _reap_stale_jobs():
         sdb.close()
 
 
+def _refresh_ads_cache_after_deploy(tenant_id: int, act_ids: list[str]):
+    """部署收尾对账：逐账户拉最新 campaigns/adsets/ads → upsert ads_cache。
+
+    部署清单的 live_status 与广告管理器的「刚部署即可见」都依赖它。在 job 已置终态
+    后调用（本函数失败不影响 job 结果）；单账户失败跳过——15min 的 run_ads_cache_sync
+    cron 兜底。复用 ads.py._sync_one 的 upsert 逻辑（同一缓存格式）。"""
+    if not act_ids:
+        return
+    from ..routers.ads import _sync_one
+    sdb = SuperSessionLocal()
+    try:
+        for act_id in sorted(set(act_ids)):
+            try:
+                fb = client_for_account(sdb, tenant_id, act_id, "read")
+                if fb and _sync_one(sdb, tenant_id, act_id, fb):
+                    sdb.commit()
+            except Exception:
+                sdb.rollback()
+                logging.getLogger("toveads.launch").warning(
+                    f"[Launch] 部署对账刷新 ads_cache 失败: act_{act_id}", exc_info=True)
+    finally:
+        sdb.close()
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -746,6 +772,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         job.status = "partial_failed" if job.failed else "completed"
         job.finished_at = datetime.now(timezone.utc)
         sdb.commit()
+        # 部署后对账：拉成功账户的最新广告实体进 ads_cache（清单 live_status / 管理器立即可见；
+        # 只刷建出广告的账户，失败账户无新实体）。失败仅告警，不动 job 终态。
+        try:
+            _refresh_ads_cache_after_deploy(
+                tenant_id, [it.act_id for it in items if it.status == "success"])
+        except Exception:
+            logging.getLogger("toveads.launch").warning("[Launch] 部署后 ads_cache 对账失败", exc_info=True)
     except Exception as e:
         try:
             job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
@@ -794,6 +827,64 @@ def get_job(job_id: int, user: CurrentUser = Depends(require_permission("ads.cre
         "finished_at": str(j.finished_at) if j.finished_at else "",
         "items": [_item_dict(it) for it in items],
     }
+
+
+# ── 模板已部署清单（模板维度聚合）──
+def _job_dict(j: LaunchJob) -> dict:
+    return {
+        "id": j.id, "template_id": j.template_id, "template_name": j.template_name or "",
+        "status": j.status, "total": j.total, "succeeded": j.succeeded, "failed": j.failed,
+        "created_at": str(j.created_at) if j.created_at else "",
+        "finished_at": str(j.finished_at) if j.finished_at else "",
+    }
+
+
+def _live_status_map(db: Session, tenant_id: int, act_ids: list[str]) -> dict[str, str]:
+    """ads_cache → {ad_id: effective_status}（按 items 的账户集取缓存，全状态）。
+    缓存无该广告 → 不入 map，前端显「待同步」而非空白。"""
+    out: dict[str, str] = {}
+    ids = sorted({a for a in act_ids if a})
+    if not ids:
+        return out
+    for row in db.query(AdsCache).filter(
+        AdsCache.tenant_id == tenant_id, AdsCache.act_id.in_(ids)).all():
+        try:
+            for ad in json.loads(row.ads_json or "[]"):
+                aid = str(ad.get("id")) if isinstance(ad, dict) and ad.get("id") else ""
+                if aid:
+                    out[aid] = ad.get("effective_status") or ""
+        except Exception:
+            continue
+    return out
+
+
+@router.get("/{tid}/deployments")
+def template_deployments(tid: int, job_id: int = 0,
+                         user: CurrentUser = Depends(require_permission("ads.create")),
+                         db: Session = Depends(get_db)):
+    """模板已部署清单。无 job_id = jobs 概览（时间/账户数/成败计数，近 50 次）；
+    ?job_id= = 单次部署明细（items + join ads_cache 的当前 effective_status——
+    广告以 PAUSED 出生，用户/规则后来开停在这里能看到活状态，与创建时状态对账）。"""
+    t = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not t:
+        raise HTTPException(404, "模板不存在")
+    if job_id:
+        j = db.query(LaunchJob).filter(
+            LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id,
+            LaunchJob.template_id == tid).first()
+        if not j:
+            raise HTTPException(404, "部署任务不存在")
+        items = db.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
+        live = _live_status_map(db, user.tenant_id, [it.act_id for it in items])
+        return {**_job_dict(j),
+                "items": [{**_item_dict(it), "live_status": live.get(it.ad_id or "", "")}
+                          for it in items]}
+    jobs = db.query(LaunchJob).filter(
+        LaunchJob.tenant_id == user.tenant_id, LaunchJob.template_id == tid,
+    ).order_by(LaunchJob.id.desc()).limit(50).all()
+    return {"template_id": tid, "deploy_count": t.deploy_count or 0,
+            "jobs": [_job_dict(j) for j in jobs]}
 
 
 class RetryIn(BaseModel):
@@ -976,5 +1067,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             job.status = "partial_failed"   # 此 item 仍 fail → failed≥1，必落 partial_failed
             job.finished_at = datetime.now(timezone.utc)
         sdb.commit()
+        # 重试成功也做对账（新 ad_id 要进 ads_cache 才能在清单看到活状态）
+        if it.status == "success" and it.ad_id:
+            try:
+                _refresh_ads_cache_after_deploy(tenant_id, [it.act_id])
+            except Exception:
+                pass
     finally:
         sdb.close()

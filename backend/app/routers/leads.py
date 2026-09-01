@@ -1,12 +1,15 @@
 """潜客数据（FB Leadgen / Instant Form leads）。leads_retrieval scope。
 
-GET /leads — 列表（本地 DB，按 page/ad/form 筛选）
+GET /leads — 列表（本地 DB，按 page/ad/form/status 筛选）
+GET /leads/export — CSV 导出（含跟进状态/备注）
 POST /leads/sync — 从 FB 拉取（GET /{form_id}/leads → 存本地 + 回填 webhook stub 的 field_data）
 POST /leads/subscribe — 订阅该租户所有主页的 leadgen webhook（page-level，需 pages_manage_metadata）
+PATCH /leads/{id} — 轻 CRM：标记跟进状态（new/contacted/won/lost）/ 备注（本地状态，不回写 FB）
 """
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
@@ -17,6 +20,17 @@ from ..core.fb_client import FbClient, FbApiError
 from ..core.encryption import decrypt
 
 router = APIRouter(prefix="/leads", tags=["leads"])
+
+LEAD_STATUSES = ("new", "contacted", "won", "lost")
+LEAD_STATUS_LABELS = {   # CSV 导出列头用（按请求 locale 选）
+    "zh": {"new": "新潜客", "contacted": "已联系", "won": "已成交", "lost": "已流失"},
+    "en": {"new": "New", "contacted": "Contacted", "won": "Won", "lost": "Lost"},
+}
+
+
+class LeadUpdateIn(BaseModel):
+    status: str | None = None
+    note: str | None = None
 
 
 def _parse_created_time(raw):
@@ -35,17 +49,20 @@ def _lead_dict(r):
         "form_id": r.form_id,
         "field_data": json.loads(r.field_data_json or "[]"),
         "created_time": r.created_time.isoformat() if r.created_time else None,
+        "status": r.status or "new",
+        "note": r.note,
+        "status_updated_at": r.status_updated_at.isoformat() if r.status_updated_at else None,
     }
 
 
 @router.get("")
 def list_leads(
-    page_id: str = "", ad_id: str = "", form_id: str = "",
+    page_id: str = "", ad_id: str = "", form_id: str = "", status: str = "",
     limit: int = 200,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """潜客列表（本地 DB，0 FB 调用）。按 page/ad/form 筛选。"""
+    """潜客列表（本地 DB，0 FB 调用）。按 page/ad/form/status 筛选。"""
     q = db.query(Lead).filter(Lead.tenant_id == user.tenant_id)
     if page_id:
         q = q.filter(Lead.page_id == page_id)
@@ -53,6 +70,10 @@ def list_leads(
         q = q.filter(Lead.ad_id == ad_id)
     if form_id:
         q = q.filter(Lead.form_id == form_id)
+    if status:
+        if status not in LEAD_STATUSES:
+            raise HTTPException(400, f"无效状态 {status}")
+        q = q.filter(Lead.status == status)
     total = q.count()  # 真实总数（limit 前），给前端准确显示
     rows = q.order_by(Lead.created_time.desc().nullslast()).limit(min(max(limit, 1), 500)).all()
     return {"items": [_lead_dict(r) for r in rows], "total": total}
@@ -77,8 +98,9 @@ def export_leads(
     if form_id:
         q = q.filter(Lead.form_id == form_id)
     rows = q.order_by(Lead.created_time.desc().nullslast()).limit(2000).all()
-    headers = (["Time", "Page ID", "Ad ID", "Form ID", "Name", "Contact", "Answers"] if en else
-               ["时间", "主页ID", "广告ID", "表单ID", "姓名", "联系方式", "问卷答案"])
+    headers = (["Time", "Page ID", "Ad ID", "Form ID", "Name", "Contact", "Status", "Note", "Answers"] if en else
+               ["时间", "主页ID", "广告ID", "表单ID", "姓名", "联系方式", "跟进状态", "备注", "问卷答案"])
+    st_labels = LEAD_STATUS_LABELS["en" if en else "zh"]
     out = []
     for r in rows:
         fd = {}
@@ -98,9 +120,45 @@ def export_leads(
             r.created_time or "", r.page_id or "", r.ad_id or "", r.form_id or "",
             fd.get("name", ""),
             "; ".join(fd.get("contact", [])),
+            st_labels.get(r.status or "new", r.status or "new"),
+            r.note or "",
             " | ".join(fd.get("answers", [])),
         ])
     return build_csv("leads", headers, out)
+
+
+@router.patch("/{lead_id}")
+def update_lead(
+    lead_id: int,
+    body: LeadUpdateIn,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """轻 CRM：标记潜客跟进状态 / 写跟进备注（本地状态，不回写 FB）。
+    只更新显式传入的字段；status 枚举校验；status_updated_at 记录最近一次跟进改动。"""
+    from ..core.log_utils import write_log, new_trace_id
+    lead = db.query(Lead).filter(
+        Lead.id == lead_id, Lead.tenant_id == user.tenant_id
+    ).first()
+    if not lead:
+        raise HTTPException(404, "潜客不存在")
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(400, "无要更新的字段")
+    if "status" in data and data["status"] is not None and data["status"] not in LEAD_STATUSES:
+        raise HTTPException(400, f"无效状态 {data['status']}")
+    if data.get("note") and len(data["note"]) > 2000:
+        raise HTTPException(400, "备注过长（≤2000 字符）")
+    for k, v in data.items():
+        setattr(lead, k, v)
+    lead.status_updated_at = datetime.now(timezone.utc)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
+              actor_type="user", actor_user_id=user.id,
+              target_type="lead", target_id=lead.lead_id,
+              action_type="update", source="user", result="success",
+              metadata={"fields": sorted(data.keys()), "status": lead.status})
+    db.commit()
+    return _lead_dict(lead)
 
 
 def _get_active_cred(db: Session, tenant_id: int):

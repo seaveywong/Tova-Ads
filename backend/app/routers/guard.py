@@ -25,6 +25,7 @@ class CreateRuleIn(BaseModel):
     conversion_source: str = "either"
     action: str = "default"
     scope_act_id: str = ""  # 空=全局（名下所有账户）；填 act_id(裸数字)=仅该账户
+    enabled: bool = True
 
 
 class UpdateRuleIn(BaseModel):
@@ -77,7 +78,7 @@ def create_rule(body: CreateRuleIn, user: CurrentUser = Depends(require_permissi
     rule = GuardRule(tenant_id=user.tenant_id, name=body.name, category=body.category,
                      rule_type=body.rule_type, params=json.dumps(body.params),
                      conversion_source=body.conversion_source, action=body.action,
-                     scope_act_id=body.scope_act_id or None)
+                     scope_act_id=body.scope_act_id or None, enabled=body.enabled)
     db.add(rule)
     db.flush()
     rid = rule.id
@@ -86,7 +87,7 @@ def create_rule(body: CreateRuleIn, user: CurrentUser = Depends(require_permissi
               actor_user_id=user.id, target_type="rule", target_id=str(rid),
               action_type="create", source="user", result="success")
     db.commit()
-    return {"id": rid, "name": rule.name, "enabled": True}
+    return {"id": rid, "name": rule.name, "enabled": rule.enabled}
 
 
 @router.put("/rules/{rule_id}")
