@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, setToken } from '../api'
@@ -81,8 +81,11 @@ const unreadCount = ref(0)
 const notifOpen = ref(false)
 const recentNotifs = ref([])
 // 铃铛只留工单/纯系统消息；广告层面（业务止损 + token/巡检等影响广告保护的）都进 Dashboard 告警
-const ALERT_EVENT_TYPES = ['rule_pause', 'budget_progress', 'account_status_change', 'sentinel_pause',
-  'token_expired', 'token_invalid', 'token_expiring', 'inspection_stalled']
+// 值域=后端 emit_notification 的广告类 event_type（budget_alerts 的 budget_progress_50/75/90/98、guard_engine、account_sync、notify_utils）
+const ALERT_EVENT_TYPES = ['rule_pause', 'budget_progress_50', 'budget_progress_75', 'budget_progress_90',
+  'budget_progress_98', 'account_status_change', 'account_status_recovered', 'sentinel_pause', 'token_expired',
+  'token_invalid', 'token_expiring_soon', 'inspection_stalled', 'coverage_lost', 'account_permission_error',
+  'token_rate_limited', 'orphan_account', 'subcode_cleanup']
 const toggleNotifs = async () => {
   notifOpen.value = !notifOpen.value
   if (notifOpen.value) {
@@ -125,8 +128,32 @@ const emergencyPause = async () => {
   } catch { return }
   emergencyLoading.value = true
   try {
-    const r = await POST('/guard/emergency-pause', {})
-    ElMessage.success(t('layout.emergencyPaused', { n: r.paused || 0 }))
+    await POST('/guard/emergency-pause', {})   // 后台异步执行，立即返回
+    // 轮询进度直到完成（3s × 40 次上限）
+    let st = null
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 3000))
+      try { st = await GET('/guard/emergency-status') } catch { st = null }
+      if (st && !st.running) break
+    }
+    st = st || {}
+    if (st.running) {
+      ElMessage.warning(t('layout.emergencyStillRunning'))
+    } else {
+      const errs = (st.errors || []).join('\n').slice(0, 500)
+      await ElMessageBox.alert(
+        h('div', null, [
+          h('p', { style: 'margin:0 0 8px;white-space:pre-line' },
+            t('layout.emergencyResult', { paused: st.paused || 0, total: st.total_accounts || 0, failed: st.verify_failed || 0 })),
+          errs ? h('div', null, [
+            h('div', { style: 'font-weight:600;margin-bottom:4px' }, t('layout.emergencyErrors')),
+            h('pre', { style: 'margin:0;max-height:180px;overflow:auto;font-size:12px;white-space:pre-wrap' }, errs),
+          ]) : null,
+        ]),
+        t('layout.emergencyResultTitle'),
+        { type: (st.verify_failed || 0) > 0 ? 'warning' : 'success', confirmButtonText: t('common.confirm') }
+      ).catch(() => {})
+    }
     loadGuard()
   } catch (e) { ElMessage.error(t('layout.emergencyFail', { msg: e.message || '' })) }
   emergencyLoading.value = false

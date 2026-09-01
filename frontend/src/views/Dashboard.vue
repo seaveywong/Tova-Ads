@@ -51,7 +51,8 @@ const loadTrend = async () => {
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
       : `date_preset=${datePreset.value}`
     const actQ = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
-    trendData.value = await GET(`/dashboard/trend?${q}${actQ}&granularity=${trendGran.value}`)
+    const cq = conversionCategory.value !== 'all' ? `&conversion_category=${conversionCategory.value}` : ''   // KPI 卡收窄时趋势线同步
+    trendData.value = await GET(`/dashboard/trend?${q}${actQ}${cq}&granularity=${trendGran.value}`)
   } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
 }
 const renderTrendCharts = () => {
@@ -202,7 +203,10 @@ const landingFilter = ref('all')  // all / good / waste / watch
 const landingLoading = ref(false)
 const fetchLanding = async () => {
   landingLoading.value = true
-  try { landing.value = await GET(`/dashboard/landing?${rangeQuery()}`) }
+  try {
+    const _aq = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
+    landing.value = await GET(`/dashboard/landing?${rangeQuery()}${_aq}`)   // 账户筛选与广告区同口径
+  }
   catch (e) { /* 落地页加载失败不阻断主看板 */ }
   finally { landingLoading.value = false }
   loadLandingTrend()
@@ -659,10 +663,12 @@ const ackAllNotifs = async () => {
 }
 const NOTIF_EVENT_LABEL_KEY = {
   rule_pause: 'dashboard.evPause', coverage_lost: 'dashboard.evCoverageLost', account_permission_error: 'dashboard.evPermission',
-  token_expired: 'dashboard.evTokenInvalid', token_invalid: 'dashboard.evTokenInvalid', token_expiring: 'dashboard.evTokenExpiring',
+  token_expired: 'dashboard.evTokenInvalid', token_invalid: 'dashboard.evTokenInvalid', token_expiring_soon: 'dashboard.evTokenExpiring',
   token_rate_limited: 'dashboard.evThrottled', orphan_account: 'dashboard.evOrphan', inspection_stalled: 'dashboard.evInspectStalled',
   budget_progress_50: 'dashboard.evBudget', budget_progress_75: 'dashboard.evBudget', budget_progress_90: 'dashboard.evBudget', budget_progress_98: 'dashboard.evBudget',
-  account_status_change: 'dashboard.evStatusChange', sentinel_pause: 'dashboard.evSentinel', landing_blocked: 'dashboard.evLandingBlocked',
+  account_status_change: 'dashboard.evStatusChange', account_status_recovered: 'dashboard.evStatusRecovered', sentinel_pause: 'dashboard.evSentinel',
+  landing_blocked: 'dashboard.evLandingBlocked', leads_new: 'dashboard.evLeadsNew', leads_sync_failed: 'dashboard.evLeadsFail',
+  subcode_cleanup: 'dashboard.evSubcodeCleanup',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
 

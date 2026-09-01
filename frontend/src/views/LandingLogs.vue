@@ -14,11 +14,11 @@ const route = useRoute()
 const EVENT_TYPES = computed(() => [
   { v: '', l: t('lplogs.actionAll') }, { v: 'visit', l: t('lplogs.actionVisit') }, { v: 'click', l: t('lplogs.actionClick') },
   { v: 'submit', l: t('lplogs.actionSubmit') }, { v: 'redirect', l: t('lplogs.actionRedirect') }, { v: 'block', l: t('lplogs.actionBlock') },
-  { v: 'pass', l: t('lplogs.actionPass') }, { v: 'error', l: t('lplogs.actionError') },
 ])
+// decision 实际落库值域（worker 写入）：display=进落地页 / redirect=直跳 / click=CTA 点击（block 事件 decision 为空）
 const DECISIONS = computed(() => [
-  { v: '', l: t('lplogs.resultAll') }, { v: 'allow', l: t('lplogs.actionPass') },
-  { v: 'block', l: t('lplogs.actionBlock') }, { v: 'redirect', l: t('lplogs.actionRedirect') },
+  { v: '', l: t('lplogs.resultAll') }, { v: 'display', l: t('lplogs.actionDisplay') },
+  { v: 'click', l: t('lplogs.actionClick') }, { v: 'redirect', l: t('lplogs.actionRedirect') },
 ])
 
 // 原因 → 中文
@@ -237,7 +237,7 @@ const saveRedirect = async () => {
 }
 const eventLabel = (v) => EVENT_TYPES.value.find(x => x.v === v)?.l || v || '-'
 const decisionLabel = (v) => DECISIONS.value.find(x => x.v === v)?.l || v || ''
-const decisionClass = (d, et) => d === 'block' || et === 'block' ? 'err' : (d === 'allow' || et === 'visit' ? 'ok' : 'warn')
+const decisionClass = (d, et) => et === 'block' ? 'err' : (d === 'display' || et === 'visit' ? 'ok' : 'warn')
 const pageTitle = () => {
   const p = pages.value.find(x => String(x.id) === String(fPage.value))
   return p ? p.title : t('lplogs.allLandingPages')

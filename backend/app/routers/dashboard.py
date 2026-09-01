@@ -25,6 +25,15 @@ _CACHE_TTL = 30
 # snapshot_date 是账户本地日（和 FB insights 对齐），看板按业务日历日字符串查
 # → WHERE snapshot_date='YYYY-MM-DD' 天然命中各账户本地该日，无需换算。
 # （加白是另一套基准：账户本地当日，见 guard_engine._account_local_today。）
+KPI_CATEGORY = {
+    "shopping": ["offsite_conversion.fb_pixel_purchase", "purchase", "omni_purchase",
+                 "onsite_web_purchase", "web_in_store_purchase", "onsite_web_app_purchase"],
+    "messaging": ["onsite_conversion.messaging_conversation_started_7d"],
+    "leads": ["onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"],
+    "engagement": ["like", "post_engagement", "page_likes"],
+    "traffic": ["link_click", "landing_page_view"],
+}
+
 BUSINESS_TZ = timezone(timedelta(hours=8))
 
 
@@ -76,15 +85,7 @@ def dashboard(
         if now - entry[0] < _CACHE_TTL:
             return entry[1]
 
-    # 查 perf_snapshots：按账户聚合（支持转化分类① + 账户多选③过滤）
-    KPI_CATEGORY = {
-        "shopping": ["offsite_conversion.fb_pixel_purchase", "purchase", "omni_purchase",
-                     "onsite_web_purchase", "web_in_store_purchase", "onsite_web_app_purchase"],
-        "messaging": ["onsite_conversion.messaging_conversation_started_7d"],
-        "leads": ["onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"],
-        "engagement": ["like", "post_engagement", "page_likes"],
-        "traffic": ["link_click", "landing_page_view"],
-    }
+    # 查 perf_snapshots：按账户聚合（支持转化分类① + 账户多选③过滤；KPI_CATEGORY 已提到模块级）
     sql_text = """
         SELECT act_id,
                MAX(act_id) as keep_act,
@@ -339,6 +340,7 @@ def trend_data(
     date_to: str = "",
     granularity: str = "",
     act_ids: str = "",
+    conversion_category: str = "",   # 转化分类筛选（与 /dashboard 同口径——KPI 卡收窄时趋势线同步）
     fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
@@ -350,7 +352,7 @@ def trend_data(
     30s 内存缓存（前端与 /dashboard 成对请求，缓存收益直接翻倍）；fresh=True 跳过。
     """
     # 缓存命中（key 含全部筛选维度）
-    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}"
+    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}"
     _tnow = _time.time()
     if not fresh and _tkey in _CACHE:
         _te = _CACHE[_tkey]
@@ -383,10 +385,18 @@ def trend_data(
             WHERE tenant_id = :tid AND snapshot_date >= :since AND snapshot_date <= :until
         """
         params = {"tid": user.tenant_id, "since": since, "until": until}
+        binds = []
         if sel_ids:
             sql += "  AND act_id IN :act_ids"
             params["act_ids"] = sel_ids
-            stmt = text(sql + " GROUP BY snapshot_date ORDER BY snapshot_date").bindparams(bindparam("act_ids", expanding=True))
+            binds.append(bindparam("act_ids", expanding=True))
+        _cat = KPI_CATEGORY.get(conversion_category)
+        if _cat:
+            sql += "  AND resolved_kpi IN :cat_fields"
+            params["cat_fields"] = _cat
+            binds.append(bindparam("cat_fields", expanding=True))
+        if binds:
+            stmt = text(sql + " GROUP BY snapshot_date ORDER BY snapshot_date").bindparams(*binds)
         else:
             stmt = text(sql + " GROUP BY snapshot_date ORDER BY snapshot_date")
         rows = db.execute(stmt, params).fetchall()
@@ -479,6 +489,7 @@ def landing_overview(
     date_preset: str = "today",
     date_from: str = "",
     date_to: str = "",
+    act_ids: str = "",   # 账户多选筛选（与广告区同口径——选中账户后落地页区同步收窄）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -538,12 +549,21 @@ def landing_overview(
     """), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()
 
     # ② 广告消耗 by ad_id（业务日 snapshot_date 范围；perf_snapshots 是账户本地日）
-    spend_rows = db.execute(text("""
+    _sel = [x.strip() for x in act_ids.split(",") if x.strip()] if act_ids else []
+    _spend_sql = """
         SELECT ad_id, SUM(spend) AS spend, SUM(conversions) AS conv
         FROM perf_snapshots
         WHERE tenant_id = :tid AND snapshot_date >= :since AND snapshot_date <= :until
-        GROUP BY ad_id
-    """), {"tid": tid, "since": since, "until": until}).fetchall()
+    """
+    _spend_params = {"tid": tid, "since": since, "until": until}
+    _spend_binds = []
+    if _sel:
+        _spend_sql += "  AND act_id IN :act_ids"
+        _spend_params["act_ids"] = _sel
+        _spend_binds.append(bindparam("act_ids", expanding=True))
+    _spend_sql += "        GROUP BY ad_id"
+    _spend_stmt = text(_spend_sql).bindparams(*_spend_binds) if _spend_binds else text(_spend_sql)
+    spend_rows = db.execute(_spend_stmt, _spend_params).fetchall()
     spend_map = {r.ad_id: (float(r.spend or 0), int(r.conv or 0)) for r in spend_rows}
 
     # ②b 账户名（子码表现展示该子码对应广告所属账户）

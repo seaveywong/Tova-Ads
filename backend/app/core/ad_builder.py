@@ -409,6 +409,9 @@ def build_lead_form_payload(
     follow_up_url: str = "",
     context_card_title: str = "",
     name_prefix: str = "AI",
+    is_optimized_for_quality: bool = False,
+    welcome_message: str = "",
+    only_visible_to_target_countries: bool = False,
 ) -> dict:
     """构造 leadgen_forms 创建 payload（02_附录 §2.2）。
 
@@ -456,6 +459,14 @@ def build_lead_form_payload(
     # 带选项的自定义问题必须 ON_DELIVERY（02_附录 §四 不变量4）
     if has_custom_options:
         payload["flexible_delivery"] = "ON_DELIVERY"
+
+    # 表单模板编辑器三开关（原 UI 存而不用——payload 不带 = 配置无效无提示）
+    if is_optimized_for_quality:
+        payload["is_optimized_for_quality"] = True
+    if welcome_message:
+        payload["welcome_message"] = {"text": welcome_message[:500]}
+    if only_visible_to_target_countries and target_countries:
+        payload["target_countries"] = target_countries   # 仅选中国家可见（需先有国家）
 
     if description:
         payload["description"] = description

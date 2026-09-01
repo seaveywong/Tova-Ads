@@ -79,6 +79,8 @@ const batchSync = async () => {
   batchSyncLabel.value = ''
   if (fail) {
     showError(t('ads.batchSyncResult', { ok, fail, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
+  } else if (!ok && !total) {
+    ElMessage.warning(t('ads.batchSyncNoToken'))   // 全跳过=选中的都没绑令牌，不是"刷新成功 0 个"
   } else {
     ElMessage.success(t('ads.refreshed', { n: ok }))
   }
@@ -158,8 +160,11 @@ const batchWarmup = async (arm) => {
 const syncing = ref(false)
 const syncCampaigns = async () => {
   syncing.value = true
-  try { await POST('/ads/sync-cache'); ElMessage.success(t('ads.synced')); await load() }
-  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  try {
+    await POST('/ads/sync-cache')   // 后台异步采集（advisory lock 111，已在跑则自动跳过），立即返回
+    ElMessage.success(t('ads.syncBgStarted'))
+    setTimeout(() => { load() }, 60000)   // 同步约 1-2 分钟，60s 后自动刷新一次
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   syncing.value = false
 }
 

@@ -1,7 +1,7 @@
 """守护引擎路由：规则 CRUD + 当日加白 + 哨兵 arm/disarm（doc 03）。"""
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission, require_superadmin
@@ -287,84 +287,128 @@ def manual_sentinel_patrol(user: CurrentUser = Depends(require_superadmin)):
     return run_sentinel_patrol()
 
 
-@router.post("/emergency-pause")
-def emergency_pause(user: CurrentUser = Depends(require_permission("ads.pause")),
-                    db: Session = Depends(get_db)):
-    """全局紧急暂停：先同步 ads_cache（拉最新 ACTIVE 广告）→ 逐个 PAUSE → 回读核验。"""
-    import json as _json, time as _time
-    from ..core.fb_tokens import client_for_account, cred_for_account_op
+# 紧急暂停后台执行状态（gunicorn 多 worker 各自一份，可接受——同 ads.py _REFRESH_STATE 模式）
+# {tenant_id: {"running": bool, "started_at": ts, "paused": n, "verify_failed": n, "total_accounts": n, "errors": []}}
+_EMERGENCY_STATE: dict = {}
+
+
+def _bg_emergency_pause(tenant_id: int, user_email: str):
+    """后台执行全局紧急暂停：同步 ads_cache → 逐个 PAUSE → 回读核验（advisory lock 113 单实例互斥）。"""
+    from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+    from ..core.fb_tokens import cred_for_account_op
     from ..core.fb_client import FbClient
     from ..core.encryption import decrypt
-    from ..models.fb import Account
     from ..models.ads_cache import AdsCache
     from ..services.ad_ops import set_status
-    from ..core.security import new_trace_id
     from ..routers.ads import _sync_one
+    import json as _json, time as _time
 
-    accounts = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id,
-        Account.is_managed.is_(True),
-        Account.account_status == 1,
-    ).all()
-    trace_id = new_trace_id()
-    paused = 0
-    verify_failed = 0
-    errors = []
+    st = _EMERGENCY_STATE.get(tenant_id)
+    if st and st.get("running"):
+        return
+    lock = None
+    db = None
+    _EMERGENCY_STATE[tenant_id] = {"running": True, "started_at": datetime.now(timezone.utc).isoformat(),
+                                   "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
+    try:
+        lock = acquire_run_lock(113)
+        if not lock:
+            # 别的 worker 正在执行紧急暂停（pg_try 拿不到=已有人持有）——不重复跑
+            _EMERGENCY_STATE[tenant_id] = {"running": False, "started_at": "", "paused": 0,
+                                           "verify_failed": 0, "total_accounts": 0, "errors": []}
+            return
+        db = SuperSessionLocal()
+        _st = _EMERGENCY_STATE[tenant_id]
+        accounts = db.query(Account).filter(
+            Account.tenant_id == tenant_id,
+            Account.is_managed.is_(True),
+            Account.account_status == 1,
+        ).all()
+        _st["total_accounts"] = len(accounts)
 
-    for acc in accounts:
-        cred = cred_for_account_op(db, user.tenant_id, acc.act_id, "pause")
-        if not cred:
-            errors.append(f"{acc.name}: 无可用写令牌")
-            continue
-        fb = FbClient(decrypt(cred.access_token_enc))
+        for acc in accounts:
+            cred = cred_for_account_op(db, tenant_id, acc.act_id, "pause")
+            if not cred:
+                _st["errors"].append(f"{acc.name}: 无可用写令牌")
+                continue
+            fb = FbClient(decrypt(cred.access_token_enc))
 
-        # ① 先同步 ads_cache（拉最新广告结构，避免关漏新建广告）
-        try:
-            _sync_one(db, user.tenant_id, acc.act_id, fb)
-            db.commit()
-        except Exception as e:
-            errors.append(f"{acc.name}: 同步失败({str(e)[:40]})，用旧缓存")
-
-        # ② 从最新缓存拿 ACTIVE 广告
-        cache = db.query(AdsCache).filter(
-            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == acc.act_id).first()
-        if not cache:
-            errors.append(f"{acc.name}: 无广告缓存")
-            continue
-        ad_ids = []
-        try:
-            for ad in _json.loads(cache.ads_json or "[]"):
-                if ad.get("effective_status") == "ACTIVE":
-                    ad_ids.append(str(ad.get("id")))
-        except Exception:
-            pass
-        if not ad_ids:
-            continue
-
-        # ③ 逐个暂停
-        for ad_id in ad_ids:
+            # ① 先同步 ads_cache（拉最新广告结构，避免关漏新建广告）
             try:
-                r = set_status(db, user.tenant_id, acc.act_id, ad_id, "ad", "PAUSED", operator=user.email)
-                if r.get("success"):
-                    paused += 1
-                else:
-                    errors.append(f"{acc.name}/{ad_id[-8:]}: {r.get('error','')}")
+                _sync_one(db, tenant_id, acc.act_id, fb)
+                db.commit()
             except Exception as e:
-                errors.append(f"{acc.name}/{ad_id[-8:]}: {str(e)[:50]}")
+                _st["errors"].append(f"{acc.name}: 同步失败({str(e)[:40]})，用旧缓存")
 
-        # ④ 回读核验：等 FB 写生效，重新拉广告确认状态
-        _time.sleep(2)
-        try:
-            active_ads = fb.get_active_ads(acc.act_id)
-            still_active = [a.get("id") for a in active_ads if str(a.get("id")) in ad_ids]
-            if still_active:
-                verify_failed += len(still_active)
-                errors.append(f"{acc.name}: {len(still_active)} 条仍 ACTIVE（FB 写延迟）: {[str(i)[-8:] for i in still_active[:3]]}")
-        except Exception:
-            pass  # 核验查询失败不阻断（信任 set_status 的成功返回）
+            # ② 从最新缓存拿 ACTIVE 广告
+            cache = db.query(AdsCache).filter(
+                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+            if not cache:
+                _st["errors"].append(f"{acc.name}: 无广告缓存")
+                continue
+            ad_ids = []
+            try:
+                for ad in _json.loads(cache.ads_json or "[]"):
+                    if ad.get("effective_status") == "ACTIVE":
+                        ad_ids.append(str(ad.get("id")))
+            except Exception:
+                pass
+            if not ad_ids:
+                continue
 
-    return {"paused": paused, "verify_failed": verify_failed,
-            "errors": errors[:10], "total_accounts": len(accounts)}
+            # ③ 逐个暂停
+            for ad_id in ad_ids:
+                try:
+                    r = set_status(db, tenant_id, acc.act_id, ad_id, "ad", "PAUSED", operator=user_email)
+                    if r.get("success"):
+                        _st["paused"] += 1
+                    else:
+                        _st["errors"].append(f"{acc.name}/{ad_id[-8:]}: {r.get('error','')}")
+                except Exception as e:
+                    _st["errors"].append(f"{acc.name}/{ad_id[-8:]}: {str(e)[:50]}")
+
+            # ④ 回读核验：等 FB 写生效，重新拉广告确认状态
+            _time.sleep(2)
+            try:
+                active_ads = fb.get_active_ads(acc.act_id)
+                still_active = [a.get("id") for a in active_ads if str(a.get("id")) in ad_ids]
+                if still_active:
+                    _st["verify_failed"] += len(still_active)
+                    _st["errors"].append(f"{acc.name}: {len(still_active)} 条仍 ACTIVE（FB 写延迟）: {[str(i)[-8:] for i in still_active[:3]]}")
+            except Exception:
+                pass  # 核验查询失败不阻断（信任 set_status 的成功返回）
+
+        _st["errors"] = _st["errors"][:10]
+    except Exception as e:
+        if _EMERGENCY_STATE.get(tenant_id):
+            _errs = _EMERGENCY_STATE[tenant_id].get("errors") or []
+            _EMERGENCY_STATE[tenant_id]["errors"] = (_errs[:9] + [f"emergency_pause: {str(e)[:80]}"])[:10]
+    finally:
+        if db:
+            db.close()
+        if lock:
+            release_run_lock(lock, 113)
+        if _EMERGENCY_STATE.get(tenant_id):
+            _EMERGENCY_STATE[tenant_id]["running"] = False
+
+
+@router.post("/emergency-pause")
+def emergency_pause(background_tasks: BackgroundTasks,
+                    user: CurrentUser = Depends(require_permission("ads.pause"))):
+    """全局紧急暂停（后台异步）：同步 ads_cache → 逐个 PAUSE → 回读核验。
+    立即返回，进度/结果查 GET /guard/emergency-status（前端轮询）。"""
+    st = _EMERGENCY_STATE.get(user.tenant_id)
+    if st and st.get("running"):
+        return {"started": False, "running": True}
+    background_tasks.add_task(_bg_emergency_pause, user.tenant_id, user.email)
+    return {"started": True, "running": True}
+
+
+@router.get("/emergency-status")
+def emergency_status(user: CurrentUser = Depends(require_permission("ads.pause"))):
+    """紧急暂停进度（本 worker 进程内；多 worker 下读到的可能是旧态，前端轮询有上限兜底）。"""
+    st = _EMERGENCY_STATE.get(user.tenant_id)
+    return st or {"running": False, "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
 
 
 # ── 预热（warmup）arm/disarm（doc 03 §6）──

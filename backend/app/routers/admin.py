@@ -154,7 +154,9 @@ def create_tenant(body: TenantIn, user=Depends(require_superadmin), db: Session 
     # 种 3 个默认系统角色（权限从 permissions.py 取，不硬编码）
     for rname in ("owner", "operator", "finance"):
         rperms = sorted(ROLE_PERMISSIONS.get(rname, set()))
-        db.add(Role(tenant_id=t.id, name=rname, permissions=json.dumps(rperms), is_system=True))  # jsonb 列会存成 JSON array
+        # JSONB 列：传 list（SQLAlchemy bind processor 自己序列化）。传 json.dumps 的 str
+        # 会被再包一层 = 双重编码存成 JSON 字符串标量 → 前端展开成单字符数组、保存必 400
+        db.add(Role(tenant_id=t.id, name=rname, permissions=rperms, is_system=True))
 
     # 可选：指定首任 owner（建/复用用户 + 加 owner membership）
     owner_info = {}

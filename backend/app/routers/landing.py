@@ -207,20 +207,20 @@ class PublishIn(BaseModel):
     title: str = ""
     description: str = "Our product"
     target_url: str = "https://tovaads.com"   # legacy 单值（兼容，target_urls 优先）
-    target_urls: list[str] = []                # 多目标轮换；空时 fallback target_url
+    target_urls: list[str] | None = None  # 多目标轮换；None=未传(legacy target_url 兜底)，[]=显式清空
     pixel_id: str = ""            # legacy 单像素
-    pixel_ids: list[str] = []     # FB 多像素；空时 fallback 到 pixel_id
-    tt_pixel_ids: list[str] = []  # TK 多像素
-    tt_conversion_events: list[str] = []  # TK 转化事件（CompletePayment/SubmitForm 等）
+    pixel_ids: list[str] | None = None  # FB 多像素；None=未传(legacy pixel_id 兜底)，[]=显式清空
+    tt_pixel_ids: list[str] | None = None  # TK 多像素；None=未传，[]=显式清空
+    tt_conversion_events: list[str] | None = None  # TK 转化事件（CompletePayment/SubmitForm 等）；None=未传，[]=显式清空
     conversion_event: str = ""    # Purchase/Contact/Lead（空=只 PageView）
-    protection_rules: dict = {}   # 防护规则 10 key（空=不防护）
+    protection_rules: dict | None = None  # 防护规则 10 key；None=未传，{}=显式清空
     template_id: int | None = None  # 落地页模板（zip 上传的；空=默认模板）
     project_name: str = "tovaads-landing"
     custom_domain: str = ""        # 兼容单域（custom_domains 优先）
-    custom_domains: list[str] = [] # 多域名（一页绑多域）
+    custom_domains: list[str] | None = None  # 多域名（一页绑多域）；None=未传，[]=显式清空
     rotation_mode: str = "first"  # first|random|sequential
     redirect_mode: str = "display"  # display=落地页模式 / redirect=跳转模式
-    conversion_events: list[str] = []  # 多转化事件（CTA 点击 forEach fire，替代单 conversion_event）
+    conversion_events: list[str] | None = None  # 多转化事件（CTA 点击 forEach fire，替代单 conversion_event）；None=未传，[]=显式清空
     block_enabled: bool = False    # 防护开关：false=不评估规则全放行
     preview_enabled: bool = False  # 预览开关：true=可用 ?_pv=<token> 跳过防护看真实页
     subdomain_prefix: str = ""     # 子域名前缀（空=默认 lp{id}）
@@ -244,6 +244,23 @@ def _domain_root(domain: str) -> str:
     host = domain.rstrip("/").split(":")[0].lower()
     parts = host.split(".")
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def _page_meta_path(page_id) -> str:
+    """页面 sidecar meta 路径：description 无 DB 列（只写进部署 HTML），
+    发布时同步落此文件，供 GET /pages/{pid} 回显 + PUT 未填时保住现值。"""
+    import os as _os
+    return _os.path.join("/opt/toveads/worker-backups", f"tovaads-landing-{page_id}.meta.json")
+
+
+def _read_page_description(page_id) -> str:
+    """读页面当前生效描述（发布时写的 sidecar）；老页无文件/读失败返空串。"""
+    import json as _json
+    try:
+        with open(_page_meta_path(page_id), "r", encoding="utf-8") as f:
+            return ((_json.load(f) or {}).get("description") or "")
+    except Exception:
+        return ""
 
 
 def _emit_landing_alert(project_name: str, msg: str, tenant_id: int = 1):
@@ -290,8 +307,9 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         cf.create_project(body.project_name)
 
     # 2. 构造文件（existing 则保留 ingest_secret，避免旧 Worker 失效）
-    pixels = body.pixel_ids or ([body.pixel_id] if body.pixel_id else [])
-    targets = body.target_urls or ([body.target_url] if body.target_url else [])
+    #    列表字段 None=未传（legacy 单值兜底）；[]=显式清空——必须保留空列表，否则 PUT 清空被静默吞掉
+    pixels = body.pixel_ids if body.pixel_ids is not None else ([body.pixel_id] if body.pixel_id else [])
+    targets = body.target_urls if body.target_urls is not None else ([body.target_url] if body.target_url else [])
     primary_target = targets[0] if targets else "https://tovaads.com"
 
     # 校验：防护开关开时必须有 block_target（worker 只实现跳转；block_html 从不渲染，配了也无效）
@@ -427,17 +445,29 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         except Exception:
             pass
 
+    # 3.6 描述 sidecar：description 只存在于部署 HTML（无 DB 列），落 meta.json 供编辑回显；
+    #     PUT 未填描述时靠它保住现值，不再静默重置为默认文案
+    try:
+        import json as _json2
+        _os2.makedirs(_backup_dir, exist_ok=True)
+        with open(_page_meta_path(existing.id), "w", encoding="utf-8") as _mf:
+            _json2.dump({"description": body.description or "Our product"}, _mf, ensure_ascii=False)
+    except Exception:
+        pass
+
 
 
     # 4. 绑域名（每页独立子域名 lp{page_id}.{根域}——封禁隔离 + URL 独立；
     #    custom_domains 是用户选的根域名，绑的是派生子域名）
-    roots = [d.rstrip("/") for d in (body.custom_domains or []) if d]
-    if not roots and body.custom_domain:
-        roots = [body.custom_domain.rstrip("/")]
-    if not roots:
-        lib = _pick_domain_from_lib(db, user.tenant_id)
-        if lib:
-            roots = [lib]
+    if body.custom_domains is not None:
+        # 显式传了列表（含 []=清空域名）：不再兜底 custom_domain / 域名库
+        roots = [d.rstrip("/") for d in body.custom_domains if d]
+    else:
+        roots = [body.custom_domain.rstrip("/")] if body.custom_domain else []
+        if not roots:
+            lib = _pick_domain_from_lib(db, user.tenant_id)
+            if lib:
+                roots = [lib]
     # 域名白名单校验：请求指定的每个根域必须属于本租户域名库（active）——
     # 否则可传平台域名/他租户域名到 get_zone_id 命中后绑定（跨租户接管/钓鱼载体）
     if roots:
@@ -493,18 +523,19 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         _fields = {
             "title": body.title,
             "custom_domain": cd_clean or existing.custom_domain,
-            "custom_domains": _json.dumps(roots) if roots else existing.custom_domains,
-            "target_urls": _json.dumps(targets) if targets else existing.target_urls,
+            # 列表/字典字段 is not None 语义：显式 []/{} 清空（存 "[]"/"{}"），None=未传保留现值
+            "custom_domains": _json.dumps(roots) if body.custom_domains is not None else existing.custom_domains,
+            "target_urls": _json.dumps(targets) if body.target_urls is not None else existing.target_urls,
             "rotation_mode": body.rotation_mode or existing.rotation_mode or "first",
             "pixel_id": body.pixel_id or existing.pixel_id,
-            "pixel_ids": _json.dumps(pixels) if pixels else existing.pixel_ids,
-            "tt_pixel_ids": _json.dumps(tt_pixels) if tt_pixels else (existing.tt_pixel_ids or ""),
-            "tt_conversion_events": _json.dumps(body.tt_conversion_events) if body.tt_conversion_events else (existing.tt_conversion_events or ""),
+            "pixel_ids": _json.dumps(pixels) if body.pixel_ids is not None else existing.pixel_ids,
+            "tt_pixel_ids": _json.dumps(body.tt_pixel_ids) if body.tt_pixel_ids is not None else (existing.tt_pixel_ids or ""),
+            "tt_conversion_events": _json.dumps(body.tt_conversion_events) if body.tt_conversion_events is not None else (existing.tt_conversion_events or ""),
             "conversion_event": body.conversion_event or existing.conversion_event,
-            "protection_rules": _json.dumps(body.protection_rules) if body.protection_rules else existing.protection_rules,
+            "protection_rules": _json.dumps(body.protection_rules) if body.protection_rules is not None else existing.protection_rules,
             "template_id": body.template_id,
             "redirect_mode": body.redirect_mode or existing.redirect_mode or "display",
-            "conversion_events": _json.dumps(body.conversion_events) if body.conversion_events else existing.conversion_events,
+            "conversion_events": _json.dumps(body.conversion_events) if body.conversion_events is not None else existing.conversion_events,
             "block_enabled": body.block_enabled,
             "ingest_secret": ingest_secret,  # 存量页更新也落 secret（否则 worker 带新 secret，DB 空→ingest 全 401）
             "preview_token": preview_token,
@@ -795,11 +826,13 @@ def get_landing_page(
     if not p:
         raise HTTPException(404, "落地页不存在")
     d = _page_to_dict(p, db)
+    d["description"] = _read_page_description(pid)
     subs = db.query(LandingAdLink).filter(
         LandingAdLink.page_id == pid, LandingAdLink.status != "archived"
     ).order_by(LandingAdLink.id.desc()).all()
     d["subcodes"] = [{"id": s.id, "slug": s.slug, "url": f"/a/{s.slug}",
-                      "ad_id": s.ad_id, "act_id": s.act_id, "status": s.status} for s in subs]
+                      "ad_id": s.ad_id, "act_id": s.act_id, "status": s.status,
+                      "target_urls": s.target_urls or ""} for s in subs]
     return d
 
 
@@ -840,7 +873,9 @@ def update_landing_page(
         cur_domains = [p.custom_domain] if p.custom_domain else []
     pub = PublishIn(
         title=body.title if body.title is not None else p.title,
-        description=body.description or "Our product",
+        # 未填描述=保住当前生效值（sidecar），不再静默重置为 "Our product"
+        description=(body.description if (body.description or "").strip()
+                     else (_read_page_description(p.id) or "Our product")),
         target_url=cur_targets[0] if cur_targets else "https://tovaads.com",
         target_urls=body.target_urls if body.target_urls is not None else cur_targets,
         pixel_id=p.pixel_id or "",
@@ -966,19 +1001,9 @@ def protection_test(
     return {"profiles": results, "blocked_count": blocked_count, "pass_count": len(results) - blocked_count}
 
 
-def _fb_ban_probe(db, tenant_id, url):
-    """FB 平台封禁探测：调 Graph API URL scrape，判断 URL 是否被 FB 拉黑。
-
-    返回 (status, detail)：
-    - pass: FB 正常抓取（未封禁）
-    - fail: 命中封禁关键词（blocked/spam/policy/violat 等）→ 疑似被封禁
-    - warn: FB 爬不到（SSL/DNS/你的防护挡了 FB 爬虫）/ 令牌问题 / 无可用令牌（无法判定）
-    """
-    from ..core.fb_tokens import first_client
+def _fb_scrape_once(fb, url: str):
+    """单 URL 的 FB scrape 判定（纯读）。FbClient 无会话状态（每请求独立 httpx 调用），可跨线程。"""
     from ..core.fb_client import FbApiError
-    fb = first_client(db, tenant_id)
-    if fb is None:
-        return "warn", "无可用 FB 令牌，跳过封禁检测"
     try:
         resp = fb.post("", {"id": url, "scrape": "true"})
         title = ""
@@ -1007,6 +1032,51 @@ def _fb_ban_probe(db, tenant_id, url):
         return "warn", f"FB 返回异常：{e.friendly[:50]}"
     except Exception as e:
         return "warn", f"检测异常：{str(e)[:50]}"
+
+
+def _fb_ban_probe(db, tenant_id, url):
+    """FB 平台封禁探测：调 Graph API URL scrape，判断 URL 是否被 FB 拉黑。
+
+    返回 (status, detail)：
+    - pass: FB 正常抓取（未封禁）
+    - fail: 命中封禁关键词（blocked/spam/policy/violat 等）→ 疑似被封禁
+    - warn: FB 爬不到（SSL/DNS/你的防护挡了 FB 爬虫）/ 令牌问题 / 无可用令牌（无法判定）
+    """
+    from ..core.fb_tokens import first_client
+    fb = first_client(db, tenant_id)
+    if fb is None:
+        return "warn", "无可用 FB 令牌，跳过封禁检测"
+    return _fb_scrape_once(fb, url)
+
+
+def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0):
+    """批量 FB 封禁探测：5 并发 + 单调用 10s 超时兜底（串行 N 个 × 30s 必撞网关超时）。
+
+    first_client 只在主线程调（SQLAlchemy Session 非线程安全）；FbClient 线程安全（见 _fb_scrape_once）。
+    返回与 urls 同序的 [(status, detail), ...]；单调用超时按 warn 处理不阻断整体。
+    """
+    from ..core.fb_tokens import first_client
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    if not urls:
+        return []
+    fb = first_client(db, tenant_id)
+    if fb is None:
+        return [("warn", "无可用 FB 令牌，跳过封禁检测") for _ in urls]
+
+    def _one(u):
+        # 单调用独立线程 + result(10s)：兜住 fb_client 内置 30s 超时（fb_client 不在本次改动范围）
+        _ex = ThreadPoolExecutor(max_workers=1)
+        try:
+            return _ex.submit(_fb_scrape_once, fb, u).result(timeout=per_call_timeout)
+        except _FutTimeout:
+            return "warn", f"FB 检测超时（{int(per_call_timeout)}s），已跳过"
+        except Exception as e:
+            return "warn", f"检测异常：{str(e)[:50]}"
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)  # 不等慢调用：线程稍后自行结束
+
+    with ThreadPoolExecutor(max_workers=max_workers) as _pool:
+        return list(_pool.map(_one, urls))
 
 
 @router.post("/pages/{pid}/subdomains")
@@ -1275,12 +1345,11 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
             LandingAdLink.status == "active"
         ).all()
         if _active_links:
-            _blocked_slugs = []
-            for _link in _active_links:
-                _sub_url = f"{base.rstrip('/')}/a/{_link.slug}"
-                _st, _ = _fb_ban_probe(db, p.tenant_id, _sub_url)
-                if _st == "fail":
-                    _blocked_slugs.append(_link.slug)
+            # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
+            _probe_res = _fb_ban_probe_batch(
+                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links])
+            _blocked_slugs = [_link.slug for _link, (_st, _d)
+                              in zip(_active_links, _probe_res) if _st == "fail"]
             if _blocked_slugs:
                 checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "fail",

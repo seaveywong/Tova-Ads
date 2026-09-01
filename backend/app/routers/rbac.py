@@ -72,9 +72,20 @@ def list_roles(user: CurrentUser = Depends(require_permission("members.manage"))
         TenantMembership.tenant_id == user.tenant_id
     ).group_by(TenantMembership.role).all():
         counts[r[0]] = r[1]
+    def _norm_perms(p):
+        # 归一化：历史双重编码行（admin 建团存过 str）会以 JSON 字符串标量读出——
+        # 解开一层；前端 [...str] 展开成单字符数组的问题从根上堵
+        if isinstance(p, str):
+            import json as _json
+            try:
+                v = _json.loads(p)
+                return v if isinstance(v, list) else []
+            except Exception:
+                return []
+        return p or []
     return [{
         "id": r.id, "name": r.name, "description": r.description or "",
-        "permissions": r.permissions or [], "is_system": r.is_system,
+        "permissions": _norm_perms(r.permissions), "is_system": r.is_system,
         "member_count": counts.get(r.name, 0),
     } for r in roles]
 

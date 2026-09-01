@@ -179,7 +179,7 @@ def test_tg(
 
 # ── 用户级 TG 绑定（决策③，每人绑自己的 TG）──
 class UserTgBindingIn(BaseModel):
-    bot_token: str
+    bot_token: str = ""   # 空 = 解绑语义（chat_id 也空时删行）或复用现有绑定 token
     chat_id: str
 
 
@@ -197,17 +197,31 @@ def set_user_tg_binding(
         tb = db.query(TenantTgBinding).filter(
             TenantTgBinding.tenant_id == user.tenant_id).first()
         real_bot = decrypt(tb.bot_token_enc) if tb else body.bot_token
+    # 解绑语义：chat_id 空 = 删行（原只更新空串——行还在=GET 判 bound=true，
+    # 卡片仍显已绑定、告警继续发往空 chat_id 必失败）
+    if body.chat_id == "":
+        db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == user.tenant_id,
+            UserTgBinding.user_id == user.id,
+        ).delete()
+        db.commit()
+        return {"status": "deleted", "user_id": user.id}
     existing = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
     ).first()
+    # bot_token 留空 = 不换 bot（复用现有绑定的 token——TG 解绑/重绑 chat_id 场景）
+    _tok_to_store = real_bot if real_bot else None
     if existing:
-        existing.bot_token_enc = encrypt(real_bot)
+        if _tok_to_store:
+            existing.bot_token_enc = encrypt(_tok_to_store)
         existing.chat_id = body.chat_id
         existing.verified_at = None
     else:
+        if not _tok_to_store:
+            raise HTTPException(400, "缺少 bot_token")
         db.add(UserTgBinding(tenant_id=user.tenant_id, user_id=user.id,
-                             bot_token_enc=encrypt(real_bot), chat_id=body.chat_id))
+                             bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id))
     db.commit()
     return {"status": "saved", "user_id": user.id}
 

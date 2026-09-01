@@ -23,11 +23,13 @@ router = APIRouter(prefix="/ads", tags=["ads"])
 
 
 @router.post("/sync-cache")
-def sync_ads_cache(user: CurrentUser = Depends(require_permission("ads.read"))):
-    """手动触发广告实体缓存采集（拉 campaigns/adsets/ads → ads_cache）。
-    自动 15min 一次；此为手动即采（建了新广告后立即同步看效果）。"""
+def sync_ads_cache(background_tasks: BackgroundTasks,
+                   user: CurrentUser = Depends(require_permission("ads.read"))):
+    """手动触发广告实体缓存采集（后台跑 run_ads_cache_sync——自带 advisory lock 111，
+    已在跑时重复触发自动 skip）。自动 15min 一次；此为手动即采（建了新广告后立即同步看效果）。"""
     from ..services.ads_cache_sync import run_ads_cache_sync
-    return run_ads_cache_sync()
+    background_tasks.add_task(run_ads_cache_sync)
+    return {"started": True}
 
 
 def _id_of(v):

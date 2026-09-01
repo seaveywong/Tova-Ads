@@ -199,10 +199,6 @@ const CTAS = [
   { v: 'CALL_NOW', l: 'launch.cta_call_now' },{ v: 'MESSAGE_PAGE', l: 'launch.cta_message_page' },{ v: 'WATCH_MORE', l: 'launch.cta_watch_more' },
   { v: 'ADD_TO_CART', l: 'launch.cta_add_to_cart' },{ v: 'BUY_TICKETS', l: 'launch.cta_buy_tickets' },
 ]
-const SPECIAL_CATS = [
-  { v: '', l: 'launch.scat_none' },{ v: 'HOUSING', l: 'launch.scat_housing' },{ v: 'EMPLOYMENT', l: 'launch.scat_employment' },
-  {v:'LV',l:'launch.country_LV'},{v:'EE',l:'launch.country_EE'},{v:'AL',l:'launch.country_AL'},{v:'BA',l:'launch.country_BA'},{v:'MD',l:'launch.country_MD'},
-]
 const LANGS = [
   { v: '', l: 'launch.lang_any' },{ v: '24', l: 'launch.lang_en_us' },{ v: '6', l: 'launch.lang_en_gb' },{ v: '37', l: 'launch.lang_en_all' },
   { v: '5', l: 'launch.lang_zh_cn' },{ v: '2', l: 'launch.lang_zh_tw' },{ v: '1', l: 'launch.lang_zh_all' },
@@ -389,7 +385,6 @@ const blankForm = () => ({
   // 系列 Campaign
   objective: 'OUTCOME_TRAFFIC', conversion_goal: '', budget_mode: 'ABO',
   bid_strategy: 'LOWEST_COST_WITHOUT_CAP', budget_usd: 5, name_prefix: 'Tova Ads',
-  special_ad_category: '',
   // 组 AdSet
   optimization_goal: '', billing_event: 'IMPRESSIONS', destination_type: '',
   audience_id: 0,
@@ -605,6 +600,7 @@ const openEdit = async (tpl) => {
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
+  if (a.type === 'video') return ElMessage.warning(t('launch.videoNotSupported'))   // 部署链路只实现 image_hash——视频可选必败，先禁选
   form.value.asset_id = a.id
   editingAsset.value = a
   const hs = (a.ai_copy?.headlines || []); const bs = (a.ai_copy?.bodies || [])
@@ -754,8 +750,11 @@ const saveTpl = async () => {
   saving.value = false
 }
 const removeTpl = async (tpl) => {
-  try { await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/launch-templates/' + tpl.id); ElMessage.success(t('launch.archived')); await load() }
-  catch (e) { if (e === 'cancel') return }
+  try {
+    await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
+    await DELETE('/launch-templates/' + tpl.id)
+    ElMessage.success(t('launch.archived')); await load()
+  } catch (e) { if (e !== 'cancel') showError(e, t('common.opFail')) }   // 真报错要提示（如 400 有运行中 job）
 }
 const copyTpl = async (tpl) => {
   try {
@@ -769,7 +768,12 @@ const preflighting = ref(false)
 const preflight = async (tpl) => {
   preflighting.value = true
   try {
-    const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: accounts.value[0]?.act_id || '' })
+    // accounts 只在部署抽屉打开时加载——独立入口先拉本租户账户，取第一个 managed 正常账户预检
+    let accs = accounts.value
+    if (!accs.length) { try { accs = await GET('/fb/accounts') } catch {} }
+    const target = accs.find(x => x.account_status === 1) || accs[0]
+    if (!target) { ElMessage.warning(t('launch.preflightNoAccount')); preflighting.value = false; return }
+    const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: target.act_id })
     preflightResult.value = r; preflightVisible.value = true
   } catch (e) { showError(e, t('launch.preflightFail')) }
   preflighting.value = false
@@ -897,6 +901,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
           <button class="op" @click="openEdit(tpl)">{{ t('common.edit') }}</button>
           <button class="op" @click="copyTpl(tpl)" :title="t('launch.copyVariant')">{{ t('common.copy') }}</button>
+          <button class="op" :disabled="preflighting" @click="preflight(tpl)" :title="t('launch.preflightTitle')">{{ t('launch.preflight') }}</button>
           <button class="op danger" @click="removeTpl(tpl)">{{ t('launch.archive') }}</button>
         </div>
       </div>
@@ -972,7 +977,6 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
-        <div class="row"><label>{{ t('launch.specialAdCategory') }}</label><el-select v-model="form.special_ad_category" style="width:100%" size="small"><el-option v-for="s in SPECIAL_CATS" :key="s.v" :value="s.v" :label="t(s.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
         <div class="row"><label>{{ t('launch.pageId') }}</label>
           <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="form.post_source==='reuse'" :title="form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">

@@ -89,7 +89,7 @@ const saveForm = async () => {
 }
 const removeForm = async (t) => {
   try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
-  catch (e) { if (e === 'cancel') return }
+  catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }   // 被引用等真报错要提示
 }
 const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.config || {}; previewOpen.value = true }
 
@@ -157,7 +157,7 @@ const saveMsg = async () => {
 }
 const removeMsg = async (t) => {
   try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
-  catch (e) { if (e === 'cancel') return }
+  catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; previewOpen.value = true }
 </script>

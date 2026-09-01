@@ -440,6 +440,9 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 follow_up_url=cfg.get("follow_up_url", landing_url),
                 context_card_title=cfg.get("context_card_title", ""),
                 name_prefix="Tova",
+                is_optimized_for_quality=bool(cfg.get("is_optimized_for_quality", False)),
+                welcome_message=cfg.get("welcome_message", ""),
+                only_visible_to_target_countries=bool(cfg.get("only_visible_to_target_countries", False)),
             )
             try:
                 result = fb.post(f"{page_id}/leadgen_forms", payload)
@@ -784,6 +787,10 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         it.page_id = body.page_id
     if body.pixel_id:
         it.pixel_id = body.pixel_id
+    # job 置回 running + 清 finished_at——原状态停在 partial_failed/failed，
+    # 前端进度轮询首拍即判终态停表，重试结果永不回显且再试被 job 终态守卫放行后 item 又 400
+    j.status = "running"
+    j.finished_at = None
     db.commit()
     bg.add_task(_retry_one, job_id, user.tenant_id, j.template_id, item_id)
     return {"job_id": job_id, "item_id": item_id, "retrying": True}

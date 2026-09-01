@@ -179,6 +179,10 @@ const doInspect = async (force = false) => {
   inspecting.value = true
   try {
     const r = await POST(`/guard/inspect${force ? '?force=true' : ''}`, {})
+    // 未执行分支后端也返 200：lock 被占（与 5min cron 共锁）/引擎异常——
+    // 不能兜 0 弹绿色"评估0命中0"（止损场景的假安全）
+    if (r.skipped === 'lock_busy') { ElMessage.warning(t('guard.inspectLockBusy')); return }
+    if (r.error) { ElMessage.error(t('guard.inspectError', { msg: r.error })); return }
     const summary = t('guard.inspectSummary', { evaluated: r.evaluated ?? 0, hits: r.hits ?? 0, paused: r.paused ?? 0 })
     if (r.details && r.details.length) {
       const names = r.details.slice(0, 3).map(d => d.ad_name || d.ad_id).join('、')

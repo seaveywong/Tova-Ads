@@ -21,9 +21,11 @@ const login = async () => {
   try {
     const res = await api('POST', '/auth/login', { email: email.value, password: password.value })
     setToken(res.access_token)
-    // 拉权限存 localStorage（导航过滤 + 路由守卫）
-    try { const me = await GET('/auth/me'); setUserPerms(me.permissions || []) } catch {}
-    router.push('/dashboard')
+    // 拉权限存 localStorage（导航过滤 + 路由守卫）+ 捕获 must_change_password（被邀新成员引导先改密）
+    let mustChange = false
+    try { const me = await GET('/auth/me'); setUserPerms(me.permissions || []); mustChange = !!me.must_change_password } catch {}
+    if (mustChange) { ElMessage.warning(t('login.mustChangePwd')); router.push('/settings') }
+    else router.push('/dashboard')
   } catch (e) {
     ElMessage.error(e.message)
   } finally {

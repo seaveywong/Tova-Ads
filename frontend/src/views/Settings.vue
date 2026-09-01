@@ -170,12 +170,14 @@ const testVisionAi = async () => {
 // 账户（用户名 + 改密码）
 const acctEmail = ref('')
 const acctSaving = ref(false)
+const emailOldPwd = ref('')   // 改登录邮箱需旧密码确认（防会话劫持接管）——后端必查
 const pwdForm = ref({ old: '', new: '', confirm: '' })
 const pwdSaving = ref(false)
 const saveEmail = async () => {
   if (!acctEmail.value.trim() || !acctEmail.value.includes('@')) return ElMessage.warning(t('settings.invalidEmail'))
+  if (!emailOldPwd.value) return ElMessage.warning(t('settings.fillOldPwdForEmail'))
   acctSaving.value = true
-  try { await PATCH('/auth/me/email', { email: acctEmail.value.trim() }); ElMessage.success(t('settings.emailUpdated')) }
+  try { await PATCH('/auth/me/email', { email: acctEmail.value.trim(), old_password: emailOldPwd.value }); ElMessage.success(t('settings.emailUpdated')); emailOldPwd.value = '' }
   catch (e) { ElMessage.error(t('settings.opFail', { msg: e.message || '' })) }
   acctSaving.value = false
 }
@@ -434,10 +436,12 @@ const runKeepaliveNow = async () => {
   kaRunning.value = true
   try {
     const r = await POST('/guard/keepalive/run')
+    kaRunning.value = false
+    if (r.skipped === 'lock_busy') { ElMessage.warning(t('settings.kaLockBusy')); return }
+    if (r.error) { ElMessage.error(t('settings.kaRunError', { msg: r.error })); return }
     kaResult.value = r
     kaResultOpen.value = true
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  kaRunning.value = false
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')); kaRunning.value = false }
 }
 </script>
 
@@ -452,6 +456,7 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.accountTitle') }}</div>
       <div class="d">{{ t('settings.accountDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.username') }}</label><input v-model="acctEmail" class="input" :placeholder="t('settings.loginEmailPh')" /></div>
+      <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="emailOldPwd" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>
       <button class="btn primary" :disabled="acctSaving" @click="saveEmail">{{ t('settings.saveUsername') }}</button>
       <div class="acct-sep"></div>
       <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>

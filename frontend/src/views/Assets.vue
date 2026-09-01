@@ -229,6 +229,7 @@ const analyze = async (a) => {
   } catch (e) {
     showError(e, t('assets.analyzeFailed'))
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
+    throw e   // rethrow：批量分析的失败计数靠它（原吞错 → 全挂也弹'已分析 N 个'成功）
   } finally {
     analyzingIds.value.delete(a.id)
     delete analyzeElapsed.value[a.id]

@@ -135,6 +135,15 @@ def delete_form(fid: int, user: CurrentUser = Depends(require_permission("ads.cr
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    # 归档后部署 runner 仍会按 id 继续用它建 FB 表单——被引用时明确告知而不是静默归档
+    from ..models.launch_template import LaunchTemplate
+    _ref = db.query(LaunchTemplate.id).filter(
+        LaunchTemplate.tenant_id == user.tenant_id,
+        LaunchTemplate.lead_form_template_id == fid,
+        LaunchTemplate.status != "archived",
+    ).count()
+    if _ref:
+        raise HTTPException(400, f"该表单仍被 {_ref} 个投放模板引用，请先在模板中移除引用再归档")
     t.status = "archived"; db.commit()
     return {"id": fid, "archived": True}
 
@@ -174,6 +183,9 @@ def deploy_form(fid: int, body: dict,
         follow_up_url=cfg.get("follow_up_url", ""),
         context_card_title=cfg.get("context_card_title", ""),
         name_prefix="Tova",
+        is_optimized_for_quality=bool(cfg.get("is_optimized_for_quality", False)),
+        welcome_message=cfg.get("welcome_message", ""),
+        only_visible_to_target_countries=bool(cfg.get("only_visible_to_target_countries", False)),
     )
     try:
         result = fb.post(f"{page_id}/leadgen_forms", payload)

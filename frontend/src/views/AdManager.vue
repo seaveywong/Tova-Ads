@@ -179,7 +179,14 @@ const saveBudget = async () => {
 }
 const budgetQuick = (m) => { budgetInput.value = Math.round(budgetInput.value * m * 100) / 100 }
 const deleteItem = async (item) => {
-  try { await ElMessageBox.confirm(t('adm.delConfirm', { name: item.name }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' }); opLoading.value = true; const r = await POST('/ads/delete', { act_id: item.act_id, node_id: item.id }); if (r.success) { ElMessage.success(t('adm.deleted')); await load() } else ElMessage.error(r.error || t('common.fail')) } catch(e) { /* cancelled */ }
+  try {
+    await ElMessageBox.confirm(t('adm.delConfirm', { name: item.name }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
+    opLoading.value = true
+    try {
+      await POST('/ads/delete', { act_id: item.act_id, node_id: item.id })
+      ElMessage.success(t('adm.deleted')); await load()
+    } catch (e) { ElMessage.error(e.message || t('common.opFail')) }   // 失败（无写令牌/FB 拒/并发锁）要告诉用户为什么
+  } catch(e) { /* 用户取消 */ }
   opLoading.value = false
 }
 const batchStatus = async (status) => {

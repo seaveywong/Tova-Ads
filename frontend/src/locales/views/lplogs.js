@@ -3,7 +3,7 @@ export default {
   zh: {
     pageTitle: '落地页日志', subcode: '子码', adId: '广告 ID', reset: '重置',
     allLandingPages: '全部落地页', allAccounts: '全部账户', allSources: '全部来源', searchPlaceholder: '搜索 国家/城市/来源',
-    actionAll: '全部动作', actionVisit: '访问', actionClick: '点击', actionSubmit: '提交', actionRedirect: '跳转', actionBlock: '拦截', actionPass: '放行', actionError: '错误',
+    actionAll: '全部动作', actionVisit: '访问', actionClick: '点击', actionSubmit: '提交', actionRedirect: '跳转', actionBlock: '拦截', actionDisplay: '落地页',
     resultAll: '全部结果', reasonPass: '通过', reasonDeviceBlock: '设备拦截', reasonUaBlock: 'UA拦截', reasonCountryBlock: '国家拦截', reasonCountryAllow: '地区未放行', reasonDedup: '重复访客',
     srcControlled: '受控', srcExternal: '外部', srcCrawlerShort: '爬虫', srcPlaceholder: '占位符', direct: '直接', adPrefix: '广告', srcCrawler: '爬虫', fbNoAd: 'FB·无广告', directAccess: '直接访问',
     sourceLabel: '来源', directUnknown: '直接访问或来源未知',
@@ -23,7 +23,7 @@ export default {
   en: {
     pageTitle: 'Landing Page Logs', subcode: 'Subcode', adId: 'Ad ID', reset: 'Reset',
     allLandingPages: 'All landing pages', allAccounts: 'All accounts', allSources: 'All sources', searchPlaceholder: 'Search country/city/source',
-    actionAll: 'All actions', actionVisit: 'Visit', actionClick: 'Click', actionSubmit: 'Submit', actionRedirect: 'Redirect', actionBlock: 'Block', actionPass: 'Pass', actionError: 'Error',
+    actionAll: 'All actions', actionVisit: 'Visit', actionClick: 'Click', actionSubmit: 'Submit', actionRedirect: 'Redirect', actionBlock: 'Block', actionDisplay: 'Landing page',
     resultAll: 'All results', reasonPass: 'Pass', reasonDeviceBlock: 'Device blocked', reasonUaBlock: 'UA blocked', reasonCountryBlock: 'Country blocked', reasonCountryAllow: 'Region not allowed', reasonDedup: 'Duplicate visitor',
     srcControlled: 'Controlled', srcExternal: 'External', srcCrawlerShort: 'Crawler', srcPlaceholder: 'Placeholder', direct: 'Direct', adPrefix: 'Ad', srcCrawler: 'Crawler', fbNoAd: 'FB·No Ad', directAccess: 'Direct visit',
     sourceLabel: 'Source', directUnknown: 'Direct visit or unknown source',

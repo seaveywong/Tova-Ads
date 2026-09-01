@@ -117,6 +117,7 @@ def list_subcodes(
         ).group_by(LandingEvent.slug).all())
     items = [{"id": l.id, "slug": l.slug, "url": f"/a/{l.slug}", "page_id": l.page_id,
               "act_id": l.act_id, "ad_id": l.ad_id, "status": l.status,
+              "target_urls": l.target_urls or "",
               "ad_count": ad_counts.get(l.slug, 0),
               "act_count": act_counts.get(l.slug, 0),
               "archived_at": l.archived_at.isoformat() if l.archived_at else "",
@@ -204,7 +205,8 @@ def update_subcode(
               action_type="update", source="user", result="success")
     db.commit()
     return {"id": link.id, "slug": link.slug, "ad_id": link.ad_id,
-            "act_id": link.act_id, "status": link.status}
+            "act_id": link.act_id, "status": link.status,
+            "target_urls": link.target_urls or ""}
 
 
 @router.delete("/{sid}")
@@ -322,9 +324,9 @@ def fb_check_batch(
 ):
     """批量检测页下所有 active 子码在 FB 是否被封。
 
-    返回 [{slug, status, detail, url}, ...]。
+    并发 scrape（串行 N×30s 会撞网关超时）。返回 [{slug, status, detail, url}, ...]。
     """
-    from .landing import _fb_ban_probe
+    from .landing import _fb_ban_probe_batch
     base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
     if not p:
         raise HTTPException(404, "落地页不存在")
@@ -333,10 +335,9 @@ def fb_check_batch(
         LandingAdLink.tenant_id == user.tenant_id,
         LandingAdLink.status == "active",
     ).all()
-    results = []
-    for link in links:
-        url = f"{base.rstrip('/')}/a/{link.slug}"
-        status, detail = _fb_ban_probe(db, user.tenant_id, url)
-        results.append({"slug": link.slug, "status": status, "detail": detail, "url": url})
+    urls = [f"{base.rstrip('/')}/a/{link.slug}" for link in links]
+    probe_res = _fb_ban_probe_batch(db, user.tenant_id, urls)
+    results = [{"slug": link.slug, "status": st, "detail": det, "url": u}
+               for link, (st, det), u in zip(links, probe_res, urls)]
     blocked = [r for r in results if r["status"] == "fail"]
     return {"total": len(results), "blocked": len(blocked), "results": results}

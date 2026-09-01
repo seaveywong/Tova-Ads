@@ -80,7 +80,7 @@ const removeRole = async (r) => {
     await DELETE(`/rbac/roles/${r.id}`)
     ElMessage.success(t('common.delete') + t('members.doneSuffix'))
     await load()
-  } catch {}
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }   // 真报错（如角色下仍有成员 400）要提示
 }
 
 // 成员管理
@@ -120,7 +120,7 @@ const removeMember = async (m) => {
     await DELETE(`/rbac/members/${m.membership_id}`)
     ElMessage.success(t('members.removed'))
     await load()
-  } catch {}
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 
 const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin', super: 'role.super' }
