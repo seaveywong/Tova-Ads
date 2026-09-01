@@ -690,11 +690,10 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
                  f"{detail} | 目标预算≤当前（${cur_usd:.2f}）",
                  target_id=adset_id, target_type="adset")
         return
-    # USD → TT 本币整数（tt_ad_builder 同款：TT 预算无 minor units，全币种取整；
-    # 汇率取 CurrencyRate（_fx_map，1h 缓存），缺失兜底 1.0）
-    from ..core.tt_ad_builder import usd_to_tt_amount
-    _fx = _fx_map().get(cur_code)
-    new_amount = usd_to_tt_amount(new_usd, cur_code, _fx if _fx else 1.0)
+    # USD → TT 本币整数（对称逆换算：与 to_usd 用同一来源/兜底——to_usd 有硬编码
+    # 字典兜底而 1.0 兜底会算出远小于当前的数 → 被下方守卫拦下静默哑火一整天）
+    _usd_rate = to_usd(1.0, cur_code) or 1.0
+    new_amount = max(1, int(round(new_usd / _usd_rate)))
     if new_amount <= cur_amount:
         _log_evt("increase_budget_skipped", "success",
                  f"{detail} | 目标预算≤当前（本币整数 {cur_amount}）",
@@ -1101,6 +1100,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             continue
                     else:
                         succ = None
+                        # 平台隔离（照 _scale_cooldown_ok 模式）：TT 小整数 ad_id 与 FB
+                        # 撞号时互相吞停；FB 存量日志全回填 'fb'，过滤对 FB 零差异
+                        _pf = [ActionLog.platform == platform] if platform == "tt" else []
                         if not force:
                             succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
                             succ = db.query(ActionLog).filter(
@@ -1111,6 +1113,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 # 否则 observe 每 5min 巡检都重写一条日志（通知侧另有 60min dedup）
                                 ActionLog.action_type.in_(["pause", "observe_alert"]),
                                 ActionLog.result == "success",
+                                *_pf,
                                 ActionLog.created_at >= succ_cd,
                             ).first()
                         if succ:
@@ -1122,6 +1125,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             ActionLog.trigger_type == rule.rule_type,
                             ActionLog.action_type == "pause",
                             ActionLog.result == "fail",
+                            *_pf,
                             ActionLog.created_at >= fail_cd,
                         ).first()
                         if fail_recent:
@@ -1233,6 +1237,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         actor_type="system", target_type="ad", target_id=ad_id,
                         action_type="observe_alert" if ra == "observe" else "pause",
                         source="rule_engine", result=pause_result,
+                        platform=platform,
                         trigger_type=rule.rule_type,
                         trigger_detail=f"{detail} | act={acc.act_id}({acc.currency}) "
                                        f"camp={campaign_id} adset={adset_id} ad={ad_id} "

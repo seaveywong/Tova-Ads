@@ -530,10 +530,11 @@ def tt_refresh_now(cred_id: int,
         raise HTTPException(404, "TikTok 令牌不存在")
     if not cred.refresh_token_enc:
         raise HTTPException(400, "该凭证没有 refresh_token，请重新授权")
-    # App 配置是系统级行（tenant_id NULL）——SuperSessionLocal 读（同 tt_oauth_start）
+    # App 配置是系统级行（tenant_id NULL）——SuperSessionLocal 读（同 tt_oauth_start）。
+    # 按凭证自己的 app_id 精确匹配（多 App 用错 secret 刷新必失败；无 app_id 回退第一行）
     sdb = SuperSessionLocal()
     try:
-        app_cfg = resolve_tt_app(sdb)
+        app_cfg = resolve_tt_app(sdb, (cred.app_id or "").strip())
     finally:
         sdb.close()
     if not app_cfg:

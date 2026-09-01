@@ -341,7 +341,7 @@ def _tt_audit(db: Session, tenant_id: int, node_id: str, action_type: str,
                   actor_type="user", actor_user_id=0,
                   target_type="ad", target_id=node_id,
                   action_type=action_type, source="ad_ops", result=result,
-                  trigger_detail=trigger_detail)
+                  trigger_detail=trigger_detail, platform="tt")
         _sdb.commit()
     finally:
         _sdb.close()
