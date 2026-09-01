@@ -116,7 +116,10 @@ watch(datePreset, () => {
 
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
-const { platform } = usePlatform()  // ④ 平台切换器（topbar 全局；all=跨平台汇总）
+const { platform, setPlatform } = usePlatform()
+const platOpts = computed(() => [
+  { v: 'all', label: t('common.all') }, { v: 'fb', label: 'Facebook' }, { v: 'tt', label: 'TikTok' },
+])
 watch(platform, () => {
   // 平台切换：所选账户可能不属于新平台——先清再拉，防"选中但永不匹配"的空数据
   if (platform.value !== 'all' && selectedActs.value.length) selectedActs.value = []
@@ -770,6 +773,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 
     <div class="sticky-top">
     <div class="date-bar">
+        <el-radio-group :model-value="platform" size="small" class="plat-seg" @update:model-value="setPlatform">
+          <el-radio-button v-for="p in platOpts" :key="p.v" :value="p.v">{{ p.label }}</el-radio-button>
+        </el-radio-group>
         <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
         <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
                    :title="t('dashboard.convCatTitle')">
@@ -1106,6 +1112,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .task-block { display: flex; flex-direction: column; gap: 8px; }
 
 .date-bar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.plat-seg { margin-right: 6px; }
 .date-bar .filter-select { width: 110px; }
 .date-bar .act-filter { width: 180px; }
 .date-btn { padding: 6px 14px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; cursor: pointer; transition: all 0.15s; }

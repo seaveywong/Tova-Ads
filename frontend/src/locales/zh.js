@@ -201,7 +201,7 @@ export default {
     tokenPending: '待认证',
   },
   layout: {
-    platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）',
+    platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）', platformKey: '平台 '
     sentinel: '哨兵',
     rulesCount: '规则 {n} 条',
     safetyGuard: '安全守护',
@@ -731,7 +731,7 @@ export default {
     cfTitle: '域名服务配置',
     cfDesc: '落地页发布、域名导入用的域名服务凭据。Token 需有 Pages 编辑 + Zone 读取权限。',
     emTitle: '邮箱转发',
-    emDesc: '把 {domain} 的域名邮箱（如 dev@{domain}）转发到你的真实邮箱。底层是 CF Email Routing，域名 DNS 托管在 CF，启用和 DNS 配置全自动。',
+    emDesc: '把 {domain} 的域名邮箱（如 dev{'@'}{domain}）转发到你的真实邮箱。底层是 CF Email Routing，域名 DNS 托管在 CF，启用和 DNS 配置全自动。',
     emStatusUnconfigured: '未启用',
     emStatusEnabled: '已启用',
     emStatusDisabled: '已停用',
@@ -752,7 +752,7 @@ export default {
     emAddrDelConfirm: '删除目的地邮箱 {email}？正在被映射引用时无法删除。',
     emNoAddrs: '暂无目的地邮箱',
     emRouteTitle: '转发映射',
-    emRouteDesc: '域名别名 → 目的地邮箱。别名只收小写字母/数字和 . _ - （如 dev → dev@{domain}）。',
+    emRouteDesc: '域名别名 → 目的地邮箱。别名只收小写字母/数字和 . _ - （如 dev → dev{'@'}{domain}）。',
     emAliasPh: '别名，如 dev',
     emAliasRequired: '先填别名',
     emPickDestPh: '选已验证的目的地邮箱',

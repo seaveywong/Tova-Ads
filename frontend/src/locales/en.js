@@ -190,7 +190,7 @@ export default {
     tokenPending: 'Pending Auth',
   },
   layout: {
-    platformFilter: 'Platform filter (dashboard / ad manager filter by selected platform)',
+    platformFilter: 'Platform filter (dashboard / ad manager filter by selected platform)', platformKey: 'Platform '
     sentinel: 'Sentinel',
     rulesCount: '{n} rules',
     safetyGuard: 'Safety Guard',
@@ -720,7 +720,7 @@ export default {
     cfTitle: 'Domain service config',
     cfDesc: 'Domain service credentials for landing-page publishing and domain import. The token needs Pages edit + Zone read permissions.',
     emTitle: 'Email forwarding',
-    emDesc: 'Forward domain mailboxes on {domain} (e.g. dev@{domain}) to your real inbox. Powered by CF Email Routing — the domain DNS is hosted on Cloudflare, so enabling and DNS records are fully automatic.',
+    emDesc: 'Forward domain mailboxes on {domain} (e.g. dev{'@'}{domain}) to your real inbox. Powered by CF Email Routing — the domain DNS is hosted on Cloudflare, so enabling and DNS records are fully automatic.',
     emStatusUnconfigured: 'Not enabled',
     emStatusEnabled: 'Enabled',
     emStatusDisabled: 'Disabled',
@@ -741,7 +741,7 @@ export default {
     emAddrDelConfirm: 'Delete destination address {email}? It cannot be deleted while referenced by a mapping.',
     emNoAddrs: 'No destination addresses yet',
     emRouteTitle: 'Forwarding mappings',
-    emRouteDesc: 'Domain alias → destination address. Alias accepts lowercase letters, digits and . _ - only (e.g. dev → dev@{domain}).',
+    emRouteDesc: 'Domain alias → destination address. Alias accepts lowercase letters, digits and . _ - only (e.g. dev → dev{'@'}{domain}).',
     emAliasPh: 'Alias, e.g. dev',
     emAliasRequired: 'Enter an alias first',
     emPickDestPh: 'Pick a verified destination address',

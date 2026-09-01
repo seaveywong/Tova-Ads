@@ -306,7 +306,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           <el-dropdown trigger="click" @command="setPlatform">
             <span class="team-switcher plat-switcher" :title="t('layout.platformFilter')">
               <span class="plat-dot" :class="platform"></span>
-              <span class="plat-name">{{ platformLabel }}</span>
+              <span class="plat-name"><span class="plat-k">{{ t('layout.platformKey') }}</span>{{ platformLabel }}</span>
               <el-icon class="caret"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -461,6 +461,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .plat-dot.fb { background: #1877f2; }
 .plat-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%); }
 .plat-name { max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plat-k { color: var(--t3); margin-right: 4px; }
 @media (max-width: 768px) { .plat-name { display: none; } }
 .topbar-icon {
   font-size: 20px; color: var(--t2); cursor: pointer;
