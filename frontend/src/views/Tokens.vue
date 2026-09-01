@@ -83,6 +83,16 @@ const connectTikTok = async () => {
     if (r.url) window.location.href = r.url
   } catch (e) { ElMessage.error(t('tokens.ttStartFail') + (e.message || '')) }
 }
+const copyTtOAuth = async () => {  // 与 FB copyOAuth 同款：复制授权链接（剪贴板失败弹窗显示）
+  try {
+    const r = await GET('/tt/oauth/start')
+    if (!r.url) return
+    await navigator.clipboard.writeText(r.url)
+    ElMessage.success(t('tokens.oauthLinkCopied'))
+  } catch (e) {
+    ElMessage.error(t('tokens.ttStartFail') + (e.message || ''))
+  }
+}
 const saveTtApp = async () => {
   if (!ttAppForm.value.app_id.trim() || !ttAppForm.value.app_secret.trim()) return ElMessage.warning(t('tokens.ttAppFillBoth'))
   ttAppSaving.value = true
@@ -464,6 +474,7 @@ const deleteToken = async (tk) => {
       </div>
       <div v-else class="bar-r">
         <button class="btn primary" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+        <button class="btn" @click="copyTtOAuth">{{ t('tokens.copyOAuthUrl') }}</button>
       </div>
     </div>
 
