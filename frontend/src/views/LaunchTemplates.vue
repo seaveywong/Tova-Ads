@@ -448,6 +448,7 @@ const onMsgTplChange = (id) => {
 
 const blankForm = () => ({
   name: '', description: '',
+  platform: 'fb',   // fb / tt（TK P3：tt 走 TT 三件套部署链路）
   // 系列 Campaign
   objective: 'OUTCOME_TRAFFIC', conversion_goal: '', budget_mode: 'ABO',
   bid_strategy: 'LOWEST_COST_WITHOUT_CAP', budget_usd: 5, name_prefix: 'Tova Ads',
@@ -585,6 +586,19 @@ const setPostSource = (src) => {
   form.value.post_source = src
   if (src !== 'reuse') { reuseNeedManualPage.value = false; manualPageForPost.value = '' }
 }
+// 平台切换（TK P3）：tt = TikTok 三件套链路——跟帖/主页是 FB 专属，切 tt 强制回"新建帖"语义
+const setPlatform = (p) => {
+  if (form.value.platform === p) return
+  form.value.platform = p
+  if (p === 'tt') {
+    form.value.post_source = 'new'
+    form.value.reuse_post_ref = ''
+    form.value.page_id = ''
+    reusePostPreview.value = null
+    reuseNeedManualPage.value = false
+  }
+}
+const isTt = computed(() => form.value.platform === 'tt')
 const clearReusePost = () => { form.value.reuse_post_ref = ''; reusePostPreview.value = null; reuseNeedManualPage.value = false }
 // 卡片完整性判断（列表用，不需打开编辑器）
 const _tplMissing = (tpl) => {
@@ -727,6 +741,7 @@ const saveTpl = async () => {
   try {
     const body = {
       name: form.value.name, description: form.value.description,
+      platform: form.value.platform || 'fb',
       objective: form.value.objective, conversion_goal: form.value.conversion_goal,
       budget_mode: form.value.budget_mode, bid_strategy: form.value.bid_strategy,
       budget_usd: Number(form.value.budget_usd), name_prefix: form.value.name_prefix,
@@ -836,8 +851,10 @@ const preflight = async (tpl) => {
   preflighting.value = true
   try {
     // accounts 只在部署抽屉打开时加载——独立入口先拉本租户账户，取第一个 managed 正常账户预检
-    let accs = accounts.value
-    if (!accs.length) { try { accs = await GET('/fb/accounts') } catch {} }
+    // （按模板平台过滤：tt 模板只能用 TT 账户预检，否则预算/像素换算口径就错了）
+    const wantPlat = tpl.platform === 'tt' ? 'tt' : 'fb'
+    let accs = accounts.value.length ? accounts.value.filter(a => (a.platform || 'fb') === wantPlat) : []
+    if (!accs.length) { try { accs = (await GET('/fb/accounts')).filter(a => (a.platform || 'fb') === wantPlat) } catch {} }
     const target = accs.find(x => x.account_status === 1) || accs[0]
     if (!target) { ElMessage.warning(t('launch.preflightNoAccount')); preflighting.value = false; return }
     const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: target.act_id })
@@ -856,13 +873,21 @@ const accManagesReusePage = (actId) => {
   if (!reuseDeployPage.value) return true  // 非跟帖模式不限制
   return reuseEligibleActs.value.has(actId)
 }
+// TT 模板：只列 TikTok 账户 + 像素下拉换 TT 像素库（landing-lib platform=tt）
+const ttPixels = ref([])
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   reuseEligibleActs.value = new Set()
   deployAsset.value = null
   if (tpl.asset_id) { try { deployAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   accLoading.value = true
-  try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, t('launch.loadAccFail')) }
+  try {
+    const all = await GET('/fb/accounts')
+    accounts.value = (tpl.platform === 'tt') ? all.filter(a => a.platform === 'tt') : all.filter(a => (a.platform || 'fb') === 'fb')
+  } catch (e) { showError(e, t('launch.loadAccFail')) }
+  if (tpl.platform === 'tt') {
+    try { const ps = await GET('/landing-lib/pixels'); ttPixels.value = (ps || []).filter(p => p.platform === 'tt') } catch { ttPixels.value = [] }
+  }
   if (tpl.post_source === 'reuse' && tpl.id) {
     // 后端权威判定：候选池里有能管该帖主页的写令牌的账户才可选（多令牌同账户也覆盖）
     try { const r = await GET('/launch-templates/' + tpl.id + '/reuse-eligible'); reuseEligibleActs.value = new Set(r.eligible || []) }
@@ -876,6 +901,10 @@ const ensureAccConfig = async (id) => {
   const acc = accounts.value.find(a => a.act_id === id)
   const credId = acc?.fb_credential_id
   deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
+  if (deployTpl.value?.platform === 'tt') {
+    accPages.value[id] = []   // TT 无主页概念；像素下拉用共享 ttPixels（无 per-account 差异）
+    return
+  }
   if (credId) {
     accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
     try {
@@ -943,6 +972,10 @@ const statusText = (s) => itemStatus(s).label
 const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
 const jobText = (s) => jobStatus(s).label
 const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/campaigns?act=${actId}&selected_campaign_ids=${campId}`
+// TT 跳 TikTok Ads Manager（aadvid=广告主 ID）；plat 由调用点显式传（activeJob/depJobDetail 各自的平台，不共享状态）
+const ttAdsUrl = (actId) => `https://ads.tiktok.com/am/manage/campaigns?aadvid=${actId}`
+const adsUrl = (it, plat) => plat === 'tt' ? ttAdsUrl(it.act_id) : fbAdsUrl(it.act_id, it.campaign_id)
+const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbAds')
 </script>
 
 <template>
@@ -964,7 +997,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
           </span>
         </div>
-        <div class="card-meta"><span class="card-obj">{{ objLabel(tpl.objective) }}</span><span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span></div>
+        <div class="card-meta"><span v-if="tpl.platform === 'tt'" class="card-plat">🎵 TikTok</span><span class="card-obj">{{ objLabel(tpl.objective) }}</span><span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span></div>
         <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
@@ -980,13 +1013,19 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
     <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
-      <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶 -->
-      <div class="post-mode-seg">
+      <!-- 平台切换（TK P3）：fb=FB 三件套 / tt=TikTok 三件套（决定部署链路与术语） -->
+      <div class="plat-seg">
+        <button :class="['plat-btn',{on:form.platform!=='tt'}]" @click="setPlatform('fb')">📘 Facebook</button>
+        <button :class="['plat-btn',{on:form.platform==='tt'}]" @click="setPlatform('tt')">🎵 TikTok</button>
+      </div>
+      <div v-if="isTt" class="tt-hint">ℹ️ {{ t('launch.ttSwitchNote') }}</div>
+      <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶（FB 专属：TT 无主页帖） -->
+      <div v-if="!isTt" class="post-mode-seg">
         <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">📝 {{ t('launch.postSourceNew') }}</button>
         <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">📌 {{ t('launch.postSourceReuse') }}</button>
       </div>
-      <!-- 跟帖：置顶选帖卡（解决"不知在哪输入帖子ID"的发现性） -->
-      <div v-if="form.post_source==='reuse'" class="reuse-select-card">
+      <!-- 跟帖：置顶选帖卡（解决"不知在哪输入帖子ID"的发现性；FB 专属） -->
+      <div v-if="!isTt && form.post_source==='reuse'" class="reuse-select-card">
         <div class="reuse-card-hint">{{ t('launch.reuseCardHint') }}</div>
         <div class="reuse-input-row">
           <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
@@ -1019,7 +1058,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
       <div class="level-tabs">
         <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① {{ t('launch.levelCampaign') }}</button>
-        <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ t('launch.levelAdSet') }}</button>
+        <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</button>
         <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ {{ t('launch.levelAd') }}</button>
       </div>
       <!-- #8 summary strip：跨级概览 -->
@@ -1048,20 +1087,22 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
-        <div class="row"><label>{{ t('launch.pageId') }}</label>
+        <div v-if="!isTt" class="row"><label>{{ t('launch.pageId') }}</label>
           <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="form.post_source==='reuse'" :title="form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
         </div>
-        <div class="row"><label>{{ t('launch.pixelId') }}</label>
-          <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ t('launch.pixelIdHint') }}</span>
+        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
+          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
+          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
         </div>
       </div>
 
       <!-- ② 广告组 -->
       <div v-if="editLevel==='adset'" class="form">
+        <template v-if="!isTt">
         <div class="row"><label>{{ t('launch.optimizationGoal') }}</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoByObj')" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.billingEvent') }}</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.conversionDest') }}</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoOpt')" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="t(d.l)" /></el-select></div>
@@ -1071,6 +1112,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.cpaGoalPlaceholder')" />
           <span class="hint">{{ t('launch.cpaGoalHint') }}</span>
         </div>
+        </template>
+        <div v-else class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
         <!-- 受众来源：保存的受众（SavedAudience，部署时用） / 自定义（下方手动定向） -->
@@ -1094,8 +1137,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <button class="btn sm ghost" :disabled="!hasManualAudience" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ t('launch.saveAsAudience') }}</button>
         </div>
         <template v-if="!form.audience_id">
-        <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为） -->
-        <div class="advantage-box">
+        <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为；FB 专属） -->
+        <div v-if="!isTt" class="advantage-box">
           <div class="adv-row">
             <div class="adv-info">
               <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
@@ -1112,12 +1155,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </div>
         <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
         <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
-        <div class="row"><label>{{ t('launch.languageLabel') }}</label>
+        <div v-if="isTt" class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttAudienceHint') }}</div>
+        <div v-if="!isTt" class="row"><label>{{ t('launch.languageLabel') }}</label>
           <el-select v-model="form.audience_language" filterable clearable :placeholder="t('launch.langAny')" style="width:100%" size="small">
             <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
           </el-select>
         </div>
-        <template v-if="!advantage_audience">
+        <template v-if="!advantage_audience && !isTt">
         <div class="row"><label>{{ t('launch.interestLabel') }}</label>
           <div class="interest-search">
             <input v-model="interestQ" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterests" />
@@ -1145,6 +1189,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         </template>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.placement') }}</div>
+        <div v-if="isTt" class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttPlacementHint') }}</div>
+        <template v-else>
         <div class="row"><label>{{ t('launch.adPlacement') }}</label>
           <div class="seg">
             <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">{{ t('launch.advPlusPlacement') }}</button>
@@ -1177,6 +1223,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             </div>
           </div>
         </div>
+        </template>
+        <template v-if="!isTt">
         <div class="sec-title">{{ t('launch.disclosure') }}</div>
         <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
         <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
@@ -1219,6 +1267,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.advancedFieldsTitle') }}</div>
         <div class="row"><label>{{ t('launch.advancedSettings') }}</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" :placeholder='t(&apos;launch.advancedPlaceholder&apos;)'></textarea><span class="hint">{{ t('launch.advancedHint') }}</span></div>
+        </template>
       </div>
 
       <!-- ③ 广告 -->
@@ -1259,8 +1308,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <button class="btn sm" :disabled="form.post_source==='reuse'" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
           </div>
         </div>
-        <!-- Advantage+ 创意（对齐 FB Ads Manager） -->
-        <div class="advantage-box">
+        <!-- Advantage+ 创意（对齐 FB Ads Manager；FB 专属） -->
+        <div v-if="!isTt" class="advantage-box">
           <div class="adv-row">
             <div class="adv-info">
               <span class="adv-title">{{ t('launch.advPlusCreative') }}</span>
@@ -1291,8 +1340,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           </el-select>
           <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
         </div>
-        <!-- 消息类（ENGAGEMENT + 消息目标） -->
-        <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
+        <!-- 消息类（ENGAGEMENT + 消息目标；FB Messenger 专属） -->
+        <template v-if="form.objective === 'OUTCOME_ENGAGEMENT' && !isTt">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">{{ t('launch.messageAd') }}</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageMsgTpl') }} →</router-link>
           </div>
@@ -1306,8 +1355,8 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="preview-link">{{ t('common.preview') }}</span>
           </div>
         </template>
-        <!-- 表单类（LEADS + Instant Forms） -->
-        <template v-if="form.objective === 'OUTCOME_LEADS'">
+        <!-- 表单类（LEADS + Instant Forms；FB Instant Form 专属） -->
+        <template v-if="form.objective === 'OUTCOME_LEADS' && !isTt">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
           </div>
@@ -1364,7 +1413,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
-      <div class="d">{{ t('launch.deploySubtitle') }}</div>
+      <div class="d">{{ deployTpl?.platform === 'tt' ? t('launch.ttDeploySubtitle') : t('launch.deploySubtitle') }}</div>
       <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">⚠ {{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
       <div v-if="deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
       <div class="deploy-search-row">
@@ -1376,6 +1425,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <button class="op sm" @click="deploySelectActive">{{ t('launch.deploySelectActive') }}</button>
         <button class="op sm" @click="deployClearSel">{{ t('launch.deployClear') }}</button>
       </div>
+      <div v-if="deployTpl?.platform === 'tt' && !accLoading && !accounts.length" class="empty-sm">{{ t('launch.deployNoTtAccounts') }}</div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
@@ -1388,6 +1438,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
               <span class="config-loading">{{ t('launch.loadingPagePixel') }}</span>
+            </template>
+            <template v-else-if="deployTpl?.platform === 'tt'">
+              <label>{{ t('launch.ttPixelLabel') }}</label>
+              <select v-model="deployItems[a.act_id].pixel_id" class="inp sm">
+                <option value="">{{ t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.autoPick') }) }}</option>
+                <option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id">{{ (p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')' }}</option>
+              </select>
             </template>
             <template v-else>
               <label>{{ t('launch.page') }}</label>
@@ -1424,7 +1481,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <span class="dot" :style="{background:statusColor(it.status)}"></span>
             <span class="pi-act">{{ it.act_id }}</span>
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
-            <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">{{ t('launch.fbAds') }}→</a>
+            <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
             <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,60) }}</span>
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
           </div>
@@ -1432,13 +1489,13 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
       </div>
     </el-dialog>
     <!-- 预检结果（结构化展示） -->
-    <el-dialog v-model="preflightVisible" :title="t('launch.preflightTitle')" width="700px" append-to-body>
+    <el-dialog v-model="preflightVisible" :title="preflightResult?.platform === 'tt' ? t('launch.ttPreflightTitle') : t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
         <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
         <div v-if="preflightResult.asset?.type === 'video'" style="padding:4px 0;font-size:13px">{{ t('launch.videoAsset') }}：{{ preflightResult.asset.name || preflightResult.asset.filename }}<template v-if="preflightResult.asset.duration_sec"> · {{ t('launch.durationLabel') }} {{ preflightResult.asset.duration_sec }}s</template></div>
         <div class="pf-summary">
           <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
-          <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ t('launch.minorUnitHint') }}）</span>
+          <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ preflightResult.platform === 'tt' ? t('launch.ttUnitHint') : t('launch.minorUnitHint') }}）</span>
           <span>{{ t('launch.fxRate') }}：{{ preflightResult.fx_rate || t('launch.none') }}</span>
           <span>{{ t('launch.modeColon') }}{{ preflightResult.budget_mode }}</span>
         </div>
@@ -1447,7 +1504,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
         </div>
         <div class="pf-section">
-          <div class="pf-title">{{ t('launch.pfAdSet') }}</div>
+          <div class="pf-title">{{ preflightResult.platform === 'tt' ? t('launch.levelAdGroup') : t('launch.pfAdSet') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ JSON.stringify(v) }}</span></div></div>
         </div>
         <div class="pf-section">
@@ -1493,7 +1550,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
               <span v-if="it.status === 'success'" class="dep-live" :style="{color: liveStatusColor(it.live_status)}" :title="t('launch.liveStatusHint')">
                 {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
               </span>
-              <a v-if="it.campaign_id" :href="fbAdsUrl(it.act_id,it.campaign_id)" target="_blank" class="pi-link">{{ t('launch.fbAds') }}→</a>
+              <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(depJobDetail?.platform) }}→</a>
               <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,40) }}</span>
             </div>
             <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
@@ -1543,6 +1600,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-obj{font-size:11px;color:var(--ac);white-space:nowrap}
+.card-plat{font-size:11px;color:var(--t2);background:var(--bg3);padding:1px 8px;border-radius:8px;white-space:nowrap}
 .card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.pending{color:var(--warning);background:rgba(255,159,10,.13)}
@@ -1637,6 +1695,11 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .ps-btn{flex:none;padding:9px 18px;border:none;background:transparent;color:var(--t3);font-size:14px;cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;font-weight:500;transition:color .15s}
 .ps-btn:hover{color:var(--t2)}
 .ps-btn.on{color:var(--ac);border-bottom-color:var(--ac);font-weight:600}
+/* 平台切换（fb/tt，TK P3） */
+.plat-seg{display:flex;gap:6px;margin-bottom:10px}
+.plat-btn{flex:1;padding:8px;border:1px solid var(--bd);background:var(--bg3);color:var(--t3);border-radius:8px;cursor:pointer;font-size:14px;font-family:inherit;font-weight:500}
+.plat-btn.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1);font-weight:600}
+.tt-hint{font-size:11px;color:var(--t3);padding:6px 10px;background:var(--bg3);border-radius:6px;margin-bottom:10px;line-height:1.5}
 .reuse-selected{display:flex;align-items:center;gap:8px}
 .reuse-selected-block{display:flex;flex-direction:column;gap:6px}
 .reuse-mini-preview{display:flex;gap:8px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:8px}

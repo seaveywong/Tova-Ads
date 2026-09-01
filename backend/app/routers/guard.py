@@ -343,10 +343,13 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         db = SuperSessionLocal()
         _st = _EMERGENCY_STATE[tenant_id]
         _emergency_state_write(db, tenant_id, dict(_st))
+        # 紧急暂停是 FB kill-switch（set_status→FB ad_ops）；TT 账户在此排除——
+        # 否则 cred_for_account_op 对 TT 抛 NotImplementedError 会中断整轮（其余账户漏停）
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
             Account.account_status == 1,
+            Account.platform == "fb",
         ).all()
         _st["total_accounts"] = len(accounts)
 

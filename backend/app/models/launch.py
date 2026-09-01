@@ -32,6 +32,7 @@ class Asset(Base):
     ai_language = Column(Text)       # 分析输出语言代码（en/zh/...）
     fb_image_hashes = Column(Text)   # JSON {act_id: hash} 每账户缓存（FB image_hash 按账户，不能跨账户复用）
     fb_video_ids = Column(Text)      # JSON {act_id: video_id} 每账户缓存（FB 视频按账户隔离，不能跨账户复用）
+    tt_file_ids = Column(Text)       # JSON {advertiser_id: file_id} 每广告主缓存（TT 素材 file_id 按广告主隔离，迁移0073）
     language = Column(Text)          # 用户显式指定语言（en/zh/zh-tw/vi...）；空=按 country 推（AI analyze + 文案语言）
     is_manual = Column(Boolean, default=False)
     manual_copy = Column(Text)

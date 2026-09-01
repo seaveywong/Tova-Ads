@@ -5,6 +5,7 @@ import { GET, POST, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
+import { usePlatform, platformQuery } from '../composables/usePlatform'
 import { useRouter } from 'vue-router'
 import { isSuperadminSync } from '../router'
 const isSuper = isSuperadminSync()
@@ -52,7 +53,7 @@ const loadTrend = async () => {
       : `date_preset=${datePreset.value}`
     const actQ = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
     const cq = conversionCategory.value !== 'all' ? `&conversion_category=${conversionCategory.value}` : ''   // KPI 卡收窄时趋势线同步
-    trendData.value = await GET(`/dashboard/trend?${q}${actQ}${cq}&granularity=${trendGran.value}`)
+    trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}&granularity=${trendGran.value}`)
   } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
 }
 const renderTrendCharts = () => {
@@ -115,12 +116,20 @@ watch(datePreset, () => {
 
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
+const { platform } = usePlatform()  // ④ 平台切换器（topbar 全局；all=跨平台汇总）
+watch(platform, () => {
+  // 平台切换：所选账户可能不属于新平台——先清再拉，防"选中但永不匹配"的空数据
+  if (platform.value !== 'all' && selectedActs.value.length) selectedActs.value = []
+  loadDashboard()
+  loadTrend()
+})
 const rangeQuery = () => {
   let q = (showCustom.value && customFrom.value && customTo.value)
     ? `date_from=${customFrom.value}&date_to=${customTo.value}`
     : `date_preset=${datePreset.value}`
   if (conversionCategory.value && conversionCategory.value !== 'all') q += `&conversion_category=${conversionCategory.value}`
   if (selectedActs.value.length) q += `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}`
+  q += platformQuery()   // fb/tt 才附加（all 不带参，请求与旧版一致）
   return q
 }
 const activeTokens = ref(0)
@@ -136,6 +145,9 @@ const fmtAgo = (iso) => {
 // 账户 error：后端返 code（uncovered/cross_tz），按 locale 映射显示；其余（FB 错误等）原样
 const ERR_LABEL = { uncovered: 'dashboard.covUncovered', cross_tz: 'dashboard.covCrossTz' }
 const mapErr = (e) => (e && ERR_LABEL[e]) ? t(ERR_LABEL[e]) : (e || '')
+// 账户平台小标（fb/tt；已移除账户 platform=null 不标）
+const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
+const platPrefix = (a) => (platChip(a) ? platChip(a).toUpperCase() + ' · ' : '')
 const loadDashboard = async (fresh = false) => {
   const isLatest = _dashGuard.next()
   loading.value = true
@@ -265,7 +277,7 @@ const loadLandingTrend = async () => {
     let q = (showCustom.value && customFrom.value && customTo.value)
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
       : `date_preset=${datePreset.value}`
-    landingTrend.value = await GET(`/dashboard/landing-trend?${q}`)
+    landingTrend.value = await GET(`/dashboard/landing-trend?${q}`)   // 落地事件跨平台，不做 platform 过滤
   } catch { landingTrend.value = { labels: [], visits: [], clicks: [], blocked: [] } }
 }
 const renderLandingTrend = () => {
@@ -771,7 +783,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
                    @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
                    :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
-          <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="a.name" />
+          <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="platPrefix(a) + a.name" />
         </el-select>
         <div class="sys-info">
           <span v-if="lastUpdated" class="sync-time">{{ t('dashboard.dataUpdated') }} {{ fmtAgo(lastUpdated) }}</span>
@@ -820,7 +832,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <tbody>
               <tr v-for="acc in filteredKpiAccs" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (kpiDetail.mode === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
                 <td v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
-                  <template v-if="col.key === 'name'">{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
+                  <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
                   <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
                 </td>
               </tr>
@@ -875,7 +887,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabel(col) }}</th></tr></thead>
             <tbody>
               <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id) }" @click="toggleSelect(acc.act_id)">
-                <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono">{{ columnFmt(col, acc) }}</td>
+                <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono"><span v-if="col === 'name' && platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ columnFmt(col, acc) }}</td>
               </tr>
             </tbody>
           </table>
@@ -1220,6 +1232,10 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-header { padding: 12px 16px; border-bottom: 1px solid var(--bd); display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; color: var(--t1); }
 .detail-close { cursor: pointer; color: var(--t3); font-size: 18px; }
 .detail-close:hover { color: var(--t1); }
+/* 平台小标（账户名前的 FB/TT chip，品牌色调在明暗主题均可读） */
+.plat-chip { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 6px; line-height: 16px; vertical-align: 1px; }
+.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
+.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 .detail-table { width: 100%; border-collapse: collapse; }
 .detail-table th { padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--t3); border-bottom: 1px solid var(--bd); white-space: nowrap; }
 .detail-table th.left { text-align: left; } .detail-table th.right { text-align: right; }

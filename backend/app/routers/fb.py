@@ -1049,6 +1049,7 @@ def list_accounts(
         perf = spend_map.get(a.act_id, {})
         out.append({
             "id": a.id, "act_id": a.act_id, "name": a.name, "currency": cur,
+            "platform": a.platform or "fb",
             "timezone": a.timezone_name, "account_status": a.account_status,
             "is_managed": a.is_managed if a.is_managed is not None else True,
             "warmup_state": a.warmup_state or "none",

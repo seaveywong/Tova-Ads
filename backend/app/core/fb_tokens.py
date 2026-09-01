@@ -169,11 +169,85 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
     return pick
 
 
+def tt_client_for_account(db: Session, tenant_id: int, act_id: str, op_kind: str = "read"):
+    """TT 账户的 (TtClient, TtCredential) 选择器（照 FB cred_for_account_op 语义）：
+    account_tt_credentials 候选池（priority 序）→ accounts.tt_credential_id 主令牌 →
+    租户 active TT 凭证兜底；read RR 轮换分摊、pause/write 绑定池内最高优先。
+    无可用凭证 → (None, None)。TtClient 带 app_id + refresher（access_token 24h，
+    请求间隙过期自动轮换原子写回；cron 6h 刷新为主，这里兜间隙）。"""
+    from ..models.tt import TtCredential, AccountTtCredential
+    TtClient = _tt_client_cls()
+    if TtClient is None:
+        return None, None
+    acc = db.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id == act_id).first()
+    ordered: list = []
+    seen: set = set()
+
+    def _add(c):
+        if c is not None and c.id not in seen and (c.status or "") == "active":
+            ordered.append(c)
+            seen.add(c.id)
+
+    if acc:
+        for c in db.query(TtCredential).join(
+            AccountTtCredential, AccountTtCredential.tt_credential_id == TtCredential.id
+        ).filter(
+            AccountTtCredential.account_id == acc.id,
+            AccountTtCredential.status == "active",
+            TtCredential.status == "active",
+        ).order_by(AccountTtCredential.priority, TtCredential.id).all():
+            _add(c)
+    tenant_creds = db.query(TtCredential).filter(
+        TtCredential.tenant_id == tenant_id, TtCredential.status == "active",
+    ).order_by(TtCredential.id).all()
+    if acc and acc.tt_credential_id:
+        _add(next((c for c in tenant_creds if c.id == acc.tt_credential_id), None))
+    for c in tenant_creds:
+        _add(c)
+    if not ordered:
+        return None, None
+    if op_kind in ("write", "pause"):
+        pick = ordered[0]
+    else:
+        key = (tenant_id, act_id, "tt", op_kind)
+        cursor = _RR_STATE.get(key, 0)
+        pick = ordered[cursor % len(ordered)]
+        _RR_STATE[key] = cursor + 1
+
+    _db, _cred = db, pick
+
+    def _refresher():
+        """token 请求间隙过期（40105）→ 轮换刷新原子写回一次（失败走 cron/告警链兜底）。"""
+        try:
+            from ..services.tt_token_refresh import refresh_credential, resolve_tt_app
+            app = resolve_tt_app(_db)
+            if not app:
+                return None
+            res = refresh_credential(_db, _cred, app[0], app[1])
+            return decrypt(_cred.access_token_enc) if res.get("ok") else None
+        except Exception:
+            try:
+                _db.rollback()
+            except Exception:
+                pass
+            return None
+
+    client = TtClient(decrypt(pick.access_token_enc),
+                      app_id=(pick.app_id or ""), refresher=_refresher)
+    return client, pick
+
+
 def client_for_account(db: Session, tenant_id: int, act_id: str,
                        op_kind: str = "read") -> Optional[FbClient]:
     """按账户选 client（绑定优先 + RR 兜底）。op_kind: read 任意可用 / pause 管理+操作 / write 操作。
-    TT 账户（platform='tt'）在此 fail-fast（NotImplementedError）——TtClient 分发口 P1 接。"""
-    cred = cred_for_account_op(db, tenant_id, act_id, op_kind)
+    平台分发：platform='tt' → TtClient（方法面 duck-type FbClient，tt_client_for_account 选凭证）；
+    FB 路径不变（TT 账户在 cred_for_account_op 抛 NotImplementedError 即转 TT 分支，无额外查询）。"""
+    try:
+        cred = cred_for_account_op(db, tenant_id, act_id, op_kind)
+    except NotImplementedError:
+        client, _cred = tt_client_for_account(db, tenant_id, act_id, op_kind)
+        return client
     return FbClient(decrypt(cred.access_token_enc)) if cred else None
 
 

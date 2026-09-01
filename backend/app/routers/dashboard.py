@@ -50,6 +50,11 @@ def _business_today() -> str:
     return datetime.now(BUSINESS_TZ).strftime("%Y-%m-%d")
 
 
+def _norm_platform(p: str) -> str:
+    """平台筛选参数归一：all（默认，跨平台汇总）/ fb / tt。非法值按 all。"""
+    return p if p in ("fb", "tt") else "all"
+
+
 @router.get("")
 def dashboard(
     date_preset: str = "today",
@@ -57,6 +62,7 @@ def dashboard(
     date_to: str = "",
     conversion_category: str = "",  # ① 转化分类筛选：全部/购物/私信/线索/互动/流量（只统计符合 KPI 类型的广告）
     act_ids: str = "",  # ③ 账户多选筛选：逗号分隔 act_id
+    platform: str = "all",  # ④ 平台筛选：all（跨平台汇总）/ fb / tt（perf 按 platform 列过滤）
     fresh: bool = False,  # 手动刷新跳过 30s 内存缓存（只读库，不触发 FB 采集）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
@@ -86,14 +92,15 @@ def dashboard(
         since = until = today
 
     # 内存缓存（fresh=True 跳过：手动刷新只读库，绕 30s 缓存看最新快照）
-    cache_key = f"{user.tenant_id}:{since}:{until}:{conversion_category}:{act_ids}"
+    platform = _norm_platform(platform)
+    cache_key = f"{user.tenant_id}:{since}:{until}:{conversion_category}:{act_ids}:{platform}"
     now = _time.time()
     if not fresh and cache_key in _CACHE:
         entry = _CACHE[cache_key]
         if now - entry[0] < _CACHE_TTL:
             return entry[1]
 
-    # 查 perf_snapshots：按账户聚合（支持转化分类① + 账户多选③过滤；KPI_CATEGORY 已提到模块级）
+    # 查 perf_snapshots：按账户聚合（支持转化分类① + 账户多选③ + 平台④过滤；KPI_CATEGORY 已提到模块级）
     sql_text = """
         SELECT act_id,
                MAX(act_id) as keep_act,
@@ -116,6 +123,10 @@ def dashboard(
     """
     params = {"tid": user.tenant_id, "since": since, "until": until}
     binds = []
+    if platform != "all":
+        # ad_id 跨平台可能撞号（唯一键 ad_id+platform+date）——聚合按 platform 列过滤
+        sql_text += "  AND platform = :platform\n"
+        params["platform"] = platform
     cat_fields = KPI_CATEGORY.get(conversion_category)
     if cat_fields:
         sql_text += "  AND resolved_kpi IN :cat_fields\n"
@@ -132,8 +143,12 @@ def dashboard(
         stmt = stmt.bindparams(*binds)
     rows = db.execute(stmt, params).fetchall()
 
-    # 全部账户（含已移除）——历史消耗必须保留；余额/覆盖只算 managed 子集
+    # 全部账户（含已移除）——历史消耗必须保留；余额/覆盖只算 managed 子集。
+    # 平台筛选④：fb/tt 时账户明细/余额/覆盖同口径收窄（all=不过滤，跨平台汇总）
     accounts = db.query(Account).filter(Account.tenant_id == user.tenant_id).all()
+    _pf_on = platform != "all"
+    if _pf_on:
+        accounts = [a for a in accounts if (a.platform or "fb") == platform]
     acc_map = {a.act_id: a for a in accounts}
     managed_accounts = [a for a in accounts if a.is_managed]
     managed_act_ids = {a.act_id for a in managed_accounts}
@@ -167,6 +182,10 @@ def dashboard(
         ActionLog.created_at < _fetch_end,
     ).order_by(ActionLog.created_at.desc()).limit(200).all()
     _pause_in_range = [p for p in _pause_cand if since <= _pause_local_day(p) <= until]
+    if _pf_on:
+        # 平台筛选④：止损/放行计数与所选平台同口径（act 无法归属的保留，不误删）
+        _pause_in_range = [p for p in _pause_in_range
+                           if not _act(p.trigger_detail) or _act(p.trigger_detail) in acc_map]
     pause_count = len(_pause_in_range)
 
     # 放行计数/明细：按各账户本地今日（多时区账户不能一刀切 UTC；和加白写入/巡检查询对齐）
@@ -179,6 +198,8 @@ def dashboard(
         GuardAllowance.allowance_date.in_(today_dates),
     ).all() if today_dates else []
     today_allows = [a for a in allow_cand if local_today.get(a.act_id) == a.allowance_date]
+    if _pf_on:
+        today_allows = [a for a in today_allows if a.act_id in acc_map]
     allowance_count = len(today_allows)
 
     # 止损明细（已按账户本地日过滤到 [since, until]，与快照同天）
@@ -233,6 +254,7 @@ def dashboard(
             conv = r.total_conversions or 0
             account_details.append({
                 "act_id": r.act_id, "name": "（已移除账户）", "currency": "USD", "timezone": "",
+                "platform": None,   # 账户行已删，平台无从判定
                 "account_status": None, "is_managed": False, "removed": True,
                 "spend": round(spend_usd, 2), "spend_usd": round(spend_usd, 2),
                 "conversions": conv, "cpa": round(spend_usd / conv, 2) if conv > 0 else 0.0,
@@ -251,6 +273,7 @@ def dashboard(
         cpa = round(spend_usd / conv, 2) if conv > 0 else 0.0
         account_details.append({
             "act_id": r.act_id, "name": acc.name, "currency": acc.currency or "USD", "timezone": acc.timezone_name or "",
+            "platform": acc.platform or "fb",
             "account_status": acc.account_status, "is_managed": acc.is_managed if acc.is_managed is not None else True,
             "last_inspected_at": acc.last_inspected_at.isoformat() if acc.last_inspected_at else None,
             "spend": round(r.total_spend_native or 0, 2),
@@ -293,6 +316,7 @@ def dashboard(
                 err = "uncovered"  # 巡检未覆盖——code，前端按 locale 显示
             account_details.append({
                 "act_id": acc.act_id, "name": acc.name, "currency": acc.currency or "USD", "timezone": acc.timezone_name or "",
+                "platform": acc.platform or "fb",
                 "account_status": acc.account_status, "is_managed": acc.is_managed if acc.is_managed is not None else True,
                 "spend": 0, "spend_usd": 0, "conversions": 0, "cpa": 0, "roas": 0,
                 "impressions": 0, "clicks": 0, "reach": 0, "frequency": 0,
@@ -349,6 +373,7 @@ def trend_data(
     granularity: str = "",
     act_ids: str = "",
     conversion_category: str = "",   # 转化分类筛选（与 /dashboard 同口径——KPI 卡收窄时趋势线同步）
+    platform: str = "all",           # 平台筛选（与 /dashboard 同口径）
     fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
@@ -359,8 +384,9 @@ def trend_data(
     颗粒度：5min/30min/hour → perf_snapshot_ticks 聚合；day → perf_snapshots 聚合。
     30s 内存缓存（前端与 /dashboard 成对请求，缓存收益直接翻倍）；fresh=True 跳过。
     """
+    platform = _norm_platform(platform)
     # 缓存命中（key 含全部筛选维度）
-    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}"
+    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}:{platform}"
     _tnow = _time.time()
     if not fresh and _tkey in _CACHE:
         _te = _CACHE[_tkey]
@@ -376,6 +402,17 @@ def trend_data(
         since = (datetime.now(BUSINESS_TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
         until = today
     sel_ids = [s.strip() for s in act_ids.split(",") if s.strip()] if act_ids else []
+    if platform != "all":
+        # perf_snapshot_ticks 无 platform 列——按该平台账户的 act_id 过滤（与用户勾选账户求交）。
+        # 交集为空 = 该平台无账户/无勾选 → 直接空结果（不能落入"不过滤"分支）
+        _pf_acts = {a.act_id for a in db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.platform == platform).all()}
+        sel_ids = (list(set(sel_ids) & _pf_acts) if sel_ids else list(_pf_acts))
+        if not sel_ids:
+            result = {"labels": [], "spend": [], "conversions": [], "cpa": [],
+                      "granularity": granularity or "day"}
+            _CACHE[_tkey] = (_tnow, result)
+            return result
 
     # 颗粒度未指定 → 按范围自动选
     if not granularity:
@@ -394,6 +431,9 @@ def trend_data(
         """
         params = {"tid": user.tenant_id, "since": since, "until": until}
         binds = []
+        if platform != "all":
+            sql += "  AND platform = :platform"
+            params["platform"] = platform
         if sel_ids:
             sql += "  AND act_id IN :act_ids"
             params["act_ids"] = sel_ids
@@ -474,12 +514,16 @@ def ad_breakdown(
     db: Session = Depends(get_db),
 ):
     """单账户广告级（从 perf_snapshots 读，秒开）。看数据按业务日（北京），
-    snapshot_date 是账户本地日，按业务日历日查即命中该账户本地该日。"""
+    snapshot_date 是账户本地日，按业务日历日查即命中该账户本地该日。
+    platform 取自账户行（fb/tt 各查各的快照——ad_id 跨平台可能撞号）。"""
+    _acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+    _acc_plat = (_acc.platform or "fb") if _acc else "fb"
     today = _business_today()
     rows = db.query(PerfSnapshot).filter(
         PerfSnapshot.tenant_id == user.tenant_id,
         PerfSnapshot.act_id == act_id,
-        PerfSnapshot.platform == "fb",
+        PerfSnapshot.platform == _acc_plat,
         PerfSnapshot.snapshot_date == today,
     ).all()
     return {
@@ -499,6 +543,7 @@ def landing_overview(
     date_from: str = "",
     date_to: str = "",
     act_ids: str = "",   # 账户多选筛选（与广告区同口径——选中账户后落地页区同步收窄）
+    platform: str = "all",  # 平台筛选（消耗侧与广告区同口径；落地事件本身跨平台不过滤）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -557,7 +602,9 @@ def landing_overview(
         LIMIT 50
     """), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()
 
-    # ② 广告消耗 by ad_id（业务日 snapshot_date 范围；perf_snapshots 是账户本地日）
+    # ② 广告消耗 by ad_id（业务日 snapshot_date 范围；perf_snapshots 是账户本地日）。
+    #    platform 过滤：ad_id 跨平台可能撞号（fb/tt 各一行）——按 platform 列收窄
+    _pf = _norm_platform(platform)
     _sel = [x.strip() for x in act_ids.split(",") if x.strip()] if act_ids else []
     _spend_sql = """
         SELECT ad_id, SUM(spend) AS spend, SUM(conversions) AS conv
@@ -566,6 +613,9 @@ def landing_overview(
     """
     _spend_params = {"tid": tid, "since": since, "until": until}
     _spend_binds = []
+    if _pf != "all":
+        _spend_sql += "  AND platform = :platform"
+        _spend_params["platform"] = _pf
     if _sel:
         _spend_sql += "  AND act_id IN :act_ids"
         _spend_params["act_ids"] = _sel
@@ -740,6 +790,7 @@ def dashboard_export(
     date_to: str = "",
     act_id: str = "",                # ads 数据源必传（与 /dashboard/ads 对齐）
     conversion_category: str = "",
+    platform: str = "all",           # 平台筛选（与 /dashboard 同口径透传）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
     request: Request = None,
@@ -766,7 +817,7 @@ def dashboard_export(
 
     if source == "landing":
         data = landing_overview(date_preset=date_preset, date_from=date_from,
-                                date_to=date_to, user=user, db=db)
+                                date_to=date_to, platform=platform, user=user, db=db)
         headers = (["Subcode", "Ad ID", "Account", "Account ID", "Domain", "Visits", "Pass(CTA)",
                     "Blocked", "Pass %", "Block %", "Spend(USD)", "Conv", "CPC", "CVR %"] if en else
                    ["子码", "广告ID", "账户", "账户ID", "域名", "访问", "通过", "屏蔽",
@@ -779,10 +830,13 @@ def dashboard_export(
     if source == "ads":
         if not act_id:
             raise HTTPException(400, "act_id 必填" if not en else "act_id required")
+        _acc = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+        _acc_plat = (_acc.platform or "fb") if _acc else "fb"   # 快照按账户平台取（ad_id 跨平台撞号）
         rows_q = db.query(PerfSnapshot).filter(
             PerfSnapshot.tenant_id == user.tenant_id,
             PerfSnapshot.act_id == act_id,
-            PerfSnapshot.platform == "fb",
+            PerfSnapshot.platform == _acc_plat,
             PerfSnapshot.ad_id.isnot(None),          # 排除账户级汇总行（ad_id 空）
             PerfSnapshot.snapshot_date >= since,
             PerfSnapshot.snapshot_date <= until,
@@ -799,7 +853,8 @@ def dashboard_export(
 
     # 默认：账户汇总（复用 dashboard 主查询逻辑，走 fresh=True 拿当前区间）
     data = dashboard(date_preset=date_preset, date_from=date_from, date_to=date_to,
-                     conversion_category=conversion_category, fresh=True, user=user, db=db)
+                     conversion_category=conversion_category, platform=platform,
+                     fresh=True, user=user, db=db)
     headers = (["Account", "Account ID", "Currency", "Status", "Spend(native)", "Spend(USD)",
                 "Conv", "CPA", "ROAS", "Impr", "Clicks", "Reach", "CTR %", "CPC",
                 "Balance(USD)"] if en else

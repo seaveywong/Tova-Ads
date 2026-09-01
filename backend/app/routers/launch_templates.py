@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from ..core.database import get_db, SessionLocal, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
@@ -18,8 +18,9 @@ from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
                            ensure_video_id_for_account, usd_to_fb_amount)
+from ..core.tt_client import TtApiError
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
-from ..models.launch import Asset, LandingAdLink
+from ..models.launch import Asset, LandingAdLink, LandingPage
 from ..models.audience import SavedAudience
 from ..models.ads_cache import AdsCache
 from ..models.fb import Account
@@ -34,6 +35,7 @@ ASSET_DIR = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
 def _tpl_dict(t: LaunchTemplate) -> dict:
     return {
         "id": t.id, "name": t.name, "description": t.description or "",
+        "platform": t.platform or "fb",
         "objective": t.objective, "conversion_goal": t.conversion_goal or "",
         "budget_mode": t.budget_mode, "bid_strategy": t.bid_strategy,
         "daily_budget": t.daily_budget, "budget_usd": t.budget_usd, "name_prefix": t.name_prefix,
@@ -61,6 +63,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
 class TemplateIn(BaseModel):
     name: str
     description: str = ""
+    platform: str = "fb"          # fb / tt（tt 部署走 TT 三件套链路，TK P3）
     objective: str = "OUTCOME_SALES"
     conversion_goal: str = ""
     budget_mode: str = "ABO"
@@ -92,6 +95,13 @@ class TemplateIn(BaseModel):
     payer: str = ""
     post_source: str = "new"
     reuse_post_ref: str = ""
+
+    @field_validator("platform")
+    @classmethod
+    def _norm_platform(cls, v: str) -> str:
+        """平台白名单：只接受 fb/tt（脏值回落 fb——存量 FB 部署链路是默认安全侧）。"""
+        v = (v or "fb").strip().lower()
+        return v if v in ("fb", "tt") else "fb"
 
 
 @router.get("")
@@ -145,7 +155,7 @@ def delete_template(tid: int, user: CurrentUser = Depends(require_permission("ad
 # 复制的字段（不含 id/tenant_id/created_by/status/deploy_count/时间戳；不含 lead_form_id——
 # 它是 page 绑定的具体 FB form_id，复制后部署到别的 page 会失效，留给 lead_form_template_id 按页重建）
 _COPY_COLS = [
-    "name", "description", "objective", "conversion_goal", "budget_mode", "bid_strategy",
+    "name", "description", "platform", "objective", "conversion_goal", "budget_mode", "bid_strategy",
     "daily_budget", "budget_usd", "name_prefix", "optimization_goal", "billing_event",
     "destination_type", "audience_id", "audience_json", "advanced_config", "asset_id",
     "headline", "body", "page_id", "pixel_id", "landing_url", "cta_type", "subcode_slug",
@@ -222,6 +232,12 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
         ).first()
         if not acc:
             raise HTTPException(400, f"账户 {it.act_id} 不在已纳管列表（先在令牌页载入并勾选导入）")
+        # 平台匹配守卫（TK P3）：TT 模板只能部署 TT 账户（反之亦然）——错平台走下去会撞
+        # FB 令牌分发 fail-fast，不如在提交前 400 把话说清楚
+        if (acc.platform or "fb") != (t.platform or "fb"):
+            acc_side = "TikTok" if (acc.platform or "fb") == "tt" else "FB"
+            tpl_side = "TikTok" if (t.platform or "fb") == "tt" else "FB"
+            raise HTTPException(400, f"账户 {it.act_id} 是 {acc_side} 账户，与 {tpl_side} 模板平台不匹配")
         clean_items.append(it)
     body.items = clean_items
     job = LaunchJob(tenant_id=user.tenant_id, template_id=t.id, template_name=t.name,
@@ -282,6 +298,9 @@ def preflight_deploy(tid: int, body: PreflightIn,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    # TikTok 模板走 TT 预检（TK P3）：payload 构建器/预算单位/像素解析全不同
+    if (t.platform or "fb") == "tt":
+        return _preflight_tt(db, t, body, user.tenant_id)
     # 子码存在性预检：拼错/已归档的 slug 部署时静默丢追踪（runner 查不到 link 就不带 /a/{slug}），
     # 部署"成功"但归因链路全断——最阴的隐性事故，预检必须提前拦
     subcode_warn_slug = None
@@ -339,7 +358,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
         # build_adset 对缺 pixel/page 等抛 ValueError —— 预检就该把这个告诉用户
         raise HTTPException(400, f"参数校验失败：{e}")
     return {
-        "act_id": body.act_id, "currency": currency,
+        "act_id": body.act_id, "platform": "fb", "currency": currency,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
         "subcode_warn_slug": subcode_warn_slug,
@@ -421,6 +440,225 @@ def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
         rate = cr.rate if cr else 1.0
         return usd_to_fb_amount(tpl.budget_usd, currency, rate)
     return tpl.daily_budget if tpl.daily_budget and tpl.daily_budget > 0 else 200000
+
+
+# ── TikTok 分支 helper（TK P3；platform='tt' 才会走到，FB 路径零改动）──
+
+def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0) -> int:
+    """模板预算 → 该账户本币**整数**（TT 预算无 FB 的 minor units ×100）。
+    优先 budget_usd（按账户 currency + 汇率转）；legacy daily_budget 是 FB 最小单位 → /100 回整本币。"""
+    from ..core.tt_ad_builder import usd_to_tt_amount
+    if tpl.budget_usd and tpl.budget_usd > 0:
+        q = sdb.query(Account).filter(Account.act_id == act_id)
+        if tenant_id:
+            q = q.filter(Account.tenant_id == tenant_id)
+        acc = q.first()
+        currency = (acc.currency if acc else "USD") or "USD"
+        cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+        if not cr and currency.upper() != "USD":
+            raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
+        return usd_to_tt_amount(tpl.budget_usd, currency, cr.rate if cr else 1.0)
+    return max(1, int(round((tpl.daily_budget or 200000) / 100)))
+
+
+def _resolve_tt_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0) -> dict:
+    """解析受众 → TT targeting（countries/age/gender）。
+
+    数据源与 FB 的 _resolve_targeting 同（内联 audience_json / SavedAudience），但只迁移
+    地理+人口维度——FB adinterest 兴趣 ID 与 TT 兴趣词库（/tool/interest_category/）不互通，
+    迁移错 ID 会静默错定向，宁可不带。TT 兴趣词库接入后走 interest_category_ids。
+    """
+    from ..core.tt_ad_builder import build_tt_targeting
+    a: dict = {}
+    if audience_json and audience_json.strip():
+        try:
+            a = json.loads(audience_json)
+        except Exception:
+            a = {}
+    if not (a.get("countries") or []) and audience_id:
+        aud = sdb.query(SavedAudience).filter(
+            SavedAudience.id == audience_id, SavedAudience.tenant_id == sdb_tenant_id,
+            SavedAudience.status == "active").first()
+        if aud:
+            a = {"countries": json.loads(aud.countries or "[]"), "age_min": aud.age_min,
+                 "age_max": aud.age_max, "gender": aud.gender}
+    return build_tt_targeting(
+        countries=a.get("countries") or [], age_min=a.get("age_min") or 18,
+        age_max=a.get("age_max") or 65, gender=a.get("gender") or 0)
+
+
+def _resolve_tt_pixel(sdb, tenant_id: int, tpl: LaunchTemplate, item_pixel: str = "",
+                      act_id: str = "") -> str:
+    """TT 像素 code 解析（TT 转化绑定的是像素 code，不是 FB 的 pixel_id 数字串语义）。
+
+    优先级：部署 item 手选 > 模板手填 > 落地页 tt_pixel_ids[0] > 像素库 platform='tt'
+    （绑定了目标广告主 act_id 的优先，否则任一 active TT 像素）。解析不到返空串
+    （web 转化目标由 _deploy_item_tt 预检拦截报清晰错）。
+    """
+    if item_pixel:
+        return item_pixel
+    if tpl.pixel_id:
+        return tpl.pixel_id
+    if tpl.landing_page_id:
+        lp = sdb.query(LandingPage).filter(
+            LandingPage.id == tpl.landing_page_id, LandingPage.tenant_id == tenant_id).first()
+        if lp and lp.tt_pixel_ids:
+            try:
+                ids = json.loads(lp.tt_pixel_ids)
+                if ids:
+                    return str(ids[0])
+            except Exception:
+                pass
+    from ..models.landing_lib import LandingPixel
+    rows = sdb.query(LandingPixel).filter(
+        LandingPixel.tenant_id == tenant_id, LandingPixel.platform == "tt",
+        LandingPixel.status != "archived",
+    ).order_by(LandingPixel.id.desc()).all()
+    if not rows:
+        return ""
+    if act_id:
+        for r in rows:
+            if (r.act_id or "") == act_id:
+                return r.pixel_id
+    return rows[0].pixel_id
+
+
+def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, tenant_id: int,
+                    link, is_retry: bool = False) -> None:
+    """单账户 TT 部署（_run_deploy_job / _retry_one 的 TT 分支共用）。
+
+    链路：纳管复查 → tt_client_for_account（TT 令牌不走 FB 令牌池）→ 素材 file_id
+    （按广告主上传+行锁缓存）→ 预算本币整数 → 像素 code → deploy_one_account_tt 三件套。
+    错误消化为 item fail（TtApiError.category 进 error_code 供前端 i18n），不外抛。
+    """
+    from ..core.ad_ops import (deploy_one_account_tt, ensure_tt_file_id_for_account,
+                               tt_client_for_account, pick_random_copy)
+    from ..core.tt_ad_builder import normalize_tt_objective
+    try:
+        from ..models.fb import Account as _AccT
+        _acc = sdb.query(_AccT).filter(
+            _AccT.tenant_id == tenant_id, _AccT.act_id == item.act_id,
+            _AccT.is_managed == True,  # noqa: E712
+        ).first()
+        if not _acc:
+            raise TtApiError("no_id", "该账户已移除纳管，跳过（移除后建广告无止损覆盖）")
+        tt = tt_client_for_account(sdb, tenant_id, item.act_id)
+        if not tt:
+            raise TtApiError("no_id", f"账户 {item.act_id} 无可用 TikTok 令牌（TT 账户走 tt_credentials 绑定/候选池）")
+        # per-advertiser 素材 file_id 缓存（首次上传可能耗时：视频大文件分块）
+        image_file_id = ""
+        video_file_id = ""
+        if asset and asset.type in ("image", "video"):
+            filepath = os.path.join(ASSET_DIR, asset.storage_key)
+            if not os.path.exists(filepath):
+                raise TtApiError("no_id", f"素材文件丢失: {asset.storage_key}")
+            fid = ensure_tt_file_id_for_account(tt, sdb, asset, item.act_id, filepath)
+            if asset.type == "video":
+                video_file_id = fid
+            else:
+                image_file_id = fid
+            sdb.commit()  # 持久化 file_id 缓存（后续部署同广告主直接命中）
+        daily_budget_tt = _resolve_budget_tt(sdb, item.act_id, tpl, tenant_id)
+        pixel_code = _resolve_tt_pixel(sdb, tenant_id, tpl, item.pixel_id or "", item.act_id)
+        if not pixel_code and normalize_tt_objective(tpl.objective) == "WEB_CONVERSIONS":
+            raise TtApiError("invalid_param",
+                             "未解析到 TikTok 像素 code（转化类目标必填）：部署抽屉选 TT 像素 / 模板填像素 code / 像素库添加 platform=tt 像素")
+        # 随机组合素材 AI 文案（与 FB 链一致，增多样性；TT 创意只有 ad_text 无独立标题）
+        _rh, _rb = pick_random_copy(asset)
+        _body = _rb or (tpl.body or "")
+        r = deploy_one_account_tt(
+            tt, advertiser_id=item.act_id, objective=tpl.objective,
+            conversion_goal=tpl.conversion_goal, pixel_code=pixel_code,
+            landing_url=tpl.landing_url, daily_budget=daily_budget_tt,
+            budget_mode=tpl.budget_mode, name_prefix=tpl.name_prefix,
+            headline=_rh or (tpl.headline or ""), body=_body, cta_type=tpl.cta_type,
+            image_file_id=image_file_id, video_file_id=video_file_id,
+            subcode_slug=tpl.subcode_slug, subcode_link=link,
+            targeting=_resolve_tt_targeting(sdb, tpl.audience_id, tpl.audience_json or "", tenant_id),
+        )
+        item.campaign_id = r["campaign_id"]; item.adset_id = r["adgroup_id"]; item.ad_id = r["ad_id"]
+        item.status = "success"; item.error = None
+        if job:
+            job.succeeded = (job.succeeded or 0) + 1
+            if is_retry and (job.failed or 0) > 0:
+                job.failed -= 1  # 重试成功：撤销原 fail 计数（与 FB _retry_one 口径一致）
+        write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                  target_type="ad", target_id=str(r.get("ad_id", "")),
+                  action_type="deploy", source="launch", result="success",
+                  metadata={"act_id": item.act_id, "campaign_id": r.get("campaign_id"),
+                            "adgroup_id": r.get("adgroup_id"), "template_id": tpl.id, "platform": "tt"})
+    except TtApiError as e:
+        item.status = "fail"; item.error = (e.friendly or str(e))[:300]; item.error_code = e.category
+        if job and not is_retry:
+            job.failed = (job.failed or 0) + 1  # 重试失败：原 fail 已计数过，不重复加
+        write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                  target_type="ad", target_id="", action_type="deploy", source="launch",
+                  result="fail", friendly_error=(e.friendly or str(e))[:200],
+                  metadata={"act_id": item.act_id, "template_id": tpl.id, "platform": "tt"})
+    except Exception as e:
+        item.status = "fail"; item.error = str(e)[:300]; item.error_code = "error"
+        if job and not is_retry:
+            job.failed = (job.failed or 0) + 1
+        write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                  target_type="ad", target_id="", action_type="deploy", source="launch",
+                  result="fail", friendly_error=str(e)[:200],
+                  metadata={"act_id": item.act_id, "template_id": tpl.id, "platform": "tt"})
+
+
+def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int) -> dict:
+    """TT 模板预检：构建（不发送）campaign/adgroup/creative payload + 预算换算 + 像素解析。
+    不调 TT、不花钱；sandbox 校准期最有价值的核对工具。"""
+    from ..core.tt_ad_builder import build_tt_campaign, build_tt_adgroup, build_tt_creative
+    try:
+        daily_budget_tt = _resolve_budget_tt(db, body.act_id, t, tenant_id)
+    except ValueError as e:
+        logging.getLogger("toveads.launch").warning(f"preflight tt budget resolve failed: {e}")
+        raise HTTPException(400, "预算换算失败：账户币种缺少汇率，请在系统设置配置汇率或改用 USD 模板")
+    targeting = _resolve_tt_targeting(db, t.audience_id, t.audience_json or "", tenant_id)
+    pixel_code = _resolve_tt_pixel(db, tenant_id, t, body.pixel_id or "", body.act_id)
+    asset = (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == tenant_id).first()
+             if t.asset_id else None)
+    acc = db.query(Account).filter(Account.act_id == body.act_id).first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    try:
+        campaign_payload = build_tt_campaign(
+            name=t.name_prefix, objective=t.objective,
+            daily_budget=daily_budget_tt if t.budget_mode.upper() == "CBO" else None,
+            budget_mode=t.budget_mode)
+        adgroup_payload = build_tt_adgroup(
+            name=f"{t.name_prefix} 组", campaign_id="<TT 创建 campaign 后返回>",
+            daily_budget=daily_budget_tt, objective=t.objective,
+            conversion_goal=t.conversion_goal,
+            pixel_code=pixel_code or "<部署时从 TT 像素库解析>",
+            budget_mode=t.budget_mode, targeting=targeting)
+        creative_payload = build_tt_creative(
+            ad_text=t.body or "", cta_type=t.cta_type, landing_url=t.landing_url,
+            video_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "video") else "",
+            image_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "image") else "")
+    except ValueError as e:
+        raise HTTPException(400, f"参数校验失败：{e}")
+    # daily_budget_fb 键名沿用（前端预检弹窗按此键渲染；TT 值为本币整数，notes 里说明单位差异）
+    return {
+        "act_id": body.act_id, "platform": "tt", "currency": currency,
+        "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
+        "daily_budget_fb": daily_budget_tt, "budget_mode": t.budget_mode,
+        "asset": {
+            "type": (asset.type if asset else ""),
+            "name": (asset.name or asset.filename or "") if asset else "",
+            "filename": (asset.filename or "") if asset else "",
+            "duration_sec": (asset.duration_sec or 0) if asset else 0,
+        },
+        "objective": t.objective, "optimization_goal": adgroup_payload.get("optimization_goal"),
+        "targeting_resolved": targeting,
+        "campaign": campaign_payload, "adset": adgroup_payload, "creative": creative_payload,
+        "notes": [
+            "TT 预算单位=当地币种整数（无 FB 的最小货币单位 ×100）",
+            "file_id（video_id/image_id）部署时按目标广告主上传并缓存到素材行",
+            "广告出生暂停（operation_status=DISABLE），TT 审核通过后手动开启",
+            "campaign_id / adgroup_id 部署时由 TT 返回填入",
+        ],
+    }
 
 
 def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
@@ -664,6 +902,12 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
                             {"jid": job_id})
                 item.status = "creating"; sdb.commit()
+                # TikTok 分支（TK P3）：TT 三件套走 _deploy_item_tt（内部含纳管复查/错误消化）；
+                # platform='fb'（含存量行 server_default）走的下方 FB 路径零改动
+                if (tpl.platform or "fb") == "tt":
+                    _deploy_item_tt(sdb, job, item, tpl, asset, tenant_id, link)
+                    sdb.commit()
+                    continue
                 # 纳管复查（部署请求后到本 item 执行间隙账户可能被移除——同 retry 守卫理由）
                 from ..models.fb import Account as _Acc3
                 _acc3 = sdb.query(_Acc3).filter(
@@ -774,11 +1018,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         sdb.commit()
         # 部署后对账：拉成功账户的最新广告实体进 ads_cache（清单 live_status / 管理器立即可见；
         # 只刷建出广告的账户，失败账户无新实体）。失败仅告警，不动 job 终态。
-        try:
-            _refresh_ads_cache_after_deploy(
-                tenant_id, [it.act_id for it in items if it.status == "success"])
-        except Exception:
-            logging.getLogger("toveads.launch").warning("[Launch] 部署后 ads_cache 对账失败", exc_info=True)
+        # TT 模板不对账：ads_cache 刷新走 FB 客户端，TT 广告缓存同步由 P4（巡检/看板平台化）接。
+        if (tpl.platform or "fb") != "tt":
+            try:
+                _refresh_ads_cache_after_deploy(
+                    tenant_id, [it.act_id for it in items if it.status == "success"])
+            except Exception:
+                logging.getLogger("toveads.launch").warning("[Launch] 部署后 ads_cache 对账失败", exc_info=True)
     except Exception as e:
         try:
             job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
@@ -820,8 +1066,12 @@ def get_job(job_id: int, user: CurrentUser = Depends(require_permission("ads.cre
     if not j:
         raise HTTPException(404, "job 不存在")
     items = db.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
+    # 模板平台（前端按平台跳 FB/TT 广告后台；模板可能已归档但软删不物理删，查询安全）
+    _tpl_platform = (db.query(LaunchTemplate.platform).filter(
+        LaunchTemplate.id == j.template_id).scalar() or "fb")
     return {
         "id": j.id, "template_id": j.template_id, "template_name": j.template_name or "",
+        "platform": _tpl_platform,
         "status": j.status, "total": j.total, "succeeded": j.succeeded, "failed": j.failed,
         "created_at": str(j.created_at) if j.created_at else "",
         "finished_at": str(j.finished_at) if j.finished_at else "",
@@ -877,13 +1127,14 @@ def template_deployments(tid: int, job_id: int = 0,
             raise HTTPException(404, "部署任务不存在")
         items = db.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
         live = _live_status_map(db, user.tenant_id, [it.act_id for it in items])
-        return {**_job_dict(j),
+        return {**_job_dict(j), "platform": t.platform or "fb",
                 "items": [{**_item_dict(it), "live_status": live.get(it.ad_id or "", "")}
                           for it in items]}
     jobs = db.query(LaunchJob).filter(
         LaunchJob.tenant_id == user.tenant_id, LaunchJob.template_id == tid,
     ).order_by(LaunchJob.id.desc()).limit(50).all()
-    return {"template_id": tid, "deploy_count": t.deploy_count or 0,
+    return {"template_id": tid, "platform": t.platform or "fb",
+            "deploy_count": t.deploy_count or 0,
             "jobs": [_job_dict(j) for j in jobs]}
 
 
@@ -971,6 +1222,21 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             except Exception:
                 post_content = {}
         job = sdb.query(LaunchJob).filter(LaunchJob.id == job_id).first()
+        # TikTok 分支（TK P3）：TT 三件套重试（复用 _deploy_item_tt，含纳管复查）；FB 路径零改动
+        if (tpl.platform or "fb") == "tt":
+            try:
+                it.status = "creating"; sdb.commit()
+                _deploy_item_tt(sdb, job, it, tpl, asset, tenant_id, link, is_retry=True)
+            except Exception:
+                pass  # _deploy_item_tt 内部已消化为 item fail
+            if it.status == "fail" and job:
+                job.status = "partial_failed"   # 此 item 仍 fail → 必落 partial_failed
+                job.finished_at = datetime.now(timezone.utc)
+            elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
+                job.status = "partial_failed" if job.failed else "completed"
+                job.finished_at = datetime.now(timezone.utc)
+            sdb.commit()
+            return  # TT 不做 ads_cache 对账（P4 接）
         try:
             it.status = "creating"; sdb.commit()
             # 后台二次纳管校验（请求时已查，这里防请求→执行间隙账户被移除——

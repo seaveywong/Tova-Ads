@@ -146,6 +146,16 @@ export default {
     adPreview: '预览',
     adInProcess: '处理中',
     adWithIssues: '有问题',
+    // TikTok 广告状态（tt_client _STATUS_MAP/_OPT_STATUS + 审核 show_status）
+    ttEnable: '投放中',
+    ttDisable: '已暂停',
+    ttDelete: '已删除',
+    ttComplete: '已结束',
+    ttBudgetExceed: '预算耗尽',
+    ttInProcess: '处理中',
+    ttShowYes: '审核通过',
+    ttShowNotStart: '待投放',
+    ttShowNo: '审核未通过',
     // 账户 account_status
     accActive: '可用',
     accDisabled: '已禁用',
@@ -191,6 +201,7 @@ export default {
     tokenPending: '待认证',
   },
   layout: {
+    platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）',
     sentinel: '哨兵',
     rulesCount: '规则 {n} 条',
     safetyGuard: '安全守护',

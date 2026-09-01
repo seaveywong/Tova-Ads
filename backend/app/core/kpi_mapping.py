@@ -65,7 +65,58 @@ DEFAULT_FIELD_LABELS = {
     "landing_page_view": "落地页浏览", "video_view": "视频观看", "thruplay": "ThruPlay",
     "offsite_conversion.fb_pixel_add_to_cart": "加入购物车",
     "offsite_conversion.fb_pixel_initiate_checkout": "发起结账",
+    "tt.conversions": "转化（TT）",
 }
+
+# ── TikTok 报表字段映射（TK P3；guard_engine P4 巡检按 platform 分发消费）──
+# TT integrated report（report/integrated/get）指标名与 FB insights 字段不同：
+# 转化数 = conversions（报表口径）/ converted（旧名）同义；转化价值 = total_complete_payment_value
+# （购物成交价值）、ROAS = complete_payment_roas。价值类指标名 sandbox 校准点。
+
+TT_METRIC_ALIASES = {
+    "conversions": "conversions",
+    "converted": "conversions",     # TT 新旧指标名并存，归一到 conversions
+    "conversion": "conversions",
+    "spend": "spend",
+    "impressions": "impressions",
+    "clicks": "clicks",
+    "ctr": "ctr",
+    "cpc": "cpc",
+    "cpm": "cpm",
+    "cost_per_conversion": "cost_per_conversion",
+    "total_complete_payment_value": "conversion_value",
+    "complete_payment_roas": "roas",
+}
+
+# TT objective → KPI 口径字段（DEFAULT_BY_OBJECTIVE 的 TT 对应；"tt." 前缀区隔 FB 字段名空间）
+DEFAULT_TT_BY_OBJECTIVE = {
+    "WEB_CONVERSIONS": "tt.conversions",
+    "LEAD_GENERATION": "tt.conversions",
+    "TRAFFIC": "clicks",
+    "VIDEO_VIEWS": "video_view",
+    "REACH": "reach",
+    "APP_PROMOTION": "app_install",
+}
+
+
+def normalize_tt_metrics(row: dict) -> dict:
+    """TT 报表行 → 统一 KPI 口径 {spend, conversions, conversion_value, clicks, ...}。
+
+    未知键原样保留（sandbox 出新指标名不丢数据）；conversions 缺失时不做 click/video
+    兜底（与 FB 劣质兜底黑名单同口径——video_view/link_click 不是转化）。
+    """
+    out: dict = {}
+    for k, v in (row or {}).items():
+        out[TT_METRIC_ALIASES.get(k, k)] = v
+    return out
+
+
+def tt_kpi_field(tt_objective: str, mapping: dict = None) -> str:
+    """TT 目标 → KPI 口径字段（mapping 未传时用默认；供 P4 巡检对 TT 账户取转化口径）。"""
+    by_obj = ((mapping or {}).get("tt_by_objective")
+              or {k: v for k, v in DEFAULT_TT_BY_OBJECTIVE.items()})
+    return by_obj.get((tt_objective or "").strip().upper(),
+                      DEFAULT_TT_BY_OBJECTIVE["WEB_CONVERSIONS"])
 
 # KPI 字段分类（看板筛选 + 诊断展示用）
 KPI_CATEGORIES = {
@@ -111,6 +162,7 @@ def _default_mapping() -> dict:
         "fallback_priority": list(DEFAULT_FALLBACK_PRIORITY),
         "poor_fallback_types": list(DEFAULT_POOR_FALLBACK_TYPES),
         "field_labels": dict(DEFAULT_FIELD_LABELS),
+        "tt_by_objective": dict(DEFAULT_TT_BY_OBJECTIVE),
     }
 
 
@@ -123,6 +175,7 @@ def _merge_defaults(cfg: dict) -> dict:
         "fallback_priority": cfg.get("fallback_priority") or d["fallback_priority"],
         "poor_fallback_types": cfg.get("poor_fallback_types") or d["poor_fallback_types"],
         "field_labels": {**d["field_labels"], **(cfg.get("field_labels") or {})},
+        "tt_by_objective": {**d["tt_by_objective"], **(cfg.get("tt_by_objective") or {})},
     }
 
 

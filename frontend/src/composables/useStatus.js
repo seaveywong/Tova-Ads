@@ -26,6 +26,37 @@ export const fbAdStatus = (s) => {
   return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
 }
 
+// TikTok 广告状态（TT ad/get 的 status / opt_status；对照 core/tt_client.py 的
+// _STATUS_MAP{ACTIVE→STATUS_ENABLE, PAUSED→STATUS_DISABLE, ARCHIVED/DELETED→STATUS_DELETE}
+// 与 _OPT_STATUS{ENABLE/DISABLE/DELETE}。未知枚举原样透传）
+export const TT_AD_STATUS = {
+  STATUS_ENABLE:        { key: 'status.ttEnable',       cls: 'ok' },
+  STATUS_DISABLE:       { key: 'status.ttDisable',      cls: 'off' },
+  STATUS_DELETE:        { key: 'status.ttDelete',       cls: 'off' },
+  STATUS_COMPLETE:      { key: 'status.ttComplete',     cls: 'off' },
+  STATUS_BUDGET_EXCEED: { key: 'status.ttBudgetExceed', cls: 'warn' },
+  IN_PROCESS:           { key: 'status.ttInProcess',    cls: 'warn' },
+  // opt_status（写操作回读/管理器直显）
+  ENABLE:  { key: 'status.ttEnable',  cls: 'ok' },
+  DISABLE: { key: 'status.ttDisable', cls: 'off' },
+  DELETE:  { key: 'status.ttDelete',  cls: 'off' },
+}
+export const ttAdStatus = (s) => {
+  const e = TT_AD_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
+
+// TikTok 审核展示状态（ad 的 show_status；SHOW_STATUS_* 家族，其余原样透传）
+export const TT_SHOW_STATUS = {
+  SHOW_STATUS_YES:       { key: 'status.ttShowYes',      cls: 'ok' },
+  SHOW_STATUS_NOT_START: { key: 'status.ttShowNotStart', cls: 'warn' },
+  SHOW_STATUS_NO:        { key: 'status.ttShowNo',       cls: 'err' },
+}
+export const ttShowStatus = (s) => {
+  const e = TT_SHOW_STATUS[s]
+  return e ? { label: t(e.key), cls: e.cls } : { label: s || '—', cls: 'off' }
+}
+
 // 账户 account_status（FB 数字码）
 export const ACCOUNT_STATUS = {
   1:   { key: 'status.accActive',       cls: 'ok' },

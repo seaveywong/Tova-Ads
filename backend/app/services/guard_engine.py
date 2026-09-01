@@ -14,6 +14,7 @@ from sqlalchemy import text
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
+from ..core.tt_client import TtApiError
 from ..core.log_utils import write_log, new_trace_id
 from ..core.notify_utils import emit_notification, emit_token_expired_if_due, dedup_recent
 from ..core.i18n import tenant_locale, notify_text
@@ -131,6 +132,28 @@ def _account_local_today(acc) -> str:
         return datetime.now(ZoneInfo(acc.timezone_name or "UTC")).strftime("%Y-%m-%d")
     except Exception:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _acc_platform(acc) -> str:
+    """账户平台归一：'tt' → tt，其余（含空/历史缺省）→ 'fb'。"""
+    return "tt" if (getattr(acc, "platform", None) or "fb") == "tt" else "fb"
+
+
+def _ad_id_of(a: dict) -> str:
+    """广告行 id 归一（FB 对象=id / TT 对象=ad_id）。"""
+    return str(a.get("ad_id") or a.get("id") or "")
+
+
+def _ad_is_active(a: dict, platform: str) -> bool:
+    """广告行投放状态判定（FB=effective_status ACTIVE / TT=status STATUS_ENABLE）。"""
+    s = str(a.get("effective_status") or a.get("status") or "").upper()
+    return s == "ACTIVE" if platform == "fb" else s in ("ACTIVE", "STATUS_ENABLE")
+
+
+def _norm_created(v) -> str:
+    """创建时间归一：TT 'YYYY-MM-DD HH:MM:SS'（空格分隔）→ ISO 'T' 分隔（学习期 strptime 按 FB 格式）。"""
+    s = str(v) if v is not None else ""
+    return s.replace(" ", "T") if s else s
 
 
 def _max_history_days(rules: list) -> int:
@@ -580,34 +603,50 @@ def _inspect_account_worker(ctx: dict) -> dict:
     db = SuperSessionLocal()
     scaled_targets: set = set()  # 本账户本轮已扩量目标（同组多广告防重复；跨账户无交集）
     try:
-        # 按账户选 token（查 cooldown + op_kind=read + RR 兜底）；全灭 → 跳过
-        cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
-        if not cred:
-            return res
+        # 按账户选 token（查 cooldown + op_kind=read + RR 兜底）；全灭 → 跳过。
+        # 平台分发：platform='tt' → tt_credentials 池选主令牌（TtClient 方法面与 FbClient duck-type）
+        platform = _acc_platform(acc)
+        if platform == "tt":
+            from ..core.fb_tokens import tt_client_for_account
+            fb, cred = tt_client_for_account(db, tenant_id, acc.act_id, "read")
+            if not fb:
+                return res
+        else:
+            cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
+            if not cred:
+                return res
+            fb = FbClient(decrypt(cred.access_token_enc))
         _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
         _alias = cred.alias or ""
-        fb = FbClient(decrypt(cred.access_token_enc))
         acc_today = _account_local_today(acc)  # 账户本地日（time_range 拉 insights + 写 snapshot_date，统一账户本地基准，避免跨时区累积）
         # 拿 ACTIVE 广告 ID 集 + 创建时间（学习期保护用）；含学习中的——学习中但 ACTIVE = 在花钱
         active_ids = None
         created_map: dict = {}
         try:
             active_ads = fb.get_active_ads(acc.act_id)
-            active_ids = {a.get("id") for a in active_ads}
-            created_map = {a.get("id"): a.get("created_time") for a in active_ads}
+            if platform == "tt":
+                # TT ad/get 字段：ad_id / create_time（FB 是 id / created_time），归一成 FB 形状
+                active_ids = {_ad_id_of(a) for a in active_ads}
+                created_map = {_ad_id_of(a): _norm_created(a.get("create_time"))
+                               for a in active_ads}
+            else:
+                active_ids = {a.get("id") for a in active_ads}
+                created_map = {a.get("id"): a.get("created_time") for a in active_ads}
         except Exception:
-            active_ids = None  # FB API 拉失败，下面用 ads_cache 兜底
-        # ads_cache 兜底：FB API 失败 或 补充过滤——只评估 effective_status=ACTIVE 的广告
+            active_ids = None  # 平台 API 拉失败，下面用 ads_cache 兜底
+        # ads_cache 兜底：平台 API 失败 或 补充过滤——只评估投放中的广告
         # 避免"已停广告还有今日消耗 → 重复告警"的幽灵告警
         if active_ids is None or len(active_ids) == 0:
             try:
                 _cache_row = db.query(AdsCache).filter(
-                    AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+                    AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id,
+                    AdsCache.platform == platform).first()
                 if _cache_row:
                     _cache_ads = json.loads(_cache_row.ads_json or "[]")
-                    _cache_ids = {str(_a.get("id")) for _a in _cache_ads
-                                  if _a.get("effective_status") == "ACTIVE"}
-                    created_map.update({str(_a.get("id")): _a.get("created_time")
+                    _cache_ids = {_ad_id_of(_a) for _a in _cache_ads
+                                  if _ad_is_active(_a, platform)}
+                    created_map.update({_ad_id_of(_a):
+                                        _norm_created(_a.get("created_time") or _a.get("create_time"))
                                         for _a in _cache_ads})
                     if _cache_ids:
                         active_ids = _cache_ids
@@ -615,8 +654,13 @@ def _inspect_account_worker(ctx: dict) -> dict:
             except Exception:
                 pass
         try:
-            ads = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False, since=acc_today, until=acc_today)
-        except FbApiError as e:
+            if platform == "tt":
+                # TT get_ad_insights 参数序与 FB 不同（advertiser_id, date_preset, since, until, ...）——
+                # 统一走 kwargs，行已摊平（dimensions.ad_id + metrics.* 提到顶层）
+                ads = fb.get_ad_insights(acc.act_id, since=acc_today, until=acc_today, limit=50)
+            else:
+                ads = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False, since=acc_today, until=acc_today)
+        except (FbApiError, TtApiError) as e:
             logger.warning(f"[Guard] 账户 {acc.act_id} 读 insights 失败: {e.friendly}")
             _cred = cred
             _alias = (_cred.alias if _cred else "") or ""
@@ -642,13 +686,18 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
                     db.commit()
             elif e.category == "rate_limited":
-                # 限流：写冷却（下轮 client_for_account 跳过该 token）+ 告警
-                if _cred:
+                # 限流：FB 写冷却（下轮 client_for_account 跳过该 token）+ 告警；
+                # TT 无 cooldown 列（TtClient 进程内自计数限流已退避封路），只告警
+                if _cred and platform == "fb":
                     mark_cred_cooldown(db, _cred.id, minutes=30, status="rate_limited")
                 _rid = str(_cred.id) if _cred else acc.act_id
                 if not dedup_recent(db, tenant_id, "token_rate_limited", _rid, 60):
-                    _affected = [a.name for a in db.query(Account).filter(
-                        Account.fb_credential_id == cred.id).all()] if cred else []
+                    if platform == "tt":
+                        _affected = [a.name for a in db.query(Account).filter(
+                            Account.tt_credential_id == cred.id).all()] if cred else []
+                    else:
+                        _affected = [a.name for a in db.query(Account).filter(
+                            Account.fb_credential_id == cred.id).all()] if cred else []
                     _loc = tenant_locale(db, tenant_id)
                     _t_rl, _b_rl = notify_text(_loc, "token_rate_limited",
                         alias=_esc(_alias or acc.act_id),
@@ -657,7 +706,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         event_type="token_rate_limited",
                         title=_t_rl, body=_b_rl)
                     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                        target_type="fb_credential", target_id=_rid,
+                        target_type=("tt_credential" if platform == "tt" else "fb_credential"),
+                        target_id=_rid,
                         action_type="token_rate_limited", source="guard",
                         result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
                     db.commit()
@@ -676,14 +726,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
             except Exception:
                 pass
             return res
-        # 建 ads_cache ACTIVE 广告集（覆盖丢失告警用：区分"真盲区"vs"已停广告有历史消耗"）
+        # 建 ads_cache 投放中广告集（覆盖丢失告警用：区分"真盲区"vs"已停广告有历史消耗"）
         _cache_active_set = None
         try:
             _cr = db.query(AdsCache).filter(
-                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id,
+                AdsCache.platform == platform).first()
             if _cr and _cr.ads_json:
-                _cache_active_set = {str(_a.get("id")) for _a in json.loads(_cr.ads_json)
-                                     if _a.get("effective_status") == "ACTIVE"}
+                _cache_active_set = {_ad_id_of(_a) for _a in json.loads(_cr.ads_json)
+                                     if _ad_is_active(_a, platform)}
         except Exception:
             pass
         # 昨日 insights（trend_drop 用；无 trend_drop 规则可跳过省 API 调用）
@@ -691,9 +742,13 @@ def _inspect_account_worker(ctx: dict) -> dict:
         if any(r.rule_type == "trend_drop" for r in all_rules):
             try:
                 yest = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-                for yad in fb.get_ad_insights(acc.act_id, "yesterday", 50, since=yest, until=yest):
+                if platform == "tt":
+                    _y_ads = fb.get_ad_insights(acc.act_id, since=yest, until=yest, limit=50)
+                else:
+                    _y_ads = fb.get_ad_insights(acc.act_id, "yesterday", 50, since=yest, until=yest)
+                for yad in _y_ads:
                     yesterday_map[yad.get("ad_id", "")] = yad
-            except FbApiError:
+            except (FbApiError, TtApiError):
                 pass  # 昨日读取失败不阻断今日评估
         # snapshot_date 用账户本地日（和 FB insights time_range 一致，账户本地基准）
         biz_today = acc_today
@@ -746,6 +801,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                   ad_objective, ad_opt_goal, ad.get("actions", []))
                 conv = kpi["conversions"]
                 target_cpa = kpi["target_cpa"]
+                if platform == "tt" and ad.get("conversions"):
+                    # TT 报表行自带 goal conversions（TT 侧已按 campaign 目标聚合）。resolver 无
+                    # actions 可解析时以其兜底——防 KPI 映射缺位把有转化的 TT 广告当空耗误杀
+                    try:
+                        _tt_conv = int(float(ad.get("conversions") or 0))
+                        if _tt_conv > conv:
+                            conv = _tt_conv
+                    except (TypeError, ValueError):
+                        pass
             except Exception as e:
                 logger.warning(f"[Guard] KPI 解析异常 ad={ad_id}: {e}")
                 conv, target_cpa = 0, None
@@ -804,7 +868,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 prev_snap = db.query(PerfSnapshot).filter(
                     PerfSnapshot.tenant_id == tenant_id,
                     PerfSnapshot.ad_id == ad_id,
-                    PerfSnapshot.platform == "fb",
+                    PerfSnapshot.platform == platform,
                     PerfSnapshot.snapshot_date == biz_today,
                 ).first()
                 if prev_snap:
@@ -814,7 +878,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     history = db.query(PerfSnapshot).filter(
                         PerfSnapshot.tenant_id == tenant_id,
                         PerfSnapshot.ad_id == ad_id,
-                        PerfSnapshot.platform == "fb",
+                        PerfSnapshot.platform == platform,
                         PerfSnapshot.snapshot_date >= since_date,
                         PerfSnapshot.snapshot_date < biz_today,
                     ).order_by(PerfSnapshot.snapshot_date.desc()).all()
@@ -890,6 +954,42 @@ def _inspect_account_worker(ctx: dict) -> dict:
 
                     # ── 扩量规则：加预算（observe=只告警），不走暂停链 ──
                     if rule.rule_type in SCALE_RULE_TYPES:
+                        if platform == "tt":
+                            # TT 扩量本轮 observe-only：TT 暂无 set_budget 通道（ad_ops P3 合入后下批补），
+                            # 命中只告警不动预算（语义同 _apply_scale 的 observe 分支：不进 24h 扩量冷却）
+                            events.append({"kind": "log", "kwargs": dict(
+                                tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                                target_type="ad", target_id=ad_id,
+                                action_type="observe_alert", source="rule_engine",
+                                result="success", trigger_type=rule.rule_type,
+                                trigger_detail=f"{detail} | TT 扩量暂只观察（未动预算） "
+                                               f"act={acc.act_id} ad={ad_id} rule={rule.name}")})
+                            if not dedup_recent(db, tenant_id, "rule_scale_notified",
+                                                (adset_id or ad_id), 60):
+                                _loc = tenant_locale(db, tenant_id)
+                                _t_ts, _b_ts = notify_text(_loc, "rule_scale",
+                                    category=("Smart Scale-Up" if _loc == "en" else "智能扩量"),
+                                    name=_esc(acc.name), act_id=acc.act_id,
+                                    ad_name=_esc(ad_name), ad_id=ad_id,
+                                    adset_id=(adset_id or '-'),
+                                    rule_name=_esc(rule.name), detail=_esc(detail),
+                                    action=("⚠ Alert only (observe mode, budget NOT changed)"
+                                            if _loc == "en" else "⚠ 仅告警（观察模式，未动预算）"),
+                                    budget="-")
+                                if (rule.action or "default").lower() != "observe":
+                                    _t_ts = ("[Observe] " if _loc == "en" else "[观察] ") + _t_ts
+                                events.append({"kind": "notify", "kwargs": dict(
+                                    tenant_id=tenant_id, level="info", event_type="rule_scale",
+                                    trace_id=trace_id, title=_t_ts, body=_b_ts,
+                                    target_type="ad", target_id=ad_id, force_tg=True)})
+                                events.append({"kind": "log", "kwargs": dict(
+                                    tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                                    target_type="ad", target_id=(adset_id or ad_id),
+                                    action_type="rule_scale_notified", source="rule_engine",
+                                    result="success",
+                                    trigger_detail=f"target={adset_id or ad_id}")})
+                            db.commit()
+                            break  # 一条广告命中一条规则即止
                         try:
                             _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail,
                                          ad_id, adset_id, campaign_id, ad_name,
@@ -923,17 +1023,27 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             if not pid:
                                 continue
                             try:
-                                fb.pause_ad(pid)  # pause_ad 对 ad/adset/campaign 通用
-                                # A2 核验（ad 级）：停后单查 effective_status，仍 ACTIVE=假停→升级下一级
-                                # 单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等 FB 写延迟
+                                if platform == "tt":
+                                    fb.pause_ad(acc.act_id, pid)  # TT pause_ad(advertiser_id, ad_id)=opt_status DISABLE
+                                else:
+                                    fb.pause_ad(pid)  # pause_ad 对 ad/adset/campaign 通用
+                                # A2 核验（ad 级）：停后单查状态，仍投放中=假停→升级下一级
+                                # 单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等平台写延迟
                                 if pid == ad_id:
                                     time.sleep(2.5)
                                     try:
-                                        _node = fb.get_node(pid, "effective_status")
-                                        if str(_node.get("effective_status", "")).upper() == "ACTIVE":
-                                            continue  # 假停，升级下一级
+                                        if platform == "tt":
+                                            _node = fb.get_node(pid, "ad", acc.act_id) or {}
+                                            _still = str(_node.get("opt_status")
+                                                         or _node.get("status") or "").upper()
+                                            if _still in ("ENABLE", "STATUS_ENABLE"):
+                                                continue  # 假停，升级下一级
+                                        else:
+                                            _node = fb.get_node(pid, "effective_status")
+                                            if str(_node.get("effective_status", "")).upper() == "ACTIVE":
+                                                continue  # 假停，升级下一级
                                     except Exception:
-                                        pass  # 核验查询失败，信任 FB（视为成功，不升级）——宁可少停不误停整组
+                                        pass  # 核验查询失败，信任平台（视为成功，不升级）——宁可少停不误停整组
                                 res["paused"] += 1
                                 res["paused_details"].append({"act_id": acc.act_id, "ad_id": ad_id,
                                                               "ad_name": ad_name, "level": label,
@@ -941,8 +1051,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 action_text = f"已暂停{label} PAUSED" + ("（已核验）" if pid == ad_id else "")
                                 paused_ok = True
                                 break
-                            except FbApiError as _pause_err:
-                                # 记录 Meta code/subcode 供排障（交接包 pitfall#7：不丢弃错误码）
+                            except (FbApiError, TtApiError) as _pause_err:
+                                # 记录平台 code/错误原文供排障（交接包 pitfall#7：不丢弃错误码）
                                 logger.warning(f"[Guard] 暂停{label}失败 ad={ad_id} pid={pid} code={getattr(_pause_err,'category','')} raw={str(getattr(_pause_err,'raw',''))[:100]}")
                                 continue  # 该级暂停失败，升级下一级
                         if not paused_ok:
@@ -1018,7 +1128,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 roas_val = float(ad.get("purchase_roas", 0) or 0)
                 snap = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == ad_id,
-                    PerfSnapshot.platform == "fb",
+                    PerfSnapshot.platform == platform,
                     PerfSnapshot.snapshot_date == biz_today,
                 ).first()
                 if snap:
@@ -1040,7 +1150,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 else:
                     db.add(PerfSnapshot(
                         tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
-                        platform="fb",
+                        platform=platform,
                         snapshot_date=biz_today, spend=spend_usd_snap,
                         spend_native=spend, currency=acc.currency,
                         conversions=conv, cpa=cpa,
@@ -1111,10 +1221,18 @@ def run_inspection(force: bool = False):
 
     try:
         learning_hours = _sys_float(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
-        # 取所有有 active 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔）
-        tenant_ids = db.query(FbCredential.tenant_id).filter(
+        # 取所有有 active FB 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔），
+        # 并上「有 managed TT 账户」的租户——纯 TT 租户（无任何 FB 凭证）不再被整个跳过。
+        # FB 租户集合不变（有 FB 账户必有 FB 凭证），遍历顺序 FB 在前 → FB 行为不变
+        _fb_tids = [tid for (tid,) in db.query(FbCredential.tenant_id).filter(
             FbCredential.status == "active"
-        ).distinct().all()
+        ).distinct().all()]
+        _tt_tids = {tid for (tid,) in db.query(Account.tenant_id).filter(
+            Account.platform == "tt",
+            Account.is_managed.is_(True),
+        ).distinct().all()}
+        _seen_tids = set(_fb_tids)
+        tenant_ids = [(t,) for t in _fb_tids] + [(t,) for t in sorted(_tt_tids - _seen_tids)]
 
         tasks = []
         for (tenant_id,) in tenant_ids:
@@ -1125,13 +1243,13 @@ def run_inspection(force: bool = False):
             if not all_rules:
                 # 规则兜底：租户无规则时注入默认空耗止血线（保底防裸奔，用户可建规则覆盖）
                 all_rules = [_DEFAULT_BLEED_ABS_RULE]
-            # 本租户无 active 凭证 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
+            # 本租户无 active FB 凭证且无 managed TT 账户 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
             cred_n = db.query(FbCredential).filter(
                 FbCredential.tenant_id == tenant_id,
                 FbCredential.status == "active",
             ).count()
-            if not cred_n:
-                logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证，跳过")
+            if not cred_n and tenant_id not in _tt_tids:
+                logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证且无 TT 账户，跳过")
                 continue
             # 取已纳管账户（is_managed=true 且 ACTIVE=1，跳过被 FB 禁用/宽限/违规的，省 Token 配额；
             # 也跳过已取消纳管的软删账户——它们保留历史但不再巡检）
@@ -1154,7 +1272,8 @@ def run_inspection(force: bool = False):
                     "learning_hours": learning_hours, "hist_days": hist_days,
                     "all_rules": rule_ctxs, "default_rule": _DEFAULT_BLEED_RULE_CTX,
                     "acc": SimpleNamespace(act_id=acc.act_id, name=acc.name,
-                                           currency=acc.currency, timezone_name=acc.timezone_name),
+                                           currency=acc.currency, timezone_name=acc.timezone_name,
+                                           platform=_acc_platform(acc)),
                 })
 
         workers = _max_workers(db, len(tasks))
@@ -1583,9 +1702,11 @@ def run_sentinel_patrol():
     trace_id = new_trace_id()
     total_paused = 0
     try:
-        # 所有 armed 账户（手动或自动 arm）；排除已取消纳管的（is_managed=false）
+        # 所有 armed 账户（手动或自动 arm）；排除已取消纳管的（is_managed=false）。
+        # 哨兵是 FB 链路（campaign 级全停），TT 账户明确排除不误入
         armed = db.query(Account).filter(
             Account.is_managed.is_(True),
+            Account.platform == "fb",
             (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)  # noqa: E712
         ).all()
         for acc in armed:
@@ -1673,9 +1794,11 @@ def run_subcode_autobind():
         if not unbound:
             return {"skipped": "no_unbound", "unbound": 0}
         slug_re = re.compile(r"/a/([A-Za-z0-9_-]{4,64})")
-        # 建未绑子码 set（按租户分组遍历）；排除已取消纳管的账户
+        # 建未绑子码 set（按租户分组遍历）；排除已取消纳管的账户。
+        # 子码绑定走 FB /adcreatives 反查，TT 账户明确排除
         accounts = db.query(Account).filter(
-            Account.account_status == 1, Account.is_managed.is_(True)).all()
+            Account.account_status == 1, Account.is_managed.is_(True),
+            Account.platform == "fb").all()
         tenant_ids = {a.tenant_id for a in accounts}
         bound = 0
         for tid in tenant_ids:
@@ -1833,11 +1956,13 @@ def run_keepalive():
             except: pass
         asset_dir = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
 
-        # 汇总所有需保活的账户：租户 enabled=true → 该租户全部 managed 账户；否则 → 仅 warming
+        # 汇总所有需保活的账户：租户 enabled=true → 该租户全部 managed 账户；否则 → 仅 warming。
+        # 保活建的是 FB Page Like（object_story_spec 链路），TT 账户明确排除
         from sqlalchemy import or_
         warming_q = db.query(Account).filter(
             Account.is_managed == True,  # noqa: E712
             Account.account_status == 1,
+            Account.platform == "fb",
         )
         enabled_tenants = {tid for tid, c in tenant_cfgs.items() if c.get("enabled")}
         if enabled_tenants:
@@ -1865,10 +1990,11 @@ def run_keepalive():
                 asset_prefix = cfg["asset_prefix"]
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
 
-                # 1. 近 idle_days 天消耗
+                # 1. 近 idle_days 天消耗（platform='fb'：防跨平台 act_id 撞号把 TT 消耗算进来）
                 spend = db.query(_f.sum(PerfSnapshot.spend)).filter(
                     PerfSnapshot.tenant_id == acc.tenant_id,
                     PerfSnapshot.act_id == acc.act_id,
+                    PerfSnapshot.platform == "fb",
                     PerfSnapshot.snapshot_date >= cutoff,
                 ).scalar() or 0
                 if float(spend) > 0:

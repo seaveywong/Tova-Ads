@@ -29,6 +29,8 @@ export default {
     deleteUsageWarn: '\n\n⚠ 该素材被 {n} 个投放模板引用，删除后需重新选素材。',
     deleteConfirm: '确定删除「{name}」？\n服务器文件 + 记录一起删除（不可恢复）。', deleteTitle: '硬删确认', deleted: '已删除',
     framePart: ' / {n} 帧',
+    tkVertical: 'TK 9:16 适用',
+    tkVerticalTitle: '竖屏视频（高宽比 ≥ 2:3），满足 TikTok 9:16 视频版位规格',
   },
   en: {
     typeImage: 'Image', typeVideo: 'Video', tagPh: 'Tag', searchNamePh: 'Search name',
@@ -59,5 +61,7 @@ export default {
     deleteUsageWarn: '\n\n⚠ This asset is referenced by {n} launch template(s); you will need to re-select the asset after deleting.',
     deleteConfirm: 'Delete "{name}"?\nServer file + record will both be deleted (irreversible).', deleteTitle: 'Hard delete confirm', deleted: 'Deleted',
     framePart: ' / {n} frames',
+    tkVertical: 'TK 9:16 ready',
+    tkVerticalTitle: 'Vertical video (height/width ≥ 2:3) fits the TikTok 9:16 video placement spec',
   },
 }

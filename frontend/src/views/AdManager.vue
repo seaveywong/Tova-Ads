@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, PATCH, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
+import { usePlatform } from '../composables/usePlatform'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
 
@@ -105,6 +106,20 @@ const watchRefreshDone = () => {
 }
 const statusMatch = (s) => statusFilter.value === 'all' ? true : (statusFilter.value === 'active' ? s === 'ACTIVE' : (s === 'PAUSED' || (s && s.includes('PAUSED'))))
 const actMatch = (item) => !selectedActs.value.length ? true : selectedActs.value.includes(item.act_id)
+// 平台切换器过滤（纯前端：accounts 带 platform 字段，实体行按所属账户过滤）
+const { platform } = usePlatform()
+const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
+const platActIds = computed(() => platform.value === 'all' ? null : new Set(platAccounts.value.map(a => a.act_id)))
+const platMatch = (item) => { const ids = platActIds.value; return !ids || ids.has(item.act_id) }
+watch(platform, () => {
+  // 切平台：勾选账户里不属于新平台的清掉（防"选中永不匹配"空列表）
+  if (platActIds.value) selectedActs.value = selectedActs.value.filter(id => platActIds.value.has(id))
+})
+const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
+const platChipByAct = (actId) => {
+  const a = accounts.value.find(x => x.act_id === actId)
+  return platChip(a)
+}
 const sortBy = (key) => { if (sortKey.value === key) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'; else { sortKey.value = key; sortDir.value = 'desc' } }
 const _rankMap = { ACTIVE: 0, PAUSED: 1, CAMPAIGN_PAUSED: 2, ADSET_PAUSED: 3, PENDING_REVIEW: 4, WITH_ISSUES: 5, DISAPPROVED: 6, ARCHIVED: 7, DELETED: 8 }
 const statusRank = (s) => _rankMap[s] ?? 9
@@ -114,7 +129,7 @@ const sortIcon = (key) => sortKey.value === key ? (sortDir.value === 'desc' ? '�
 const viewCurs = computed(() => {
   const s = new Set()
   for (const arr of [data.value.campaigns, data.value.adsets, data.value.ads])
-    for (const it of (arr || [])) if (actMatch(it) && it.currency) s.add(it.currency)
+    for (const it of (arr || [])) if (platMatch(it) && actMatch(it) && it.currency) s.add(it.currency)
   return s
 })
 const mixedCur = computed(() => viewCurs.value.size > 1)
@@ -133,7 +148,7 @@ const curList = computed(() => {
   if (tab.value === 'campaign') arr = data.value.campaigns || []
   else if (tab.value === 'adset') { arr = data.value.adsets || []; if (drillCampaign.value) arr = arr.filter(a => _idOf(a.campaign_id) === drillCampaign.value) }
   else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => _idOf(a.adset_id) === drillAdset.value) }
-  arr = arr.filter(a => actMatch(a) && statusMatch(a.effective_status))
+  arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatch(a.effective_status))
   if (searchQ.value.trim()) {
     const q = searchQ.value.trim().toLowerCase()
     arr = arr.filter(a => (a.name || '').toLowerCase().includes(q) || String(a.id || '').includes(q))
@@ -406,7 +421,7 @@ const subscribeLeads = async () => {
   <div class="page">
     <div class="ctrl-bar">
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
-      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in accounts" :key="a.act_id" :value="a.act_id" :label="a.name" /></el-select>
+      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" /></el-select>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
@@ -434,7 +449,7 @@ const subscribeLeads = async () => {
         <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}</div>
-          <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid">{{ c.account_name }} · {{ c.id }}</div></div>
+          <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid"><span v-if="platChipByAct(c.act_id)" :class="['plat-chip', platChipByAct(c.act_id)]">{{ platChipByAct(c.act_id).toUpperCase() }}</span>{{ c.account_name }} · {{ c.id }}</div></div>
           <div>{{ objLabel(c.objective) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(c) }" @click.stop="hasBudget(c) && openBudget(c)">{{ fmtBudget(c, 'campaign') }}</div>
           <div>{{ fmtSpendCol(c) }}</div><div>{{ c.conversions || 0 }}</div><div>{{ fmtCpaCol(c) }}</div><div>{{ fmtNum(c.reach) }}</div><div>{{ c.frequency || '-' }}</div>
@@ -445,7 +460,7 @@ const subscribeLeads = async () => {
         <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}</div>
-          <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid">{{ s.account_name }} · {{ s.id }}</div></div>
+          <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid"><span v-if="platChipByAct(s.act_id)" :class="['plat-chip', platChipByAct(s.act_id)]">{{ platChipByAct(s.act_id).toUpperCase() }}</span>{{ s.account_name }} · {{ s.id }}</div></div>
           <div>{{ optLabel(s.optimization_goal) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(s) }" @click.stop="hasBudget(s) && openBudget(s)">{{ fmtBudget(s, 'adset') }}</div>
           <div>{{ fmtSpendCol(s) }}</div><div>{{ s.conversions || 0 }}</div><div>{{ fmtCpaCol(s) }}</div><div>{{ fmtNum(s.reach) }}</div><div>{{ s.frequency || '-' }}</div>
@@ -456,7 +471,7 @@ const subscribeLeads = async () => {
         <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
         <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="a.effective_status === 'DISAPPROVED' && rfOf(a)" class="rf-flag" :title="t('adm.reviewFlagHint')" @click.stop="showReview(a)">⚠</span></div>
-          <div class="nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" />{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid">{{ a.account_name }} · {{ a.id }}</div></div>
+          <div class="nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" />{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid"><span v-if="platChipByAct(a.act_id)" :class="['plat-chip', platChipByAct(a.act_id)]">{{ platChipByAct(a.act_id).toUpperCase() }}</span>{{ a.account_name }} · {{ a.id }}</div></div>
           <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="t('adm.slugTitle', { slug: a.slug, pass: a.landing_pass||0 })">/a/{{ a.slug }}</code><span v-else class="muted" :title="t('adm.slugEmptyTitle')">{{ t('adm.slugEmpty') }}</span></div>
           <div>{{ fmtSpendCol(a) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ fmtCpaCol(a) }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? a.ctr + '%' : '-' }}</div>
           <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">📌 {{ t('adm.reuseThisPost') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
@@ -647,6 +662,10 @@ const subscribeLeads = async () => {
 .nm.clk { cursor: pointer }
 .nm.clk:hover { color: var(--ac) }
 .sid { font-size: 10px; color: var(--t3); font-weight: 400 }
+/* 平台小标（账户名前的 FB/TT chip，明暗主题均可读） */
+.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; }
+.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
+.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 .lv { color: var(--ac); font-size: 11px; font-weight: 600 }
 .lp { color: var(--success); font-size: 11px; font-weight: 600 }
 .lpr { color: var(--t2); font-size: 11px }

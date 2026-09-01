@@ -3,9 +3,13 @@
 从 routers/launch.py 抽出，供 /launch/create（单广告）和 launch_templates 部署 runner（批量）共用。
 helper 纯 FB 侧：接收已解析好的 image_hash / video_id / subcode_link / targeting，
 per-account 图片上传+缓存的逻辑由调用方处理（ensure_image_hash_for_account）。
+
+文件尾部另有一段 TikTok 平行链路（TK P3）：tt_client_for_account /
+ensure_tt_file_id_for_account / deploy_one_account_tt —— FB 函数零改动。
 """
 import json
 from .fb_client import FbClient, FbApiError
+from .tt_client import TtApiError
 from .ad_builder import build_campaign, build_adset, build_creative
 
 # ISO 4217 零小数位币种（FB amount 单位 = 整本币，其余 ×100 进分）
@@ -252,3 +256,100 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         subcode_link.status = "active"
 
     return {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id, "page_post_id": page_post_id}
+
+
+# ── TikTok 部署链路（TK P3；与上面 FB 链平行，FB 函数零改动）──
+
+def tt_client_for_account(db, tenant_id: int, act_id: str):
+    """按账户选 TtClient（写令牌语义）。thin 包装：唯一实现在 fb_tokens（带 app_id +
+    refresher——access_token 24h 请求间隙过期自动轮换），这里只保持部署链路旧签名。"""
+    from .fb_tokens import tt_client_for_account as _pick
+    tt, _cred = _pick(db, tenant_id, act_id, "write")
+    return tt
+
+
+def ensure_tt_file_id_for_account(tt, db, asset, advertiser_id: str, filepath: str) -> str:
+    """取该广告主的素材 file_id（TT file_id 按 advertiser 隔离，不能跨账户复用）。
+
+    查 asset.tt_file_ids[advertiser_id] 缓存；无 → 上传到该广告主文件库 → 行锁合并写回缓存
+    （调用方 commit）。图片走 upload_ad_image、视频走 upload_ad_video（大文件分块，耗时较长）。
+    """
+    cache = {}
+    if asset.tt_file_ids:
+        try:
+            cache = json.loads(asset.tt_file_ids)
+        except Exception:
+            cache = {}
+    v = cache.get(str(advertiser_id))
+    if v:
+        return v
+    with open(filepath, "rb") as f:
+        file_bytes = f.read()
+    if (asset.type or "image") == "video":
+        result = tt.upload_ad_video(advertiser_id, file_bytes, asset.filename or "video.mp4")
+    else:
+        result = tt.upload_ad_image(advertiser_id, file_bytes, asset.filename or "image.jpg")
+    fid = result.get("file_id")
+    if not fid:
+        raise TtApiError("no_id", f"上传素材到 TT advertiser {advertiser_id} 未返回 file_id")
+    _merge_asset_cache(db, asset, "tt_file_ids", str(advertiser_id), str(fid))
+    db.flush()
+    return str(fid)
+
+
+def deploy_one_account_tt(tt, *, advertiser_id: str, objective: str, conversion_goal: str,
+                          pixel_code: str, landing_url: str, daily_budget: int,
+                          budget_mode: str, name_prefix: str, headline: str, body: str,
+                          cta_type: str, image_file_id: str = "", video_file_id: str = "",
+                          subcode_slug: str = "", subcode_link=None, targeting=None) -> dict:
+    """TT 三件套：campaign/create → adgroup/create → ad/create。失败 raise TtApiError。
+
+    与 FB deploy_one_account 平行；差异：定向/预算全在 adgroup 层、素材用文件库 file_id、
+    广告出生暂停（operation_status=DISABLE，对应 FB 的 status=PAUSED）。
+    page_post/表单/消息模板为 FB 专属，TT 链路不涉及。
+    """
+    from .tt_ad_builder import (build_tt_campaign, build_tt_adgroup, build_tt_creative)
+
+    # 1. Campaign（objective 映射 FB 枚举 → TT）
+    camp_payload = build_tt_campaign(
+        name=name_prefix, objective=objective,
+        daily_budget=daily_budget if budget_mode.upper() == "CBO" else None,
+        budget_mode=budget_mode,
+    )
+    camp = tt.create_campaign(advertiser_id, camp_payload)
+    campaign_id = camp["campaign_id"]
+
+    # 2. AdGroup（定向/优化/预算全在此层；转化目标绑像素 code）
+    adgroup_payload = build_tt_adgroup(
+        name=f"{name_prefix} 组", campaign_id=campaign_id, daily_budget=daily_budget,
+        objective=objective, conversion_goal=conversion_goal, pixel_code=pixel_code,
+        budget_mode=budget_mode, targeting=targeting,
+    )
+    adgroup = tt.create_adgroup(advertiser_id, adgroup_payload)
+    adgroup_id = adgroup["adgroup_id"]
+
+    # 3. 创意链接（子码集成：TT 广告 ID 宏是 __AID__，对应 FB 的 {ad.id}）
+    effective_url = landing_url
+    if subcode_slug and subcode_link is not None:
+        base = landing_url or "https://tovaads.com"
+        effective_url = f"{base}/a/{subcode_slug}?ad=__AID__"
+
+    creative_payload = build_tt_creative(
+        ad_text=body, cta_type=cta_type, landing_url=effective_url,
+        video_file_id=video_file_id, image_file_id=image_file_id,
+    )
+    # 广告出生暂停（对齐 FB PAUSED 出生）：审核前绝不投放，用户在 TT 后台审核通过后手动开
+    ad = tt.create_ad(advertiser_id, {
+        "ad_name": f"{name_prefix} 广告",
+        "adgroup_id": adgroup_id,
+        **creative_payload,
+        "operation_status": "DISABLE",
+    })
+    ad_id = ad["ad_id"]
+
+    # 子码回绑 ad_id（TT 不支持建后改名标注——FB 的 [子码:slug] 改名省略，回绑已保证可追溯）
+    if subcode_slug and subcode_link is not None:
+        subcode_link.ad_id = ad_id
+        subcode_link.status = "active"
+
+    return {"campaign_id": campaign_id, "adgroup_id": adgroup_id, "ad_id": ad_id}

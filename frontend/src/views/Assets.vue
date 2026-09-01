@@ -381,6 +381,8 @@ const fmtDuration = (sec) => {
   const s = Math.floor(sec % 60)
   return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`
 }
+// TikTok 9:16 视频规格判定：竖屏（高宽比 ≥ 2:3，覆盖 9:16=1.78 与 2:3=1.5）→ 标「TK 9:16 适用」
+const isTkVertical = (a) => a.type === 'video' && a.width > 0 && a.height > 0 && (a.height / a.width) >= 1.5
 const countryLabel = (code) => {
   const c = COUNTRIES.find(x => x.code === code)
   return c ? c.label : code
@@ -449,6 +451,7 @@ const countryLabel = (code) => {
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
+          <span v-if="isTkVertical(a)" class="tk-badge" :title="t('assets.tkVerticalTitle')">{{ t('assets.tkVertical') }}</span>
           <span class="type-badge">{{ a.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
         </div>
         <div class="card-body">
@@ -674,6 +677,7 @@ const countryLabel = (code) => {
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
 .thumb { max-width: 100%; max-height: 100%; object-fit: cover; width: 100%; height: 100%; }
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+.tk-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(254,44,85,.85); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
 .type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; }
 .country-badge { position: absolute; top: 4px; right: 4px; background: rgba(10,132,255,.85); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 .card-body { padding: 8px 10px; flex: 1; }

@@ -9,6 +9,10 @@ OAuth 端点（access_token/refresh_token/advertiser/get）用 app_id + secret/r
 方法面与 FbClient 对齐（get_campaigns/get_adsets/get_ads/get_active_ads/
 get_ad_insights/pause_ad/get_node/update_status），供巡检按平台分发复用；
 参数结构与 FB 不同（advertiser_id 维度 + filtering JSON），sandbox 实测后再校准。
+
+P3 增补（部署链路）：create_campaign/create_adgroup/create_ad（建广告三件套，
+payload 由 core/tt_ad_builder.py 构造）+ upload_ad_image/upload_ad_video
+（素材传广告主文件库拿 file_id，视频小文件单发/大文件分块）。
 """
 import json
 import os
@@ -40,6 +44,27 @@ RATE_SOFT_CAP = 300        # 每 endpoint 每 60s 主动上限（无官方数字
 MAX_BACKOFF_S = 300        # 封路封顶
 MAX_BLOCK_SLEEP = 10.0     # 门禁时等待上限：≤10s 睡等，更长直接拒（调用方跳过）
 MAX_INLINE_RETRY_S = 30.0  # 429 后同请求内最长重试等待
+
+# 视频上传（P3）：≤单发阈值整文件 multipart 直传；超过走分块 Init/Upload/Finish
+VIDEO_SINGLE_SHOT_MAX = 20 * 1024 * 1024   # 20MB 以下单发（广告素材 MP4 绝大多数在此内）
+VIDEO_SLICE_SIZE = 10 * 1024 * 1024        # 分块大小 10MB
+
+
+def _pick_file_id(data: dict) -> str:
+    """从上传/分块响应宽容取 file_id（video_id/file_id/列表首元素键名随版本漂移）。"""
+    if not isinstance(data, dict):
+        return ""
+    for k in ("video_id", "file_id", "image_id"):
+        v = data.get(k)
+        if v:
+            return str(v)
+    for k in ("videos", "list", "materials"):
+        v = data.get(k)
+        if isinstance(v, (list, tuple)) and v and isinstance(v[0], dict):
+            vid = v[0].get("video_id") or v[0].get("id") or v[0].get("file_id")
+            if vid:
+                return str(vid)
+    return ""
 
 _rate_lock = threading.Lock()
 _rate_state: dict[str, "_Throttle"] = {}
@@ -472,3 +497,142 @@ class TtClient:
             params["fields"] = json.dumps(fields)
         items = self.get_paged(path, params)
         return items[0] if items else {}
+
+    # ── 广告创建三件套（P3 部署链路；payload 由 core/tt_ad_builder.py 构造）──
+
+    def create_campaign(self, advertiser_id: str, payload: dict) -> dict:
+        """campaign/create/ → {"campaign_id": ...}。payload 不含 advertiser_id（此处合并）。"""
+        data = self._post_create("campaign/create/", advertiser_id, payload, "campaign_ids")
+        return {"campaign_id": data[0]}
+
+    def create_adgroup(self, advertiser_id: str, payload: dict) -> dict:
+        """adgroup/create/ → {"adgroup_id": ...}。"""
+        data = self._post_create("adgroup/create/", advertiser_id, payload, "adgroup_ids")
+        return {"adgroup_id": data[0]}
+
+    def create_ad(self, advertiser_id: str, payload: dict) -> dict:
+        """ad/create/ → {"ad_id": ...}。广告出生暂停由 payload.operation_status=DISABLE 保证。"""
+        data = self._post_create("ad/create/", advertiser_id, payload, "ad_ids")
+        return {"ad_id": data[0]}
+
+    def _post_create(self, path: str, advertiser_id: str, payload: dict, ids_key: str) -> list[str]:
+        """创建端点公共：合并 advertiser_id（int）→ POST → 取 data.{ids_key}[0]。"""
+        try:
+            adv = int(advertiser_id)
+        except (TypeError, ValueError):
+            adv = advertiser_id
+        body = dict(payload or {})
+        body["advertiser_id"] = adv
+        result = self.post(path, body)
+        data = result.get("data") or {}
+        # 创建类端点返回 id 列表（campaign_ids/adgroup_ids/ad_ids）；个别版本返回单值
+        ids = data.get(ids_key)
+        if isinstance(ids, (list, tuple)):
+            ids = [str(i) for i in ids if i]
+        elif ids:
+            ids = [str(ids)]
+        if not ids:
+            raise TtApiError("no_id", f"TT {path} 未返回 {ids_key}（响应：{str(result)[:200]}）")
+        return ids
+
+    # ── 素材上传（file_id 按 advertiser 隔离，不能跨账户复用；部署侧 ensure_tt_file_id_for_account 缓存）──
+    # sandbox 校准点：multipart 字段名/响应键以官方 v1.3 文档实测为准（image_id/file_id、
+    # 分块协议 upload_id/chunk_number）。解析端已对常见键名容错，实测不符只需改这里。
+
+    UPLOAD_TIMEOUT = 300  # 视频上传远大于普通请求
+
+    def _upload_multipart(self, path: str, data: dict, files: dict) -> dict:
+        """multipart POST（_raw_call 只支持 JSON body，上传走这里；限流/错误分类同款）。"""
+        key = f"POST {path}"
+        _throttle_enter(key)
+        params = {"access_token": self.token}
+        try:
+            resp = httpx.post(TT_BASE + path, params=params, data=data, files=files,
+                              timeout=self.UPLOAD_TIMEOUT)
+        except httpx.RequestError as e:
+            raise TtApiError("network", f"网络错误：{e}", {}, 0)
+        try:
+            result = resp.json()
+        except Exception:
+            raise TtApiError("network",
+                             f"响应非 JSON（HTTP {resp.status_code}）：{resp.text[:120]}", {}, resp.status_code)
+        if _is_rate_limited(resp.status_code, result):
+            throttle_strike(key)
+            raise TtApiError("rate_limited", TT_ERROR_MAP[42900][1], result, resp.status_code)
+        if result.get("code", 0) != 0:
+            cat, friendly = classify_tt_error(result.get("code", 0), result.get("message", ""))
+            logger.warning(f"[TT] POST {path} → {cat}: {friendly}")
+            raise TtApiError(cat, friendly, result, resp.status_code)
+        _throttle_success(key)
+        return result.get("data") or {}
+
+    def upload_ad_image(self, advertiser_id: str, image_bytes: bytes,
+                        filename: str = "image.jpg") -> dict:
+        """上传图片到广告主文件库 → {"file_id": image_id}。
+
+        file/image/ad/（广告素材库）；返回 image_id 即创意用的 file_id（另有 post_id 可选）。
+        """
+        data = self._upload_multipart("file/image/ad/", {
+            "advertiser_id": str(advertiser_id),
+        }, {"image_file": (filename or "image.jpg", image_bytes, "image/jpeg")})
+        file_id = _pick_file_id(data)
+        if not file_id:
+            raise TtApiError("no_id", f"TT 上传图片未返回 image_id（响应：{str(data)[:200]}）")
+        return {"file_id": file_id}
+
+    def upload_ad_video(self, advertiser_id: str, video_bytes: bytes,
+                        filename: str = "video.mp4") -> dict:
+        """上传视频到广告主文件库 → {"file_id": video_id, "mode": single|chunk}。
+
+        小文件单发（file/ad/video/upload/ multipart 直传）；大文件分块 Init → Upload(逐块) →
+        Finish（末块即完成，分块协议字段以官方文档/sandbox 实测为准——Init 失败自动回落单发）。
+        视频转码异步：拿到 video_id 即可用于建广告（TT 允许 PROCESSING 状态引用，审核时校验）。
+        """
+        adv = str(advertiser_id)
+        if len(video_bytes) <= VIDEO_SINGLE_SHOT_MAX:
+            return self._upload_video_single(adv, video_bytes, filename)
+        try:
+            return self._upload_video_chunked(adv, video_bytes, filename)
+        except TtApiError as e:
+            if e.category in ("invalid_param", "not_found"):
+                logger.warning(f"[TT] 分块上传不可用（{e.friendly}），回落整文件单发")
+                return self._upload_video_single(adv, video_bytes, filename)
+            raise
+
+    def _upload_video_single(self, adv: str, video_bytes: bytes, filename: str) -> dict:
+        data = self._upload_multipart("file/ad/video/upload/", {
+            "advertiser_id": adv,
+        }, {"video_file": (filename or "video.mp4", video_bytes, "video/mp4")})
+        vid = _pick_file_id(data)
+        if not vid:
+            raise TtApiError("no_id", f"TT 上传视频未返回 video_id（响应：{str(data)[:200]}）")
+        return {"file_id": vid, "mode": "single"}
+
+    def _upload_video_chunked(self, adv: str, video_bytes: bytes, filename: str) -> dict:
+        """分块：Init（JSON，拿 upload_id）→ 逐块 multipart → 末块完成拿 video_id。"""
+        total = len(video_bytes)
+        chunk_num = (total + VIDEO_SLICE_SIZE - 1) // VIDEO_SLICE_SIZE
+        init = self.post("file/ad/video/upload/", {
+            "advertiser_id": adv,
+            "upload_type": "UPLOAD_TYPE_CHUNK",
+            "file_name": filename or "video.mp4",
+            "file_size": total,
+            "slice_size": VIDEO_SLICE_SIZE,
+            "chunk_num": chunk_num,
+        }).get("data") or {}
+        upload_id = init.get("upload_id") or init.get("uploadid") or ""
+        if not upload_id:
+            raise TtApiError("invalid_param",
+                             f"TT 分块上传 Init 未返回 upload_id（响应：{str(init)[:200]}）")
+        for i in range(chunk_num):
+            chunk = video_bytes[i * VIDEO_SLICE_SIZE:(i + 1) * VIDEO_SLICE_SIZE]
+            data = self._upload_multipart("file/ad/video/upload/", {
+                "advertiser_id": adv,
+                "upload_type": "UPLOAD_TYPE_CHUNK",
+                "upload_id": upload_id,
+                "chunk_number": str(i + 1),   # 1 基序号
+            }, {"video_file": (filename or "video.mp4", chunk, "video/mp4")})
+            vid = _pick_file_id(data)
+            if vid and i + 1 == chunk_num:
+                return {"file_id": vid, "mode": "chunk"}
+        raise TtApiError("no_id", "TT 分块上传完成但未返回 video_id（视频转码中，稍后重试或查看文件库）")
