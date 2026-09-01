@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-09-02（三）— 全清单两波：视频链路/规则引擎4项/素材治理/潜客CRM/受众打通/清单对账 + 复审
+
+### 概述
+用户批准全做 8 项 → 两波 3+2 agent 并行（文件分区零冲突）。commit `879e3ec`（波1）+ `f1e063a`（波2）+ 复审修复（本 commit）。迁移 0068（assets.fb_video_ids）+ 0069（leads 轻CRM 三列）。独立复审无 P0，P1×2+P2×6 当场修 4 项。
+
+### 变更（按主题）
+| 主题 | 内容 |
+|---|---|
+| 视频部署链路 | upload_video(advideos,600s,非幂等不重试)+ensure_video_id_for_account+runner/retry/preflight 三分支+前端解锁；迁移 0068；顺手修 CJK multipart 崩溃+retry 缺文件检查 |
+| 扩量规则 | slow_scale/roas_scale（1.0 语义移植）：KPI 感知 CPA/ROAS 阈值/步长/日预算上限/连续天数；24h 冷却三道防重复闸；observe 模式；前端参数 schema 与后端契约逐字段对齐（复审验证）|
+| 学习期保护 | guard_learning_hours(默认24h) 新广告不动作；get_ads 补拉 created_time 数据源 |
+| 告警风暴上限 | notify_storm_cap(30/日,0=关) per(tenant,event_type)；9 类 critical 豁免；dedup 之上第二道闸 |
+| 巡检并发 | guard_concurrency(1-8,默认4) ThreadPoolExecutor；线程私有 SuperSessionLocal+SimpleNamespace 纯数据 ctx+暂停/扩量 events 收口主线程回放；复审逐行核验线程安全成立 |
+| 素材治理 | 上传去重 md5→409 指明已存在；unmanage+prune 清 hash 死缓存（复审后扩到 video_id 列）；孤儿文件 asset_gc（SuperSessionLocal 防跨租户 RLS 误判）；顺手修 fb-upload 只写遗留单列 bug |
+| 潜客轻CRM | Lead+status/note/status_updated_at(0069)；PATCH+筛选+CSV 两列；前端状态下拉(4 语义色)+备注弹窗+筛选组 |
+| 受众打通 | 编辑器来源选择器+存为受众入库入口+停用警示；🔴修 _resolve_targeting 优先级坑（非空 json 顶掉 SavedAudience/空 json 直接 None）|
+| 清单+对账 | GET /{tid}/deployments(jobs+?job_id= items)；job 完成/retry 后自动刷 ads_cache（原无任何刷新）+live_status join；前端已部署抽屉 |
+| 顺手真bug | guard CreateRuleIn 缺 enabled（静默忽略+响应硬编码）；🔴leads_id_seq 无 USAGE（SuperSessionLocal 插 lead permission denied，疑预存）postgres 手工 GRANT+补 0069 |
+
+### 复审修复（同日）
+- P1-2：super_engine pool 5→10（并发8+扩量峰值 17>15 会池等待）
+- P2-4：fb_image_hashes/fb_video_ids 写回改行锁合并（_merge_asset_cache FOR UPDATE+populate_existing，防并发 job 丢缓存→重复上传）
+- P2-5：unmanage/prune 扩到 fb_video_ids 列（视频缓存原零清理入口）
+- P2-6：PerfSnapshot 历史查询补 tenant 过滤（双租户同 ad_id 竞态）
+
+### 验证
+- 语法门×3 轮 / IMPORT_OK / active / health 1.3.5；前端 build ✓ CF Pages×2
+- smoke17 17/17（图片 preflight 回归/扩量规则 CRUD/去重 409/orphans/prune/storm/5 端点）
+- smoke18 8/8 + 18b 11/11（lead PATCH 全流程 seed 验证/deployments 两模式/live_status/受众建删+SavedAudience 解析/enabled=false 生效）
+- 复审后回归 5/5（prune 两列重构/池=10）
+
+### 复审结论（已知限制）
+- 无 P0；并发改造核心论证成立。未修 P2：Settings 无 3 旋钮 UI（guard_concurrency/learning_hours/storm_cap 只能 psql）；受众选择保存清空内联定向无确认；storm TOCTOU 有界超发；P3 三条
+- FB 解封后待实测：advideos 真上传、扩量 set_budget 回读 verified、学习期新广告不动作、视频+OUTCOME_LEADS 组合
+- 生产观察：多 cron×guard 并发的池等待（已扩池）；journalctl 应见"巡检 N 个账户，并发 4"
+
+---
+
 ## 2026-09-02（二）— 5模块深扫修复（账户生命周期+告警正确性+AdManager）+ 切Tab + 复审收尾
 
 ### 概述

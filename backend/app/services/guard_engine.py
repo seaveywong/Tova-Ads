@@ -802,6 +802,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             history = None
             if ctx["hist_days"] or any(r.rule_type == "budget_burn_fast" for r in all_rules):
                 prev_snap = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.tenant_id == tenant_id,
                     PerfSnapshot.ad_id == ad_id,
                     PerfSnapshot.snapshot_date == biz_today,
                 ).first()
@@ -810,6 +811,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 if ctx["hist_days"]:
                     since_date = (datetime.strptime(biz_today, "%Y-%m-%d") - timedelta(days=ctx["hist_days"])).strftime("%Y-%m-%d")
                     history = db.query(PerfSnapshot).filter(
+                        PerfSnapshot.tenant_id == tenant_id,
                         PerfSnapshot.ad_id == ad_id,
                         PerfSnapshot.snapshot_date >= since_date,
                         PerfSnapshot.snapshot_date < biz_today,

@@ -13,7 +13,8 @@ engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=10, 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True, expire_on_commit=False)
 
 # system 连接（toveads_super，BYPASSRLS）——用于注册/登录/平台超管等无租户上下文的操作
-super_engine = create_engine(settings.database_super_url, pool_pre_ping=True, pool_size=5, future=True)
+# pool_size=10：巡检并发(默认4,上限8) + 扩量 set_budget 各自开连接的峰值需 ≥15；5 会池等待
+super_engine = create_engine(settings.database_super_url, pool_pre_ping=True, pool_size=10, future=True)
 SuperSessionLocal = sessionmaker(bind=super_engine, autoflush=False, autocommit=False, future=True, expire_on_commit=False)
 
 Base = declarative_base()

@@ -155,47 +155,51 @@ class PruneHashCacheIn(BaseModel):
 def prune_hash_cache(body: PruneHashCacheIn,
                      user: CurrentUser = Depends(require_permission("ads.create")),
                      db: Session = Depends(get_db)):
-    """清 Asset.fb_image_hashes JSON 缓存里的死条目（账户解除纳管/令牌失效后 hash 成脏数据）。
+    """清 Asset.fb_image_hashes / fb_video_ids JSON 缓存里的死条目（账户解除纳管/令牌失效后成脏数据）。
 
     - act_id 非空：只清该账户的条目（不论纳管状态，支持强制重传）；
     - act_id 空：对照 Account.is_managed，清所有「非纳管账户」的条目。
     全部命中才算清理；清空的 JSON 置 NULL。同租户、一条事务。
     """
     from ..models.fb import Account
-    rows = db.query(Asset).filter(
-        Asset.tenant_id == user.tenant_id, Asset.fb_image_hashes.isnot(None),
-    ).all()
-    # 先解析全部缓存，确定要清的 act_id 集合
-    parsed = []
-    all_keys = set()
-    for a in rows:
-        cache = _parse_json_field(a.fb_image_hashes, {})
-        if isinstance(cache, dict) and cache:
-            parsed.append((a, cache))
-            all_keys.update(_norm_act_id(k) for k in cache.keys())
     target = _norm_act_id(body.act_id)
-    if target:
-        dead = {target}
-    else:
+    if not target:
         managed = {r[0] for r in db.query(Account.act_id).filter(
             Account.tenant_id == user.tenant_id,
             Account.is_managed == True,  # noqa: E712
         ).all() if r[0]}
-        dead = {k for k in all_keys if k not in managed}
-    if not dead:
-        return {"assets_touched": 0, "entries_removed": {}, "dead_act_ids": []}
     removed: dict = {}
     touched = 0
-    for a, cache in parsed:
-        pop = [k for k in cache if _norm_act_id(k) in dead]
-        if not pop:
-            continue
-        for k in pop:
-            nk = _norm_act_id(k)
-            removed[nk] = removed.get(nk, 0) + 1
-            del cache[k]
-        a.fb_image_hashes = json.dumps(cache, ensure_ascii=False) if cache else None
-        touched += 1
+    all_dead: set = set()
+    for col in (Asset.fb_image_hashes, Asset.fb_video_ids):
+        rows = db.query(Asset).filter(
+            Asset.tenant_id == user.tenant_id, col.isnot(None),
+        ).all()
+        parsed = []
+        all_keys = set()
+        for a in rows:
+            cache = _parse_json_field(getattr(a, col.key), {})
+            if isinstance(cache, dict) and cache:
+                parsed.append((a, cache))
+                all_keys.update(_norm_act_id(k) for k in cache.keys())
+        if target:
+            dead = {target}
+        else:
+            dead = {k for k in all_keys if k not in managed}
+        all_dead |= dead
+        for a, cache in parsed:
+            pop = [k for k in cache if _norm_act_id(k) in dead]
+            if not pop:
+                continue
+            for k in pop:
+                nk = _norm_act_id(k)
+                removed[nk] = removed.get(nk, 0) + 1
+                del cache[k]
+            setattr(a, col.key, json.dumps(cache, ensure_ascii=False) if cache else None)
+            touched += 1
+    dead = all_dead
+    if not dead:
+        return {"assets_touched": 0, "entries_removed": {}, "dead_act_ids": []}
     tid = new_trace_id()
     write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
               actor_user_id=user.id, target_type="asset", target_id="batch",

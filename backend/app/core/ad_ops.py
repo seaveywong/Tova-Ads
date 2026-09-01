@@ -48,13 +48,32 @@ def ensure_image_hash_for_account(fb: FbClient, db, asset, act_id: str, filepath
     h = result.get("hash")
     if not h:
         raise FbApiError("no_id", f"上传图片到 act_{act_id} 未返回 hash")
-    cache[act_id] = h
-    asset.fb_image_hashes = json.dumps(cache, ensure_ascii=False)
+    _merge_asset_cache(db, asset, "fb_image_hashes", act_id, h)
     # 也兼容旧单列（首个账户）
     if not asset.fb_image_hash:
         asset.fb_image_hash = h
     db.flush()
     return h
+
+
+def _merge_asset_cache(db, asset, col_name: str, act_id: str, value: str) -> None:
+    """行锁下合并写回 Asset 的 {act_id: value} JSON 缓存列。
+
+    并发 job 各自给同一素材上传不同账户时，无锁的整列覆盖会丢先提交方条目
+    （下次部署重复上传）。FOR UPDATE + populate_existing 拿到最新已提交值再合并。
+    锁持有到调用方 commit。
+    """
+    from ..models.launch import Asset
+    db.query(Asset).filter(Asset.id == asset.id).with_for_update().populate_existing().first()
+    merged = {}
+    cur = getattr(asset, col_name)
+    if cur:
+        try:
+            merged = json.loads(cur)
+        except Exception:
+            merged = {}
+    merged[act_id] = value
+    setattr(asset, col_name, json.dumps(merged, ensure_ascii=False))
 
 
 def ensure_video_id_for_account(fb: FbClient, db, asset, act_id: str, filepath: str) -> str:
@@ -78,8 +97,7 @@ def ensure_video_id_for_account(fb: FbClient, db, asset, act_id: str, filepath: 
     v = result.get("id")
     if not v:
         raise FbApiError("no_id", "上传视频未返回 video_id（视频转码可能失败，请稍后重试）")
-    cache[act_id] = v
-    asset.fb_video_ids = json.dumps(cache, ensure_ascii=False)
+    _merge_asset_cache(db, asset, "fb_video_ids", act_id, v)
     db.flush()
     return v
 

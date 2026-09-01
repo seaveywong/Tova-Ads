@@ -1137,23 +1137,29 @@ def unmanage_account(
             AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == aid).delete()
     except Exception:
         pass
-    # 清该账户的素材 FB image_hash 缓存：解除纳管后 hash 成死数据，
-    # 重导账户后旧 hash 仍挂在素材上属脏数据（重新部署会自然重传，无需预热）。
+    # 清该账户的素材 FB image_hash/video_id 缓存：解除纳管后成死数据，
+    # 重导账户后旧值仍挂在素材上属脏数据（重新部署会自然重传，无需预热）。
     # JSON 键是纯数字 act_id（ensure_image_hash_for_account 写入约定）。
     try:
         from ..models.launch import Asset
-        for a in db.query(Asset).filter(
-            Asset.tenant_id == user.tenant_id,
-            Asset.fb_image_hashes.isnot(None),
-            Asset.fb_image_hashes.ilike(f'%"{aid}"%'),
-        ).all():
-            try:
-                cache = json.loads(a.fb_image_hashes)
-            except Exception:
-                cache = None
-            if isinstance(cache, dict) and aid in cache:
-                del cache[aid]
-                a.fb_image_hashes = json.dumps(cache, ensure_ascii=False) if cache else None
+        _dirty = False
+        for col in (Asset.fb_image_hashes, Asset.fb_video_ids):
+            for a in db.query(Asset).filter(
+                Asset.tenant_id == user.tenant_id,
+                col.isnot(None),
+                col.ilike(f'%"{aid}"%'),
+            ).all():
+                try:
+                    cache = json.loads(a.fb_image_hashes if col is Asset.fb_image_hashes else a.fb_video_ids)
+                except Exception:
+                    cache = None
+                if isinstance(cache, dict) and aid in cache:
+                    del cache[aid]
+                    if col is Asset.fb_image_hashes:
+                        a.fb_image_hashes = json.dumps(cache, ensure_ascii=False) if cache else None
+                    else:
+                        a.fb_video_ids = json.dumps(cache, ensure_ascii=False) if cache else None
+                    _dirty = True
     except Exception:
         pass  # 清缓存失败不阻断取消纳管主流程
     db.commit()
