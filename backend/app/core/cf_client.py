@@ -218,12 +218,14 @@ class CfClient:
         return data.get("result", {})
 
     def unbind_custom_domain(self, project_name: str, domain: str) -> bool:
-        """解绑 Pages 自定义域名（改前缀/移除域名时清理旧子域名残留）。"""
-        domains = self._get(f"/accounts/{self.account_id}/pages/projects/{project_name}/domains").get("result", [])
-        did = next((d.get("id") for d in domains if d.get("name") == domain), None)
-        if not did:
-            return False
-        r = httpx.delete(f"{CF_API_BASE}/accounts/{self.account_id}/pages/projects/{project_name}/domains/{did}",
+        """解绑 Pages 自定义域名（改前缀/移除域名时清理旧子域名残留）。
+
+        CF Pages domains API 的 DELETE key 是域名本身（name），不是列表返回的 uuid id——
+        用 id 调永远 404（DB 侧移出了列表、CF 侧域名仍挂着）。
+        """
+        r = httpx.delete(f"{CF_API_BASE}/accounts/{self.account_id}/pages/projects/{project_name}/domains/{domain}",
                          headers=self.headers, timeout=30)
         logger.info(f"[CF] unbind {domain}: {r.status_code}")
+        if r.status_code == 404:
+            return False  # 本来就没绑
         return r.json().get("success", False)

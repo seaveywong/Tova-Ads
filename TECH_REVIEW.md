@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-09-02（四）— 留档清账三波：Settings旋钮UI + 令牌页4项 + P2大池分级 + #187落地页集成验证
+
+### 概述
+用户"留档未做的都做"。3+1 agent：commit `3d47955`（wave3）+ 落地页验证修复（本 commit）。#217/#219/#187 三笔挂账清零。
+
+### 变更（按主题）
+| 主题 | 内容 |
+|---|---|
+| Settings 旋钮 | GET/PUT /settings/guard-tuning（并发/学习期/风暴上限，写后即生效）+ 超管卡片；error_i18n +3 |
+| #217 令牌页 | token_type 分流核实已做（补 fb-upload 漏网点：上传是写操作原按 read 选令牌）；data-health 8 类诊断 + data-clean 幂等清理 + Tokens 页超管 modal；孤儿通知核实已做；low_balance 余额告警（口径同看板，6h dedup，阈值可调）|
+| #219 P2 大池 | 36 子项：11 已修失效 / 13 修（CORS 生产拦 localhost、/logs 北京业务日+400、last_7d 口径、compliance 枚举、重复路由装饰器、N+1×4、_CACHE 上限、OAuth 死 nonce、FRONTEND_URL 配置化、Dashboard 死代码×6）/ 13 记录（AdsCache 倒排索引/PyJWT/占用文件 4/产品决策 3/评估不修 5——含 total_roas 核实 1.0 同款）|
+| #187 落地页验证 | 9/9 矩阵全过（建页→发布→子码→日志→防护→编辑重发→FB扫描→删除）。🔴挖出 2 个 P0：worker const 重赋值（V8 不报 esbuild 才拦，发布 500 **两个月**）+ 域名白名单 NameError（绑域发布必炸）；均当场修复；_worker_check.mjs 加变体趟防再发。P1 cf_client 解绑用 uuid id 调 CF（应传域名）→ 404 假成功，已修 |
+
+### 验证
+- smoke19 17/17（旋钮 GET/PUT/no-op/越界、data-health 幂等、CORS 生产无 localhost 头、logs 坏日期 400、9 端点回归）
+- 落地页 E2E 9/9（_verify187.py 可复跑）；测试数据/CF 孤儿项目全清，生产页 6 未动复查健康
+- 语法门×2 轮 / health 1.3.5 / 前端 CF Pages
+
+### 遗留
+- AdsCache 倒排索引表（P2 架构级）、PyJWT 换库、占用文件 4 条 P2（.env 转义/refresh is_managed/tenant_locale N+1/Tokens 排序）
+- FB 解封后实测清单（视频上传/扩量/学习期）+ 保活 #188
+
+---
+
 ## 2026-09-02（三）— 全清单两波：视频链路/规则引擎4项/素材治理/潜客CRM/受众打通/清单对账 + 复审
 
 ### 概述

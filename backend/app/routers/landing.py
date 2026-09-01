@@ -82,8 +82,7 @@ WORKER_SOURCE = r"""
 function parseDev(u){u=(u||"").toLowerCase();let t="desktop";if(/ipad|tablet|playbook|silk/.test(u)||(/android/.test(u)&&!/mobile/.test(u)))t="tablet";else if(/mobile|iphone|ipod|android.*mobile|blackberry|opera mini/.test(u))t="mobile";return t;}
 function matchAny(list,s){if(!Array.isArray(list)||!list.length)return false;s=(s||"").toLowerCase();return list.some(k=>s.includes(String(k).toLowerCase()));}
 function evalProtection(request,url,cf){
-  const rules=LP_CONFIG.rules;
-  if(!rules||typeof rules!=="object")rules={};
+  const rules=(LP_CONFIG.rules&&typeof LP_CONFIG.rules==="object")?LP_CONFIG.rules:{};
   const ua=request.headers.get("user-agent")||"";
   const referer=request.headers.get("referer")||"";
   const country=(cf.country||"").toUpperCase();
@@ -472,7 +471,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     # 否则可传平台域名/他租户域名到 get_zone_id 命中后绑定（跨租户接管/钓鱼载体）
     if roots:
         from ..models.landing_lib import LandingDomain as _LD
-        allowed = {_domain_root(r.domain) for r in db.query(LandingDomain).filter(
+        allowed = {_domain_root(r.domain) for r in db.query(_LD).filter(
             _LD.tenant_id == user.tenant_id, _LD.status == "active").all()}
         bad = [_domain_root(r) for r in roots if _domain_root(r) not in allowed]
         if bad:

@@ -27,26 +27,50 @@ if (!worker || typeof worker.fetch !== 'function') {
   process.exit(1)
 }
 
-// 造一个 /a/ 请求（模拟真实广告点击：带 ad 参数 + UA + referer）
-const req = new Request('https://example.com/a/__check__?ad=1234567890&fbclid=abc', {
-  headers: {
-    'user-agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120 Mobile',
-    'cf-connecting-ip': '1.2.3.4',
-    'referer': 'https://www.facebook.com/',
-  },
-})
 const env = { ASSETS: { fetch: async () => new Response('assets', { status: 200 }) } }
 const ctx = { waitUntil: (p) => { try { if (p && p.catch) p.catch(() => {}) } catch (e) {} } }
 
+async function runOnce(w, url) {
+  const req = new Request(url, {
+    headers: {
+      'user-agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120 Mobile',
+      'cf-connecting-ip': '1.2.3.4',
+      'referer': 'https://www.facebook.com/',
+    },
+  })
+  const resp = await w.fetch(req, env, ctx)
+  if (!resp || typeof resp.status !== 'number') throw new Error('fetch 没返回 Response')
+  return resp.status
+}
+
+// ① 主路径：按真实配置跑一遍 /a/ 请求（模拟广告点击）
 try {
-  const resp = await worker.fetch(req, env, ctx)
-  if (!resp || typeof resp.status !== 'number') {
-    console.error('WORKER_BAD_RESPONSE: fetch 没返回 Response')
-    process.exit(1)
-  }
-  console.log('WORKER_OK status=' + resp.status)
-  process.exit(0)
+  const status = await runOnce(worker, 'https://example.com/a/__check__?ad=1234567890&fbclid=abc')
+  console.log('WORKER_OK status=' + status)
 } catch (e) {
   console.error('WORKER_RUNTIME_ERR:', e.message, e.stack ? e.stack.split('\n')[1] : '')
   process.exit(1)
 }
+
+// ② 变体：把首行 LP_CONFIG 换成 {block_enabled:true, rules:0} 再跑 —— 强制执行
+//    evalProtection 的 rules 兜底分支（rules 非 object）。V8 对"未执行分支里的 const
+//    重赋值"不报错（node --check / import 都放行），只有 wrangler 的 esbuild 静态分析
+//    才拦；让兜底分支真执行，这类错误在发布门就被拦下，不会到 wrangler 才炸。
+//    rules=0（非 null）：后续 LP_CONFIG.rules.frequency 读 undefined 不炸，只测兜底分支。
+const fs = await import('node:fs')
+const src = await fs.promises.readFile(path, 'utf8')
+const mutated = src.replace(/^const LP_CONFIG = .*\n/m, 'const LP_CONFIG = {block_enabled:true, rules:0};\n')
+if (mutated !== src) {
+  const tmp2 = path + '.nulcfg.mjs'
+  await fs.promises.writeFile(tmp2, mutated, 'utf8')
+  try {
+    const w2 = (await import('file://' + tmp2)).default
+    await runOnce(w2, 'https://example.com/a/__check2__')
+  } catch (e) {
+    console.error('WORKER_NULLCFG_ERR:', e.message)
+    process.exit(1)
+  } finally {
+    try { fs.unlinkSync(tmp2) } catch (e) {}
+  }
+}
+process.exit(0)
