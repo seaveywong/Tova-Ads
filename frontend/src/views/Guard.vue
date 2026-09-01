@@ -83,6 +83,8 @@ const editing = ref(null)
 const form = ref({})
 const inspecting = ref(false)
 const accountsList = ref([])
+// 平台 chip（照 AdManager platChip 模式，样式本地复制一份）：作用账户下拉标 FB/TT
+const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
 
 const load = async () => {
   loading.value = true
@@ -306,7 +308,10 @@ const doInspect = async (force = false) => {
         <div class="form-l"><label>{{ t('guard.scopeAccountsLabel') }}</label>
           <el-select v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip
             :placeholder="t('guard.scopeAccountsPh')" style="width:100%">
-            <el-option v-for="a in accountsList" :key="a.act_id" :value="a.act_id" :label="`${a.name}（${a.act_id}）`" />
+            <el-option v-for="a in accountsList" :key="a.act_id" :value="a.act_id"
+              :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + `${a.name}（${a.act_id}）`">
+              <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}（{{ a.act_id }}）
+            </el-option>
           </el-select>
         </div>
         <div class="m-foot"><button class="btn" @click="editOpen=false">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
@@ -371,4 +376,8 @@ const doInspect = async (force = false) => {
 .param-input{width:100px}
 .param-unit{font-size:11px;color:var(--t3)}
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+/* 平台 chip（复制自 AdManager 同款视觉，不跨文件 import）*/
+.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; }
+.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
+.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 </style>

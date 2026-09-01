@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
@@ -9,6 +9,7 @@ import { isSuperadminSync } from '../router'
 const { t, locale } = useI18n()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
+const router = useRouter()
 // 自定义 overlay 用 EP 的 nextZIndex 取 z-index，保证在 el-drawer(2000+) 之上，
 // 且从 overlay 内弹出的 ElMessageBox 又在 overlay 之上（EP 共享计数器单调递增）。
 const ovZ = ref(2050)
@@ -130,6 +131,97 @@ const ttStatusMeta = (c) => c.status === 'active'
   ? { dot: 'ok', label: t('status.tokenValid') }
   : { dot: 'err', label: t('status.tokenInvalid') }
 
+// TT 载入账户 modal（勾选导入，照 FB 载入 modal 交互；无 ID 粘贴模式——只能导授权过的账户）
+const ttLoadOpen = ref(false)
+const ttLoadables = ref([])
+const ttLoadLoading = ref(false)
+const ttLoadSelected = ref({})
+const ttLoadImporting = ref(false)
+const ttLoadSearch = ref('')
+const ttCredAlias = (id) => {
+  const c = ttCreds.value.find(x => x.id === id)
+  return c ? (c.alias || `#${id}`) : ''
+}
+const openTtLoad = async () => {
+  popOverlay()
+  ttLoadOpen.value = true
+  ttLoadSearch.value = ''
+  ttLoadSelected.value = {}
+  ttLoadLoading.value = true
+  try { ttLoadables.value = await GET('/tt/loadable-accounts') }
+  catch (e) { ElMessage.error(e.message || t('tokens.ttLoadFail')); ttLoadables.value = [] }
+  ttLoadLoading.value = false
+}
+const filteredTtLoadable = computed(() => {
+  const q = ttLoadSearch.value.trim().toLowerCase()
+  let arr = ttLoadables.value
+  if (q) arr = arr.filter(a => (a.name || '').toLowerCase().includes(q) || (a.act_id || '').includes(q))
+  return arr
+})
+const ttLoadSelectedCount = computed(() => Object.values(ttLoadSelected.value).filter(Boolean).length)
+const commitTtLoad = async () => {
+  const ids = Object.keys(ttLoadSelected.value).filter(k => ttLoadSelected.value[k])
+  if (!ids.length) { ElMessage.warning(t('tokens.selectUnimported')); return }
+  ttLoadImporting.value = true
+  try {
+    const r = await POST('/tt/import', { act_ids: ids })
+    const ok = (r.imported || []).length
+    ttLoadOpen.value = false
+    await loadTt()
+    if (ok) {
+      // 导入成功 → 提示跳广告账户页（账户页现在 FB/TT 混列）
+      try {
+        await ElMessageBox.confirm(t('tokens.ttImportedGoAds', { n: ok }), t('common.confirm'),
+          { type: 'success', confirmButtonText: t('tokens.goAdsPage'), cancelButtonText: t('common.close') })
+        router.push('/ads')
+      } catch {}
+    } else {
+      ElMessage.info(t('tokens.skippedExisting', { n: r.skipped_existing || 0 }))
+    }
+  } catch (e) { ElMessage.error(e.message || t('tokens.importFail')) }
+  ttLoadImporting.value = false
+}
+
+// TT 令牌生命周期：改名（inline）/ 立即刷新 / 删除带确认（照 FB 卡片交互）
+const editTtId = ref(null)
+const editTtAlias = ref('')
+const startTtEdit = (c) => { editTtId.value = c.id; editTtAlias.value = c.alias || '' }
+const saveTtEdit = async (c) => {
+  if (editTtId.value === null) return
+  const id = editTtId.value, val = editTtAlias.value.trim()
+  editTtId.value = null
+  if (val === (c.alias || '')) return
+  try { await POST(`/tt/credentials/${id}/rename`, { alias: val }); c.alias = val || null; ElMessage.success(t('tokens.updated')) }
+  catch (e) { ElMessage.error(e.message || t('tokens.updateFail')) }
+}
+const ttRefreshing = ref({})
+const ttRefreshNow = async (c) => {
+  if (ttRefreshing.value[c.id]) return
+  ttRefreshing.value = { ...ttRefreshing.value, [c.id]: true }
+  try {
+    const r = await POST(`/tt/credentials/${c.id}/refresh-now`, {})
+    const d = parseTT(r.expires_at)
+    const h = d ? Math.max(0, Math.floor((d.getTime() - Date.now()) / 3600000)) : null
+    ElMessage.success(t('tokens.ttRefreshedNow', { h: h != null ? h : '—' }))
+  } catch (e) { ElMessage.error(e.message || t('tokens.ttRefreshFail')) }
+  ttRefreshing.value = { ...ttRefreshing.value, [c.id]: false }
+  await loadTt()   // 成功/失败都重拉（失败路径后端可能降级 status）
+}
+const ttDeleteCred = async (c) => {
+  try {
+    await ElMessageBox.confirm(
+      t('tokens.ttDeleteConfirm', { name: c.alias || c.advertiser_id || String(c.id) }) + '\n\n' + t('tokens.ttDeleteWarning'),
+      t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
+    await DELETE(`/tt/credentials/${c.id}`)
+    ElMessage.success(t('tokens.deleted'))
+    await loadTt()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
+}
+const handleTtCmd = (cmd, c) => {
+  if (cmd === 'refresh') ttRefreshNow(c)
+  else if (cmd === 'delete') ttDeleteCred(c)
+}
+
 const load = async () => {
   loading.value = true
   try { tokens.value = await GET('/fb/credentials') }
@@ -155,6 +247,10 @@ const ISSUE_LABELS = {
   afc_bad_status: 'hIssueAfcBadStatus',
   token_health_dangling: 'hIssueTokenHealthDangling',
   account_empty_actid: 'hIssueAccountEmptyActid',
+  tt_cred_bad_status: 'hIssueTtCredBadStatus',
+  tt_account_dangling_cred: 'hIssueTtAccountDanglingCred',
+  ttc_dangling: 'hIssueTtcDangling',
+  ttc_bad_status: 'hIssueTtcBadStatus',
 }
 const healthIssues = computed(() => {
   const iss = health.value?.issues || {}
@@ -176,7 +272,7 @@ const runClean = async () => {
   cleaning.value = true
   try {
     const r = await POST('/fb/credentials/data-clean', {})
-    ElMessage.success(t('tokens.cleanDone', { afc: r.afc_deleted || 0, th: r.token_health_deleted || 0, cred: r.primary_cred_nulled || 0, tt: r.token_type_normalized || 0 }))
+    ElMessage.success(t('tokens.cleanDone', { afc: r.afc_deleted || 0, th: r.token_health_deleted || 0, cred: r.primary_cred_nulled || 0, tt: r.token_type_normalized || 0, ttc: r.ttc_deleted || 0, ttp: r.tt_primary_cred_nulled || 0 }))
     await fetchHealth()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   cleaning.value = false
@@ -474,6 +570,7 @@ const deleteToken = async (tk) => {
       </div>
       <div v-else class="bar-r">
         <button class="btn primary" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+        <button class="btn" @click="openTtLoad">{{ t('tokens.importAccounts') }}</button>
         <button class="btn" @click="copyTtOAuth">{{ t('tokens.copyOAuthUrl') }}</button>
       </div>
     </div>
@@ -493,7 +590,8 @@ const deleteToken = async (tk) => {
         <div v-for="c in ttCreds" :key="c.id" class="tt-card">
           <span class="c-st"><span class="dot" :class="ttStatusMeta(c).dot"></span>{{ ttStatusMeta(c).label }}</span>
           <div class="tt-main">
-            <span class="tt-alias">{{ c.alias || t('tokens.unnamed') }}</span>
+            <input v-if="editTtId===c.id" v-model="editTtAlias" class="inp" @keyup.enter="saveTtEdit(c)" @blur="saveTtEdit(c)" />
+            <span v-else class="tt-alias nm" @click="startTtEdit(c)">{{ c.alias || t('tokens.unnamed') }}<span class="pen">✎</span></span>
             <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(c.advertiser_id)">{{ c.advertiser_id || '—' }}</span>
           </div>
           <span class="st-tag off">{{ t('tokens.ttLinkedAccounts') }} {{ c.account_count ?? 0 }}</span>
@@ -511,6 +609,17 @@ const deleteToken = async (tk) => {
               <span class="st-tag" :class="ttRefreshDays(c).cls" :title="ttRefreshDays(c).cls==='err' ? t('tokens.ttReauthTip') : ''">{{ ttRefreshDays(c).days != null ? t('tokens.ttDaysUnit', { n: ttRefreshDays(c).days }) : '—' }}</span>
               <button v-if="ttRefreshDays(c).cls === 'err'" class="btn tt-reauth" @click="connectTikTok">{{ t('tokens.ttReauth') }}</button>
             </span>
+          </div>
+          <div class="c-op" @click.stop>
+            <el-dropdown trigger="click" @command="cmd => handleTtCmd(cmd, c)">
+              <button class="dots-btn" @click.stop>⋯</button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="refresh" :disabled="!!ttRefreshing[c.id]">{{ ttRefreshing[c.id] ? t('tokens.refreshing') : t('tokens.ttRefreshNow') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided>{{ t('tokens.deleteToken') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -720,12 +829,34 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
+    <div v-if="ttLoadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="ttLoadOpen=false">
+      <div class="modal wide">
+        <div class="m-title">{{ t('tokens.importAccounts') }} · TikTok</div>
+        <div class="hint-left">{{ t('tokens.ttLoadHint') }}</div>
+        <input v-model="ttLoadSearch" class="input load-search" :placeholder="t('tokens.searchAccountPlaceholder')" />
+        <div class="load-meta">{{ t('tokens.loadableMeta', { total: ttLoadables.length, selected: ttLoadSelectedCount }) }}</div>
+        <div v-loading="ttLoadLoading" class="load-list">
+          <label v-for="a in filteredTtLoadable" :key="a.act_id" class="load-row">
+            <input type="checkbox" :checked="!!ttLoadSelected[a.act_id]" @change="ttLoadSelected[a.act_id] = $event.target.checked" />
+            <span class="ai-name">{{ a.name }}</span>
+            <span class="ai-id blue" @click.stop="copyId(a.act_id)">{{ a.act_id }}</span>
+            <span v-if="ttCredAlias(a.tt_credential_id)" class="tk-badge" :title="t('tokens.ttCoverToken')">{{ ttCredAlias(a.tt_credential_id) }}</span>
+          </label>
+          <div v-if="!filteredTtLoadable.length && !ttLoadLoading" class="drawer-empty">{{ t('tokens.ttNoLoadable') }}</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" @click="ttLoadOpen=false">{{ t('common.cancel') }}</button>
+          <button class="btn primary" :disabled="ttLoadImporting" @click="commitTtLoad">{{ t('tokens.importSelected') }}</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="healthOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="healthOpen=false">
       <div class="modal wide">
         <div class="m-title">{{ t('tokens.healthTitle') }}</div>
         <div v-loading="healthLoading">
           <div v-if="health" class="hint-left health-meta">
-            {{ t('tokens.healthMeta', { creds: health.totals.credentials, accounts: health.totals.accounts, links: health.totals.account_fb_credentials, th: health.totals.token_health }) }}
+            {{ t('tokens.healthMeta', { creds: health.totals.credentials, accounts: health.totals.accounts, links: health.totals.account_fb_credentials, th: health.totals.token_health, ttc: health.totals.tt_credentials ?? 0, ttl: health.totals.account_tt_credentials ?? 0 }) }}
           </div>
           <div v-if="healthIssues.length" class="health-list">
             <div v-for="iss in healthIssues" :key="iss.key" class="health-row">
@@ -949,7 +1080,7 @@ const deleteToken = async (tk) => {
 .tt-app-form{display:flex;gap:8px;flex-wrap:wrap}
 .tt-app-form .input{flex:1;min-width:160px}
 .tt-list{display:flex;flex-direction:column;gap:8px}
-.tt-card{display:grid;grid-template-columns:86px minmax(140px,1fr) auto auto auto auto;gap:14px;align-items:center;padding:12px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);font-size:13px}
+.tt-card{display:grid;grid-template-columns:86px minmax(140px,1fr) auto auto auto auto 36px;gap:14px;align-items:center;padding:12px 14px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);font-size:13px}
 .tt-main{display:flex;align-items:center;gap:8px;overflow:hidden}
 .tt-alias{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tt-cell{display:flex;flex-direction:column;gap:3px;align-items:flex-start}

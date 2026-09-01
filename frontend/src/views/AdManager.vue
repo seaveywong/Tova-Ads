@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, PATCH, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fbAdStatus } from '../composables/useStatus'
+import { fbAdStatus, ttAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { usePlatform } from '../composables/usePlatform'
 import { useI18n } from 'vue-i18n'
@@ -36,8 +36,12 @@ const curRange = computed(() => {
   return r ? { date_from: r[0], date_to: r[1] } : { date_from: '', date_to: '' }
 })
 
-const statusLabel = (s) => fbAdStatus(s).label
-const statusDot = (s) => fbAdStatus(s).cls
+// 状态展示统一方案：后端已把 TT 行归一成 FB 形状 effective_status（ACTIVE/PAUSED/DISAPPROVED…），
+// 主用 fbAdStatus；TT 特有枚举（STATUS_BUDGET_EXCEED 等透传值，FB registry 未收录）回落
+// TT registry 翻译——三层表一套 chip 逻辑，无 per-row 平台分支
+const _fbKnown = (s) => s && fbAdStatus(s).label !== s
+const statusLabel = (s) => _fbKnown(s) ? fbAdStatus(s).label : ttAdStatus(s).label
+const statusDot = (s) => _fbKnown(s) ? fbAdStatus(s).cls : ttAdStatus(s).cls
 const OBJ_MAP = computed(() => ({ OUTCOME_SALES: t('adm.objSales'), OUTCOME_TRAFFIC: t('adm.objTraffic'), OUTCOME_ENGAGEMENT: t('adm.objEngagement'), OUTCOME_AWARENESS: t('adm.objAwareness'), OUTCOME_LEAD_GENERATION: t('adm.objLead'), LINK_CLICKS: t('adm.objTraffic'), CONVERSIONS: t('adm.objSales'), MESSAGES: t('adm.objMessages'), PAGE_LIKES: t('adm.objPageLikes'), POST_ENGAGEMENT: t('adm.objEngagement'), VIDEO_VIEWS: t('adm.objVideoViews'), BRAND_AWARENESS: t('adm.objAwareness'), REACH: t('adm.objReach') }))
 const objLabel = (o) => OBJ_MAP.value[o] || o || '-'
 const OPT_MAP = computed(() => ({ OFFSITE_CONVERSIONS: t('adm.optConversion'), LINK_CLICKS: t('adm.optLinkClicks'), LANDING_PAGE_VIEWS: t('adm.optLandingViews'), POST_ENGAGEMENT: t('adm.objEngagement'), REACH: t('adm.objReach'), IMPRESSIONS: t('adm.optImpressions'), VIDEO_VIEWS: t('adm.objVideoViews'), APP_INSTALLS: t('adm.optAppInstalls'), LEAD_GENERATION: t('adm.optLeadGen'), MESSAGING_CONVERSATIONS: t('adm.optMsgConv'), VALUE: t('adm.optValue') }))

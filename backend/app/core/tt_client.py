@@ -7,8 +7,11 @@
 OAuth 端点（access_token/refresh_token/advertiser/get）用 app_id + secret/refresh_token。
 
 方法面与 FbClient 对齐（get_campaigns/get_adsets/get_ads/get_active_ads/
-get_ad_insights/pause_ad/get_node/update_status），供巡检按平台分发复用；
-参数结构与 FB 不同（advertiser_id 维度 + filtering JSON），sandbox 实测后再校准。
+get_ad_insights/pause_ad/get_node/update_status/update_budget/rename_node/delete_node），
+供巡检按平台分发复用；参数结构与 FB 不同（advertiser_id 维度 + filtering JSON），sandbox 实测后再校准。
+
+TT→FB 形状归一映射（tt_to_fb_campaign/adset/ad）：TT 实体 → FB 字段形状（键名/状态/
+预算单位），ads_cache 同构存储，广告管理器展示层零平台分支。
 
 P3 增补（部署链路）：create_campaign/create_adgroup/create_ad（建广告三件套，
 payload 由 core/tt_ad_builder.py 构造）+ upload_ad_image/upload_ad_video
@@ -176,6 +179,110 @@ def classify_tt_error(code: int, message: str = "") -> tuple[str, str]:
     if "token" in m and ("expire" in m or "invalid" in m):
         return TT_ERROR_MAP[40105]
     return ("generic", f"TikTok 返回错误（code {code}）：{(message or '')[:120]}")
+
+
+# ── TT→FB 形状归一（ads_cache 同构存储：TT 实体 → FB 字段形状，管理器展示层零平台分支）──
+# sandbox 校准点：各 get 端点默认字段集与枚举值以 v1.3 实测为准（objective_type /
+# optimization_goal 枚举随版本扩充），映射按官方文档 v1.3 编写，实测差异只需改这一段。
+
+# opt_status（用户配置态）→ FB status/configured_status。TT DELETE=FB ARCHIVED（软删语义）
+TT_OPT_TO_FB = {"ENABLE": "ACTIVE", "DISABLE": "PAUSED", "DELETE": "ARCHIVED"}
+# status（投放状态，TT 的 effective 语义：含预算耗尽/完成等阻塞态）→ FB effective_status。
+# 未收录枚举（STATUS_BUDGET_EXCEED/STATUS_COMPLETE…）原样透传——前端 TT registry 兜底翻译
+TT_STATUS_TO_FB = {"STATUS_ENABLE": "ACTIVE", "STATUS_DISABLE": "PAUSED", "STATUS_DELETE": "DELETED"}
+# TT objective_type → FB objective（对齐前端 OBJ_MAP 展示；语义近似映射）
+TT_OBJECTIVE_TO_FB = {
+    "TRAFFIC": "LINK_CLICKS", "CONVERSIONS": "CONVERSIONS", "AWARENESS": "BRAND_AWARENESS",
+    "REACH": "REACH", "ENGAGEMENT": "OUTCOME_ENGAGEMENT", "LEAD_GENERATION": "OUTCOME_LEAD_GENERATION",
+    "VIDEO_VIEWS": "VIDEO_VIEWS", "APP_PROMOTION": "APP_PROMOTION",
+    "CATALOG_SALES": "CATALOG_SALES", "LIVE_PROMOTION": "LIVE_PROMOTION",
+}
+# TT optimization_goal → FB optimization_goal（对齐前端 OPT_MAP 展示）
+TT_OPTGOAL_TO_FB = {
+    "CLICK": "LINK_CLICKS", "CONVERSION": "OFFSITE_CONVERSIONS", "IMPRESSION": "IMPRESSIONS",
+    "REACH": "REACH", "VIDEO_VIEW": "VIDEO_VIEWS", "LEAD": "LEAD_GENERATION",
+}
+
+# 零小数位币种（同 guard_engine._NO_DECIMAL_CURRENCIES，模块内自带避免反向依赖 services 层）
+_TT_ZERO_DECIMAL = {"JPY", "KRW", "IDR", "VND", "CLP", "COP", "HUF", "PYG", "UGX", "TZS"}
+
+
+def tt_budget_to_fb_minor(budget, currency: str) -> str:
+    """TT 预算（整本币，20=20 美元/20 日元）→ FB minor units 字符串（'2000'=$20）。
+    存进 ads_cache 后展示层走 FB 同一 from_minor_units 逆换算路径；非法值返 ''。"""
+    try:
+        v = int(budget)
+    except (TypeError, ValueError):
+        return ""
+    factor = 1 if (currency or "USD").upper() in _TT_ZERO_DECIMAL else 100
+    return str(v * factor)
+
+
+def _tt_status_fields(o: dict) -> dict:
+    """opt_status/status/show_status → FB status/configured_status/effective_status。
+
+    effective 取 TT status（投放状态，含阻塞态）优先、opt 兜底；show_status=SHOW_STATUS_NO
+    （审核拒）为最高可见级——盖成 DISAPPROVED，对齐 FB 拒审红标 + ⚠ 拒审原因入口。
+    原生字段全部保留在行上（guard 兜底读 ad_id/status 原生键不受影响）。
+    """
+    opt = str(o.get("opt_status") or "").upper()
+    raw = str(o.get("status") or "").upper()
+    configured = TT_OPT_TO_FB.get(opt, opt)
+    eff = TT_STATUS_TO_FB.get(raw, raw) or configured  # 未知投放态透传；status 缺失回落 opt
+    if str(o.get("show_status") or "").upper() == "SHOW_STATUS_NO":
+        eff = "DISAPPROVED"
+    return {"status": configured, "configured_status": configured, "effective_status": eff}
+
+
+def _tt_budget_fields(o: dict, currency: str) -> dict:
+    """budget_mode/budget（整本币）→ FB daily_budget/lifetime_budget（minor units）。
+    BUDGET_MODE_INFINITE（不限）不产出预算字段——同 FB 无预算对象，前端显示层级占位且不可编辑。"""
+    out: dict = {}
+    mode = str(o.get("budget_mode") or "").upper()
+    if mode == "BUDGET_MODE_DAY":
+        out["daily_budget"] = tt_budget_to_fb_minor(o.get("budget"), currency)
+    elif mode == "BUDGET_MODE_TOTAL":
+        out["lifetime_budget"] = tt_budget_to_fb_minor(o.get("budget"), currency)
+    return out
+
+
+def tt_to_fb_campaign(c: dict, currency: str = "USD") -> dict:
+    """TT campaign/get 行 → FB campaign 形状（键名/状态/预算单位三归一）。"""
+    out = dict(c)
+    out["id"] = str(c.get("campaign_id") or "")
+    out["name"] = c.get("campaign_name") or ""
+    out["objective"] = TT_OBJECTIVE_TO_FB.get(str(c.get("objective_type") or "").upper(),
+                                              c.get("objective_type") or "")
+    out.update(_tt_status_fields(c))
+    out.update(_tt_budget_fields(c, currency))
+    return out
+
+
+def tt_to_fb_adset(a: dict, currency: str = "USD") -> dict:
+    """TT adgroup/get 行 → FB adset 形状。"""
+    out = dict(a)
+    out["id"] = str(a.get("adgroup_id") or "")
+    out["name"] = a.get("adgroup_name") or ""
+    out["campaign_id"] = str(a.get("campaign_id") or "")
+    out["optimization_goal"] = TT_OPTGOAL_TO_FB.get(str(a.get("optimization_goal") or "").upper(),
+                                                    a.get("optimization_goal") or "")
+    out.update(_tt_status_fields(a))
+    out.update(_tt_budget_fields(a, currency))
+    return out
+
+
+def tt_to_fb_ad(a: dict, currency: str = "USD") -> dict:
+    """TT ad/get 行 → FB ad 形状（create_time 空格分隔 → ISO T；无缩略图/主页帖，creative 不映射）。"""
+    out = dict(a)
+    out["id"] = str(a.get("ad_id") or "")
+    out["name"] = a.get("ad_name") or ""
+    out["adset_id"] = str(a.get("adgroup_id") or "")
+    out["campaign_id"] = str(a.get("campaign_id") or "")
+    ct = str(a.get("create_time") or "")
+    if ct:
+        out["created_time"] = ct.replace(" ", "T")
+    out.update(_tt_status_fields(a))
+    return out
 
 
 class TtApiError(Exception):
@@ -497,6 +604,41 @@ class TtClient:
             params["fields"] = json.dumps(fields)
         items = self.get_paged(path, params)
         return items[0] if items else {}
+
+    def update_budget(self, node_id: str, budget: int, advertiser_id: str = "",
+                      budget_mode: str = "BUDGET_MODE_DAY") -> dict:
+        """改广告组预算（adgroup/update/）。budget=整本币（无 ×100，与 FB minor units 不同）；
+        budget_mode 需与目标类型一致（DAY/TOTAL，不限→改设任一类型时一并传）。
+        sandbox 校准点：campaign 层预算能否走 campaign/update/ 未证实——现仅 adgroup 层。"""
+        try:
+            adv = int(advertiser_id)
+        except (TypeError, ValueError):
+            adv = advertiser_id
+        return self.post("adgroup/update/", {
+            "advertiser_id": adv,
+            "adgroup_ids": [str(node_id)],
+            "budget": int(budget),
+            "budget_mode": budget_mode,
+        })
+
+    def rename_node(self, node_id: str, name: str, node_type: str = "ad",
+                    advertiser_id: str = "") -> dict:
+        """改名（campaign/adgroup/ad 通用；TT 各层端点与 name 字段名不同：campaign_name 等）。"""
+        path, ids_key, name_key = {
+            "campaign": ("campaign/update/", "campaign_ids", "campaign_name"),
+            "adgroup": ("adgroup/update/", "adgroup_ids", "adgroup_name"),
+            "ad": ("ad/update/", "ad_ids", "ad_name"),
+        }.get(node_type, ("ad/update/", "ad_ids", "ad_name"))
+        try:
+            adv = int(advertiser_id)
+        except (TypeError, ValueError):
+            adv = advertiser_id
+        return self.post(path, {"advertiser_id": adv, ids_key: [str(node_id)], name_key: name})
+
+    def delete_node(self, node_id: str, node_type: str = "ad", advertiser_id: str = "") -> dict:
+        """删节点。TT 无 FB 式 DELETE /{id} 硬删端点——opt_status=DELETE 即 TT 的删除语义
+        （sandbox 校准点：若 /ad/delete/ 等硬删端点实测可用，在此切换即可，签名不变）。"""
+        return self.update_status(node_id, "ARCHIVED", node_type, advertiser_id)
 
     # ── 广告创建三件套（P3 部署链路；payload 由 core/tt_ad_builder.py 构造）──
 

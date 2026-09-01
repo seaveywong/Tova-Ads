@@ -101,6 +101,14 @@ NOTIFY = {
             "en": "Account: {name} ({act_id})\nCampaign: {camp_name} ({camp_id})\nSentinel armed, ACTIVE campaigns paused directly.",
         },
     },
+    # 哨兵 TT 分支（ad 级 DISABLE；campaign 级批量形状 sandbox 验证前先逐条停广告）
+    "sentinel_pause_ad": {
+        "title": {"zh": "哨兵暂停广告", "en": "Sentinel Paused Ad"},
+        "body": {
+            "zh": "账户：{name}（TikTok {act_id}）\n广告：{ad_name}（{ad_id}）\n哨兵已 arm，投放中广告直接停。",
+            "en": "Account: {name} (TikTok {act_id})\nAd: {ad_name} ({ad_id})\nSentinel armed, active ads paused directly.",
+        },
+    },
     "rule_scale": {
         "title": {"zh": "扩量【{category}】· {name}", "en": "Scale-Up [{category}] · {name}"},
         "body": {

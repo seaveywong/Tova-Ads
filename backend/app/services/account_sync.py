@@ -84,6 +84,132 @@ def _maybe_low_balance_alert(db, tenant_id: int, acc, threshold_usd: float) -> b
     return False
 
 
+# TT advertiser status（Business API advertiser/info/ 的 status）→ account_status（FB 语义：
+# 1 正常 / 2 禁用 / 7 政策受限；异常判定沿用 STATUS_ABNORMAL 集合，恢复=回到 1）。
+# ⚠ sandbox 未实测：按 TikTok 官方文档枚举语义映射，首次真跑如与实际返回不符在此校准；
+# 未收录枚举不动状态（防未知值 flap），只记 info 日志留痕。
+TT_STATUS_MAP = {
+    "STATUS_ENABLE": 1,
+    "STATUS_DISABLE": 2,           # 禁用/被关
+    "STATUS_LIMIT_LOGIN": 2,       # 登录受限
+    "STATUS_RESTRICT": 7,          # 受限（政策类），对齐 FB 7=政策违规
+    "STATUS_PENDING_CONFIRM": 2,   # 待确认（未过审不能投）
+    "STATUS_PENDING_VERIFIED": 2,
+    "STATUS_CONFIRM_FAIL": 2,
+    "STATUS_SELF_SERVICE_UNAUDITED": 2,
+    "STATUS_CONTRACT_PAYMENT_UNAUDITED": 2,
+    "STATUS_WAIT_FOR_BPM_AUDIT": 2,
+    "STATUS_WAIT_FOR_PUBLIC_AUTH": 2,
+    "STATUS_WAIT_FOR_LEGAL_REPRESENTATIVE_AUTH": 2,
+}
+TT_STATUS_LABELS = {1: "正常", 2: "禁用", 7: "受限"}
+TT_STATUS_ADVICE = {
+    2: "TikTok 广告主已被禁用或未过审，请到 TikTok 后台查看原因。",
+    7: "账户被 TikTok 限制投放，请检查广告内容或申诉。",
+}
+
+
+def _sync_tt_accounts(db) -> tuple[int, int, int]:
+    """同步 managed TT 账户（状态/余额/币种/时区）+ 异常/恢复告警（事件同款 account_status_change）。
+
+    余额口径照 FB：acc.balance 存 minor-units 字符串（TT API 返本币明文 → ×_money_factor
+    入库），既有读路径（from_minor_units / calc_available_balance / 看板展示）零改动；
+    USD 换算沿用 to_usd（CurrencyRate）。TT 无 spend_cap/amount_spent 对应字段，不写；
+    低额告警本批不接（balance 字段语义 sandbox 校准后再开）。
+    一次事件只告一次（_last_notified_status 同款去重）+ 恢复告知，照 FB 链。
+    返回 (synced, alerted, recovered)。
+    """
+    from ..core.fb_tokens import tt_client_for_account
+    from .guard_engine import _money_factor
+    tt_accs = db.query(Account).filter(
+        Account.platform == "tt",
+        Account.is_managed.is_(True),
+    ).all()
+    synced = alerted = recovered = 0
+    for acc in tt_accs:
+        try:
+            tt, _cred = tt_client_for_account(db, acc.tenant_id, acc.act_id, "read")
+            if not tt:
+                continue
+            info = tt.get_advertiser_info(acc.act_id) or {}
+            if info.get("currency") and info["currency"] != acc.currency:
+                acc.currency = info["currency"]
+            if info.get("timezone"):
+                acc.timezone_name = info["timezone"]
+            try:
+                _factor = _money_factor(acc.currency or "USD")
+                acc.balance = str(int(round(float(info.get("balance") or 0) * _factor)))
+            except (TypeError, ValueError):
+                pass  # balance 缺失/非数值（sandbox 差异）→ 不动
+            raw_status = str(info.get("status") or "").upper()
+            new_status = TT_STATUS_MAP.get(raw_status)
+            if new_status is None:
+                if raw_status:
+                    logger.info(f"[AccountSync][TT] 账户 {acc.act_id} 未收录状态枚举: {raw_status}")
+            else:
+                old_status = acc.account_status or 1
+                if old_status != new_status:
+                    if new_status in STATUS_ABNORMAL:
+                        # 进入异常：仅"新状态 ≠ 上次已告状态"时告（同 FB：同状态不重报）
+                        if _last_notified_status(db, acc.tenant_id, acc.act_id) != new_status:
+                            old_label = STATUS_LABELS.get(old_status, str(old_status))
+                            new_label = TT_STATUS_LABELS.get(new_status, str(new_status))
+                            try:
+                                emit_notification(
+                                    db, tenant_id=acc.tenant_id, level="critical",
+                                    event_type="account_status_change",
+                                    title=f"账户状态变动 · {acc.name}",
+                                    body=(f"账户：{acc.name}（TikTok {acc.act_id}）\n"
+                                          f"状态：<b>{old_label} → {new_label}</b>（{raw_status}）\n"
+                                          f"{TT_STATUS_ADVICE.get(new_status, '')}"),
+                                    roles=["owner", "operator"], trace_id=new_trace_id(),
+                                    target_type="account", target_id=acc.act_id,
+                                )
+                            except Exception as e:
+                                logger.warning(f"[AccountSync][TT] 告警发送失败 act {acc.act_id}: {e}")
+                            write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                                      actor_type="system", target_type="account", target_id=acc.act_id,
+                                      action_type="account_status_change", source="account_sync",
+                                      result="alerted", platform="tt",
+                                      trigger_detail=f"old={old_status} new={new_status} tt_status={raw_status}",
+                                      metadata={"status": new_status, "old": old_status,
+                                                "platform": "tt", "tt_status": raw_status})
+                            alerted += 1
+                    elif new_status == 1 and old_status in STATUS_ABNORMAL:
+                        # 恢复正常：告知一次 + 写 status=1（使再异常能再告，同 FB）
+                        old_label = STATUS_LABELS.get(old_status, str(old_status))
+                        try:
+                            emit_notification(
+                                db, tenant_id=acc.tenant_id, level="info",
+                                event_type="account_status_recovered",
+                                title=f"账户已恢复 · {acc.name}",
+                                body=(f"账户：{acc.name}（TikTok {acc.act_id}）\n"
+                                      f"状态：<b>{old_label} → 正常</b>（{raw_status}）\n账户已恢复正常。"),
+                                roles=["owner", "operator"], trace_id=new_trace_id(),
+                                target_type="account", target_id=acc.act_id,
+                            )
+                        except Exception as e:
+                            logger.warning(f"[AccountSync][TT] 恢复告警发送失败 act {acc.act_id}: {e}")
+                        write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                                  actor_type="system", target_type="account", target_id=acc.act_id,
+                                  action_type="account_status_change", source="account_sync",
+                                  result="recovered", platform="tt",
+                                  trigger_detail=f"old={old_status} new=1 tt_status={raw_status}",
+                                  metadata={"status": 1, "old": old_status, "recovered": True,
+                                            "platform": "tt", "tt_status": raw_status})
+                        recovered += 1
+                acc.account_status = new_status
+            synced += 1
+            if synced % 25 == 0:
+                db.commit()
+        except Exception as e:
+            # 单账户异常不阻断其他 TT 账户（照 FB per-account 容错）
+            logger.warning(f"[AccountSync][TT] 账户 {acc.act_id} 处理异常: {e}")
+            db.rollback()
+            continue
+    return synced, alerted, recovered
+
+
 def run_account_status_sync():
     """定时同步账户状态/余额，变动到异常 → emit 告警。每 30min。"""
     lock = acquire_run_lock(110)
@@ -199,6 +325,16 @@ def run_account_status_sync():
                 logger.warning(f"[AccountSync] 账户 {raw.get('account_id','')} 处理异常: {e}")
                 db.rollback()
                 continue
+        # ── TT 账户（P1-9）：advertiser/info 拉状态/余额/币种/时区；异常/恢复告警链同款 FB ──
+        # 整段 try 包裹：TT 侧异常不影响 FB 已完成的同步提交
+        try:
+            _t_synced, _t_alerted, _t_recovered = _sync_tt_accounts(db)
+            synced += _t_synced
+            alerted += _t_alerted
+            recovered += _t_recovered
+        except Exception as e:
+            logger.warning(f"[AccountSync][TT] 同步异常: {e}")
+            db.rollback()
         db.commit()
         logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复，{low_balance_alerts} 低额告警")
     finally:

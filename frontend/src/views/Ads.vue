@@ -88,6 +88,8 @@ const batchSync = async () => {
   accLoading.value = false
 }
 const balKindLabel = (k) => k === 'limited' ? t('ads.balLimited') : (k === 'unlimited' ? t('ads.balUnlimited') : t('ads.balHighLimited'))
+// 平台 chip（照 AdManager platChip：仅显式 fb/tt，未知平台不标）
+const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
 const boundTokenTitle = (a) => {
   const alias = a.bound_alias || t('ads.unbound')
   const state = a.bound_available ? t('ads.tokenOk') : t('ads.tokenAbnormal')
@@ -109,17 +111,34 @@ const load = async () => {
 }
 const openLoad = async () => {
   loadOpen.value = true; loadLoading.value = true
-  try { loadables.value = (await GET('/fb/credentials/loadable-accounts')).map(a => ({ ...a, _checked: false })) }
-  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  // 平台分流：FB 勾选清单 + TT 授权未纳管账户并拉（一侧失败不影响另一侧展示）
+  const rows = []
+  const [fb, tt] = await Promise.allSettled([
+    GET('/fb/credentials/loadable-accounts'),
+    GET('/tt/loadable-accounts'),
+  ])
+  if (fb.status === 'fulfilled') for (const a of fb.value) rows.push({ ...a, platform: 'fb', _checked: false })
+  if (tt.status === 'fulfilled') for (const a of tt.value) rows.push({ account_id: a.act_id, name: a.name || a.act_id, platform: 'tt', _checked: false })
+  if (fb.status === 'rejected' && tt.status === 'rejected') ElMessage.error(fb.reason?.message || t('common.opFail'))
+  loadables.value = rows
   loadLoading.value = false
 }
 const doImport = async () => {
-  const ids = loadables.value.filter(a => a._checked && !a.imported).map(a => a.account_id).filter(Boolean)
-  if (!ids.length) return ElMessage.warning(t('ads.selectToImport'))
+  const fbIds = loadables.value.filter(a => a._checked && a.platform !== 'tt' && !a.imported).map(a => a.account_id).filter(Boolean)
+  const ttIds = loadables.value.filter(a => a._checked && a.platform === 'tt').map(a => a.account_id).filter(Boolean)
+  if (!fbIds.length && !ttIds.length) return ElMessage.warning(t('ads.selectToImport'))
   importing.value = true
   try {
-    const r = await POST('/fb/import', { account_ids: ids })
-    ElMessage.success(t('ads.imported', { n: r.count || 0, skipped: r.skipped_existing || 0 }))
+    let ok = 0, skipped = 0
+    if (fbIds.length) {
+      const r = await POST('/fb/import', { account_ids: fbIds })
+      ok += r.count || 0; skipped += r.skipped_existing || 0
+    }
+    if (ttIds.length) {
+      const r = await POST('/tt/import', { act_ids: ttIds })
+      ok += (r.imported || []).length; skipped += r.skipped_existing || 0
+    }
+    ElMessage.success(t('ads.imported', { n: ok, skipped }))
     loadOpen.value = false; await load()
   } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   importing.value = false
@@ -200,7 +219,7 @@ onMounted(async () => {
         <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
         <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
-          <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: a.act_id } })">{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
+          <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: a.act_id } })"><span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
           <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
         </div>
         <div>{{ fmtMoney(a.balance, a.currency) }}<span v-if="a.balance_usd != null && a.currency !== 'USD'" class="sub"> ≈${{ a.balance_usd }}</span></div>
@@ -243,8 +262,9 @@ onMounted(async () => {
       <div class="modal">
         <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="loadOpen = false">✕</button></div>
         <div class="load-list" v-loading="loadLoading">
-          <div v-for="a in loadables" :key="a.account_id" class="load-row">
+          <div v-for="a in loadables" :key="a.platform + ':' + a.account_id" class="load-row">
             <input type="checkbox" v-model="a._checked" :disabled="a.imported" />
+            <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>
             <span class="lm-name">{{ a.name }}</span>
             <code>{{ a.account_id }}</code>
             <span class="tag" :class="a.imported ? 'off' : 'ok'">{{ a.imported ? t('ads.importedTag') : t('ads.importableTag') }}</span>
@@ -310,4 +330,8 @@ onMounted(async () => {
 .load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px }
 .lm-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .load-row code { color: var(--t3); font-size: 11px }
+/* 平台 chip（照 AdManager 配色：FB 蓝 / TT 红） */
+.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; vertical-align: middle }
+.plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff }
+.plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d }
 </style>

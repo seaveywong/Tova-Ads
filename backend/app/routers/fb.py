@@ -1116,12 +1116,15 @@ def unmanage_account(
     ).first()
     if not acc:
         raise HTTPException(404, "账户未纳管")
-    # 先数 ACTIVE 广告（删缓存前数——前端确认文案要告知"广告不会停、止损失效"）
+    # 先数 ACTIVE 广告（删缓存前数——前端确认文案要告知"广告不会停、止损失效"）。
+    # ads_cache 同 act_id 可跨平台并存（FB/TT act_id 空间独立）——按账户 platform 过滤。
     active_ads = 0
+    _plat = acc.platform or "fb"
     try:
         import json as _json
         from ..models.ads_cache import AdsCache as _AC2
-        _c = db.query(_AC2).filter(_AC2.tenant_id == user.tenant_id, _AC2.act_id == aid).first()
+        _c = db.query(_AC2).filter(_AC2.tenant_id == user.tenant_id, _AC2.act_id == aid,
+                                   _AC2.platform == _plat).first()
         if _c and _c.ads_json:
             active_ads = sum(1 for _a in _json.loads(_c.ads_json or "[]")
                              if str(_a.get("effective_status", "")) == "ACTIVE")
@@ -1133,11 +1136,13 @@ def unmanage_account(
     acc.sentinel_auto_armed = False
     acc.warmup_state = "none"
     # 清该账户的 ads_cache（广告管理器读它——不清则移除后仍显示陈旧广告列表）。
+    # 同上按 platform 过滤：只清本平台的缓存行，不误删另一平台同 act_id 的行。
     # perf_snapshots 保留（历史消耗数据不丢，dashboard/报表仍可查）。
     try:
         from ..models.ads_cache import AdsCache
         db.query(AdsCache).filter(
-            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == aid).delete()
+            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == aid,
+            AdsCache.platform == _plat).delete()
     except Exception:
         pass
     # 清该账户的素材 FB image_hash/video_id 缓存：解除纳管后成死数据，
@@ -1243,9 +1248,53 @@ def _scan_token_data_health(db: Session) -> dict:
         {"tenant_id": a.tenant_id, "id": a.id, "name": a.name}
         for a in accounts if not (a.act_id or "").strip()])
 
+    # ── TikTok 侧（照 FB 思路简化 4 类）──
+    from ..models.tt import TtCredential, AccountTtCredential
+    tt_creds = db.query(TtCredential).all()
+    ttcs = db.query(AccountTtCredential).all()
+    tt_cred_by_id = {c.id: c for c in tt_creds}
+    _TT_CRED_STATUS_ENUM = ("active", "invalid", "expired")
+    _ATC_STATUS_ENUM = ("active", "disabled")
+
+    # ⑦ tt_credentials.status 非法（写路径只产 active/invalid/expired）
+    _issue("tt_cred_bad_status", False, [
+        {"tenant_id": c.tenant_id, "id": c.id, "alias": c.alias, "status": c.status}
+        for c in tt_creds if (c.status or "") not in _TT_CRED_STATUS_ENUM])
+
+    # ⑧ accounts.tt_credential_id 悬挂：指向已删/跨租户 TT 令牌
+    rows = []
+    for a in accounts:
+        if not a.tt_credential_id:
+            continue
+        c = tt_cred_by_id.get(a.tt_credential_id)
+        reason = "missing_cred" if c is None else (
+            "cross_tenant" if c.tenant_id != a.tenant_id else None)
+        if reason:
+            rows.append({"tenant_id": a.tenant_id, "account_id": a.id, "act_id": a.act_id,
+                         "tt_credential_id": a.tt_credential_id, "reason": reason})
+    _issue("tt_account_dangling_cred", True, rows)
+
+    # ⑨ account_tt_credentials 悬挂/租户错位（reason 区分；⑩ status 非法只报告）
+    dangling, bad_status = [], []
+    for r in ttcs:
+        a, c = acct_by_id.get(r.account_id), tt_cred_by_id.get(r.tt_credential_id)
+        if a is None or c is None:
+            dangling.append({"tenant_id": r.tenant_id, "id": r.id,
+                             "account_id": r.account_id, "tt_credential_id": r.tt_credential_id,
+                             "reason": "missing_account" if a is None else "missing_cred"})
+        elif a.tenant_id != r.tenant_id or c.tenant_id != r.tenant_id:
+            dangling.append({"tenant_id": r.tenant_id, "id": r.id,
+                             "account_id": r.account_id, "tt_credential_id": r.tt_credential_id,
+                             "reason": "tenant_mismatch"})
+        if (r.status or "") not in _ATC_STATUS_ENUM:
+            bad_status.append({"tenant_id": r.tenant_id, "id": r.id, "status": r.status})
+    _issue("ttc_dangling", True, dangling)
+    _issue("ttc_bad_status", False, bad_status)
+
     return {
         "totals": {"credentials": len(creds), "accounts": len(accounts),
-                   "account_fb_credentials": len(afcs), "token_health": len(ths)},
+                   "account_fb_credentials": len(afcs), "token_health": len(ths),
+                   "tt_credentials": len(tt_creds), "account_tt_credentials": len(ttcs)},
         "issues": issues,
         "cleanable": sum(v["count"] for v in issues.values() if v["cleanable"]),
     }
@@ -1307,10 +1356,27 @@ def credentials_data_clean(user: CurrentUser = Depends(require_superadmin),
             c.token_type = norm
             _hit(c.tenant_id, "token_type_normalized")
 
+    # ⑤ TikTok：悬挂/错位 account_tt_credentials → 删；账户 TT 主令牌悬挂 → 置 NULL
+    #    （同 ①③ 语义；TT status 非法值只报告不自动改）
+    from ..models.tt import TtCredential, AccountTtCredential
+    tt_cred_tenant = dict(db.query(TtCredential.id, TtCredential.tenant_id).all())
+    for r in db.query(AccountTtCredential).all():
+        a_t = acct_tenant.get(r.account_id)
+        c_t = tt_cred_tenant.get(r.tt_credential_id)
+        if a_t is None or c_t is None or a_t != r.tenant_id or c_t != r.tenant_id:
+            db.delete(r)
+            _hit(r.tenant_id, "ttc_deleted")
+    for a in db.query(Account).filter(Account.tt_credential_id.isnot(None)).all():
+        if tt_cred_tenant.get(a.tt_credential_id) != a.tenant_id:
+            a.tt_credential_id = None
+            _hit(a.tenant_id, "tt_primary_cred_nulled")
+
     result = {"afc_deleted": sum(ch.get("afc_deleted", 0) for ch in changes.values()),
               "token_health_deleted": sum(ch.get("token_health_deleted", 0) for ch in changes.values()),
               "primary_cred_nulled": sum(ch.get("primary_cred_nulled", 0) for ch in changes.values()),
-              "token_type_normalized": sum(ch.get("token_type_normalized", 0) for ch in changes.values())}
+              "token_type_normalized": sum(ch.get("token_type_normalized", 0) for ch in changes.values()),
+              "ttc_deleted": sum(ch.get("ttc_deleted", 0) for ch in changes.values()),
+              "tt_primary_cred_nulled": sum(ch.get("tt_primary_cred_nulled", 0) for ch in changes.values())}
     result["cleaned_total"] = sum(result.values())
 
     if changes:

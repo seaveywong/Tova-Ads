@@ -20,4 +20,6 @@ class ActionLog(Base):
     trigger_type = Column(Text)
     trigger_detail = Column(Text)
     metadata_ = Column("metadata", Text)
+    # 平台标注（fb/tt）。迁移 0076 回填存量 'fb'——历史 FB 行为不变；write_log 默认 'fb'
+    platform = Column(Text, default="fb")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -211,6 +211,49 @@ ERROR_ZH_EN: dict[str, str] = {
 
     # ---- settings.py / 设置（200 响应里的 detail，非错误，但前端可能照原样展示） ----
     "无变更": "No changes",
+
+    # ---- TikTok（tt_client TT_ERROR_MAP 静态 friendly + services/ad_ops TT 写操作错误。
+    #      动态 f-string（"TikTok 返回错误（code …）"/"网络错误：…"）不收录，无法精确匹配；
+    #      未知 code 走 friendly 原样透传 ----
+    "请求参数错误": "Invalid request parameters",
+    "请求参数缺失": "Missing request parameters",
+    "请求格式错误": "Invalid request format",
+    "授权码无效或已过期（10 分钟内有效），请重新授权": (
+        "The authorization code is invalid or expired (valid for 10 minutes). Please re-authorize."
+    ),
+    "缺少 Access Token": "Missing access token",
+    "Access Token 无效或已过期，需刷新或重新授权": (
+        "The access token is invalid or expired and needs to be refreshed or re-authorized."
+    ),
+    "Refresh Token 无效或已过期，需重新走 TikTok 授权": (
+        "The refresh token is invalid or expired. Please redo the TikTok authorization."
+    ),
+    "对象不存在": "Object not found",
+    "无权操作该对象（权限不足或对象不属于该广告主）": (
+        "No permission to operate this object (insufficient permission, "
+        "or the object does not belong to this advertiser)"
+    ),
+    "Scope 权限不足，请在 TikTok 开发者后台申请": (
+        "Insufficient TikTok scope. Please apply for it in the TikTok developer console."
+    ),
+    "请求过于频繁，请稍后重试": "Too many requests. Please try again later.",
+    "TikTok 拒绝了请求参数（金额过低/字段不合法）": (
+        "TikTok rejected the request parameters (amount too low or an invalid field)"
+    ),
+    "TikTok 仅支持在广告组层级修改预算": (
+        "TikTok only supports changing budgets at the ad group level"
+    ),
+
+    # ---- FB/TT 共用浮出的写操作 detail（原 FB 路径就有的字符串，此处一并补齐 en 配对）----
+    "无可用写令牌（operate/manage）": "No available write token (operate/manage)",
+    "该广告正在被其他操作处理": "This ad is being processed by another operation",
+    "预算必须大于 0": "Budget must be greater than 0",
+    "该对象使用日预算，不支持改总预算": (
+        "This object uses a daily budget; changing to a lifetime budget is not supported"
+    ),
+    "该对象使用总预算(lifetime)，不支持改日预算": (
+        "This object uses a lifetime budget; changing to a daily budget is not supported"
+    ),
 }
 
 

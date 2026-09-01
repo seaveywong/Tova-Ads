@@ -30,8 +30,12 @@ def write_log(
     trigger_type: str | None = None,
     trigger_detail: str | None = None,
     metadata: dict | None = None,
+    platform: str = "fb",
 ):
-    """写一条 action_log。调用者控制事务（db.flush 不 commit）。"""
+    """写一条 action_log。调用者控制事务（db.flush 不 commit）。
+
+    platform 默认 'fb'（现有调用零改动）；TT 写路径显式传 'tt'（迁移 0076 列）。
+    """
     log = ActionLog(
         tenant_id=tenant_id,
         trace_id=trace_id,
@@ -47,6 +51,7 @@ def write_log(
         trigger_type=trigger_type,
         trigger_detail=trigger_detail,
         metadata_=json.dumps(metadata) if metadata else None,
+        platform=platform,
     )
     db.add(log)
     db.flush()

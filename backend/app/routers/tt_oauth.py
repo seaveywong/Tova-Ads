@@ -29,9 +29,10 @@ from ..core.database import get_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
 from ..core.encryption import encrypt
 from ..core.tt_client import TtClient, TtApiError, TT_AUTH_PORTAL
+from ..core.log_utils import new_trace_id
 from ..models.fb import Account
 from ..models.tt import TtCredential, AccountTtCredential, TtApp
-from ..services.tt_token_refresh import resolve_tt_app
+from ..services.tt_token_refresh import resolve_tt_app, refresh_credential, _fail_credential
 
 router = APIRouter(prefix="/tt", tags=["tt"])
 logger = logging.getLogger("toveads.tt_oauth")
@@ -416,3 +417,89 @@ def tt_import(body: TtImportIn, user: CurrentUser = Depends(require_permission("
     db.commit()
     return {"imported": imported, "skipped_existing": skipped,
             "not_found": not_found, "total": len(cleaned)}
+
+
+# ── TT 令牌生命周期（照 fb.py rename/delete_credential 模式）──
+
+class TtRenameIn(BaseModel):
+    alias: str = ""
+
+
+@router.post("/credentials/{cred_id}/rename")
+def rename_tt_credential(cred_id: int, body: TtRenameIn,
+                         user: CurrentUser = Depends(require_permission("ads.create")),
+                         db: Session = Depends(get_db)):
+    """修改 TikTok 令牌名称。"""
+    cred = db.query(TtCredential).filter(
+        TtCredential.tenant_id == user.tenant_id,
+        TtCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "TikTok 令牌不存在")
+    cred.alias = body.alias.strip() or None
+    db.commit()
+    return {"id": cred_id, "alias": cred.alias}
+
+
+@router.delete("/credentials/{cred_id}")
+def delete_tt_credential(cred_id: int,
+                         user: CurrentUser = Depends(require_permission("ads.create")),
+                         db: Session = Depends(get_db)):
+    """删除 TikTok 令牌（解绑关联账户 + 删多令牌关联行 + 删凭证行；账户不删）。
+    与 FB delete_credential 同构；账户行保留（platform 不变），tt_credential_id 置空。"""
+    cred = db.query(TtCredential).filter(
+        TtCredential.tenant_id == user.tenant_id,
+        TtCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "TikTok 令牌不存在")
+    # 账户主令牌置空（账户不删、纳管状态不变——重新授权后可再绑）
+    db.query(Account).filter(
+        Account.tenant_id == user.tenant_id,
+        Account.tt_credential_id == cred_id,
+    ).update({Account.tt_credential_id: None}, synchronize_session="fetch")
+    # 删多令牌关联行（FK 阻止删凭证，同 FB "移除令牌不生效" 根因）
+    db.query(AccountTtCredential).filter(
+        AccountTtCredential.tt_credential_id == cred_id,
+    ).delete(synchronize_session="fetch")
+    db.delete(cred)
+    db.commit()
+    return {"deleted": True, "id": cred_id}
+
+
+@router.post("/credentials/{cred_id}/refresh-now")
+def tt_refresh_now(cred_id: int,
+                   user: CurrentUser = Depends(require_permission("ads.create")),
+                   db: Session = Depends(get_db)):
+    """手动触发单凭证刷新（复用 cron 的 refresh_credential：轮换原子写回，不做任何改动）。
+    失败走 _fail_credential 同款降级（计数/invalid/expired + 重新授权通知）。"""
+    cred = db.query(TtCredential).filter(
+        TtCredential.tenant_id == user.tenant_id,
+        TtCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "TikTok 令牌不存在")
+    if not cred.refresh_token_enc:
+        raise HTTPException(400, "该凭证没有 refresh_token，请重新授权")
+    # App 配置是系统级行（tenant_id NULL）——SuperSessionLocal 读（同 tt_oauth_start）
+    sdb = SuperSessionLocal()
+    try:
+        app_cfg = resolve_tt_app(sdb)
+    finally:
+        sdb.close()
+    if not app_cfg:
+        raise HTTPException(400, "尚未配置 TikTok App（超管在令牌页 TikTok 分区配置，或设 TT_APP_ID/TT_APP_SECRET）")
+    app_id, secret = app_cfg
+    try:
+        refresh_credential(db, cred, app_id, secret)
+    except TtApiError as e:
+        _fail_credential(db, cred, user.tenant_id, new_trace_id(), e)
+        raise HTTPException(502, f"刷新失败：{e.friendly}")
+    except Exception as e:
+        db.rollback()
+        logger.error("[TT refresh-now] 凭证 %s 异常: %s", cred_id, repr(e)[:300])
+        raise HTTPException(502, "刷新异常，请稍后重试")
+    return {"ok": True, "id": cred.id, "status": cred.status,
+            "expires_at": _iso(cred.expires_at),
+            "refresh_expires_at": _iso(cred.refresh_expires_at),
+            "last_refreshed_at": _iso(cred.last_refreshed_at)}

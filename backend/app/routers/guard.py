@@ -343,17 +343,18 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         db = SuperSessionLocal()
         _st = _EMERGENCY_STATE[tenant_id]
         _emergency_state_write(db, tenant_id, dict(_st))
-        # 紧急暂停是 FB kill-switch（set_status→FB ad_ops）；TT 账户在此排除——
-        # 否则 cred_for_account_op 对 TT 抛 NotImplementedError 会中断整轮（其余账户漏停）
+        # 按平台分组：FB 组走原 set_status 链（零改动）；TT 组走 TtClient 批量 DISABLE（下方 TT 段）。
+        # 不再整段排除 TT（P0-2）——紧急暂停覆盖全平台。
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
             Account.account_status == 1,
-            Account.platform == "fb",
         ).all()
+        fb_accounts = [a for a in accounts if (a.platform or "fb") != "tt"]
+        tt_accounts = [a for a in accounts if (a.platform or "fb") == "tt"]
         _st["total_accounts"] = len(accounts)
 
-        for acc in accounts:
+        for acc in fb_accounts:
             cred = cred_for_account_op(db, tenant_id, acc.act_id, "pause")
             if not cred:
                 _st["errors"].append(f"{acc.name}: 无可用写令牌")
@@ -409,6 +410,59 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                 _emergency_state_write(db, tenant_id, dict(_st))
             except Exception:
                 pass
+
+        # ── TT 组：TtClient → get_active_ads → ad/status/update 批量 DISABLE → 回读核验 ──
+        # 与 FB 组共用 _st 进度结构（paused/verify_failed/total_accounts 计数合并），
+        # errors 条目带 [TT] 前缀标注平台维度。TT 失败不阻断 FB 已完成的暂停结果。
+        if tt_accounts:
+            from ..core.fb_tokens import tt_client_for_account
+            tt_trace = new_trace_id()
+            for acc in tt_accounts:
+                tt, _tt_cred = tt_client_for_account(db, tenant_id, acc.act_id, "pause")
+                if not tt:
+                    _st["errors"].append(f"[TT] {acc.name}: 无可用 TT 写令牌")
+                    continue
+                try:
+                    active_ads = tt.get_active_ads(acc.act_id)
+                except Exception as e:
+                    _st["errors"].append(f"[TT] {acc.name}: 拉投放中广告失败({str(e)[:40]})")
+                    continue
+                # TT 行 id 在 ad_id 字段（_ad_id_of 同款归一）
+                ad_ids = [str(a.get("ad_id") or a.get("id") or "") for a in active_ads]
+                ad_ids = [i for i in ad_ids if i]
+                if not ad_ids:
+                    continue
+                for ad_id in ad_ids:
+                    try:
+                        tt.update_status(ad_id, "PAUSED", "ad", acc.act_id)  # opt_status=DISABLE
+                        _st["paused"] += 1
+                        try:
+                            write_log(db, tenant_id=tenant_id, trace_id=tt_trace,
+                                      actor_type="user", target_type="ad", target_id=ad_id,
+                                      action_type="pause", source="emergency_pause",
+                                      result="success", platform="tt",
+                                      trigger_detail=f"[TT] emergency pause act={acc.act_id}")
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                    except Exception as e:
+                        _st["errors"].append(f"[TT] {acc.name}/{ad_id[-8:]}: {str(e)[:50]}")
+                # 回读核验：等 TT 写生效，重拉投放中广告，仍出现=核验未过
+                _time.sleep(2)
+                try:
+                    still_ids = {str(a.get("ad_id") or a.get("id") or "")
+                                 for a in tt.get_active_ads(acc.act_id)} & set(ad_ids)
+                    if still_ids:
+                        _st["verify_failed"] += len(still_ids)
+                        _st["errors"].append(
+                            f"[TT] {acc.name}: {len(still_ids)} 条仍投放中（TT 写延迟）: "
+                            f"{[i[-8:] for i in list(still_ids)[:3]]}")
+                except Exception:
+                    pass  # 核验查询失败不阻断（信任 update_status 的成功返回）
+                try:
+                    _emergency_state_write(db, tenant_id, dict(_st))
+                except Exception:
+                    pass
 
         _st["errors"] = _st["errors"][:10]
         try:

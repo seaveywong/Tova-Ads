@@ -383,10 +383,13 @@ def _max_workers(db, count: int) -> int:
     return max(1, min(configured, int(count or 1)))
 
 
-def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now_utc) -> bool:
+def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now_utc,
+                       platform: str | None = None) -> bool:
     """扩量防重复（1.0 语义）：同目标 cooldown_hours（默认 24h）内已扩过/已跳过（到顶/lifetime）
     → 不再扩；刚失败 5min 内不 hammer（与暂停失败重试同节奏）；本轮内同组已扩过（内存 set）也不再。
-    冷却只挡扩量——同广告的止损规则仍照常评估（该停还得停）。"""
+    冷却只挡扩量——同广告的止损规则仍照常评估（该停还得停）。
+    platform：None=不加过滤（FB 路径，查询零改动）；'tt'=按 platform 列过滤——TT 的
+    adset_id 是每广告主小整数（≠FB 全局唯一），不过滤会与 FB 行（或另一 TT 广告主）撞 target。"""
     tgt = adset_id or ad_id
     if tgt in scaled_targets:
         return False
@@ -397,9 +400,11 @@ def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now
         cd_hours = max(1, int(float(_p.get("cooldown_hours", 24) or 24)))
     except Exception:
         cd_hours = 24
+    _pf = [ActionLog.platform == platform] if platform else []
     recent = db.query(ActionLog).filter(
         ActionLog.tenant_id == tenant_id,
         ActionLog.target_id == tgt,
+        *_pf,
         ActionLog.action_type.in_(["increase_budget", "increase_budget_skipped"]),
         ActionLog.result == "success",
         ActionLog.created_at >= now_utc - timedelta(hours=cd_hours),
@@ -409,6 +414,7 @@ def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now
     fail_recent = db.query(ActionLog).filter(
         ActionLog.tenant_id == tenant_id,
         ActionLog.target_id == tgt,
+        *_pf,
         ActionLog.action_type == "increase_budget",
         ActionLog.result == "fail",
         ActionLog.created_at >= now_utc - timedelta(minutes=RETRY_COOLDOWN_MIN),
@@ -566,6 +572,180 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
         _notify_evt("warning",
                     ("Scale-up failed" if loc == "en" else "加预算失败"),
                     str(_sr.get("fb_error") or _sr.get("error", ""))[:300], False)
+
+
+def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id,
+                    ad_name, events, res, scaled_targets) -> None:
+    """TT 扩量执行（照 _apply_scale 语义；预算载体恒为 adgroup 日预算，本币整数无 minor units）：
+    读 adgroup budget → USD 口径按步长上浮（钳 max_daily_budget_usd 上限，与 FB 共用逻辑）→
+    usd_to_tt_amount（tt_ad_builder 同款换算）转本币整数 → 契约函数
+    tt_set_budget_daily(tt, advertiser_id, adgroup_id, daily_amount_int)（B 组 ad_ops TT 预算通道）。
+    B 未合入 → ImportError 兜底=observe（只告警不动预算，不进扩量冷却——同 FB observe 语义）。
+    TT CBO（adgroup 无日预算/预算在 campaign）与 BUDGET_MODE_TOTAL（总预算）不动——
+    campaign 级预算 API 形状未验证（sandbox 实测后另批），跳过记日志。
+    24h 冷却已在调用前 _scale_cooldown_ok 判（platform='tt' 防与 FB 行撞 target）。"""
+    try:
+        _rp = {k: v for k, v in (json.loads(rule.params) or {}).items()
+               if v not in (None, "", [])}
+    except Exception:
+        _rp = {}
+    _p = {**RULE_DEFAULTS.get(rule.rule_type, {}), **_rp}
+    pct = max(1.0, min(float(_p.get("scale_pct", 20) or 20), 100.0)) / 100.0
+    cap_usd = float(_p.get("max_daily_budget_usd", 0) or 0)
+    ra = (rule.action or "default").lower()
+    loc = tenant_locale(db, tenant_id)
+    category = "Smart Scale-Up" if loc == "en" else "智能扩量"
+    cur_code = (acc.currency or "USD").upper()
+
+    def _log_evt(action_type, result, trigger_detail, friendly=None,
+                 target_id=None, target_type="ad", metadata=None):
+        events.append({"kind": "log", "kwargs": dict(
+            tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+            target_type=target_type, target_id=target_id or ad_id,
+            action_type=action_type, source="rule_engine", result=result,
+            trigger_type=rule.rule_type, trigger_detail=trigger_detail,
+            friendly_error=friendly, metadata=metadata, platform="tt")})
+
+    def _notify_evt(level, action_disp, budget_disp, force_tg):
+        # 通知去重 60min/目标（同 FB _apply_scale；action_log 标记供 dedup_recent）
+        if dedup_recent(db, tenant_id, "rule_scale_notified", (adset_id or ad_id), 60):
+            return
+        _t, _b = notify_text(loc, "rule_scale",
+                             category=category, name=_esc(acc.name), act_id=acc.act_id,
+                             ad_name=_esc(ad_name), ad_id=ad_id,
+                             adset_id=(adset_id or '-'),
+                             rule_name=_esc(rule.name), detail=_esc(detail),
+                             action=_esc(action_disp), budget=_esc(budget_disp))
+        if ra == "observe":
+            _t = ("[Observe] " if loc == "en" else "[观察] ") + _t
+        events.append({"kind": "notify", "kwargs": dict(
+            tenant_id=tenant_id, level=level, event_type="rule_scale",
+            trace_id=trace_id, title=_t, body=_b,
+            target_type="adset", target_id=(adset_id or ad_id),
+            force_tg=force_tg)})
+        _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
+                 target_id=(adset_id or ad_id), target_type="adset")
+
+    if not adset_id:
+        _log_evt("increase_budget_skipped", "success", f"{detail} | 无 adset_id，跳过")
+        return
+
+    # 契约函数延迟 import（B 组并行在 ad_ops 写；services 优先、core 兜底）。
+    # 未合入 → observe-only 兜底（同 P0 波次占位模式：不动预算，不进扩量冷却）
+    _set_daily = None
+    try:
+        from ..services.ad_ops import tt_set_budget_daily as _set_daily
+    except ImportError:
+        try:
+            from ..core.ad_ops import tt_set_budget_daily as _set_daily
+        except ImportError:
+            _set_daily = None
+    if _set_daily is None:
+        _log_evt("observe_alert", "success",
+                 f"{detail} | TT 扩量预算通道未就绪，仅观察（未动预算） "
+                 f"act={acc.act_id} ad={ad_id} rule={rule.name}")
+        _notify_evt("info",
+                    ("⚠ Alert only (observe mode, budget NOT changed)" if loc == "en"
+                     else "⚠ 仅告警（观察模式，未动预算）"),
+                    "-", True)
+        return
+
+    try:
+        _node = tt.get_node(adset_id, "adgroup", acc.act_id,
+                            ["adgroup_id", "budget", "budget_mode"]) or {}
+    except Exception as e:
+        _log_evt("increase_budget", "fail", f"{detail} | 读 adgroup 预算失败",
+                 friendly=str(e)[:150], target_id=adset_id, target_type="adset")
+        return
+    try:
+        cur_amount = int(float(_node.get("budget") or 0))
+    except (TypeError, ValueError):
+        cur_amount = 0
+    _mode = str(_node.get("budget_mode") or "").upper()
+    if cur_amount <= 0 or _mode in ("BUDGET_MODE_TOTAL", "BUDGET_MODE_INFINITE"):
+        # BUDGET_MODE_TOTAL=总预算（语义不同不动）；INFINITE/无 budget=CBO（预算在 campaign，未验证不动）
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | adgroup 无日预算（CBO/总预算），不动",
+                 target_id=adset_id, target_type="adset")
+        return
+
+    cur_usd = to_usd(float(cur_amount), cur_code)
+    new_usd = cur_usd * (1.0 + pct)
+    capped = False
+    if cap_usd > 0:
+        if cur_usd >= cap_usd:
+            _log_evt("increase_budget_skipped", "success",
+                     f"{detail} | 日预算已达上限 ${cur_usd:.2f}/日（cap ${cap_usd:.0f}）",
+                     target_id=adset_id, target_type="adset")
+            _notify_evt("info",
+                        ("Daily budget cap reached, not raised" if loc == "en" else "已达日预算上限，不再加"),
+                        (f"${cur_usd:.2f}/day (cap ${cap_usd:.0f})" if loc == "en"
+                         else f"${cur_usd:.2f}/日（上限 ${cap_usd:.0f}）"), True)
+            return
+        if new_usd > cap_usd:
+            new_usd = cap_usd
+            capped = True
+    if new_usd <= cur_usd + 0.01:
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | 目标预算≤当前（${cur_usd:.2f}）",
+                 target_id=adset_id, target_type="adset")
+        return
+    # USD → TT 本币整数（tt_ad_builder 同款：TT 预算无 minor units，全币种取整；
+    # 汇率取 CurrencyRate（_fx_map，1h 缓存），缺失兜底 1.0）
+    from ..core.tt_ad_builder import usd_to_tt_amount
+    _fx = _fx_map().get(cur_code)
+    new_amount = usd_to_tt_amount(new_usd, cur_code, _fx if _fx else 1.0)
+    if new_amount <= cur_amount:
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | 目标预算≤当前（本币整数 {cur_amount}）",
+                 target_id=adset_id, target_type="adset")
+        return
+    budget_disp = (f"${cur_usd:.2f} → ${new_usd:.2f}/day" if loc == "en" else f"${cur_usd:.2f} → ${new_usd:.2f}/日")
+    if capped:
+        budget_disp += (f" (cap ${cap_usd:.0f})" if loc == "en" else f"（上限 ${cap_usd:.0f}）")
+
+    if ra == "observe":
+        _log_evt("observe_alert", "success",
+                 f"{detail} | 仅告警（观察） 拟 {budget_disp} act={acc.act_id} adgroup={adset_id}",
+                 target_id=ad_id)
+        _notify_evt("info",
+                    ("⚠ Alert only (observe mode, budget NOT changed)" if loc == "en"
+                     else "⚠ 仅告警（观察模式，未动预算）"),
+                    ("planned: " if loc == "en" else "拟 ") + budget_disp, True)
+        return
+
+    # 真扩量：契约函数（B 组）——写+核验+审计在其内部，此处只按 bool 结果记账
+    try:
+        _ok = bool(_set_daily(tt, acc.act_id, adset_id, new_amount))
+    except Exception as e:
+        _log_evt("increase_budget", "fail", f"{detail} | 加预算异常",
+                 friendly=str(e)[:200], target_id=adset_id, target_type="adset")
+        _notify_evt("warning", ("Scale-up failed" if loc == "en" else "加预算失败"),
+                    str(e)[:300], False)
+        return
+    if _ok:
+        scaled_targets.add(adset_id or ad_id)
+        res["scaled"] += 1
+        res["scale_details"].append({"act_id": acc.act_id, "ad_id": ad_id, "ad_name": ad_name,
+                                     "level": "adset", "target": adset_id, "platform": "tt",
+                                     "old_usd": round(cur_usd, 2), "new_usd": round(new_usd, 2)})
+        _log_evt("increase_budget", "success",
+                 f"{detail} | 日预算 ${cur_usd:.2f}→${new_usd:.2f} (+{pct*100:.0f}%) "
+                 f"act={acc.act_id} adgroup={adset_id} tt_amount={cur_amount}→{new_amount}",
+                 target_id=adset_id, target_type="adset",
+                 metadata={"ad_id": ad_id, "act_id": acc.act_id, "level": "adset",
+                           "old_usd": round(cur_usd, 2), "new_usd": round(new_usd, 2),
+                           "old_amount": cur_amount, "new_amount": new_amount,
+                           "pct": round(pct * 100, 1), "cap_usd": cap_usd})
+        _notify_evt("info",
+                    (f"daily budget +{pct*100:.0f}%" if loc == "en" else f"日预算 +{pct*100:.0f}%"),
+                    budget_disp, True)
+    else:
+        _log_evt("increase_budget", "fail",
+                 f"{detail} | 加预算失败（TT 写未生效/核验未过）",
+                 target_id=adset_id, target_type="adset")
+        _notify_evt("warning", ("Scale-up failed" if loc == "en" else "加预算失败"),
+                    "TT budget update not verified", False)
 
 
 def _safe_inspect_account(ctx: dict) -> dict:
@@ -913,9 +1093,11 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     now_utc = datetime.now(timezone.utc)
                     if rule.rule_type in SCALE_RULE_TYPES:
                         # 扩量冷却：同目标 cooldown_hours 内扩过/跳过过 → 不重复（不计 hits，
-                        # 防持续达标广告每 5min 刷计数/日志）
+                        # 防持续达标广告每 5min 刷计数/日志）。TT 传 platform='tt'（小整数
+                        # adset_id 防撞 FB 行），FB 不传 → 查询与原逻辑零差异
                         if not _scale_cooldown_ok(db, tenant_id, rule, ad_id,
-                                                  ad.get("adset_id", ""), scaled_targets, now_utc):
+                                                  ad.get("adset_id", ""), scaled_targets, now_utc,
+                                                  platform=("tt" if platform == "tt" else None)):
                             continue
                     else:
                         succ = None
@@ -955,39 +1137,23 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     # ── 扩量规则：加预算（observe=只告警），不走暂停链 ──
                     if rule.rule_type in SCALE_RULE_TYPES:
                         if platform == "tt":
-                            # TT 扩量本轮 observe-only：TT 暂无 set_budget 通道（ad_ops P3 合入后下批补），
-                            # 命中只告警不动预算（语义同 _apply_scale 的 observe 分支：不进 24h 扩量冷却）
-                            events.append({"kind": "log", "kwargs": dict(
-                                tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                                target_type="ad", target_id=ad_id,
-                                action_type="observe_alert", source="rule_engine",
-                                result="success", trigger_type=rule.rule_type,
-                                trigger_detail=f"{detail} | TT 扩量暂只观察（未动预算） "
-                                               f"act={acc.act_id} ad={ad_id} rule={rule.name}")})
-                            if not dedup_recent(db, tenant_id, "rule_scale_notified",
-                                                (adset_id or ad_id), 60):
-                                _loc = tenant_locale(db, tenant_id)
-                                _t_ts, _b_ts = notify_text(_loc, "rule_scale",
-                                    category=("Smart Scale-Up" if _loc == "en" else "智能扩量"),
-                                    name=_esc(acc.name), act_id=acc.act_id,
-                                    ad_name=_esc(ad_name), ad_id=ad_id,
-                                    adset_id=(adset_id or '-'),
-                                    rule_name=_esc(rule.name), detail=_esc(detail),
-                                    action=("⚠ Alert only (observe mode, budget NOT changed)"
-                                            if _loc == "en" else "⚠ 仅告警（观察模式，未动预算）"),
-                                    budget="-")
-                                if (rule.action or "default").lower() != "observe":
-                                    _t_ts = ("[Observe] " if _loc == "en" else "[观察] ") + _t_ts
-                                events.append({"kind": "notify", "kwargs": dict(
-                                    tenant_id=tenant_id, level="info", event_type="rule_scale",
-                                    trace_id=trace_id, title=_t_ts, body=_b_ts,
-                                    target_type="ad", target_id=ad_id, force_tg=True)})
+                            # TT 扩量（P1-7）：_apply_scale_tt——契约函数 tt_set_budget_daily
+                            # （B 组 ad_ops）可用即真扩量；未合入 ImportError 兜底=observe（函数内处理）。
+                            # 上限钳制/observe 语义与 FB _apply_scale 对齐
+                            try:
+                                _apply_scale_tt(db, fb, tenant_id, acc, trace_id, rule, detail,
+                                                ad_id, adset_id, ad_name,
+                                                events, res, scaled_targets)
+                            except Exception as _se:
+                                logger.warning(f"[Guard] TT 扩量执行异常 ad={ad_id}: {_se}",
+                                               exc_info=True)
                                 events.append({"kind": "log", "kwargs": dict(
                                     tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                                    target_type="ad", target_id=(adset_id or ad_id),
-                                    action_type="rule_scale_notified", source="rule_engine",
-                                    result="success",
-                                    trigger_detail=f"target={adset_id or ad_id}")})
+                                    target_type="adset", target_id=(adset_id or ad_id),
+                                    action_type="increase_budget", source="rule_engine",
+                                    result="fail", trigger_type=rule.rule_type,
+                                    trigger_detail=f"{detail} | TT 扩量执行异常",
+                                    friendly_error=str(_se)[:200], platform="tt")})
                             db.commit()
                             break  # 一条广告命中一条规则即止
                         try:
@@ -1690,11 +1856,64 @@ def run_landing_block_scan():
         release_run_lock(lock, 107)
 
 
+def _sentinel_pause_tt(db, tt, acc, trace_id: str) -> int:
+    """哨兵 TT 分支：投放中广告逐条 ad 级 DISABLE（kill-switch，同义 FB 的 campaign 全停——
+    get_active_ads 只返投放中，全停等价）。
+    级别选择：campaign/status/update 的批量形状未在 sandbox 验证，先 ad 级（验证后可升 campaign 级）。
+    dedup：每广告 1h 内已停过跳过（ActionLog platform='tt'——TT ad_id 每广告主小整数，
+    不过滤会与 FB 行/另一广告主撞 target）。返回停掉的条数。"""
+    paused = 0
+    try:
+        active_ads = tt.get_active_ads(acc.act_id)
+    except Exception as e:
+        logger.warning(f"[Sentinel][TT] 账户 {acc.act_id} 拉广告失败: {getattr(e, 'friendly', e)}")
+        return 0
+    for a in active_ads:
+        ad_id = str(a.get("ad_id") or a.get("id") or "")
+        ad_name = (a.get("ad_name") or "")[:60]
+        if not ad_id:
+            continue
+        # 保活广告永不停（哨兵跳过 [Tova-保活]，同 FB）
+        if "[Tova-保活]" in ad_name:
+            continue
+        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        already = db.query(ActionLog).filter(
+            ActionLog.tenant_id == acc.tenant_id,
+            ActionLog.target_id == ad_id,
+            ActionLog.action_type == "pause",
+            ActionLog.trigger_type == "sentinel",
+            ActionLog.platform == "tt",
+            ActionLog.created_at >= since,
+        ).first()
+        if already:
+            continue
+        try:
+            tt.update_status(ad_id, "PAUSED", "ad", acc.act_id)  # opt_status=DISABLE
+            paused += 1
+            write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",
+                      target_type="ad", target_id=ad_id,
+                      action_type="pause", source="sentinel_patrol", result="success",
+                      trigger_type="sentinel", platform="tt",
+                      trigger_detail=f"[TT] sentinel armed, ad {ad_name} 直接停")
+            _loc = tenant_locale(db, acc.tenant_id)
+            _t_sp, _b_sp = notify_text(_loc, "sentinel_pause_ad",
+                                       name=acc.name, act_id=acc.act_id,
+                                       ad_name=ad_name or ad_id, ad_id=ad_id)
+            emit_notification(db, tenant_id=acc.tenant_id, level="critical",
+                              event_type="sentinel_pause", trace_id=trace_id,
+                              title=_t_sp, body=_b_sp)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"[Sentinel][TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}")
+    return paused
+
+
 def run_sentinel_patrol():
     """哨兵巡逻（doc 03 §4，1.0 sentinel_patrol 移植）：armed 账户的 ACTIVE 系列→直接全停。
 
     哨兵是 kill-switch（不走规则评估）：手动 arm 或自动 arm 后，发现 ACTIVE 系列直接停。
-    与规则巡检独立。dedup：每 campaign 1h 内不重复停。
+    FB 走 campaign 级全停；TT（P4）走 ad 级 DISABLE（_sentinel_pause_tt）。
+    与规则巡检独立。dedup：每 campaign（FB）/每广告（TT）1h 内不重复停。
     """
     lock = acquire_run_lock(106)
     if not lock:
@@ -1703,11 +1922,9 @@ def run_sentinel_patrol():
     trace_id = new_trace_id()
     total_paused = 0
     try:
-        # 所有 armed 账户（手动或自动 arm）；排除已取消纳管的（is_managed=false）。
-        # 哨兵是 FB 链路（campaign 级全停），TT 账户明确排除不误入
+        # 所有 armed 账户（手动或自动 arm，含 TT）；排除已取消纳管的（is_managed=false）
         armed = db.query(Account).filter(
             Account.is_managed.is_(True),
-            Account.platform == "fb",
             (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)  # noqa: E712
         ).all()
         for acc in armed:
@@ -1716,6 +1933,13 @@ def run_sentinel_patrol():
             if acc.account_status is not None and acc.account_status != 1:
                 continue
             # 预热账户哨兵也跑（只跳过保活系列）
+            if (acc.platform or "fb") == "tt":
+                from ..core.fb_tokens import tt_client_for_account
+                tt, _cred = tt_client_for_account(db, acc.tenant_id, acc.act_id, "pause")
+                if not tt:
+                    continue
+                total_paused += _sentinel_pause_tt(db, tt, acc, trace_id)
+                continue
             fb = client_for_account(db, acc.tenant_id, acc.act_id, "pause")
             if not fb:
                 continue

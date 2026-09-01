@@ -68,14 +68,21 @@ def _bg_refresh(tenant_id: int, act_id: str):
             _REFRESH_STATE[tenant_id] = {"running": False, "started_at": "", "done": 0, "total": 0}
             return
         db = SuperSessionLocal()
-        acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
-            Account.tenant_id == tenant_id, Account.is_managed == True,  # noqa: E712
-            Account.account_status == 1).all()]
-        _REFRESH_STATE[tenant_id]["total"] = len(acts)
-        for a in acts:
-            fb = client_for_account(db, tenant_id, a, "read")
+        # 平台分发（P0-3 的过滤止血已被 #2 取代）：FB/TT 账户都刷——client_for_account
+        # 按账户 platform 返回 FbClient/TtClient，_sync_one 按平台归一后同构 upsert
+        if act_id:
+            accs = db.query(Account).filter(
+                Account.tenant_id == tenant_id, Account.act_id == act_id).all()
+        else:
+            accs = db.query(Account).filter(
+                Account.tenant_id == tenant_id, Account.is_managed == True,  # noqa: E712
+                Account.account_status == 1).all()
+        _REFRESH_STATE[tenant_id]["total"] = len(accs)
+        for a in accs:
+            fb = client_for_account(db, tenant_id, a.act_id, "read")
             if fb:
-                _sync_one(db, tenant_id, a, fb)
+                _sync_one(db, tenant_id, a.act_id, fb, platform=_acc_platform(a),
+                          currency=(a.currency or "USD"))
             _REFRESH_STATE[tenant_id]["done"] += 1
         db.commit()
     except Exception:
@@ -204,24 +211,41 @@ def _attach_perf(items: list, perf_map: dict) -> list:
     return out
 
 
-def _sync_one(db: Session, tenant_id: int, act_id: str, fb) -> bool:
-    """拉单账户 campaigns/adsets/ads → upsert ads_cache。返回是否成功。"""
+def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb",
+              currency: str = "USD") -> bool:
+    """拉单账户 campaigns/adsets/ads → upsert ads_cache。返回是否成功。
+
+    platform='tt'：TtClient duck-type 同方法面拉原生行 → tt_to_fb_* 归一成 FB 形状
+    （键名/状态/预算单位）再 upsert（platform='tt' 行）——/ads/list 与前端零平台分支。
+    client_for_account 已按账户 platform 分发返回 FbClient/TtClient，这里只按参归一。
+    """
     try:
         campaigns = fb.get_campaigns(act_id)
         adsets = fb.get_adsets(act_id, effective_status=None)
         ads = fb.get_ads(act_id, effective_status=None)
     except (FbApiError, Exception):
         return False
+    if platform == "tt":
+        from ..core.tt_client import tt_to_fb_campaign, tt_to_fb_adset, tt_to_fb_ad
+        campaigns = [tt_to_fb_campaign(c, currency) for c in campaigns]
+        adsets = [tt_to_fb_adset(a, currency) for a in adsets]
+        ads = [tt_to_fb_ad(a, currency) for a in ads]
     row = db.query(AdsCache).filter(
-        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id).first()
+        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+        AdsCache.platform == platform).first()
     if not row:
-        row = AdsCache(tenant_id=tenant_id, act_id=act_id)
+        row = AdsCache(tenant_id=tenant_id, act_id=act_id, platform=platform)
         db.add(row)
     row.campaigns_json = json.dumps(campaigns)
     row.adsets_json = json.dumps(adsets)
     row.ads_json = json.dumps(ads)
     row.updated_at = datetime.now(timezone.utc)
     return True
+
+
+def _acc_platform(acc) -> str:
+    """账户平台归一（'tt' → tt，空/历史缺省 → fb）。"""
+    return "tt" if (getattr(acc, "platform", None) or "fb") == "tt" else "fb"
 
 
 @router.get("/list")
@@ -346,17 +370,22 @@ def refresh_ads(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """手动刷新 ads_cache（单账户 act_id 或全部）。"""
-    acts = [act_id] if act_id else [a.act_id for a in db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
-        Account.account_status == 1).all()]
+    """手动刷新 ads_cache（单账户 act_id 或全部）。FB/TT 平台分发（同 _bg_refresh）。"""
+    if act_id:
+        accs = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == act_id).all()
+    else:
+        accs = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
+            Account.account_status == 1).all()
     ok = 0
-    for a in acts:
-        fb = client_for_account(db, user.tenant_id, a, "read")
-        if fb and _sync_one(db, user.tenant_id, a, fb):
+    for a in accs:
+        fb = client_for_account(db, user.tenant_id, a.act_id, "read")
+        if fb and _sync_one(db, user.tenant_id, a.act_id, fb, platform=_acc_platform(a),
+                            currency=(a.currency or "USD")):
             ok += 1
     db.commit()
-    return {"refreshed": ok, "total": len(acts)}
+    return {"refreshed": ok, "total": len(accs)}
 
 
 # ── 写操作（Phase D2）──
@@ -392,9 +421,10 @@ def set_ad_status(
     user: CurrentUser = Depends(require_permission("ads.update")),
     db: Session = Depends(get_db),
 ):
-    """改广告/组/系列状态（ACTIVE/PAUSED/ARCHIVED）。回读验证 + 缓存 patch。"""
-    from ..services.ad_ops import set_status
-    r = set_status(db, user.tenant_id, body.act_id, body.node_id, body.level, body.status, operator=user.email)
+    """改广告/组/系列状态（ACTIVE/PAUSED/ARCHIVED）。回读验证 + 缓存 patch。
+    平台分发：TT 账户走 tt_set_status（opt_status 语义），FB 走原 set_status。"""
+    from ..services.ad_ops import set_status_any
+    r = set_status_any(db, user.tenant_id, body.act_id, body.node_id, body.level, body.status, operator=user.email)
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "操作失败"))
     return r
@@ -406,13 +436,13 @@ def batch_set_status(
     user: CurrentUser = Depends(require_permission("ads.update")),
     db: Session = Depends(get_db),
 ):
-    """批量改状态（≤100）。逐条执行，返回每条结果。"""
-    from ..services.ad_ops import set_status
+    """批量改状态（≤100）。逐条执行，返回每条结果。逐条按账户 platform 分发（FB/TT 可混批）。"""
+    from ..services.ad_ops import set_status_any
     if len(body.items) > 100:
         raise HTTPException(400, "批量操作上限 100 条")
     results = []
     for item in body.items[:100]:
-        r = set_status(db, user.tenant_id, item.act_id, item.node_id, item.level, item.status, operator=user.email)
+        r = set_status_any(db, user.tenant_id, item.act_id, item.node_id, item.level, item.status, operator=user.email)
         results.append({"node_id": item.node_id, "level": item.level, **r})
     return {"results": results, "success_count": sum(1 for r in results if r.get("success"))}
 
@@ -423,14 +453,15 @@ def set_ad_budget(
     user: CurrentUser = Depends(require_permission("ads.update")),
     db: Session = Depends(get_db),
 ):
-    """改预算（本币金额→minor units，回读验证）。日预算/总预算二选一，对象类型必须匹配。"""
-    from ..services.ad_ops import set_budget
+    """改预算（本币金额→minor units，回读验证）。日预算/总预算二选一，对象类型必须匹配。
+    平台分发：TT 账户走 tt_set_budget（整本币 int + 仅 adgroup 层），FB 走原 set_budget。"""
+    from ..services.ad_ops import set_budget_any
     acc = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == body.act_id).first()
     cur = (acc.currency or "USD") if acc else "USD"
-    r = set_budget(db, user.tenant_id, body.act_id, body.node_id, body.level,
-                   daily_budget=body.daily_budget, lifetime_budget=body.lifetime_budget,
-                   currency=cur, budget_type=body.budget_type, operator=user.email)
+    r = set_budget_any(db, user.tenant_id, body.act_id, body.node_id, body.level,
+                       daily_budget=body.daily_budget, lifetime_budget=body.lifetime_budget,
+                       currency=cur, budget_type=body.budget_type, operator=user.email)
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "操作失败"))
     return r
@@ -442,9 +473,9 @@ def delete_ad(
     user: CurrentUser = Depends(require_permission("ads.delete")),
     db: Session = Depends(get_db),
 ):
-    """硬删广告（DELETE /{id}，不可恢复）。"""
-    from ..services.ad_ops import delete_node
-    r = delete_node(db, user.tenant_id, body.act_id, body.node_id, operator=user.email)
+    """硬删广告（FB：DELETE /{id}；TT：opt_status=DELETE 软删——TT 无硬删端点）。"""
+    from ..services.ad_ops import delete_node_any
+    r = delete_node_any(db, user.tenant_id, body.act_id, body.node_id, operator=user.email)
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "删除失败"))
     return r
@@ -474,6 +505,17 @@ def rename_ad_node(
         raise HTTPException(400, "名称不能为空且不超过 200 字符")
     if body.level not in ("ad", "adset", "campaign"):
         raise HTTPException(400, "level 必须是 ad/adset/campaign")
+    # 平台分发：TT 账户走 services.ad_ops.tt_rename_node（各层端点与 name 字段名不同，
+    # 广告主维度必带；锁/回读/cache patch/审计与下方 FB 内联版同构）。FB 路径原样保留。
+    _acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id).first()
+    if _acc and (_acc.platform or "fb") == "tt":
+        from ..services.ad_ops import tt_rename_node
+        r = tt_rename_node(db, user.tenant_id, body.act_id, body.node_id, body.level, name,
+                           operator=user.email)
+        if not r.get("success"):
+            raise HTTPException(400, r.get("error", "操作失败"))
+        return r
     fb = client_for_account(db, user.tenant_id, body.act_id, "write")
     if not fb:
         raise HTTPException(400, "无可用写令牌（operate/manage）")
@@ -657,6 +699,7 @@ def diagnose_ad(
         Account.is_managed.is_(True)).first()
     if not acc:
         raise HTTPException(404, "账户未纳管或已移除")
+    _plat = "tt" if (acc.platform or "fb") == "tt" else "fb"   # 快照/报表查询按账户实际平台
 
     # 2. 初始化 result（先建，令牌不可用时也能返回部分数据）
     result = {
@@ -681,7 +724,12 @@ def diagnose_ad(
     fb_error = None
     try:
         if fb:
-            ads = fb.get_ad_insights(_act_id, "today", 100, only_active=False, since=acc_today, until=acc_today)
+            if _plat == "tt":
+                # TT get_ad_insights 签名（advertiser_id/date_preset/since/until/only_active/limit）
+                # 与 FB 参数序不同——必须 kwargs，位置参数会把 limit 错位进 since
+                ads = fb.get_ad_insights(_act_id, since=acc_today, until=acc_today, limit=100)
+            else:
+                ads = fb.get_ad_insights(_act_id, "today", 100, only_active=False, since=acc_today, until=acc_today)
             for a in ads:
                 if str(a.get("ad_id", "")) == _ad_short or str(a.get("ad_id", "")) == ad_id:
                     ad_insights = a
@@ -693,6 +741,16 @@ def diagnose_ad(
         from ..services.guard_engine import to_usd
         spend = float(ad_insights.get("spend", 0))
         result["fb_status"] = ad_insights.get("effective_status", "")
+        if _plat == "tt":
+            # TT 报表行不含投放状态——从 ads_cache（TT 归一形状，与管理器同源）回填
+            _crow = db.query(AdsCache).filter(
+                AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == _act_id,
+                AdsCache.platform == "tt").first()
+            if _crow:
+                for _a in json.loads(_crow.ads_json or "[]"):
+                    if str(_a.get("id") or "") == _ad_short:
+                        result["fb_status"] = _a.get("effective_status") or result["fb_status"]
+                        break
         result["spend"] = spend
         result["spend_usd"] = round(to_usd(spend, acc.currency or "USD"), 2)
         result["impressions"] = int(ad_insights.get("impressions", 0) or 0)
@@ -708,6 +766,15 @@ def diagnose_ad(
             result["fb_kpi_source"] = kpi.get("source", "")
             result["fb_kpi_field"] = kpi.get("kpi_field", "")
             result["target_cpa"] = kpi.get("target_cpa")
+            if _plat == "tt" and ad_insights.get("conversions"):
+                # TT 报表行自带 goal conversions（TT 侧已按 campaign 目标聚合）；resolver 无
+                # actions 可解析时以其兜底——同 guard_engine 口径，防有转化的 TT 广告被当空耗误杀
+                try:
+                    _ttc = int(float(ad_insights.get("conversions") or 0))
+                    if _ttc > result["fb_conversions"]:
+                        result["fb_conversions"] = _ttc
+                except (TypeError, ValueError):
+                    pass
         except Exception:
             pass
 
@@ -765,14 +832,14 @@ def diagnose_ad(
                 _since = (datetime.now(tz) - timedelta(days=_hist_days)).strftime("%Y-%m-%d")
                 _history = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == _ad_short,
-                    PerfSnapshot.platform == "fb",
+                    PerfSnapshot.platform == _plat,
                     PerfSnapshot.snapshot_date >= _since,
                     PerfSnapshot.snapshot_date < acc_today,
                 ).order_by(PerfSnapshot.snapshot_date.desc()).all()
             if rule.rule_type == "budget_burn_fast":
                 _prev = db.query(PerfSnapshot).filter(
                     PerfSnapshot.ad_id == _ad_short,
-                    PerfSnapshot.platform == "fb",
+                    PerfSnapshot.platform == _plat,
                     PerfSnapshot.snapshot_date == acc_today,
                 ).first()
                 _prev_spend = _prev.spend if _prev else None
