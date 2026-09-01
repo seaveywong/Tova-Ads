@@ -7,8 +7,10 @@ import { useTheme } from '../composables/useTheme'
 import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserPerms, setUserPerms, isSuperadminSync } from '../router'
+import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 
+// 登录后的主壳挂载时预取全部路由 chunk（未登录不拉，见 App.vue）
+prefetchRoutes()
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
@@ -337,7 +339,8 @@ watch(() => route.path, () => { sidebarOpen.value = false })
              exclude 依赖 route.query 深链的 5 页（缓存后 onMounted 不重跑会丢 query 语义）：
              AdManager(?act)/Landing(?tab)/LandingLogs(?tab,slug,ad_id)/LaunchTemplates(?reuse_post)/Tokens(?oauth) -->
         <RouterView v-slot="{ Component }">
-          <KeepAlive :exclude="['AdManager', 'Landing', 'LandingLogs', 'LaunchTemplates', 'Tokens']" :max="12">
+          <!-- exclude = 依赖 route.query 深链状态的页（Landing 内嵌的 LandingLogs tab 随 Landing 一并被排除） -->
+          <KeepAlive :exclude="['AdManager', 'Landing', 'LaunchTemplates', 'Tokens']" :max="12">
             <component :is="Component" />
           </KeepAlive>
         </RouterView>

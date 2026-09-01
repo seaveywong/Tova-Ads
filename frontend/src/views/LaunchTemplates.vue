@@ -1341,7 +1341,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     <!-- 预检结果（结构化展示） -->
     <el-dialog v-model="preflightVisible" :title="t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
-        <div v-if="preflightResult.subcode_warn" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ preflightResult.subcode_warn }}</div>
+        <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
         <div class="pf-summary">
           <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
           <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ t('launch.minorUnitHint') }}）</span>

@@ -1,9 +1,8 @@
 <script setup>
 import { RouterView } from 'vue-router'
 import { useLocale } from './composables/useLocale'
-import { prefetchRoutes } from './router'
 const { epLocale } = useLocale()
-prefetchRoutes()
+// 路由 chunk 预取在 MainLayout（登录后的主壳）里做，登录页不拉
 </script>
 
 <template>

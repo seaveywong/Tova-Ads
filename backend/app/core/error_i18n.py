@@ -130,6 +130,15 @@ ERROR_ZH_EN: dict[str, str] = {
     "子码不存在": "Subcode does not exist",
     "仅归档/硬删的子码可恢复": "Only archived or hard-deleted subcodes can be restored",
 
+    # ---- launch_templates.py / 投放模板·部署 ----
+    "预算换算失败：账户币种缺少汇率，请在系统设置配置汇率或改用 USD 模板": (
+        "Budget conversion failed: exchange rate missing for the account currency. "
+        "Configure the rate in Settings or deploy with a USD template"
+    ),
+    "该账户已移除纳管，不能重试（重新导入后再部署）": (
+        "This ad account is no longer managed; retry is disabled (re-import it to deploy again)"
+    ),
+
     # ---- audiences.py / 受众 ----
     "查询词 q 不能为空": "Query parameter q cannot be empty",
     "strategy 必须是 broad_interest/broad_only/interest_only": (

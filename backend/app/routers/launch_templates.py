@@ -282,20 +282,21 @@ def preflight_deploy(tid: int, body: PreflightIn,
         raise HTTPException(404, "模板不存在")
     # 子码存在性预检：拼错/已归档的 slug 部署时静默丢追踪（runner 查不到 link 就不带 /a/{slug}），
     # 部署"成功"但归因链路全断——最阴的隐性事故，预检必须提前拦
-    subcode_warn = None
+    subcode_warn_slug = None
     if t.subcode_slug:
         _link = db.query(LandingAdLink).filter(
             LandingAdLink.tenant_id == user.tenant_id, LandingAdLink.slug == t.subcode_slug,
             LandingAdLink.status.in_(["reserved", "active"]),
         ).first()
         if not _link:
-            subcode_warn = f"子码 /a/{t.subcode_slug} 不存在或已归档——部署将丢失子码追踪，请先在落地页生成该子码"
+            subcode_warn_slug = t.subcode_slug  # 前端按 i18n 渲染完整提示
     # 汇率预检：非 USD 账户缺汇率时 _resolve_budget_fb 抛 ValueError——
     # 原在 try 之外直接 500，预检该给友好 400（部署 runner 同异常是 fail item）
     try:
         daily_budget_fb = _resolve_budget_fb(db, body.act_id, t, user.tenant_id)
     except ValueError as e:
-        raise HTTPException(400, f"预算换算失败：{e}")
+        logging.getLogger("toveads.launch").warning(f"preflight budget resolve failed: {e}")
+        raise HTTPException(400, "预算换算失败：账户币种缺少汇率，请在系统设置配置汇率或改用 USD 模板")
     targeting = _resolve_targeting(db, t.audience_id, t.audience_json or "")
     advanced = _parse_advanced(t)
     page_id = body.page_id or t.page_id
@@ -330,7 +331,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
         "act_id": body.act_id, "currency": currency,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
-        "subcode_warn": subcode_warn,
+        "subcode_warn_slug": subcode_warn_slug,
         "objective": t.objective, "optimization_goal": adset_payload.get("optimization_goal"),
         "billing_event": adset_payload.get("billing_event"),
         "targeting_resolved": targeting,
@@ -628,7 +629,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     _Acc3.is_managed == True,  # noqa: E712
                 ).first()
                 if not _acc3:
-                    raise FbApiError("no_id", f"act_{item.act_id} 已移除纳管，跳过（移除后建广告无止损覆盖）")
+                    raise FbApiError("no_id", "该账户已移除纳管，跳过（移除后建广告无止损覆盖）")
                 # 跟帖(reuse)：选能管该帖主页的写令牌（多令牌场景扫候选池，不只 priority 最高）
                 is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
                 _page_for_token = (item.page_id or tpl.page_id or "") if is_reuse else ""
@@ -804,7 +805,7 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         _Acc.tenant_id == user.tenant_id, _Acc.act_id == it.act_id, _Acc.is_managed == True,  # noqa: E712
     ).first()
     if not _acc:
-        raise HTTPException(400, f"账户 {it.act_id} 已移除纳管，不能重试（重新导入后再部署）")
+        raise HTTPException(400, "该账户已移除纳管，不能重试（重新导入后再部署）")
     # 原子抢占：UPDATE ... WHERE status='fail' 判 rowcount——双击并发时只有一个请求能置 pending
     # （原 check-then-write：两请求都读到 fail 都通过 → 两个后台任务 = 同账户两份广告）
     from sqlalchemy import text as _text
@@ -868,7 +869,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 _Acc2.is_managed == True,  # noqa: E712
             ).first()
             if not _acc2:
-                raise FbApiError("no_id", f"act_{it.act_id} 已移除纳管，跳过重试")
+                raise FbApiError("no_id", "该账户已移除纳管，跳过重试")
             # 跟帖(reuse)：选能管该帖主页的写令牌（与 _run_deploy_job 一致）
             is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
             _page_for_token = (it.page_id or tpl.page_id or "") if is_reuse else ""

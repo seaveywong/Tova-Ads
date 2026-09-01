@@ -718,7 +718,11 @@ def credentials_assets_summary(
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id, FbCredential.status == "active"
     ).all()
-    _sig = ",".join(str(c.id) for c in creds) + f":{len(creds)}"
+    # 签名含纳管账户数：unmanage/重新导入后计数变化即失效，不会给最长 1h 的旧计数
+    _mgd = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
+    ).count()
+    _sig = ",".join(str(c.id) for c in creds) + f":{len(creds)}:{_mgd}"
     ent = _ASSETS_SUMMARY_CACHE.get(user.tenant_id)
     _now = _t.time()
     if not fresh and ent and _now - ent[0] < 3600 and ent[2] == _sig:
