@@ -428,7 +428,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
+onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]) })   // 并行——原 7 串行吃满 7 个 RTT
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -522,24 +522,8 @@ const anchorSections = computed(() => {
   if (isSuper.value || (myPerms.value || []).includes('ads.pause')) secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
   return secs
 })
-let _anchorLock = false
-const scrollToSection = (id) => {
-  activeSection.value = id
-  _anchorLock = true
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  setTimeout(() => { _anchorLock = false }, 800)
-}
-let _sectionObserver = null
-const _setupObserver = () => {
-  nextTick(() => {
-    _sectionObserver = new IntersectionObserver((entries) => {
-      if (_anchorLock) return
-      entries.forEach(e => { if (e.isIntersecting) activeSection.value = e.target.id })
-    }, { rootMargin: '-10% 0px -70% 0px', threshold: 0 })
-    anchorSections.value.forEach(s => { const el = document.getElementById(s.id); if (el) _sectionObserver.observe(el) })
-  })
-}
-onUnmounted(() => { if (_sectionObserver) _sectionObserver.disconnect() })
+// Tab 模式：点哪个显示哪个部分（不再长页滚动 + IntersectionObserver）
+const scrollToSection = (id) => { activeSection.value = id }
 const kaResultOpen = ref(false)
 const kaResult = ref(null)
 const kaResMeta = (r) => ({
@@ -567,7 +551,7 @@ const runKeepaliveNow = async () => {
       <button v-for="s in anchorSections" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="scrollToSection(s.id)">{{ s.label }}</button>
     </div>
 
-    <div id="sec-account" class="card">
+    <div v-if="activeSection==='sec-account'" id="sec-account" class="card">
       <div class="t">{{ t('settings.accountTitle') }}</div>
       <div class="d">{{ t('settings.accountDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.username') }}</label><input v-model="acctEmail" class="input" :placeholder="t('settings.loginEmailPh')" /></div>
@@ -580,7 +564,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">{{ t('settings.changePwd') }}</button>
     </div>
 
-    <div id="sec-tz" class="card">
+    <div v-if="activeSection==='sec-tz'" id="sec-tz" class="card">
       <div class="t">{{ t('settings.tzTitle') }}</div>
       <div class="d">{{ t('settings.tzDesc') }}</div>
       <el-select v-model="tz" filterable allow-create default-first-option
@@ -589,7 +573,7 @@ const runKeepaliveNow = async () => {
       </el-select>
     </div>
 
-    <div v-if="isSuper && sched" id="sec-schedule" class="card">
+    <div v-if="sSuper && sched && activeSection==='sec-schedule'" id="sec-schedule" class="card">
       <div class="t">{{ t('settings.scheduleTitle') }}</div>
       <div class="d">{{ t('settings.scheduleDesc') }}</div>
       <div class="base-row">
@@ -612,7 +596,7 @@ const runKeepaliveNow = async () => {
       <button class="btn primary" :disabled="schedSaving" @click="saveSched">{{ t('settings.saveAndApply') }}</button>
     </div>
 
-    <div v-if="isSuper" id="sec-guard-tuning" class="card">
+    <div v-if="sSuper && activeSection==='sec-guard-tuning'" id="sec-guard-tuning" class="card">
       <div class="t">{{ t('settings.gtTitle') }}</div>
       <div class="d">{{ t('settings.gtDesc') }}</div>
       <template v-if="gt.guard_concurrency !== null">
@@ -626,7 +610,7 @@ const runKeepaliveNow = async () => {
       </template>
     </div>
 
-    <div v-if="isSuper" id="sec-ai" class="card">
+    <div v-if="sSuper && activeSection==='sec-ai'" id="sec-ai" class="card">
       <div class="t">{{ t('settings.aiTitle') }}</div>
       <div class="d">{{ t('settings.aiDesc') }}</div>
       <div class="sub-t">{{ t('settings.aiTextModelTitle') }}</div>
@@ -665,7 +649,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" id="sec-cf" class="card">
+    <div v-if="sSuper && activeSection==='sec-cf'" id="sec-cf" class="card">
       <div class="t">{{ t('settings.cfTitle') }}</div>
       <div class="d">{{ t('settings.cfDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
@@ -674,7 +658,7 @@ const runKeepaliveNow = async () => {
     </div>
 
     <!-- 邮箱转发（超管）：状态行 + 目的地邮箱 + 别名映射 -->
-    <div v-if="isSuper" id="sec-email" class="card">
+    <div v-if="sSuper && activeSection==='sec-email'" id="sec-email" class="card">
       <div class="t">{{ t('settings.emTitle') }}</div>
       <div class="d">{{ t('settings.emDesc', { domain: em.domain || 'tovaads.com' }) }}</div>
 
@@ -736,7 +720,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" id="sec-webhook" class="card">
+    <div v-if="sSuper && activeSection==='sec-webhook'" id="sec-webhook" class="card">
       <div class="t">{{ t('settings.whTitle') }}</div>
       <div class="d">{{ t('settings.whDesc') }}</div>
       <div class="wh-url-row">
@@ -758,7 +742,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" id="sec-retention" class="card">
+    <div v-if="sSuper && activeSection==='sec-retention'" id="sec-retention" class="card">
       <div class="t">{{ t('settings.retentionTitle') }}</div>
       <div class="d">{{ t('settings.retentionDesc') }}</div>
       <div class="ret-head"><span>{{ t('settings.retDataCol') }}</span><span>{{ t('settings.retDaysCol') }}</span><span>{{ t('settings.retDescCol') }}</span></div>
@@ -774,7 +758,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper" id="sec-fx" class="card">
+    <div v-if="sSuper && activeSection==='sec-fx'" id="sec-fx" class="card">
       <div class="t">{{ t('settings.fxTitle') }}</div>
       <div class="d">{{ t('settings.fxDesc') }}</div>
       <div class="fx-grid">
@@ -787,7 +771,7 @@ const runKeepaliveNow = async () => {
       <button class="btn" :disabled="fxLoading" @click="runFx" style="margin-top:14px">{{ fxLoading ? t('settings.fetching') : t('settings.syncFxNow') }}</button>
     </div>
 
-    <div id="sec-tg" class="card">
+    <div v-if="activeSection==='sec-tg'" id="sec-tg" class="card">
       <div class="t">{{ t('settings.tgTitle') }}</div>
       <div class="d" style="margin-bottom:10px">{{ t('settings.tgDesc') }}</div>
 
@@ -820,7 +804,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="isSuper || (myPerms || []).includes('ads.pause')" id="sec-keepalive" class="card">
+    <div v-if="sSuper || (myPerms || []).includes('ads.pause') && activeSection==='sec-keepalive'" id="sec-keepalive" class="card">
       <div class="t">{{ t('settings.keepaliveTitle') }}</div>
       <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
