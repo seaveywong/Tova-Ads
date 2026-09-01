@@ -4,7 +4,7 @@ v1: 本地存储（/opt/toveads/assets/）+ 基础 CRUD
 v2: 加 name/tags/public_url/搜索/重命名/引用检查
 v3: AI 分析（图片→视觉模型看图；视频→ffmpeg抽关键帧→视觉模型）→ 生成 ai_copy + ai_audience
 """
-import os, uuid, json, base64
+import os, uuid, json, base64, hashlib
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +35,32 @@ def _parse_json_field(raw, default):
         return json.loads(raw)
     except Exception:
         return default
+
+
+def _file_md5(path: str, _buf: int = 1024 * 1024) -> str:
+    """流式算文件 md5（分块读，200MB 视频也不撑内存）。读不出返回 ''。"""
+    h = hashlib.md5()
+    try:
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(_buf)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return ""
+
+
+def _norm_act_id(v: str) -> str:
+    """统一账户 ID 形状：去 act_/ACT_ 前缀（JSON 缓存键与 Account.act_id 都是纯数字）。"""
+    return (v or "").replace("act_", "").replace("ACT_", "").strip()
+
+
+def _require_owner_or_super(user: CurrentUser):
+    """孤儿文件清理跨租户（目录全局），限团队 owner / 平台超管。"""
+    if not (user.is_superadmin or user.role == "owner"):
+        raise HTTPException(403, "仅团队 owner 或平台超管可操作")
 
 
 def _mark_asset_failed(db: Session, a: Asset, msg: str):
@@ -120,6 +146,120 @@ def get_ai_options(user: CurrentUser = Depends(require_permission("assets.manage
     }
 
 
+class PruneHashCacheIn(BaseModel):
+    """FB image_hash 缓存清理。act_id 空 = 清全部死账户条目（不预填，空走全量死账户模式）。"""
+    act_id: str = ""
+
+
+@router.post("/prune-hash-cache")
+def prune_hash_cache(body: PruneHashCacheIn,
+                     user: CurrentUser = Depends(require_permission("ads.create")),
+                     db: Session = Depends(get_db)):
+    """清 Asset.fb_image_hashes JSON 缓存里的死条目（账户解除纳管/令牌失效后 hash 成脏数据）。
+
+    - act_id 非空：只清该账户的条目（不论纳管状态，支持强制重传）；
+    - act_id 空：对照 Account.is_managed，清所有「非纳管账户」的条目。
+    全部命中才算清理；清空的 JSON 置 NULL。同租户、一条事务。
+    """
+    from ..models.fb import Account
+    rows = db.query(Asset).filter(
+        Asset.tenant_id == user.tenant_id, Asset.fb_image_hashes.isnot(None),
+    ).all()
+    # 先解析全部缓存，确定要清的 act_id 集合
+    parsed = []
+    all_keys = set()
+    for a in rows:
+        cache = _parse_json_field(a.fb_image_hashes, {})
+        if isinstance(cache, dict) and cache:
+            parsed.append((a, cache))
+            all_keys.update(_norm_act_id(k) for k in cache.keys())
+    target = _norm_act_id(body.act_id)
+    if target:
+        dead = {target}
+    else:
+        managed = {r[0] for r in db.query(Account.act_id).filter(
+            Account.tenant_id == user.tenant_id,
+            Account.is_managed == True,  # noqa: E712
+        ).all() if r[0]}
+        dead = {k for k in all_keys if k not in managed}
+    if not dead:
+        return {"assets_touched": 0, "entries_removed": {}, "dead_act_ids": []}
+    removed: dict = {}
+    touched = 0
+    for a, cache in parsed:
+        pop = [k for k in cache if _norm_act_id(k) in dead]
+        if not pop:
+            continue
+        for k in pop:
+            nk = _norm_act_id(k)
+            removed[nk] = removed.get(nk, 0) + 1
+            del cache[k]
+        a.fb_image_hashes = json.dumps(cache, ensure_ascii=False) if cache else None
+        touched += 1
+    tid = new_trace_id()
+    write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
+              actor_user_id=user.id, target_type="asset", target_id="batch",
+              action_type="prune_hash_cache", source="user", result="success",
+              metadata={"act_ids": sorted(dead), "assets_touched": touched,
+                        "entries_removed": removed})
+    db.commit()
+    return {"assets_touched": touched, "entries_removed": removed, "dead_act_ids": sorted(dead)}
+
+
+@router.get("/orphans")
+def list_orphans(user: CurrentUser = Depends(require_permission("assets.manage"))):
+    """列出 assets 目录中的孤儿文件（无 DB 行引用）。只列不删。owner/超管。
+
+    ⚠ 必须注册在 GET /{aid} 之前（同 /ai-options 的路由顺序坑）。
+    引用集跨租户取全量 → SuperSessionLocal（RLS 会话只见本租户会把别租户文件误判成孤儿）。
+    """
+    _require_owner_or_super(user)
+    from ..core.database import SuperSessionLocal
+    from ..services.asset_gc import scan_orphans
+    sdb = SuperSessionLocal()
+    try:
+        orphans = scan_orphans(sdb)
+    finally:
+        sdb.close()
+    return {
+        "asset_dir": os.environ.get("ASSET_DIR", "/opt/toveads/assets"),
+        "count": len(orphans),
+        "total_size": sum(o["size"] for o in orphans),
+        "orphans": orphans,
+    }
+
+
+class OrphanDeleteIn(BaseModel):
+    files: list[str]
+
+
+@router.delete("/orphans")
+def delete_orphans(body: OrphanDeleteIn,
+                   user: CurrentUser = Depends(require_permission("assets.manage")),
+                   db: Session = Depends(get_db)):
+    """删除孤儿文件。必须传明确的文件名列表（不支持也不提供"全删"），
+    删除前实时复算孤儿集合，只删仍无引用的文件。owner/超管。"""
+    _require_owner_or_super(user)
+    if not body.files:
+        raise HTTPException(400, "文件列表为空（需显式传要删的文件名）")
+    from ..core.database import SuperSessionLocal
+    from ..services.asset_gc import delete_orphans as _gc_delete
+    sdb = SuperSessionLocal()
+    try:
+        result = _gc_delete(sdb, body.files)
+    finally:
+        sdb.close()
+    tid = new_trace_id()
+    write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
+              actor_user_id=user.id, target_type="asset", target_id="orphan_files",
+              action_type="orphan_cleanup", source="user",
+              result="success" if not result["skipped"] else "partial",
+              metadata={"requested": len(body.files), "deleted": result["deleted"],
+                        "skipped": result["skipped"], "freed_bytes": result["freed_bytes"]})
+    db.commit()
+    return result
+
+
 @router.get("/{aid}")
 def get_asset(aid: int, user: CurrentUser = Depends(require_permission("assets.manage")),
               db: Session = Depends(get_db)):
@@ -157,6 +297,21 @@ async def upload_asset(
         raise HTTPException(400, "文件超过 200MB 上限")
     if not content:
         raise HTTPException(400, "空文件")
+    # 同租户内容去重（零迁移：不存 hash 列）：先比 file_size 缩小候选，
+    # 再逐个读盘比 md5（候选数量级小）。命中 → 409 指明已存在的素材，让用户自己决定
+    # （明确拒绝优于静默复用——复用会造成"改了素材名却影响老素材"的隐性耦合）。
+    _digest = hashlib.md5(content).hexdigest()
+    for c in db.query(Asset).filter(
+        Asset.tenant_id == user.tenant_id,
+        Asset.file_size == len(content),
+    ).all():
+        if _file_md5(os.path.join(ASSET_DIR, c.storage_key)) == _digest:
+            raise HTTPException(409, {
+                "code": "duplicate_asset",
+                "asset_id": c.id,
+                "name": c.name or c.filename or c.storage_key,
+                "file_size": c.file_size,
+            })
     storage_key = f"{uuid.uuid4().hex}{ext}"
     filepath = os.path.join(ASSET_DIR, storage_key)
     with open(filepath, "wb") as f:
@@ -264,7 +419,15 @@ def fb_upload_image(aid: int, body: FbUploadIn,
         result = fb.upload_ad_image(body.act_id, image_bytes, a.filename or "image.jpg")
     except FbApiError as e:
         raise HTTPException(400, f"FB 上传失败：{e.friendly}")
-    a.fb_image_hash = result.get("hash")
+    h = result.get("hash")
+    a.fb_image_hash = h  # 遗留单列（兼容展示）
+    # 同步写每账户 JSON 缓存（部署链路 ensure_image_hash_for_account 读的是它——
+    # 以前这里只写单列，手动上传过 hash 的素材部署时仍会重传一遍）
+    cache = _parse_json_field(a.fb_image_hashes, {})
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[_norm_act_id(body.act_id)] = h
+    a.fb_image_hashes = json.dumps(cache, ensure_ascii=False)
     tid = new_trace_id()
     write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
               actor_user_id=user.id, target_type="asset", target_id=str(aid),

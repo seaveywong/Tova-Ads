@@ -16,7 +16,8 @@ from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account, client_for_account_page
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
-from ..core.ad_ops import deploy_one_account, ensure_image_hash_for_account, usd_to_fb_amount
+from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
+                           ensure_video_id_for_account, usd_to_fb_amount)
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink
 from ..models.audience import SavedAudience
@@ -301,6 +302,8 @@ def preflight_deploy(tid: int, body: PreflightIn,
     advanced = _parse_advanced(t)
     page_id = body.page_id or t.page_id
     pixel_id = body.pixel_id or t.pixel_id
+    asset = (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == user.tenant_id).first()
+             if t.asset_id else None)
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
@@ -319,11 +322,18 @@ def preflight_deploy(tid: int, body: PreflightIn,
             optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
             destination_type_override=t.destination_type or "", extra=advanced,
         )
-        creative_payload = build_creative(
-            page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-            landing_url=t.landing_url, headline=t.headline, body=t.body,
-            cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
-        )
+        if asset and asset.type == "video":
+            creative_payload = build_creative(
+                page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
+                landing_url=t.landing_url, headline=t.headline, body=t.body,
+                cta_type=t.cta_type, video_id="<部署时按账户上传缓存>",
+            )
+        else:
+            creative_payload = build_creative(
+                page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
+                landing_url=t.landing_url, headline=t.headline, body=t.body,
+                cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
+            )
     except ValueError as e:
         # build_adset 对缺 pixel/page 等抛 ValueError —— 预检就该把这个告诉用户
         raise HTTPException(400, f"参数校验失败：{e}")
@@ -332,6 +342,12 @@ def preflight_deploy(tid: int, body: PreflightIn,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
         "subcode_warn_slug": subcode_warn_slug,
+        "asset": {
+            "type": (asset.type if asset else ""),
+            "name": (asset.name or asset.filename or "") if asset else "",
+            "filename": (asset.filename or "") if asset else "",
+            "duration_sec": (asset.duration_sec or 0) if asset else 0,
+        },
         "objective": t.objective, "optimization_goal": adset_payload.get("optimization_goal"),
         "billing_event": adset_payload.get("billing_event"),
         "targeting_resolved": targeting,
@@ -641,14 +657,18 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     fb = client_for_account(sdb, tenant_id, item.act_id, "write")
                     if not fb:
                         raise FbApiError("no_id", f"act_{item.act_id} 未绑定写令牌")
-                # per-account 图片 hash（FB hash 按账户）
+                # per-account 素材缓存（FB image_hash / video_id 都按账户隔离）
                 image_hash = ""
-                if asset and asset.type == "image":
+                video_id = ""
+                if asset and asset.type in ("image", "video"):
                     filepath = os.path.join(ASSET_DIR, asset.storage_key)
                     if not os.path.exists(filepath):
                         raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
-                    image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
-                    sdb.commit()  # 持久化 hash 缓存
+                    if asset.type == "image":
+                        image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
+                    else:
+                        video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
+                    sdb.commit()  # 持久化 hash/video_id 缓存
                 page_id = item.page_id or tpl.page_id
                 pixel_id = item.pixel_id or tpl.pixel_id
                 daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
@@ -686,7 +706,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
                     daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
                     name_prefix=tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
-                    image_hash=image_hash, subcode_slug=tpl.subcode_slug, subcode_link=link,
+                    image_hash=image_hash, video_id=video_id,
+                    subcode_slug=tpl.subcode_slug, subcode_link=link,
                     targeting=targeting, ad_language=tpl.ad_language,
                     dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                     optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
@@ -882,9 +903,15 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
             image_hash = ""
-            if asset and asset.type == "image":
+            video_id = ""
+            if asset and asset.type in ("image", "video"):
                 filepath = os.path.join(ASSET_DIR, asset.storage_key)
-                image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
+                if not os.path.exists(filepath):
+                    raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
+                if asset.type == "image":
+                    image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
+                else:
+                    video_id = ensure_video_id_for_account(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
             # 与 _run_deploy_job 保持一致：表单模板 page-aware 解析 + AI 消息兜底（重试要等价于全新部署，否则 LEADS/ENGAGEMENT 重试拿到错误/缺失的 form/message）
@@ -921,6 +948,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
+                video_id=video_id,
                 subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                 optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",

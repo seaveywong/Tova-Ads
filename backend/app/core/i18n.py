@@ -87,6 +87,13 @@ NOTIFY = {
             "en": "Account: {name} ({act_id})\nCampaign: {camp_name} ({camp_id})\nSentinel armed, ACTIVE campaigns paused directly.",
         },
     },
+    "rule_scale": {
+        "title": {"zh": "扩量【{category}】· {name}", "en": "Scale-Up [{category}] · {name}"},
+        "body": {
+            "zh": "账户：{name}（<code>{act_id}</code>）\n广告：{ad_name}（<code>{ad_id}</code>）\n广告组：<code>{adset_id}</code>\n规则：{rule_name}\n触发：<b>{detail}</b>\n动作：<b>{action}</b>\n预算：<b>{budget}</b>",
+            "en": "Account: {name} (<code>{act_id}</code>)\nAd: {ad_name} (<code>{ad_id}</code>)\nAd set: <code>{adset_id}</code>\nRule: {rule_name}\nTrigger: <b>{detail}</b>\nAction: <b>{action}</b>\nBudget: <b>{budget}</b>",
+        },
+    },
     "coverage_lost": {
         "title": {"zh": "巡检覆盖丢失：{n} 条有消耗广告未被评估", "en": "Inspection Coverage Lost: {n} ads with spend not evaluated"},
         "body": {

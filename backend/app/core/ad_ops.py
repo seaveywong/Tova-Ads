@@ -57,6 +57,33 @@ def ensure_image_hash_for_account(fb: FbClient, db, asset, act_id: str, filepath
     return h
 
 
+def ensure_video_id_for_account(fb: FbClient, db, asset, act_id: str, filepath: str) -> str:
+    """取该账户的视频 video_id（FB 视频按账户隔离，不能跨账户复用）。
+
+    查 asset.fb_video_ids[act_id] 缓存；无 → 上传到该账户 advideos → 写回缓存（调用方 commit）。
+    视频上传比图片慢（几秒~几十秒），失败抛 FbApiError。
+    """
+    cache = {}
+    if asset.fb_video_ids:
+        try:
+            cache = json.loads(asset.fb_video_ids)
+        except Exception:
+            cache = {}
+    v = cache.get(act_id)
+    if v:
+        return v
+    with open(filepath, "rb") as f:
+        video_bytes = f.read()
+    result = fb.upload_video(act_id, video_bytes, asset.filename or "video.mp4")
+    v = result.get("id")
+    if not v:
+        raise FbApiError("no_id", "上传视频未返回 video_id（视频转码可能失败，请稍后重试）")
+    cache[act_id] = v
+    asset.fb_video_ids = json.dumps(cache, ensure_ascii=False)
+    db.flush()
+    return v
+
+
 def pick_random_copy(asset) -> tuple[str, str]:
     """从素材 AI 文案随机挑 (headline, body) 组合。无 AI 文案→("", "")。
     投放/保活每条广告随机组合素材库的标题+文案，增加多样性。"""

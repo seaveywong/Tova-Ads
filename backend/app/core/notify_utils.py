@@ -2,7 +2,11 @@
 from datetime import datetime, timezone, timedelta
 import httpx
 import logging
+import threading
+import json as _json
+import time as _t
 from sqlalchemy.orm import Session
+from sqlalchemy import func as _f
 from ..models.notify import Notification, TenantTgBinding, UserTgBinding
 from ..models.auth import TenantMembership
 from ..models.log import ActionLog
@@ -10,6 +14,89 @@ from .encryption import encrypt, decrypt
 from html import escape as _esc
 
 logger = logging.getLogger("toveads.notify")
+
+# ── 告警风暴上限（dedup_recent 之上的第二道闸）──
+# per (tenant_id, event_type) 当日已发 ≥ cap → 跳过（站内信+TG 都不发）+ 计数 + 日志 warning。
+# cap 来自 system_settings.notify_storm_cap（默认 30，0=关闭封顶）；日界=UTC。
+# 豁免清单：系统级 critical 事件不封顶——它们各自已有 per-source dedup，
+# 封顶会掩盖"系统坏了/账户被封"这类最需要全量可见的信号。
+NO_CAP_EVENTS = {
+    "emergency_pause", "landing_health", "coverage_lost", "inspection_stalled",
+    "token_expired", "token_invalid", "orphan_account", "sentinel_pause",
+    "account_status_change",
+}
+DEFAULT_STORM_CAP = 30
+
+_storm_lock = threading.Lock()
+# {(tenant_id, event_type, yyyymmdd): 被抑制条数}——进程内观测计数（跨 worker 各自一份；
+# 封顶判定以 DB 行数为准，这里只供日志/排障看"压掉了多少"）
+_storm_suppressed: dict = {}
+# cap 值 TTL 缓存（避免每条通知都查 system_settings；改配置 60s 内生效）
+_storm_cap_cache = {"v": DEFAULT_STORM_CAP, "ts": 0.0}
+_STORM_CAP_TTL = 60.0
+
+
+def _storm_cap_value(db: Session) -> int:
+    """读 notify_storm_cap（system_settings，JSON 值），TTL 缓存 60s。"""
+    now = _t.time()
+    with _storm_lock:
+        if _storm_cap_cache["ts"] and now - _storm_cap_cache["ts"] < _STORM_CAP_TTL:
+            return _storm_cap_cache["v"]
+    v = DEFAULT_STORM_CAP
+    try:
+        from ..models.system import SystemSetting
+        row = db.query(SystemSetting).filter(SystemSetting.key == "notify_storm_cap").first()
+        if row and row.value not in (None, ""):
+            v = int(float(_json.loads(row.value)))
+    except Exception:
+        v = DEFAULT_STORM_CAP
+    if v < 0:
+        v = 0
+    with _storm_lock:
+        _storm_cap_cache["v"] = v
+        _storm_cap_cache["ts"] = now
+    return v
+
+
+def reset_storm_cap_cache():
+    """改配置后立即生效用（settings 写入方可调）。"""
+    with _storm_lock:
+        _storm_cap_cache["ts"] = 0.0
+
+
+def storm_suppressed_counts() -> dict:
+    """被抑制计数快照（排障/监控用）：{(tenant_id, event_type, date): n}。"""
+    with _storm_lock:
+        return dict(_storm_suppressed)
+
+
+def _storm_allows(db: Session, tenant_id: int, event_type: str) -> bool:
+    """当日该 (tenant_id, event_type) 已发条数 < cap → 允许发。
+    cap=0 → 不封顶；豁免清单事件恒允许。同事务内已 flush 的通知行也计入（batch 内封顶即时生效）。"""
+    cap = _storm_cap_value(db)
+    if cap <= 0 or (event_type or "").lower() in NO_CAP_EVENTS:
+        return True
+    day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    sent = db.query(_f.count(Notification.id)).filter(
+        Notification.tenant_id == tenant_id,
+        Notification.event_type == event_type,
+        Notification.created_at >= day_start,
+    ).scalar() or 0
+    return int(sent) < cap
+
+
+def _record_storm_suppression(tenant_id: int, event_type: str) -> None:
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    with _storm_lock:
+        # 防 dict 无界增长：超 4096 键时清掉非当日的
+        if len(_storm_suppressed) > 4096:
+            for k in [k for k in _storm_suppressed if k[2] != today]:
+                _storm_suppressed.pop(k, None)
+        key = (tenant_id, event_type, today)
+        _storm_suppressed[key] = _storm_suppressed.get(key, 0) + 1
+        n = _storm_suppressed[key]
+    logger.warning(f"[Notify] 风暴上限：租户{tenant_id} 事件[{event_type}] 当日已满，"
+                   f"累计抑制 {n} 条（notify_storm_cap 可调，0=不封顶）")
 
 
 def _roles_for_event(event_type: str) -> list[str]:
@@ -57,14 +144,20 @@ def emit_notification(
     roles: list[str] | None = None,
     send_tg: bool = True,
     reply_markup=None,
-):
+    force_tg: bool = False,
+) -> bool:
     """发通知：写站内信（带 roles 订阅）+ 按角色路由 TG 到用户级绑定。
 
     roles：决策①订阅矩阵（空则按 event_type 自动解析 _roles_for_event）。
     TG 路由：查租户内 role∈roles 的用户 → 各自 user_tg_binding 发；
     若租户无任何用户级绑定 → fallback tenant_tg_binding（不断现网）。
+    force_tg：info 级也发 TG（默认 info 只进站内信；扩量通知等需要即时可见的用）。
+    返回：True=已发；False=被每日风暴上限抑制（见 _storm_allows）。
     """
     roles = roles or _roles_for_event(event_type)
+    if not _storm_allows(db, tenant_id, event_type):
+        _record_storm_suppression(tenant_id, event_type)
+        return False
     notif = Notification(
         tenant_id=tenant_id, user_id=user_id, level=level, event_type=event_type,
         title=title, body=body, trace_id=trace_id,
@@ -74,11 +167,12 @@ def emit_notification(
     db.add(notif)
     db.flush()
 
-    if send_tg and level in ("critical", "warning"):
+    if send_tg and (force_tg or level in ("critical", "warning")):
         try:
             _send_tg_by_role(db, tenant_id, roles, level, title, body, reply_markup)
         except Exception as e:
             logger.warning(f"[TG] 发送失败（站内信已兜底）: {e}")
+    return True
 
 
 def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],

@@ -78,6 +78,18 @@ class FbApiError(Exception):
         super().__init__(friendly)
 
 
+def _safe_ascii_name(filename: str, default_ext: str) -> str:
+    """multipart 文件名 ASCII 化：非 ASCII 名（如中文）会让 httpx 编码 header 失败，
+    保留扩展名换成通用名（FB 对文件名本身无要求，只认内容）。"""
+    name = filename or ""
+    try:
+        name.encode("ascii")
+        return name or ("file" + default_ext)
+    except UnicodeEncodeError:
+        ext = name[name.rfind("."):] if "." in name else default_ext
+        return "file" + (ext if ext.startswith(".") else default_ext)
+
+
 class FbClient:
     """统一 FB Graph API 客户端。所有 FB 操作经此。"""
 
@@ -337,10 +349,11 @@ class FbClient:
     def upload_ad_image(self, act_id: str, image_bytes: bytes, filename: str = "image.jpg") -> dict:
         """上传图片到 FB 广告账户 → 返 {hash, url}（FB image_hash 供创意用）。"""
         url = f"{GRAPH_BASE}/act_{act_id}/adimages"
+        safe = _safe_ascii_name(filename, ".jpg")
         resp = httpx.post(
             url,
             params={"access_token": self.token},
-            files={filename: (filename, image_bytes, "image/jpeg")},
+            files={safe: (safe, image_bytes, "image/jpeg")},
             timeout=120,
         )
         result = resp.json()
@@ -354,11 +367,39 @@ class FbClient:
             return {"hash": v.get("hash", ""), "url": v.get("url", ""), "filename": k}
         return {"hash": "", "url": ""}
 
+    def upload_video(self, act_id: str, video_bytes: bytes, filename: str = "video.mp4") -> dict:
+        """上传视频到 FB 广告账户（POST /act_{id}/advideos，multipart source）→ 返 {id: video_id}。
+
+        video_id 可直接用于创意 video_data.video_id（FB 转码异步排队，不阻塞建广告）。
+        视频文件大（几十 MB）→ 超时 600s（图片是 120s）；不走 _request 的网络重试——
+        上传非幂等，重试可能产生重复视频。
+        """
+        url = f"{GRAPH_BASE}/act_{act_id}/advideos"
+        safe = _safe_ascii_name(filename, ".mp4")
+        mime = "video/quicktime" if safe.lower().endswith((".mov", ".qt")) else "video/mp4"
+        try:
+            resp = httpx.post(
+                url,
+                params={"access_token": self.token},
+                files={"source": (safe, video_bytes, mime)},
+                timeout=600,
+            )
+        except httpx.RequestError as e:
+            logger.warning(f"[FB] upload_video act_{act_id} network error: {e}")
+            # 静态中文串：可被全局译表精确匹配；细节进日志不进用户可见错误
+            raise FbApiError("network", "视频上传网络错误（视频文件大易超时，结果未知不自动重试，请稍后重试）", {}, 0)
+        result = resp.json()
+        if "error" in result:
+            err = result["error"]
+            cat, friendly = classify_fb_error(err)
+            raise FbApiError(cat, friendly, err, resp.status_code)
+        return {"id": result.get("id", "")}
+
     def get_ads(self, act_id: str, effective_status: str | None = '["ACTIVE"]',
                 fields: str | None = None) -> list[dict]:
         """拉广告（全量分页）。effective_status=None 拉全状态(管理器)，默认仅 ACTIVE(巡检/哨兵)。"""
         params = {"fields": fields or (
-            "id,name,status,effective_status,configured_status,adset_id,campaign_id,"
+            "id,name,status,effective_status,configured_status,adset_id,campaign_id,created_time,"
             "creative{id,effective_object_story_id,object_story_spec,thumbnail_url},review_feedback")}
         if effective_status:
             params["filtering"] = f'[{{"field":"effective_status","operator":"IN","value":{effective_status}}}]'

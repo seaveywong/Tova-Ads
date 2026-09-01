@@ -39,6 +39,7 @@ const interestResults = ref([])
 // 部署抽屉
 const deployOpen = ref(false)
 const deployTpl = ref(null)
+const deployAsset = ref(null)
 const accounts = ref([])
 const accLoading = ref(false)
 const deploySearch = ref('')
@@ -600,7 +601,6 @@ const openEdit = async (tpl) => {
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
-  if (a.type === 'video') return ElMessage.warning(t('launch.videoNotSupported'))   // 部署链路只实现 image_hash——视频可选必败，先禁选
   form.value.asset_id = a.id
   editingAsset.value = a
   const hs = (a.ai_copy?.headlines || []); const bs = (a.ai_copy?.bodies || [])
@@ -792,6 +792,8 @@ const accManagesReusePage = (actId) => {
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   reuseEligibleActs.value = new Set()
+  deployAsset.value = null
+  if (tpl.asset_id) { try { deployAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   accLoading.value = true
   try { accounts.value = await GET('/fb/accounts') } catch (e) { showError(e, t('launch.loadAccFail')) }
   if (tpl.post_source === 'reuse' && tpl.id) {
@@ -1162,7 +1164,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
             <div v-if="editingAsset" class="asset-chosen" @click="openPreview(editingAsset)" style="cursor:pointer">
               <img v-if="editingAsset.type==='image'" :src="editingAsset.public_url" class="asset-thumb" />
               <video v-else :src="editingAsset.public_url" class="asset-thumb" preload="metadata" />
-              <span class="asset-name">{{ editingAsset.name }}（{{ t('launch.clickToPreview') }}）</span>
+              <span class="asset-name">{{ editingAsset.name }}（{{ t('launch.clickToPreview') }}）<template v-if="editingAsset.type==='video' && editingAsset.duration_sec"> · {{ t('launch.durationLabel') }} {{ editingAsset.duration_sec }}s</template></span>
             </div>
             <button class="btn sm" :disabled="form.post_source==='reuse'" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
           </div>
@@ -1244,7 +1246,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
           <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
-          <span class="picker-name">{{ a.name }}</span>
+          <span class="picker-name">{{ a.name }}<template v-if="a.type==='video' && a.duration_sec"> · {{ a.duration_sec }}s</template></span>
         </div>
       </div>
     </el-drawer>
@@ -1274,6 +1276,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
       <div class="d">{{ t('launch.deploySubtitle') }}</div>
       <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">⚠ {{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
+      <div v-if="deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
       <div class="deploy-search-row">
         <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
@@ -1342,6 +1345,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
     <el-dialog v-model="preflightVisible" :title="t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
         <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
+        <div v-if="preflightResult.asset?.type === 'video'" style="padding:4px 0;font-size:13px">{{ t('launch.videoAsset') }}：{{ preflightResult.asset.name || preflightResult.asset.filename }}<template v-if="preflightResult.asset.duration_sec"> · {{ t('launch.durationLabel') }} {{ preflightResult.asset.duration_sec }}s</template></div>
         <div class="pf-summary">
           <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
           <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ t('launch.minorUnitHint') }}）</span>
@@ -1499,6 +1503,7 @@ const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/
 .reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
 .deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
+.deploy-video-hint{padding:8px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2);margin:8px 0}
 .reuse-select-card{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .reuse-card-hint{font-size:12px;color:var(--t3);line-height:1.5}
 .reuse-input-row{display:flex;gap:6px}

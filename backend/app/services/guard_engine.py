@@ -1,12 +1,14 @@
-"""巡检引擎（doc 03 §2）：定时读 FB insights → 匹配规则 → 停广告 → 记日志+通知。
+"""巡检引擎（doc 03 §2）：定时读 FB insights → 匹配规则 → 停广告/扩量 → 记日志+通知。
 
-核心流程：遍历租户 → 取规则 → 取账户 → 读 insights → 评估 → 命中则停。
-dry_run=True 时不真停（只记日志 + 通知），用于首次验证。
+核心流程：遍历租户 → 取规则 → 取账户 → 读 insights → 评估 → 命中则停/加预算。
+动作由 rule.action 控制（observe/pause*/scale）；账户级并行（guard_concurrency，每线程自建 session）。
 """
 import json
 import logging
 import time
 import html
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
@@ -34,14 +36,27 @@ COOLDOWN_MIN = 60
 
 logger = logging.getLogger("toveads.guard")
 
-# 规则类型 → 客户面类别（doc 03 §2.1，8 类止损规则）
+# 规则类型 → 客户面类别（doc 03 §2.1，8 类止损规则 + 2 类扩量规则）
 RULE_CATEGORY = {
     "bleed_abs": "空耗止损", "click_no_conv": "空耗止损", "reach_no_conv": "空耗止损",
     "low_ctr_no_conv": "空耗止损", "budget_burn_fast": "空耗止损",
     "cpa_exceed": "成本超标", "trend_drop": "效果下滑", "consecutive_bad": "效果下滑",
+    "slow_scale": "智能扩量", "roas_scale": "智能扩量",
 }
 
-# 默认参数（审计项目9：8 规则默认值表）
+# 扩量规则类型（1.0 _check_scale_rule 移植）：命中 → 走 set_budget 加预算（非暂停链）
+SCALE_RULE_TYPES = ("slow_scale", "roas_scale")
+
+# 默认参数（审计项目9：8 规则默认值表 + 扩量 2 类）
+# 扩量契约（params JSON，全部可省）：
+#   min_conversions   转化数下限（当日 FB 转化 ≥ 此值才考虑扩量）
+#   cpa_target        CPA 目标 USD（KPI target_cpa 优先，此值兜底；无目标且非 roas_scale 则不扩）
+#   cpa_ratio         "转化好"判定：CPA ≤ 目标×ratio（1.0 语义 0.8=比目标便宜两成以上）
+#   roas_threshold    ROAS 阈值（仅 roas_scale；当日 ROAS ≥ 此值）
+#   scale_pct         每次加预算步长（百分比，20=+20%/次；1-100）
+#   max_daily_budget_usd  日预算上限 USD（到顶不再加；新预算超上限则钳到上限）
+#   consecutive_days  连续好天数（1=只看当日；>1 需近 N-1 天历史快照同样达标）
+#   cooldown_hours    同一广告组两次扩量最小间隔（默认 24h）
 RULE_DEFAULTS = {
     "bleed_abs":        {"spend_threshold": 20},
     "cpa_exceed":       {"cpa_target": 8, "ratio": 1.3},
@@ -51,7 +66,30 @@ RULE_DEFAULTS = {
     "trend_drop":       {"drop_threshold": 40},               # ROAS 下滑百分比
     "consecutive_bad":  {"param_days": 2, "ratio": 1.3, "cpa_target": 8},
     "budget_burn_fast": {"threshold_abs": 20},                # 两轮巡检间消耗增量 USD
+    "slow_scale":       {"min_conversions": 3, "cpa_target": 8, "cpa_ratio": 0.8,
+                         "scale_pct": 20, "max_daily_budget_usd": 100,
+                         "consecutive_days": 1, "cooldown_hours": 24},
+    "roas_scale":       {"min_conversions": 3, "roas_threshold": 3.0, "cpa_ratio": 0.8,
+                         "scale_pct": 15, "max_daily_budget_usd": 100,
+                         "consecutive_days": 1, "cooldown_hours": 24},
 }
+
+# 学习期保护默认（system_settings.guard_learning_hours 可覆盖；0=关）：创建 < N 小时的广告不动
+DEFAULT_LEARNING_HOURS = 24.0
+# 巡检并发默认（system_settings.guard_concurrency，1-8）
+DEFAULT_CONCURRENCY = 4
+
+
+def _sys_float(db, key: str, default: float) -> float:
+    """system_settings 全局数值（value 存 JSON）。缺省/脏值 → default。"""
+    try:
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row and row.value not in (None, ""):
+            v = float(json.loads(row.value))
+            return v
+    except Exception:
+        pass
+    return default
 
 
 def _campaign_objectives(fb, campaign_ids) -> dict:
@@ -96,7 +134,7 @@ def _account_local_today(acc) -> str:
 
 
 def _max_history_days(rules: list) -> int:
-    """需要拉多少天历史快照（consecutive_bad 的 param_days 最大值）。"""
+    """需要拉多少天历史快照（consecutive_bad 的 param_days / 扩量 consecutive_days 最大值）。"""
     n = 0
     for r in rules:
         if r.rule_type == "consecutive_bad":
@@ -104,6 +142,11 @@ def _max_history_days(rules: list) -> int:
                 n = max(n, int((json.loads(r.params) or {}).get("param_days", 2)))
             except Exception:
                 n = max(n, 2)
+        elif r.rule_type in SCALE_RULE_TYPES:
+            try:
+                n = max(n, int((json.loads(r.params) or {}).get("consecutive_days", 1)))
+            except Exception:
+                pass
     return n
 
 
@@ -130,9 +173,10 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     # CPA 类规则（cpa_exceed/consecutive_bad）强制用 FB 转化数：落地点击/访问≠转化，
     #   either 取 max 或 landing 顶替都会虚增转化 → CPA 被拉低 → 超标漏停。
     #   cs=landing 且 FB insights 无 actions（算不出真实 CPA）时规则不适用，不用落地数顶替。
+    # 扩量规则同样强制 FB 转化（加预算花真钱，落地通过量当转化会误扩）。
     # 空耗类规则（bleed_abs/click_no_conv 等）保持 either/landing 兜底（落地有通过量
     #   说明不是纯空耗，防误杀）。
-    if rule.rule_type in ("cpa_exceed", "consecutive_bad"):
+    if rule.rule_type in ("cpa_exceed", "consecutive_bad", "slow_scale", "roas_scale"):
         if cs == "landing" and not (ad_insights.get("actions") or []):
             return False, ""  # CPA 规则不适用：无 FB actions，宁可漏告不拿落地数顶替 CPA
     elif cs == "landing":
@@ -220,8 +264,59 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
                 return True, f"连续 {days} 天 CPA > ${target}×{ratio}"
         return False, ""
 
+    if rt in SCALE_RULE_TYPES:
+        return _evaluate_scale_rule(rt, p, ad_insights, conversions, target_cpa, currency, history)
+
     # 未知规则类型
     return False, ""
+
+
+def _evaluate_scale_rule(rt: str, p: dict, ad_insights: dict, conversions: float,
+                         target_cpa: float | None, currency: str,
+                         history: list | None) -> tuple[bool, str]:
+    """扩量命中判定（1.0 _check_scale_rule 移植）：转化达标 + 成本优秀（+ROAS 达标）。
+    只判"该不该扩"；执行（24h 冷却/上限保护/set_budget）在巡检命中分支。"""
+    spend = float(ad_insights.get("spend", 0) or 0)
+    spend_usd = to_usd(spend, currency)
+    min_conv = max(0, int(float(p.get("min_conversions", 3) or 0)))
+    if float(conversions or 0) < min_conv:
+        return False, ""
+    # CPA 优秀判定：KPI target_cpa 优先，params.cpa_target 兜底（都无 → roas_scale 可只看 ROAS）
+    target = float(target_cpa) if target_cpa else float(p.get("cpa_target", 0) or 0)
+    ratio = max(0.1, min(float(p.get("cpa_ratio", 0.8) or 0.8), 2.0))
+    roas_threshold = float(p.get("roas_threshold", 3.0) or 3.0) if rt == "roas_scale" else None
+    parts = [f"转化 {int(conversions)}≥{min_conv}"]
+    if target > 0:
+        if conversions <= 0 or spend_usd <= 0:
+            return False, ""
+        cpa_usd = spend_usd / conversions
+        if cpa_usd > target * ratio:
+            return False, ""
+        parts.append(f"CPA ≈${cpa_usd:.2f}≤${target * ratio:.2f}")
+    elif not roas_threshold:
+        return False, ""  # 无 CPA 目标也无 ROAS 阈值 → 无扩量依据（1.0 同语义）
+    if roas_threshold:
+        roas_raw = ad_insights.get("purchase_roas")
+        if roas_raw is None or float(roas_raw) < roas_threshold:
+            return False, ""
+        parts.append(f"ROAS {float(roas_raw):.2f}≥{roas_threshold:.2f}")
+    days = max(1, int(float(p.get("consecutive_days", 1) or 1)))
+    if days > 1:
+        # 连续好天数：今日命中 + 近 days-1 天历史快照同样达标（PerfSnapshot：cpa=USD、conversions/roas）
+        good = 0
+        for r in (history or []):
+            r_conv = int(r.conversions or 0)
+            if r_conv < min_conv:
+                continue
+            if target > 0 and (not r.cpa or r.cpa > target * ratio):
+                continue
+            if roas_threshold and (not r.roas or float(r.roas) < roas_threshold):
+                continue
+            good += 1
+        if good < days - 1:
+            return False, ""
+        parts.append(f"连续{days}天达标")
+    return True, " / ".join(parts)
 
 
 class _DefaultBleedRule:
@@ -239,310 +334,522 @@ class _DefaultBleedRule:
 _DEFAULT_BLEED_ABS_RULE = _DefaultBleedRule()
 
 
-def run_inspection(force: bool = False):
-    """巡检主函数。遍历所有租户，评估规则，命中按 rule.action 动作。
+def _rule_ctx(r) -> SimpleNamespace:
+    """ORM 规则 → 线程安全纯数据上下文（SimpleNamespace；跨线程只读，不挂任何 session）。"""
+    return SimpleNamespace(
+        id=getattr(r, "id", None),
+        name=(getattr(r, "name", "") or ""),
+        rule_type=r.rule_type,
+        params=(r.params or "{}"),
+        conversion_source=(getattr(r, "conversion_source", None) or "either"),
+        action=(getattr(r, "action", None) or "default"),
+        scope_act_id=getattr(r, "scope_act_id", None),
+    )
 
-    动作由 rule.action 唯一控制（observe=只告警 / pause=停广告 / pause_adset=停组 /
-    pause_campaign=停系列）——无全局 dry_run（2026-07-07 用户决策）。
-    规则作用域：全局(scope_act_id NULL=名下所有账户) + 账户级(scope_act_id=指定账户)，并存各评估。
-    多 worker：advisory lock 保证每轮只有一个 worker 真跑（防 TG spam）。
-    force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
-    """
-    lock = acquire_run_lock(101)
-    if not lock:
-        return {"skipped": "lock_busy"}
-    db = SuperSessionLocal()
-    trace_id = new_trace_id()
-    total_evaluated = 0
-    total_hits = 0
-    total_paused = 0
-    total_skipped_spend = 0  # 有消耗但被 active_ids 过滤掉的广告数（覆盖丢失，止损盲区）
-    _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
-    paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
 
+_DEFAULT_BLEED_RULE_CTX = _rule_ctx(_DEFAULT_BLEED_ABS_RULE)
+
+
+def _max_workers(db, count: int) -> int:
+    """巡检并发度：system_settings.guard_concurrency（1-8，默认 4；1.0 同款钳制），不超过任务数。"""
     try:
-        # 取所有有 active 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔）
-        tenant_ids = db.query(FbCredential.tenant_id).filter(
-            FbCredential.status == "active"
-        ).distinct().all()
+        configured = int(_sys_float(db, "guard_concurrency", DEFAULT_CONCURRENCY))
+    except Exception:
+        configured = DEFAULT_CONCURRENCY
+    configured = max(1, min(configured, 8))
+    return max(1, min(configured, int(count or 1)))
 
-        for (tenant_id,) in tenant_ids:
-            all_rules = db.query(GuardRule).filter(
-                GuardRule.tenant_id == tenant_id,
-                GuardRule.enabled == True,
-            ).all()
-            if not all_rules:
-                # 规则兜底：租户无规则时注入默认空耗止血线（保底防裸奔，用户可建规则覆盖）
-                all_rules = [_DEFAULT_BLEED_ABS_RULE]
 
-            # 取本租户所有 active 凭证 → {cred_id: FbClient}（多 token，按账户绑定的 token 选）
-            creds = db.query(FbCredential).filter(
-                FbCredential.tenant_id == tenant_id,
-                FbCredential.status == "active",
-            ).all()
-            if not creds:
-                logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证，跳过")
-                continue
-            # 取已纳管账户（is_managed=true 且 ACTIVE=1，跳过被 FB 禁用/宽限/违规的，省 Token 配额；
-            # 也跳过已取消纳管的软删账户——它们保留历史但不再巡检）
-            accounts = db.query(Account).filter(
-                Account.tenant_id == tenant_id,
-                Account.account_status == 1,
-                Account.is_managed.is_(True),
-            ).all()
+def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now_utc) -> bool:
+    """扩量防重复（1.0 语义）：同目标 cooldown_hours（默认 24h）内已扩过/已跳过（到顶/lifetime）
+    → 不再扩；刚失败 5min 内不 hammer（与暂停失败重试同节奏）；本轮内同组已扩过（内存 set）也不再。
+    冷却只挡扩量——同广告的止损规则仍照常评估（该停还得停）。"""
+    tgt = adset_id or ad_id
+    if tgt in scaled_targets:
+        return False
+    try:
+        _p = {**RULE_DEFAULTS.get(rule.rule_type, {}),
+              **{k: v for k, v in (json.loads(rule.params) or {}).items()
+                 if v not in (None, "", [])}}
+        cd_hours = max(1, int(float(_p.get("cooldown_hours", 24) or 24)))
+    except Exception:
+        cd_hours = 24
+    recent = db.query(ActionLog).filter(
+        ActionLog.tenant_id == tenant_id,
+        ActionLog.target_id == tgt,
+        ActionLog.action_type.in_(["increase_budget", "increase_budget_skipped"]),
+        ActionLog.result == "success",
+        ActionLog.created_at >= now_utc - timedelta(hours=cd_hours),
+    ).first()
+    if recent:
+        return False
+    fail_recent = db.query(ActionLog).filter(
+        ActionLog.tenant_id == tenant_id,
+        ActionLog.target_id == tgt,
+        ActionLog.action_type == "increase_budget",
+        ActionLog.result == "fail",
+        ActionLog.created_at >= now_utc - timedelta(minutes=RETRY_COOLDOWN_MIN),
+    ).first()
+    return fail_recent is None
 
-            hist_days = _max_history_days(all_rules)  # consecutive_bad 需要的历史天数
 
-            for acc in accounts:
-                acc.last_inspected_at = datetime.now(timezone.utc)
-                # 哨兵 armed → 巡检跳过（哨兵全停，巡检再跑多余 → 省 FB API）
-                if acc.sentinel_armed or acc.sentinel_auto_armed:
-                    continue
-                # 按账户选 token（查 cooldown + op_kind=read + RR 兜底）；全灭 → 跳过
-                cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
-                if not cred:
-                    continue
-                _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
-                _alias = cred.alias or ""
-                fb = FbClient(decrypt(cred.access_token_enc))
-                acc_today = _account_local_today(acc)  # 账户本地日（time_range 拉 insights + 写 snapshot_date，统一账户本地基准，避免跨时区累积）
-                # 拿 ACTIVE 广告 ID 集（排除已停/被拒/删除的；含学习中的——学习中但 ACTIVE = 在花钱）
+def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id,
+                 campaign_id, ad_name, events, res, scaled_targets) -> None:
+    """扩量执行（1.0 _check_scale_rule 执行段移植）：
+    读当前日预算 → 按步长上浮（钳日预算上限）→ ad_ops.set_budget（含 per-node 锁/本币换算/回读核验/缓存 patch）。
+    预算载体：adset 日预算；adset 无日预算（CBO）→ campaign 日预算；lifetime 总预算语义不同，不动。
+    observe 规则只告警不动预算（日志记 observe_alert，不进 24h 扩量冷却）。
+    所有日志/通知走 events 队列（主线程回放）。异常由调用方兜底。"""
+    try:
+        _rp = {k: v for k, v in (json.loads(rule.params) or {}).items()
+               if v not in (None, "", [])}
+    except Exception:
+        _rp = {}
+    _p = {**RULE_DEFAULTS.get(rule.rule_type, {}), **_rp}
+    pct = max(1.0, min(float(_p.get("scale_pct", 20) or 20), 100.0)) / 100.0
+    cap_usd = float(_p.get("max_daily_budget_usd", 0) or 0)
+    ra = (rule.action or "default").lower()
+    loc = tenant_locale(db, tenant_id)
+    category = "Smart Scale-Up" if loc == "en" else "智能扩量"
+
+    def _log_evt(action_type, result, trigger_detail, friendly=None,
+                 target_id=None, target_type="ad", metadata=None):
+        events.append({"kind": "log", "kwargs": dict(
+            tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+            target_type=target_type, target_id=target_id or ad_id,
+            action_type=action_type, source="rule_engine", result=result,
+            trigger_type=rule.rule_type, trigger_detail=trigger_detail,
+            friendly_error=friendly, metadata=metadata)})
+
+    def _notify_evt(level, action_disp, budget_disp, force_tg):
+        # 通知去重 60min/目标（持续达标的广告不每 5min 重发；action_log 标记供 dedup_recent）
+        if dedup_recent(db, tenant_id, "rule_scale_notified", (adset_id or ad_id), 60):
+            return
+        _t, _b = notify_text(loc, "rule_scale",
+                             category=category, name=_esc(acc.name), act_id=acc.act_id,
+                             ad_name=_esc(ad_name), ad_id=ad_id,
+                             adset_id=(adset_id or '-'),
+                             rule_name=_esc(rule.name), detail=_esc(detail),
+                             action=_esc(action_disp), budget=_esc(budget_disp))
+        if ra == "observe":
+            _t = ("[Observe] " if loc == "en" else "[观察] ") + _t
+        events.append({"kind": "notify", "kwargs": dict(
+            tenant_id=tenant_id, level=level, event_type="rule_scale",
+            trace_id=trace_id, title=_t, body=_b,
+            target_type="adset", target_id=(adset_id or ad_id),
+            force_tg=force_tg)})
+        _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
+                 target_id=(adset_id or ad_id), target_type="adset")
+
+    # ── 定位预算载体 ──
+    if not adset_id:
+        _log_evt("increase_budget_skipped", "success", f"{detail} | 无 adset_id，跳过")
+        return
+    scale_level, tgt_id = "adset", adset_id
+    try:
+        _node = fb.get_node(adset_id, "id,daily_budget,lifetime_budget") or {}
+    except Exception as e:
+        _log_evt("increase_budget", "fail", f"{detail} | 读 adset 预算失败",
+                 friendly=str(e)[:150], target_id=adset_id, target_type="adset")
+        return
+    cur_minor = _node.get("daily_budget")
+    if not cur_minor:
+        if _node.get("lifetime_budget"):
+            _log_evt("increase_budget_skipped", "success",
+                     f"{detail} | adset 为 lifetime 总预算（语义不同），不动",
+                     target_id=adset_id, target_type="adset")
+            return
+        # adset 无自己的预算（CBO）→ 预算在 campaign
+        if not campaign_id:
+            _log_evt("increase_budget_skipped", "success", f"{detail} | 无日预算可加",
+                     target_id=adset_id, target_type="adset")
+            return
+        try:
+            _cnode = fb.get_node(campaign_id, "id,daily_budget,lifetime_budget") or {}
+        except Exception as e:
+            _log_evt("increase_budget", "fail", f"{detail} | 读 campaign 预算失败",
+                     friendly=str(e)[:150], target_id=campaign_id, target_type="campaign")
+            return
+        if not _cnode.get("daily_budget"):
+            _log_evt("increase_budget_skipped", "success",
+                     f"{detail} | campaign 无日预算（lifetime/其他），不动",
+                     target_id=adset_id, target_type="adset")
+            return
+        scale_level, tgt_id, cur_minor = "campaign", campaign_id, _cnode.get("daily_budget")
+
+    cur_native = from_minor_units(cur_minor, acc.currency) or 0.0
+    cur_usd = to_usd(cur_native, acc.currency)
+    new_usd = cur_usd * (1.0 + pct)
+    capped = False
+    if cap_usd > 0:
+        if cur_usd >= cap_usd:
+            _log_evt("increase_budget_skipped", "success",
+                     f"{detail} | 日预算已达上限 ${cur_usd:.2f}/日（cap ${cap_usd:.0f}）",
+                     target_id=tgt_id, target_type=scale_level)
+            _notify_evt("info",
+                        ("Daily budget cap reached, not raised" if loc == "en" else "已达日预算上限，不再加"),
+                        (f"${cur_usd:.2f}/day (cap ${cap_usd:.0f})" if loc == "en"
+                         else f"${cur_usd:.2f}/日（上限 ${cap_usd:.0f}）"), True)
+            return
+        if new_usd > cap_usd:
+            new_usd = cap_usd
+            capped = True
+    if new_usd <= cur_usd + 0.01:
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | 目标预算≤当前（${cur_usd:.2f}）",
+                 target_id=tgt_id, target_type=scale_level)
+        return
+    _one = to_usd(1.0, acc.currency) or 1.0   # 1 本币 = _one USD → 新本币 = new_usd / _one
+    new_native = round(new_usd / _one, 2)
+    budget_disp = (f"${cur_usd:.2f} → ${new_usd:.2f}/day" if loc == "en" else f"${cur_usd:.2f} → ${new_usd:.2f}/日")
+    if capped:
+        budget_disp += (f" (cap ${cap_usd:.0f})" if loc == "en" else f"（上限 ${cap_usd:.0f}）")
+
+    if ra == "observe":
+        _log_evt("observe_alert", "success",
+                 f"{detail} | 仅告警（观察） 拟 {budget_disp} act={acc.act_id} level={scale_level}",
+                 target_id=ad_id)
+        _notify_evt("info",
+                    ("⚠ Alert only (observe mode, budget NOT changed)" if loc == "en"
+                     else "⚠ 仅告警（观察模式，未动预算）"),
+                    ("planned: " if loc == "en" else "拟 ") + budget_disp, True)
+        return
+
+    # 真扩量（ad_ops.set_budget：per-node advisory lock + 本币→minor units + 回读核验 + 缓存 patch + 审计）
+    from ..services.ad_ops import set_budget as _set_budget
+    _sr = _set_budget(db, tenant_id, acc.act_id, tgt_id, scale_level,
+                      daily_budget=new_native, currency=(acc.currency or "USD"), operator="guard")
+    if _sr.get("success"):
+        scaled_targets.add(adset_id or ad_id)
+        res["scaled"] += 1
+        res["scale_details"].append({"act_id": acc.act_id, "ad_id": ad_id, "ad_name": ad_name,
+                                     "level": scale_level, "target": tgt_id,
+                                     "old_usd": round(cur_usd, 2), "new_usd": round(new_usd, 2)})
+        _log_evt("increase_budget", "success",
+                 f"{detail} | 日预算 ${cur_usd:.2f}→${new_usd:.2f} (+{pct*100:.0f}%) "
+                 f"act={acc.act_id} level={scale_level} verified={_sr.get('verified')}",
+                 target_id=tgt_id, target_type=scale_level,
+                 metadata={"ad_id": ad_id, "act_id": acc.act_id, "level": scale_level,
+                           "old_usd": round(cur_usd, 2), "new_usd": round(new_usd, 2),
+                           "pct": round(pct * 100, 1), "cap_usd": cap_usd})
+        _notify_evt("info",
+                    (f"daily budget +{pct*100:.0f}%" if loc == "en" else f"日预算 +{pct*100:.0f}%"),
+                    budget_disp, True)
+    else:
+        _log_evt("increase_budget", "fail",
+                 f"{detail} | 加预算失败 {_sr.get('error', '')}",
+                 friendly=str(_sr.get("error", ""))[:200],
+                 target_id=tgt_id, target_type=scale_level)
+        _notify_evt("warning",
+                    ("Scale-up failed" if loc == "en" else "加预算失败"),
+                    str(_sr.get("fb_error") or _sr.get("error", ""))[:300], False)
+
+
+def _safe_inspect_account(ctx: dict) -> dict:
+    """线程池任务包装：单账户异常不炸整轮（其余账户照常，异常回传 error 字段）。"""
+    try:
+        return _inspect_account_worker(ctx)
+    except Exception as e:
+        logger.error(f"[Guard] 账户 {ctx['acc'].act_id} 巡检异常: {e}", exc_info=True)
+        return {"tenant_id": ctx["tenant_id"], "act_id": ctx["acc"].act_id,
+                "evaluated": 0, "hits": 0, "paused": 0, "scaled": 0,
+                "skipped_spend": 0, "learning_skipped": 0,
+                "paused_details": [], "scale_details": [], "events": [],
+                "error": str(e)}
+
+
+def _inspect_account_worker(ctx: dict) -> dict:
+    """单账户巡检任务（线程池内跑，自建 SuperSessionLocal——SQLAlchemy session 非线程安全，
+    每线程私有，绝不与主线程/其他任务共享）。
+
+    写回边界：快照/tick/令牌冷却等数据层写入用线程私有 session（ad 级数据按账户天然分区，
+    无跨线程同行竞争）；write_log / emit_notification 不在本线程执行——收集为 events 队列，
+    由主线程 join 后统一回放入库/发 TG（多线程不共写同一 session，通知集中过风暴上限）。
+    FB 调用（FbClient）无状态线程安全；ad_ops.set_budget 自带 per-node advisory lock。
+    """
+    tenant_id = ctx["tenant_id"]
+    acc = ctx["acc"]               # SimpleNamespace: act_id/name/currency/timezone_name
+    all_rules = ctx["all_rules"]   # list[SimpleNamespace]（线程安全纯数据）
+    trace_id = ctx["trace_id"]
+    force = ctx["force"]
+    learning_hours = ctx["learning_hours"]
+    res = {"tenant_id": tenant_id, "act_id": acc.act_id, "evaluated": 0, "hits": 0,
+           "paused": 0, "scaled": 0, "skipped_spend": 0, "learning_skipped": 0,
+           "paused_details": [], "scale_details": [], "events": [], "error": None}
+    events = res["events"]
+    db = SuperSessionLocal()
+    scaled_targets: set = set()  # 本账户本轮已扩量目标（同组多广告防重复；跨账户无交集）
+    try:
+        # 按账户选 token（查 cooldown + op_kind=read + RR 兜底）；全灭 → 跳过
+        cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
+        if not cred:
+            return res
+        _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
+        _alias = cred.alias or ""
+        fb = FbClient(decrypt(cred.access_token_enc))
+        acc_today = _account_local_today(acc)  # 账户本地日（time_range 拉 insights + 写 snapshot_date，统一账户本地基准，避免跨时区累积）
+        # 拿 ACTIVE 广告 ID 集 + 创建时间（学习期保护用）；含学习中的——学习中但 ACTIVE = 在花钱
+        active_ids = None
+        created_map: dict = {}
+        try:
+            active_ads = fb.get_active_ads(acc.act_id)
+            active_ids = {a.get("id") for a in active_ads}
+            created_map = {a.get("id"): a.get("created_time") for a in active_ads}
+        except Exception:
+            active_ids = None  # FB API 拉失败，下面用 ads_cache 兜底
+        # ads_cache 兜底：FB API 失败 或 补充过滤——只评估 effective_status=ACTIVE 的广告
+        # 避免"已停广告还有今日消耗 → 重复告警"的幽灵告警
+        if active_ids is None or len(active_ids) == 0:
+            try:
+                _cache_row = db.query(AdsCache).filter(
+                    AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+                if _cache_row:
+                    _cache_ads = json.loads(_cache_row.ads_json or "[]")
+                    _cache_ids = {str(_a.get("id")) for _a in _cache_ads
+                                  if _a.get("effective_status") == "ACTIVE"}
+                    created_map.update({str(_a.get("id")): _a.get("created_time")
+                                        for _a in _cache_ads})
+                    if _cache_ids:
+                        active_ids = _cache_ids
+                        logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE")
+            except Exception:
+                pass
+        try:
+            ads = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False, since=acc_today, until=acc_today)
+        except FbApiError as e:
+            logger.warning(f"[Guard] 账户 {acc.act_id} 读 insights 失败: {e.friendly}")
+            _cred = cred
+            _alias = (_cred.alias if _cred else "") or ""
+            if e.category == "token_expired":
+                if _cred:
+                    _cred.status = "expired"
+                emit_token_expired_if_due(db, tenant_id, _alias,
+                                      cred_id=(_cred.id if _cred else None))
+            elif e.category in ("permissions", "permission"):
+                # 权限不足告警（交接包 §6.2：分级告警）。dedup 6h/账户。此分支自带 dedup+commit，
+                # 在线程私有 session 上自洽（低频、按账户去重），不经 events 队列
+                if not dedup_recent(db, tenant_id, "account_permission_error", acc.act_id, 360):
+                    _loc = tenant_locale(db, tenant_id)
+                    _title, _body = notify_text(_loc, "account_permission_error",
+                        name=_esc(acc.name), act_id=acc.act_id,
+                        alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
+                    emit_notification(db, tenant_id=tenant_id, level="critical",
+                        event_type="account_permission_error",
+                        title=_title, body=_body)
+                    write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                        target_type="account", target_id=acc.act_id,
+                        action_type="account_permission_error", source="guard",
+                        result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
+                    db.commit()
+            elif e.category == "rate_limited":
+                # 限流：写冷却（下轮 client_for_account 跳过该 token）+ 告警
+                if _cred:
+                    mark_cred_cooldown(db, _cred.id, minutes=30, status="rate_limited")
+                _rid = str(_cred.id) if _cred else acc.act_id
+                if not dedup_recent(db, tenant_id, "token_rate_limited", _rid, 60):
+                    _affected = [a.name for a in db.query(Account).filter(
+                        Account.fb_credential_id == cred.id).all()] if cred else []
+                    _loc = tenant_locale(db, tenant_id)
+                    _t_rl, _b_rl = notify_text(_loc, "token_rate_limited",
+                        alias=_esc(_alias or acc.act_id),
+                        affected=_esc('、'.join(_affected[:10]) or '无'))
+                    emit_notification(db, tenant_id=tenant_id, level="warning",
+                        event_type="token_rate_limited",
+                        title=_t_rl, body=_b_rl)
+                    write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                        target_type="fb_credential", target_id=_rid,
+                        action_type="token_rate_limited", source="guard",
+                        result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
+                    db.commit()
+            # fill forward：FB 拉失败时复制上一轮 tick，避免趋势消耗因漏采掉线
+            try:
+                _lt = db.query(PerfSnapshotTick).filter(
+                    PerfSnapshotTick.act_id == acc.act_id,
+                ).order_by(PerfSnapshotTick.snapshot_at.desc()).first()
+                if _lt:
+                    db.add(PerfSnapshotTick(
+                        tenant_id=tenant_id, act_id=acc.act_id, snapshot_date=_lt.snapshot_date,
+                        snapshot_at=datetime.now(timezone.utc),
+                        spend=_lt.spend, conversions=_lt.conversions, cpa=_lt.cpa, roas=_lt.roas,
+                    ))
+                    db.commit()
+            except Exception:
+                pass
+            return res
+        # 建 ads_cache ACTIVE 广告集（覆盖丢失告警用：区分"真盲区"vs"已停广告有历史消耗"）
+        _cache_active_set = None
+        try:
+            _cr = db.query(AdsCache).filter(
+                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+            if _cr and _cr.ads_json:
+                _cache_active_set = {str(_a.get("id")) for _a in json.loads(_cr.ads_json)
+                                     if _a.get("effective_status") == "ACTIVE"}
+        except Exception:
+            pass
+        # 昨日 insights（trend_drop 用；无 trend_drop 规则可跳过省 API 调用）
+        yesterday_map: dict[str, dict] = {}
+        if any(r.rule_type == "trend_drop" for r in all_rules):
+            try:
+                yest = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+                for yad in fb.get_ad_insights(acc.act_id, "yesterday", 50, since=yest, until=yest):
+                    yesterday_map[yad.get("ad_id", "")] = yad
+            except FbApiError:
+                pass  # 昨日读取失败不阻断今日评估
+        # snapshot_date 用账户本地日（和 FB insights time_range 一致，账户本地基准）
+        biz_today = acc_today
+        # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
+        obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
+        # 该账户适用规则：全局(scope_act_id NULL) + 本账户(scope_act_id==acc.act_id)，并存各评估
+        acc_rules = [r for r in all_rules if r.scope_act_id is None
+                     or acc.act_id in [s.strip() for s in (r.scope_act_id or "").split(",")]]
+        # 规则兜底：该账户无任何规则覆盖（如用户只配了别的账户级规则）→ 注入保底止血
+        if not acc_rules:
+            acc_rules = [ctx["default_rule"]]
+
+        # 趋势 tick 累计：本账户本次巡检所有 ACTIVE 广告的 spend/conv 总和（ad 循环后写一条聚合 tick）
+        acc_tick_spend = 0.0
+        acc_tick_conv = 0
+
+        for ad in ads:
+            ad_id = ad.get("ad_id", "")
+            # tick spend + conv 累计所有广告（含已暂停——累计值不因暂停下降）
+            try:
+                acc_tick_spend += to_usd(float(ad.get("spend", 0)), acc.currency)
+            except Exception:
+                pass
+            # 过滤：只评估 ACTIVE 广告（拉了 active_ids 就用它；None=不过滤）
+            if active_ids is not None and ad_id not in active_ids:
+                # 有消耗却被过滤掉 = 覆盖丢失。但区分：
+                #   真盲区 = 广告在 ads_cache 里是 ACTIVE 但 active_ids 没拉到 → 告警
+                #   误报 = 广告已暂停/被拒（有历史消耗但不 ACTIVE）→ 不告警
                 try:
-                    active_ads = fb.get_active_ads(acc.act_id)
-                    active_ids = {a.get("id") for a in active_ads}
-                except Exception:
-                    active_ids = None  # FB API 拉失败，下面用 ads_cache 兜底
-                # ads_cache 兜底：FB API 失败 或 补充过滤——只评估 effective_status=ACTIVE 的广告
-                # 避免"已停广告还有今日消耗 → 重复告警"的幽灵告警
-                if active_ids is None or len(active_ids) == 0:
-                    try:
-                        import json as _json_cache
-                        _cache_row = db.query(AdsCache).filter(
-                            AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
-                        if _cache_row:
-                            _cache_ids = {str(_a.get("id")) for _a in
-                                          _json_cache.loads(_cache_row.ads_json or "[]")
-                                          if _a.get("effective_status") == "ACTIVE"}
-                            if _cache_ids:
-                                active_ids = _cache_ids
-                                logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE")
-                    except Exception:
-                        pass
-                try:
-                    ads = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False, since=acc_today, until=acc_today)
-                except FbApiError as e:
-                    logger.warning(f"[Guard] 账户 {acc.act_id} 读 insights 失败: {e.friendly}")
-                    _cred = cred
-                    _alias = (_cred.alias if _cred else "") or ""
-                    if e.category == "token_expired":
-                        if _cred:
-                            _cred.status = "expired"
-                        emit_token_expired_if_due(db, tenant_id, _alias,
-                                                  cred_id=(_cred.id if _cred else None))
-                    elif e.category in ("permissions", "permission"):
-                        # 权限不足告警（交接包 §6.2：分级告警）。dedup 6h/账户，避免每轮巡检 spam
-                        if not dedup_recent(db, tenant_id, "account_permission_error", acc.act_id, 360):
-                            _loc = tenant_locale(db, tenant_id)
-                            _title, _body = notify_text(_loc, "account_permission_error",
-                                name=_esc(acc.name), act_id=acc.act_id,
-                                alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
-                            emit_notification(db, tenant_id=tenant_id, level="critical",
-                                event_type="account_permission_error",
-                                title=_title, body=_body)
-                            write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                                target_type="account", target_id=acc.act_id,
-                                action_type="account_permission_error", source="guard",
-                                result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
-                            db.commit()
-                    elif e.category == "rate_limited":
-                        # 限流：写冷却（下轮 client_for_account 跳过该 token）+ 告警
-                        if _cred:
-                            mark_cred_cooldown(db, _cred.id, minutes=30, status="rate_limited")
-                        _rid = str(_cred.id) if _cred else acc.act_id
-                        if not dedup_recent(db, tenant_id, "token_rate_limited", _rid, 60):
-                            _affected = [a.name for a in db.query(Account).filter(
-                                Account.fb_credential_id == cred.id).all()] if cred else []
-                            _loc = tenant_locale(db, tenant_id)
-                            _t_rl, _b_rl = notify_text(_loc, "token_rate_limited",
-                                alias=_esc(_alias or acc.act_id),
-                                affected=_esc('、'.join(_affected[:10]) or '无'))
-                            emit_notification(db, tenant_id=tenant_id, level="warning",
-                                event_type="token_rate_limited",
-                                title=_t_rl, body=_b_rl)
-                            write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                                target_type="fb_credential", target_id=_rid,
-                                action_type="token_rate_limited", source="guard",
-                                result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
-                            db.commit()
-                    # fill forward：FB 拉失败时复制上一轮 tick，避免趋势消耗因漏采掉线
-                    try:
-                        _lt = db.query(PerfSnapshotTick).filter(
-                            PerfSnapshotTick.act_id == acc.act_id,
-                        ).order_by(PerfSnapshotTick.snapshot_at.desc()).first()
-                        if _lt:
-                            db.add(PerfSnapshotTick(
-                                tenant_id=tenant_id, act_id=acc.act_id, snapshot_date=_lt.snapshot_date,
-                                snapshot_at=datetime.now(timezone.utc),
-                                spend=_lt.spend, conversions=_lt.conversions, cpa=_lt.cpa, roas=_lt.roas,
-                            ))
-                            db.commit()
-                    except Exception:
-                        pass
-                    continue
-                # 建 ads_cache ACTIVE 广告集（覆盖丢失告警用：区分"真盲区"vs"已停广告有历史消耗"）
-                _cache_active_set = None
-                try:
-                    _cr = db.query(AdsCache).filter(
-                        AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
-                    if _cr and _cr.ads_json:
-                        _cache_active_set = {str(_a.get("id")) for _a in json.loads(_cr.ads_json)
-                                             if _a.get("effective_status") == "ACTIVE"}
+                    if float(ad.get("spend", 0) or 0) > 0:
+                        # 查 ads_cache 看这广告当前状态
+                        _ad_active = True  # 默认保守（cache 查不到=未知=可能active=告警）
+                        if _cache_active_set is not None:
+                            _ad_active = ad_id in _cache_active_set
+                        if _ad_active:
+                            res["skipped_spend"] += 1  # ACTIVE 但被漏掉 = 真盲区
                 except Exception:
                     pass
-                # 昨日 insights（trend_drop 用；无 trend_drop 规则可跳过省 API 调用）
-                yesterday_map: dict[str, dict] = {}
-                if any(r.rule_type == "trend_drop" for r in all_rules):
-                    try:
-                        yest = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-                        for yad in fb.get_ad_insights(acc.act_id, "yesterday", 50, since=yest, until=yest):
-                            yesterday_map[yad.get("ad_id", "")] = yad
-                    except FbApiError:
-                        pass  # 昨日读取失败不阻断今日评估
-                # snapshot_date 用账户本地日（和 FB insights time_range 一致，账户本地基准）
-                biz_today = acc_today
-                # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
-                obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
-                # 该账户适用规则：全局(scope_act_id NULL) + 本账户(scope_act_id==acc.act_id)，并存各评估
-                acc_rules = [r for r in all_rules if r.scope_act_id is None
-                             or acc.act_id in [s.strip() for s in (r.scope_act_id or "").split(",")]]
-                # 规则兜底：该账户无任何规则覆盖（如用户只配了别的账户级规则）→ 注入保底止血
-                if not acc_rules:
-                    acc_rules = [_DEFAULT_BLEED_ABS_RULE]
+                continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
+            # 保活广告永不停（巡检跳过 [Tova-保活] 系列）
+            if "[Tova-保活]" in (ad.get("campaign_name") or ""):
+                continue
+            ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
+            ad_name = ad.get("ad_name", ad_id)[:50]
+            res["evaluated"] += 1
+            spend = float(ad.get("spend", 0))
+            # KPI resolver：目标感知转化数 + target_cpa（审计项目10/11）
+            try:
+                kpi = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
+                                  ad_objective, ad_opt_goal, ad.get("actions", []))
+                conv = kpi["conversions"]
+                target_cpa = kpi["target_cpa"]
+            except Exception as e:
+                logger.warning(f"[Guard] KPI 解析异常 ad={ad_id}: {e}")
+                conv, target_cpa = 0, None
+                kpi = {"kpi_field": "", "source": "error"}
+            # 落地页侧转化数（conversion_source landing/either 用）
+            # landing_metric 配置取"通过"还是"访问"：
+            #   pass = click+redirect（按钮点击/跳转通过量，用户真实意向）
+            #   visit = visit+redirect（落地页到达量，含未点击的）
+            landing_clicks = 0
+            landing_visits = 0
+            if any((r.conversion_source or "either") in ("landing", "either") for r in acc_rules):
+                try:
+                    from ..models.landing_event import LandingEvent
+                    from sqlalchemy import func as _f, text as _ft
+                    # 按账户本地日过滤（created_at 存 UTC，转成本地时区再取日期，和 FB insights 对齐）
+                    _tz = acc.timezone_name or "UTC"
+                    _local_date_expr = _ft("({} AT TIME ZONE 'UTC' AT TIME ZONE '{}')::date".format(
+                        "landing_events.created_at", _tz))
+                    # 通过量（click + redirect）—— 按 ip_hash 去重（同一人多次点击算1，减少误差）
+                    # tenant 过滤：SuperSession 绕 RLS，同 ad_id 双租户导入时不能互串归因
+                    landing_clicks = db.query(_f.count(_f.distinct(LandingEvent.ip_hash))).filter(
+                        LandingEvent.tenant_id == tenant_id,
+                        LandingEvent.ad_id == ad_id,
+                        LandingEvent.event_type.in_(["click", "redirect"]),
+                        LandingEvent.ip_hash.isnot(None),
+                        _local_date_expr == acc_today,
+                    ).scalar() or 0
+                    # 访问量（visit + redirect）—— 同样按 ip_hash 去重（爬虫/同人刷新
+                    # 会刷高访问量 → 空耗规则被虚假"转化"豁免）；ip_hash 为空的行不丢：
+                    # COALESCE 成逐行唯一值各自计 1（worker 正常事件都带 ip_hash）
+                    landing_visits = db.query(_f.count(_f.distinct(_f.coalesce(
+                        LandingEvent.ip_hash, _f.concat("row:", LandingEvent.id))))).filter(
+                        LandingEvent.tenant_id == tenant_id,
+                        LandingEvent.ad_id == ad_id,
+                        LandingEvent.event_type.in_(["visit", "redirect"]),
+                        _local_date_expr == acc_today,
+                    ).scalar() or 0
+                except Exception:
+                    pass
 
-                # 趋势 tick 累计：本账户本次巡检所有 ACTIVE 广告的 spend/conv 总和（ad 循环后写一条聚合 tick）
-                acc_tick_spend = 0.0
-                acc_tick_conv = 0
+            # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）
+            whitelisted = db.query(GuardAllowance).filter(
+                GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
+                GuardAllowance.act_id == acc.act_id,
+                GuardAllowance.ad_id == ad_id,
+                GuardAllowance.allowance_date == acc_today,
+                GuardAllowance.status == "active",
+            ).first()
+            if whitelisted:
+                continue
 
-                for ad in ads:
-                    ad_id = ad.get("ad_id", "")
-                    # tick spend + conv 累计所有广告（含已暂停——累计值不因暂停下降）
-                    try:
-                        acc_tick_spend += to_usd(float(ad.get("spend", 0)), acc.currency)
-                    except Exception:
-                        pass
-                    # 过滤：只评估 ACTIVE 广告（拉了 active_ids 就用它；None=不过滤）
-                    if active_ids is not None and ad_id not in active_ids:
-                        # 有消耗却被过滤掉 = 覆盖丢失。但区分：
-                        #   真盲区 = 广告在 ads_cache 里是 ACTIVE 但 active_ids 没拉到 → 告警
-                        #   误报 = 广告已暂停/被拒（有历史消耗但不 ACTIVE）→ 不告警
-                        try:
-                            if float(ad.get("spend", 0) or 0) > 0:
-                                # 查 ads_cache 看这广告当前状态
-                                _ad_active = True  # 默认保守（cache 查不到=未知=可能active=告警）
-                                if _cache_active_set is not None:
-                                    _ad_active = ad_id in _cache_active_set
-                                if _ad_active:
-                                    total_skipped_spend += 1  # ACTIVE 但被漏掉 = 真盲区
-                                    _tenant_skipped[tenant_id] = _tenant_skipped.get(tenant_id, 0) + 1
-                        except Exception:
-                            pass
-                        continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
-                    # 保活广告永不停（巡检跳过 [Tova-保活] 系列）
-                    if "[Tova-保活]" in (ad.get("campaign_name") or ""):
-                        continue
-                    ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
-                    ad_name = ad.get("ad_name", ad_id)[:50]
-                    total_evaluated += 1
-                    spend = float(ad.get("spend", 0))
-                    # KPI resolver：目标感知转化数 + target_cpa（审计项目10/11）
-                    try:
-                        kpi = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
-                                          ad_objective, ad_opt_goal, ad.get("actions", []))
-                        conv = kpi["conversions"]
-                        target_cpa = kpi["target_cpa"]
-                    except Exception as e:
-                        logger.warning(f"[Guard] KPI 解析异常 ad={ad_id}: {e}")
-                        conv, target_cpa = 0, None
-                        kpi = {"kpi_field": "", "source": "error"}
-                    # 落地页侧转化数（conversion_source landing/either 用）
-                    # landing_metric 配置取"通过"还是"访问"：
-                    #   pass = click+redirect（按钮点击/跳转通过量，用户真实意向）
-                    #   visit = visit+redirect（落地页到达量，含未点击的）
-                    landing_clicks = 0
-                    landing_visits = 0
-                    if any((r.conversion_source or "either") in ("landing", "either") for r in acc_rules):
-                        try:
-                            from ..models.landing_event import LandingEvent
-                            from sqlalchemy import func as _f, text as _ft
-                            # 按账户本地日过滤（created_at 存 UTC，转成本地时区再取日期，和 FB insights 对齐）
-                            _tz = acc.timezone_name or "UTC"
-                            _local_date_expr = _ft("({} AT TIME ZONE 'UTC' AT TIME ZONE '{}')::date".format(
-                                "landing_events.created_at", _tz))
-                            # 通过量（click + redirect）—— 按 ip_hash 去重（同一人多次点击算1，减少误差）
-                            # tenant 过滤：SuperSession 绕 RLS，同 ad_id 双租户导入时不能互串归因
-                            landing_clicks = db.query(_f.count(_f.distinct(LandingEvent.ip_hash))).filter(
-                                LandingEvent.tenant_id == tenant_id,
-                                LandingEvent.ad_id == ad_id,
-                                LandingEvent.event_type.in_(["click", "redirect"]),
-                                LandingEvent.ip_hash.isnot(None),
-                                _local_date_expr == acc_today,
-                            ).scalar() or 0
-                            # 访问量（visit + redirect）—— 同样按 ip_hash 去重（爬虫/同人刷新
-                            # 会刷高访问量 → 空耗规则被虚假"转化"豁免）；ip_hash 为空的行不丢：
-                            # COALESCE 成逐行唯一值各自计 1（worker 正常事件都带 ip_hash）
-                            landing_visits = db.query(_f.count(_f.distinct(_f.coalesce(
-                                LandingEvent.ip_hash, _f.concat("row:", LandingEvent.id))))).filter(
-                                LandingEvent.tenant_id == tenant_id,
-                                LandingEvent.ad_id == ad_id,
-                                LandingEvent.event_type.in_(["visit", "redirect"]),
-                                _local_date_expr == acc_today,
-                            ).scalar() or 0
-                        except Exception:
-                            pass
+            # 历史快照：上一轮的今日累计 spend（budget_burn_fast）+ 近 N 天（consecutive_bad/扩量）
+            prev_spend = None
+            history = None
+            if ctx["hist_days"] or any(r.rule_type == "budget_burn_fast" for r in all_rules):
+                prev_snap = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.ad_id == ad_id,
+                    PerfSnapshot.snapshot_date == biz_today,
+                ).first()
+                if prev_snap:
+                    prev_spend = prev_snap.spend
+                if ctx["hist_days"]:
+                    since_date = (datetime.strptime(biz_today, "%Y-%m-%d") - timedelta(days=ctx["hist_days"])).strftime("%Y-%m-%d")
+                    history = db.query(PerfSnapshot).filter(
+                        PerfSnapshot.ad_id == ad_id,
+                        PerfSnapshot.snapshot_date >= since_date,
+                        PerfSnapshot.snapshot_date < biz_today,
+                    ).order_by(PerfSnapshot.snapshot_date.desc()).all()
 
-                    # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）
-                    whitelisted = db.query(GuardAllowance).filter(
-                        GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
-                        GuardAllowance.act_id == acc.act_id,
-                        GuardAllowance.ad_id == ad_id,
-                        GuardAllowance.allowance_date == acc_today,
-                        GuardAllowance.status == "active",
-                    ).first()
-                    if whitelisted:
+            # 学习期保护：创建 < N 小时的广告不做任何动作（FB 学习期动广告/预算会重置学习）。
+            # 静默跳过规则评估（不算命中），快照照写（consecutive 历史不断档）；
+            # 无创建时间（FB 拉失败且 cache 未含该字段）则不保护（fail-open，同 1.0）。
+            learning_skip = False
+            if learning_hours > 0 and created_map.get(ad_id):
+                try:
+                    _ct = datetime.strptime(str(created_map[ad_id])[:19], "%Y-%m-%dT%H:%M:%S")
+                    if datetime.now(timezone.utc).replace(tzinfo=None) - _ct < timedelta(hours=learning_hours):
+                        learning_skip = True
+                        res["learning_skipped"] += 1
+                except Exception:
+                    pass
+
+            # 评估每条规则（全局 + 本账户级，并存）；学习期广告跳过动作但仍写快照
+            if not learning_skip:
+                for rule in acc_rules:
+                    hit, detail = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
+                                                 landing_clicks=landing_clicks,
+                                                 landing_visits=landing_visits,
+                                                 yesterday_insight=yesterday_map.get(ad_id),
+                                                 prev_spend=prev_spend, history=history,
+                                                 currency=acc.currency)
+                    if not hit:
                         continue
 
-                    # 历史快照：上一轮的今日累计 spend（budget_burn_fast）+ 近 N 天（consecutive_bad）
-                    prev_spend = None
-                    history = None
-                    if hist_days or any(r.rule_type == "budget_burn_fast" for r in all_rules):
-                        prev_snap = db.query(PerfSnapshot).filter(
-                            PerfSnapshot.ad_id == ad_id,
-                            PerfSnapshot.snapshot_date == biz_today,
-                        ).first()
-                        if prev_snap:
-                            prev_spend = prev_snap.spend
-                        if hist_days:
-                            since_date = (datetime.strptime(biz_today, "%Y-%m-%d") - timedelta(days=hist_days)).strftime("%Y-%m-%d")
-                            history = db.query(PerfSnapshot).filter(
-                                PerfSnapshot.ad_id == ad_id,
-                                PerfSnapshot.snapshot_date >= since_date,
-                                PerfSnapshot.snapshot_date < biz_today,
-                            ).order_by(PerfSnapshot.snapshot_date.desc()).all()
-
-                    # 评估每条规则（全局 + 本账户级，并存）
-                    for rule in acc_rules:
-                        hit, detail = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
-                                                     landing_clicks=landing_clicks,
-                                                     landing_visits=landing_visits,
-                                                     yesterday_insight=yesterday_map.get(ad_id),
-                                                     prev_spend=prev_spend, history=history,
-                                                     currency=acc.currency)
-                        if not hit:
+                    # 冷却 dedup（22：成功 60min 阻断；失败仅 5min 重试冷却，下轮重试）
+                    # force=True（手动触发）跳过成功冷却
+                    now_utc = datetime.now(timezone.utc)
+                    if rule.rule_type in SCALE_RULE_TYPES:
+                        # 扩量冷却：同目标 cooldown_hours 内扩过/跳过过 → 不重复（不计 hits，
+                        # 防持续达标广告每 5min 刷计数/日志）
+                        if not _scale_cooldown_ok(db, tenant_id, rule, ad_id,
+                                                  ad.get("adset_id", ""), scaled_targets, now_utc):
                             continue
-
-                        # 冷却 dedup（22：成功 60min 阻断；失败仅 5min 重试冷却，下轮重试）
-                        # force=True（手动触发）跳过成功冷却
-                        now_utc = datetime.now(timezone.utc)
+                    else:
                         succ = None
                         if not force:
                             succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
@@ -570,183 +877,328 @@ def run_inspection(force: bool = False):
                         if fail_recent:
                             continue  # 近 5min 暂停失败过，等下轮重试（不每轮 hammer）
 
-                        total_hits += 1
-                        category = RULE_CATEGORY.get(rule.rule_type, "止损")
-                        campaign_id = ad.get("campaign_id", "")
-                        campaign_name = ad.get("campaign_name", campaign_id)
-                        adset_id = ad.get("adset_id", "")
-                        adset_name = ad.get("adset_name", adset_id)
-                        logger.info(f"[Guard] 命中！租户{tenant_id} 账户{acc.act_id} "
-                                    f"广告[{ad_name}] 规则[{rule.name}] {detail}")
+                    res["hits"] += 1
+                    category = RULE_CATEGORY.get(rule.rule_type, "止损")
+                    campaign_id = ad.get("campaign_id", "")
+                    adset_id = ad.get("adset_id", "")
+                    logger.info(f"[Guard] 命中！租户{tenant_id} 账户{acc.act_id} "
+                                f"广告[{ad_name}] 规则[{rule.name}] {detail}")
 
-                        # 动作由 rule.action 控制：observe=只告警；其余=动态升级暂停
-                        # （ad→adset→campaign，失败/假停逐级升级，移植 1.0 _pause_with_escalation）
-                        ra = (rule.action or "default").lower()
-                        action_text = "仅告警（规则设为观察）"
-                        pause_result = "success"
-                        if ra != "observe":
-                            if ra in ("pause", "default"):
-                                chain = [(ad_id, "广告"), (adset_id, "组"), (campaign_id, "系列")]
-                            elif ra == "pause_adset":
-                                chain = [(adset_id, "组"), (campaign_id, "系列")]
-                            else:  # pause_campaign
-                                chain = [(campaign_id, "系列")]
-                            paused_ok = False
-                            for pid, label in chain:
-                                if not pid:
-                                    continue
-                                try:
-                                    fb.pause_ad(pid)  # pause_ad 对 ad/adset/campaign 通用
-                                    # A2 核验（ad 级）：停后单查 effective_status，仍 ACTIVE=假停→升级下一级
-                                    # 单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等 FB 写延迟
-                                    if pid == ad_id:
-                                        time.sleep(2.5)
-                                        try:
-                                            _node = fb.get_node(pid, "effective_status")
-                                            if str(_node.get("effective_status", "")).upper() == "ACTIVE":
-                                                continue  # 假停，升级下一级
-                                        except Exception:
-                                            pass  # 核验查询失败，信任 FB（视为成功，不升级）——宁可少停不误停整组
-                                    total_paused += 1
-                                    paused_details.append({"act_id": acc.act_id, "ad_id": ad_id,
-                                                           "ad_name": ad_name, "level": label,
-                                                           "target": pid, "reason": detail})
-                                    action_text = f"已暂停{label} PAUSED" + ("（已核验）" if pid == ad_id else "")
-                                    paused_ok = True
-                                    break
-                                except FbApiError as _pause_err:
-                                    # 记录 Meta code/subcode 供排障（交接包 pitfall#7：不丢弃错误码）
-                                    logger.warning(f"[Guard] 暂停{label}失败 ad={ad_id} pid={pid} code={getattr(_pause_err,'category','')} raw={str(getattr(_pause_err,'raw',''))[:100]}")
-                                    continue  # 该级暂停失败，升级下一级
-                            if not paused_ok:
-                                action_text = "暂停失败（ad→组→系列均未生效）"
-                                pause_result = "fail"
-
-                        # 记日志（账户/系列/组/广告 ID + 本币花销 + 动作 + trace_id）
-                        # observe 分支记 observe_alert（日志中心 action 筛选是自由文本，
-                        # 不与 pause 混淆——用户能区分"真停了"vs"只告警"）
-                        write_log(db, tenant_id=tenant_id, trace_id=trace_id,
-                                  actor_type="system", target_type="ad", target_id=ad_id,
-                                  action_type="observe_alert" if ra == "observe" else "pause",
-                                  source="rule_engine", result=pause_result,
-                                  trigger_type=rule.rule_type,
-                                  trigger_detail=f"{detail} | act={acc.act_id}({acc.currency}) "
-                                                 f"camp={campaign_id} adset={adset_id} ad={ad_id} "
-                                                 f"spend={fmt_spend(spend, acc.currency)} "
-                                                 f"conv={conv} action={action_text}",
-                                  metadata={"campaign_id": campaign_id, "adset_id": adset_id,
-                                            "ad_id": ad_id, "act_id": acc.act_id,
-                                            "currency": acc.currency, "rule_action": ra,
-                                            "action": action_text,
-                                            "cred_id": _rid, "cred_alias": _alias})
-
-                        # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
-                        if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):
-                            _loc = tenant_locale(db, tenant_id)
-                            # 动作位：observe 必须显式说"未暂停"（消息与真暂停区分，防用户误读）
-                            if ra == "observe":
-                                _action_disp = ("⚠ Alert only (observe mode, NOT paused)"
-                                                if _loc == "en" else "⚠ 仅告警（观察模式，未暂停）")
-                            else:
-                                _action_disp = action_text  # 已暂停广告/组/系列 PAUSED… / 暂停失败…
-                            _t_rp, _b_rp = notify_text(_loc, "rule_pause",
-                                category=_esc(category), name=_esc(acc.name),
-                                act_id=acc.act_id, ad_name=_esc(ad_name), ad_id=ad_id,
-                                adset_id=(adset_id or '-'), campaign_id=(campaign_id or '-'),
-                                rule_name=_esc(rule.name), detail=_esc(detail),
-                                action=_action_disp,
-                                spend=fmt_spend(spend, acc.currency), conv=conv,
-                                kpi_label=_esc(kpi.get('kpi_label') or '-'),
-                                source_label=_esc(SOURCE_LABELS.get(kpi.get('source'), kpi.get('source') or '-')))
-                            if ra == "observe":
-                                _t_rp = ("[Observe] " if _loc == "en" else "[观察] ") + _t_rp
-                            emit_notification(
-                                db, tenant_id=tenant_id, level="warning",
-                                event_type="rule_pause", trace_id=trace_id,
-                                title=_t_rp, body=_b_rp,
-                                target_type="ad", target_id=ad_id,
-                                reply_markup={"inline_keyboard": [[
-                                    {"text": "🛲 加白今日", "callback_data": f"allow|{tenant_id}|{acc.act_id}|{ad_id}"}
-                                ]]},
-                            )
-                            write_log(db, tenant_id=tenant_id, trace_id=trace_id,
-                                actor_type="system", target_type="ad", target_id=ad_id,
-                                action_type="rule_pause_notified", source="rule_engine",
-                                result="success", trigger_detail=f"ad={ad_id}")
-
+                    # ── 扩量规则：加预算（observe=只告警），不走暂停链 ──
+                    if rule.rule_type in SCALE_RULE_TYPES:
+                        try:
+                            _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail,
+                                         ad_id, adset_id, campaign_id, ad_name,
+                                         events, res, scaled_targets)
+                        except Exception as _se:
+                            logger.warning(f"[Guard] 扩量执行异常 ad={ad_id}: {_se}", exc_info=True)
+                            events.append({"kind": "log", "kwargs": dict(
+                                tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                                target_type="adset", target_id=(adset_id or ad_id),
+                                action_type="increase_budget", source="rule_engine",
+                                result="fail", trigger_type=rule.rule_type,
+                                trigger_detail=f"{detail} | 扩量执行异常",
+                                friendly_error=str(_se)[:200])})
                         db.commit()
-                        break  # 一条广告命中一条规则就停，不重复评估
+                        break  # 一条广告命中一条规则即止
 
-                    # upsert 今日快照（consecutive_bad / budget_burn_fast 数据源 + 看板缓存层）
-                    try:
-                        spend_usd_snap = to_usd(spend, acc.currency)
-                        cpa = (spend_usd_snap / conv) if conv > 0 else None
-                        impressions = int(ad.get("impressions", 0))
-                        clicks = int(ad.get("clicks", 0))
-                        reach = int(ad.get("reach", 0))
-                        frequency = float(ad.get("frequency", 0) or 0)
-                        ctr = float(ad.get("ctr", 0) or 0)
-                        cpc = float(ad.get("cpc", 0) or 0)
-                        roas_val = float(ad.get("purchase_roas", 0) or 0)
-                        snap = db.query(PerfSnapshot).filter(
-                            PerfSnapshot.ad_id == ad_id,
-                            PerfSnapshot.snapshot_date == biz_today,
-                        ).first()
-                        if snap:
-                            snap.spend = spend_usd_snap
-                            snap.spend_native = spend
-                            snap.currency = acc.currency
-                            snap.conversions = conv
-                            snap.cpa = cpa
-                            snap.roas = roas_val if roas_val > 0 else None
-                            snap.impressions = impressions
-                            snap.clicks = clicks
-                            snap.reach = reach
-                            snap.frequency = frequency if frequency > 0 else None
-                            snap.ctr = ctr if ctr > 0 else None
-                            snap.cpc = cpc if cpc > 0 else None
-                            snap.actions_json = json.dumps(ad.get("actions", []))[:4000]
-                            snap.resolved_kpi = kpi.get("kpi_field", "")
-                            snap.kpi_source = kpi.get("source", "")
+                    # ── 止损规则：observe=只告警；其余=动态升级暂停 ──
+                    # （ad→adset→campaign，失败/假停逐级升级，移植 1.0 _pause_with_escalation）
+                    ra = (rule.action or "default").lower()
+                    action_text = "仅告警（规则设为观察）"
+                    pause_result = "success"
+                    if ra != "observe":
+                        if ra in ("pause", "default"):
+                            chain = [(ad_id, "广告"), (adset_id, "组"), (campaign_id, "系列")]
+                        elif ra == "pause_adset":
+                            chain = [(adset_id, "组"), (campaign_id, "系列")]
+                        else:  # pause_campaign
+                            chain = [(campaign_id, "系列")]
+                        paused_ok = False
+                        for pid, label in chain:
+                            if not pid:
+                                continue
+                            try:
+                                fb.pause_ad(pid)  # pause_ad 对 ad/adset/campaign 通用
+                                # A2 核验（ad 级）：停后单查 effective_status，仍 ACTIVE=假停→升级下一级
+                                # 单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等 FB 写延迟
+                                if pid == ad_id:
+                                    time.sleep(2.5)
+                                    try:
+                                        _node = fb.get_node(pid, "effective_status")
+                                        if str(_node.get("effective_status", "")).upper() == "ACTIVE":
+                                            continue  # 假停，升级下一级
+                                    except Exception:
+                                        pass  # 核验查询失败，信任 FB（视为成功，不升级）——宁可少停不误停整组
+                                res["paused"] += 1
+                                res["paused_details"].append({"act_id": acc.act_id, "ad_id": ad_id,
+                                                              "ad_name": ad_name, "level": label,
+                                                              "target": pid, "reason": detail})
+                                action_text = f"已暂停{label} PAUSED" + ("（已核验）" if pid == ad_id else "")
+                                paused_ok = True
+                                break
+                            except FbApiError as _pause_err:
+                                # 记录 Meta code/subcode 供排障（交接包 pitfall#7：不丢弃错误码）
+                                logger.warning(f"[Guard] 暂停{label}失败 ad={ad_id} pid={pid} code={getattr(_pause_err,'category','')} raw={str(getattr(_pause_err,'raw',''))[:100]}")
+                                continue  # 该级暂停失败，升级下一级
+                        if not paused_ok:
+                            action_text = "暂停失败（ad→组→系列均未生效）"
+                            pause_result = "fail"
+
+                    # 记日志（账户/系列/组/广告 ID + 本币花销 + 动作 + trace_id）——events 队列，主线程回放
+                    # observe 分支记 observe_alert（日志中心 action 筛选是自由文本，
+                    # 不与 pause 混淆——用户能区分"真停了"vs"只告警"）
+                    events.append({"kind": "log", "kwargs": dict(
+                        tenant_id=tenant_id, trace_id=trace_id,
+                        actor_type="system", target_type="ad", target_id=ad_id,
+                        action_type="observe_alert" if ra == "observe" else "pause",
+                        source="rule_engine", result=pause_result,
+                        trigger_type=rule.rule_type,
+                        trigger_detail=f"{detail} | act={acc.act_id}({acc.currency}) "
+                                       f"camp={campaign_id} adset={adset_id} ad={ad_id} "
+                                       f"spend={fmt_spend(spend, acc.currency)} "
+                                       f"conv={conv} action={action_text}",
+                        metadata={"campaign_id": campaign_id, "adset_id": adset_id,
+                                  "ad_id": ad_id, "act_id": acc.act_id,
+                                  "currency": acc.currency, "rule_action": ra,
+                                  "action": action_text,
+                                  "cred_id": _rid, "cred_alias": _alias})})
+
+                    # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
+                    if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):
+                        _loc = tenant_locale(db, tenant_id)
+                        # 动作位：observe 必须显式说"未暂停"（消息与真暂停区分，防用户误读）
+                        if ra == "observe":
+                            _action_disp = ("⚠ Alert only (observe mode, NOT paused)"
+                                            if _loc == "en" else "⚠ 仅告警（观察模式，未暂停）")
                         else:
-                            db.add(PerfSnapshot(
-                                tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
-                                snapshot_date=biz_today, spend=spend_usd_snap,
-                                spend_native=spend, currency=acc.currency,
-                                conversions=conv, cpa=cpa,
-                                roas=roas_val if roas_val > 0 else None,
-                                impressions=impressions, clicks=clicks, reach=reach,
-                                frequency=frequency if frequency > 0 else None,
-                                ctr=ctr if ctr > 0 else None, cpc=cpc if cpc > 0 else None,
-                                actions_json=json.dumps(ad.get("actions", []))[:4000],
-                                resolved_kpi=kpi.get("kpi_field", ""),
-                                kpi_source=kpi.get("source", ""),
-                            ))
-                        # tick conv 已在循环开头累计所有广告（含暂停）
-                        db.commit()
-                    except Exception as e:
-                        logger.warning(f"[Guard] 快照写入异常 ad={ad_id}: {e}")
+                            _action_disp = action_text  # 已暂停广告/组/系列 PAUSED… / 暂停失败…
+                        _t_rp, _b_rp = notify_text(_loc, "rule_pause",
+                            category=_esc(category), name=_esc(acc.name),
+                            act_id=acc.act_id, ad_name=_esc(ad_name), ad_id=ad_id,
+                            adset_id=(adset_id or '-'), campaign_id=(campaign_id or '-'),
+                            rule_name=_esc(rule.name), detail=_esc(detail),
+                            action=_action_disp,
+                            spend=fmt_spend(spend, acc.currency), conv=conv,
+                            kpi_label=_esc(kpi.get('kpi_label') or '-'),
+                            source_label=_esc(SOURCE_LABELS.get(kpi.get('source'), kpi.get('source') or '-')))
+                        if ra == "observe":
+                            _t_rp = ("[Observe] " if _loc == "en" else "[观察] ") + _t_rp
+                        events.append({"kind": "notify", "kwargs": dict(
+                            tenant_id=tenant_id, level="warning",
+                            event_type="rule_pause", trace_id=trace_id,
+                            title=_t_rp, body=_b_rp,
+                            target_type="ad", target_id=ad_id,
+                            reply_markup={"inline_keyboard": [[
+                                {"text": "🛲 加白今日", "callback_data": f"allow|{tenant_id}|{acc.act_id}|{ad_id}"}
+                            ]]})})
+                        events.append({"kind": "log", "kwargs": dict(
+                            tenant_id=tenant_id, trace_id=trace_id,
+                            actor_type="system", target_type="ad", target_id=ad_id,
+                            action_type="rule_pause_notified", source="rule_engine",
+                            result="success", trigger_detail=f"ad={ad_id}")})
 
-                # ── 账户级聚合 tick：本账户本次巡检所有广告 spend/conv 总和（0 广告也写一条保证趋势不断档）──
-                try:
-                    acc_tick_cpa = round(acc_tick_spend / acc_tick_conv, 2) if acc_tick_conv > 0 else None
-                    db.add(PerfSnapshotTick(
-                        tenant_id=tenant_id, act_id=acc.act_id, snapshot_date=biz_today,
-                        snapshot_at=datetime.now(timezone.utc),
-                        spend=round(acc_tick_spend, 2), conversions=acc_tick_conv,
-                        cpa=acc_tick_cpa, roas=None,
-                    ))
                     db.commit()
-                except Exception:
-                    pass
+                    break  # 一条广告命中一条规则就停，不重复评估
+
+            # upsert 今日快照（consecutive_bad / budget_burn_fast 数据源 + 看板缓存层）
+            try:
+                spend_usd_snap = to_usd(spend, acc.currency)
+                cpa = (spend_usd_snap / conv) if conv > 0 else None
+                impressions = int(ad.get("impressions", 0))
+                clicks = int(ad.get("clicks", 0))
+                reach = int(ad.get("reach", 0))
+                frequency = float(ad.get("frequency", 0) or 0)
+                ctr = float(ad.get("ctr", 0) or 0)
+                cpc = float(ad.get("cpc", 0) or 0)
+                roas_val = float(ad.get("purchase_roas", 0) or 0)
+                snap = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.ad_id == ad_id,
+                    PerfSnapshot.snapshot_date == biz_today,
+                ).first()
+                if snap:
+                    snap.spend = spend_usd_snap
+                    snap.spend_native = spend
+                    snap.currency = acc.currency
+                    snap.conversions = conv
+                    snap.cpa = cpa
+                    snap.roas = roas_val if roas_val > 0 else None
+                    snap.impressions = impressions
+                    snap.clicks = clicks
+                    snap.reach = reach
+                    snap.frequency = frequency if frequency > 0 else None
+                    snap.ctr = ctr if ctr > 0 else None
+                    snap.cpc = cpc if cpc > 0 else None
+                    snap.actions_json = json.dumps(ad.get("actions", []))[:4000]
+                    snap.resolved_kpi = kpi.get("kpi_field", "")
+                    snap.kpi_source = kpi.get("source", "")
+                else:
+                    db.add(PerfSnapshot(
+                        tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
+                        snapshot_date=biz_today, spend=spend_usd_snap,
+                        spend_native=spend, currency=acc.currency,
+                        conversions=conv, cpa=cpa,
+                        roas=roas_val if roas_val > 0 else None,
+                        impressions=impressions, clicks=clicks, reach=reach,
+                        frequency=frequency if frequency > 0 else None,
+                        ctr=ctr if ctr > 0 else None, cpc=cpc if cpc > 0 else None,
+                        actions_json=json.dumps(ad.get("actions", []))[:4000],
+                        resolved_kpi=kpi.get("kpi_field", ""),
+                        kpi_source=kpi.get("source", ""),
+                    ))
+                # tick conv 已在循环开头累计所有广告（含暂停）
+                db.commit()
+            except Exception as e:
+                logger.warning(f"[Guard] 快照写入异常 ad={ad_id}: {e}")
+
+        # ── 账户级聚合 tick：本账户本次巡检所有广告 spend/conv 总和（0 广告也写一条保证趋势不断档）──
+        try:
+            acc_tick_cpa = round(acc_tick_spend / acc_tick_conv, 2) if acc_tick_conv > 0 else None
+            db.add(PerfSnapshotTick(
+                tenant_id=tenant_id, act_id=acc.act_id, snapshot_date=biz_today,
+                snapshot_at=datetime.now(timezone.utc),
+                spend=round(acc_tick_spend, 2), conversions=acc_tick_conv,
+                cpa=acc_tick_cpa, roas=None,
+            ))
+            db.commit()
+        except Exception:
+            pass
+        return res
+    except Exception as e:
+        logger.error(f"[Guard] 账户 {acc.act_id} 巡检任务异常: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        res["error"] = str(e)
+        return res
+    finally:
+        db.close()
+
+
+def run_inspection(force: bool = False):
+    """巡检主函数（并发版）。遍历所有租户，评估规则，命中按 rule.action 动作。
+
+    动作由 rule.action 唯一控制（observe=只告警 / pause*=止损暂停链 / scale=扩量加预算）
+    ——无全局 dry_run（2026-07-07 用户决策）。
+    规则作用域：全局(scope_act_id NULL=名下所有账户) + 账户级(scope_act_id=指定账户)，并存各评估。
+    并发（1.0 移植）：账户级 ThreadPoolExecutor，guard_concurrency（1-8，默认 4）；
+        每任务线程自建 SuperSessionLocal（session 非线程安全）；日志/通知收口主线程回放（events）。
+    学习期保护：guard_learning_hours（默认 24h，0=关）——创建 < N 小时的广告静默跳过（心跳计数）。
+    多 worker 进程：advisory lock 101 保证每轮只有一个 worker 真跑（防 TG spam）。
+    force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
+    """
+    lock = acquire_run_lock(101)
+    if not lock:
+        return {"skipped": "lock_busy"}
+    db = SuperSessionLocal()
+    trace_id = new_trace_id()
+    total_evaluated = 0
+    total_hits = 0
+    total_paused = 0
+    total_scaled = 0
+    total_learning = 0
+    total_skipped_spend = 0  # 有消耗但被 active_ids 过滤掉的广告数（覆盖丢失，止损盲区）
+    _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
+    paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
+    scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
+
+    try:
+        learning_hours = _sys_float(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
+        # 取所有有 active 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔）
+        tenant_ids = db.query(FbCredential.tenant_id).filter(
+            FbCredential.status == "active"
+        ).distinct().all()
+
+        tasks = []
+        for (tenant_id,) in tenant_ids:
+            all_rules = db.query(GuardRule).filter(
+                GuardRule.tenant_id == tenant_id,
+                GuardRule.enabled == True,
+            ).all()
+            if not all_rules:
+                # 规则兜底：租户无规则时注入默认空耗止血线（保底防裸奔，用户可建规则覆盖）
+                all_rules = [_DEFAULT_BLEED_ABS_RULE]
+            # 本租户无 active 凭证 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
+            cred_n = db.query(FbCredential).filter(
+                FbCredential.tenant_id == tenant_id,
+                FbCredential.status == "active",
+            ).count()
+            if not cred_n:
+                logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证，跳过")
+                continue
+            # 取已纳管账户（is_managed=true 且 ACTIVE=1，跳过被 FB 禁用/宽限/违规的，省 Token 配额；
+            # 也跳过已取消纳管的软删账户——它们保留历史但不再巡检）
+            accounts = db.query(Account).filter(
+                Account.tenant_id == tenant_id,
+                Account.account_status == 1,
+                Account.is_managed.is_(True),
+            ).all()
+
+            hist_days = _max_history_days(all_rules)  # consecutive_bad/扩量 需要的历史天数
+            rule_ctxs = [_rule_ctx(r) for r in all_rules]
+
+            for acc in accounts:
+                acc.last_inspected_at = datetime.now(timezone.utc)
+                # 哨兵 armed → 巡检跳过（哨兵全停，巡检再跑多余 → 省 FB API）
+                if acc.sentinel_armed or acc.sentinel_auto_armed:
+                    continue
+                tasks.append({
+                    "tenant_id": tenant_id, "trace_id": trace_id, "force": force,
+                    "learning_hours": learning_hours, "hist_days": hist_days,
+                    "all_rules": rule_ctxs, "default_rule": _DEFAULT_BLEED_RULE_CTX,
+                    "acc": SimpleNamespace(act_id=acc.act_id, name=acc.name,
+                                           currency=acc.currency, timezone_name=acc.timezone_name),
+                })
+
+        workers = _max_workers(db, len(tasks))
+        logger.info(f"[Guard] 巡检 {len(tasks)} 个账户，并发 {workers}")
+        results = []
+        if workers <= 1 or len(tasks) <= 1:
+            for t in tasks:
+                results.append(_safe_inspect_account(t))
+        else:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="guard") as executor:
+                futs = [executor.submit(_safe_inspect_account, t) for t in tasks]
+                for fut in as_completed(futs):
+                    results.append(fut.result())
+
+        # ── 主线程汇总 + 事件回放（日志/通知统一过主 session：多线程不共写；风暴上限集中生效）──
+        for _res in results:
+            total_evaluated += _res.get("evaluated", 0)
+            total_hits += _res.get("hits", 0)
+            total_paused += _res.get("paused", 0)
+            total_scaled += _res.get("scaled", 0)
+            total_learning += _res.get("learning_skipped", 0)
+            total_skipped_spend += _res.get("skipped_spend", 0)
+            paused_details.extend(_res.get("paused_details") or [])
+            scale_details.extend(_res.get("scale_details") or [])
+            _sk = _res.get("skipped_spend", 0)
+            if _sk > 0:
+                _tenant_skipped[_res["tenant_id"]] = _tenant_skipped.get(_res["tenant_id"], 0) + _sk
+            for _e in (_res.get("events") or []):
+                try:
+                    if _e.get("kind") == "log":
+                        write_log(db, **_e["kwargs"])
+                    elif _e.get("kind") == "notify":
+                        emit_notification(db, **_e["kwargs"])
+                except Exception as _ex:
+                    logger.warning(f"[Guard] 事件回放失败 kind={_e.get('kind')}: {_ex}")
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
 
         logger.info(f"[Guard] 巡检完成: 评估 {total_evaluated} 条广告, "
-                    f"命中 {total_hits}, 停止 {total_paused} (LIVE，按 rule.action)")
+                    f"命中 {total_hits}, 停止 {total_paused}, 扩量 {total_scaled}, "
+                    f"学习期跳过 {total_learning} (LIVE，按 rule.action)")
         # 巡检心跳（watchdog 用：长时间无成功心跳 = 巡检停滞）
         write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                   target_type="scheduler", action_type="inspection_heartbeat",
                   source="scheduled", result="success",
-                  trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条止损 · 跳过{total_skipped_spend}条有消耗广告")
+                  trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条 · 停{total_paused} · "
+                                 f"扩量{total_scaled} · 学习期跳过{total_learning} · "
+                                 f"跳过{total_skipped_spend}条有消耗广告")
         # 覆盖丢失告警：按租户分桶（原实现用循环残留 tenant_id → 发错租户+压制真盲区租户的告警）
         for _tid, _skipped in _tenant_skipped.items():
             if _skipped <= 0:
@@ -767,7 +1219,9 @@ def run_inspection(force: bool = False):
             )
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
-                "skipped_spend": total_skipped_spend, "details": paused_details}
+                "scaled": total_scaled, "learning_skipped": total_learning,
+                "skipped_spend": total_skipped_spend, "details": paused_details,
+                "scale_details": scale_details}
 
     except Exception as e:
         logger.error(f"[Guard] 巡检异常: {e}", exc_info=True)

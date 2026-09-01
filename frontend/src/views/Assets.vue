@@ -133,7 +133,7 @@ const removeUploadItem = (i) => uploadFiles.value.splice(i, 1)
 const submitUpload = async () => {
   if (!uploadFiles.value.length) return ElMessage.warning(t('assets.selectFileFirst'))
   uploadSaving.value = true
-  let ok = 0, fail = 0
+  let ok = 0, fail = 0, dup = 0
   const total = uploadFiles.value.length
   uploadProgress.value = { now: 0, total }
   for (const item of uploadFiles.value) {
@@ -154,7 +154,15 @@ const submitUpload = async () => {
       if (r.status === 401) { localStorage.removeItem('tova_token'); throw new Error(t('error.unauthorized')) }
       const text = await r.text()
       const data = JSON.parse(text)
-      if (!r.ok) throw new Error(data.detail || t('assets.uploadFailed'))
+      const d = data.detail
+      // 内容重复（409）：后端返回结构化 detail 指明已存在的素材，用户自己决定要不要复用
+      if (r.status === 409 && d && d.code === 'duplicate_asset') {
+        item.status = 'dup'
+        item.error = t('assets.duplicateExists', { name: d.name, id: d.asset_id })
+        dup++
+        continue
+      }
+      if (!r.ok) throw new Error((typeof d === 'string' && d) || t('assets.uploadFailed'))
       item.status = 'done'
       ok++
     } catch (e) {
@@ -165,6 +173,7 @@ const submitUpload = async () => {
   }
   uploadSaving.value = false
   if (ok) { ElMessage.success(t('assets.uploadOkCount', { n: ok })); uploadOpen.value = false; await load() }
+  if (dup) ElMessage.warning(t('assets.uploadDupCount', { n: dup }))   // 全 dup 时抽屉留着，用户看明细
   if (fail) ElMessage.error(t('assets.uploadFailCount', { n: fail }))
 }
 
@@ -511,6 +520,7 @@ const countryLabel = (code) => {
           <input v-model="item.uploadTagsStr" class="upload-tags-input" :placeholder="t('assets.tagsInputPh')" />
           <span v-if="item.status === 'done'" class="upload-status done">✓ {{ t('assets.uploadDone') }}</span>
           <span v-if="item.status === 'fail'" class="upload-status fail" :title="item.error || ''">✗ {{ t('common.fail') }}</span>
+          <span v-if="item.status === 'dup'" class="upload-status dup">⚠ {{ item.error }}</span>
           <span v-if="item.status === 'uploading'" class="upload-status uploading">{{ t('assets.uploadingDots') }}</span>
         </div>
       </div>
@@ -705,6 +715,7 @@ const countryLabel = (code) => {
 .upload-status { font-size: 11px; }
 .upload-status.done { color: var(--success); }
 .upload-status.fail { color: var(--error); }
+.upload-status.dup { color: var(--warning); word-break: break-all; margin-top: 2px; }
 .upload-status.uploading { color: var(--ac); }
 .meta-info { font-size: 12px; color: var(--t3); }
 

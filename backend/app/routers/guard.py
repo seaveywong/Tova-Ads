@@ -13,7 +13,8 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/guard", tags=["guard"])
 
 # 规则动作（doc 03 §2.3）：observe=只告警 / default/pause=停广告 / pause_adset=停组 / pause_campaign=停系列
-RULE_ACTIONS = {"observe", "default", "pause", "pause_adset", "pause_campaign"}
+# scale=扩量规则加预算（rule_type=slow_scale/roas_scale 专用；引擎里非 observe 的动作都按扩量执行）
+RULE_ACTIONS = {"observe", "default", "pause", "pause_adset", "pause_campaign", "scale"}
 
 
 class CreateRuleIn(BaseModel):
@@ -50,14 +51,15 @@ class SentinelArmIn(BaseModel):
 @router.get("/rules")
 def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db: Session = Depends(get_db)):
     rules = db.query(GuardRule).filter(GuardRule.tenant_id == user.tenant_id).all()
-    # 每条规则的命中统计（action_logs: pause by rule_engine, 按 trigger_type 聚合）
+    # 每条规则的命中统计（action_logs: pause/increase_budget by rule_engine, 按 trigger_type 聚合；
+    # increase_budget=扩量规则的"命中"，否则扩量规则永远显示未命中）
     from ..models.log import ActionLog
     from sqlalchemy import func
     hit_rows = db.query(
         ActionLog.trigger_type, func.count(ActionLog.id), func.max(ActionLog.created_at),
     ).filter(
         ActionLog.tenant_id == user.tenant_id,
-        ActionLog.action_type == "pause",
+        ActionLog.action_type.in_(["pause", "increase_budget"]),
         ActionLog.source == "rule_engine",
     ).group_by(ActionLog.trigger_type).all()
     hit_map = {r[0]: {"count": int(r[1] or 0), "last_at": r[2].isoformat() if r[2] else None} for r in hit_rows}

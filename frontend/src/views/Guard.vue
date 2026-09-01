@@ -40,21 +40,39 @@ const RULE_TYPES = computed(() => ({
   budget_burn_fast: { label: t('guard.rt.budget_burn_fast'), category: t('guard.cat.bleed'), params: [
     { key: 'threshold_abs', label: t('guard.param.delta_gte'), def: 20, unit: 'USD' },
   ]},
+  // 扩量规则（1.0 移植）：转化好/ROAS 达标 → 自动加日预算（带上限+24h 冷却防重复）
+  slow_scale: { label: t('guard.rt.slow_scale'), category: t('guard.cat.scale'), params: [
+    { key: 'min_conversions', label: t('guard.param.conv_gte'), def: 3, unit: t('guard.unit.times') },
+    { key: 'cpa_target', label: t('guard.param.cpa_target'), def: 8, unit: 'USD' },
+    { key: 'cpa_ratio', label: t('guard.param.cpa_good'), def: 0.8, unit: 'x' },
+    { key: 'scale_pct', label: t('guard.param.step_pct'), def: 20, unit: '%' },
+    { key: 'max_daily_budget_usd', label: t('guard.param.cap_usd'), def: 100, unit: 'USD' },
+    { key: 'consecutive_days', label: t('guard.param.days'), def: 1, unit: t('guard.unit.day') },
+  ]},
+  roas_scale: { label: t('guard.rt.roas_scale'), category: t('guard.cat.scale'), params: [
+    { key: 'min_conversions', label: t('guard.param.conv_gte'), def: 3, unit: t('guard.unit.times') },
+    { key: 'roas_threshold', label: t('guard.param.roas_gte'), def: 3, unit: 'x' },
+    { key: 'scale_pct', label: t('guard.param.step_pct'), def: 15, unit: '%' },
+    { key: 'max_daily_budget_usd', label: t('guard.param.cap_usd'), def: 100, unit: 'USD' },
+    { key: 'consecutive_days', label: t('guard.param.days'), def: 1, unit: t('guard.unit.day') },
+  ]},
 }))
-const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign') }))
+const SCALE_TYPES = ['slow_scale', 'roas_scale']
+const isScaleType = (rt) => SCALE_TYPES.includes(rt)
+const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign'), scale: t('guard.action.scale') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
 const LANDING_METRIC = computed(() => ({ pass: t('guard.lm.pass_short'), visit: t('guard.lm.visit_short') }))
 // category 显示翻译表（DB 存的是建规则时的语言文本，按已知值映射到当前 locale；映射不到原样显示）
 const CAT_LABELS = computed(() => [
   [t('guard.cat.bleed'), 'bleed'], [t('guard.cat.cost'), 'cost'], [t('guard.cat.decline'), 'decline'],
+  [t('guard.cat.scale'), 'scale'],
 ])
 const catLabel = (c) => {
   if (!c) return ''
-  const zh = { '空耗止损': 'bleed', '成本超标': 'cost', '效果下滑': 'decline' }
+  const zh = { '空耗止损': 'bleed', '成本超标': 'cost', '效果下滑': 'decline', '智能扩量': 'scale' }
   const key = zh[c] || CAT_LABELS.value.find(([label]) => label === c)?.[1]
-  const en = { bleed: 'Bleed', cost: 'Cost', decline: 'Decline' }
   // 显示当前语言；后端仍按原文匹配（_evaluate_rule 用 category 前缀分类）
-  const cur = { bleed: t('guard.cat.bleed'), cost: t('guard.cat.cost'), decline: t('guard.cat.decline') }
+  const cur = { bleed: t('guard.cat.bleed'), cost: t('guard.cat.cost'), decline: t('guard.cat.decline'), scale: t('guard.cat.scale') }
   return cur[key] || c
 }
 
@@ -92,6 +110,8 @@ const HUMAN = {
   reach_no_conv: r => t('guard.human.reach_no_conv', { reach: fmtN(p(r,'reach_threshold')||1000), spend: p(r,'min_spend')||10 }),
   low_ctr_no_conv: r => t('guard.human.low_ctr_no_conv', { spend: p(r,'min_spend')||10, ctr: p(r,'max_ctr')||0.5 }),
   budget_burn_fast: r => t('guard.human.budget_burn_fast', { n: p(r,'threshold_abs')||20 }),
+  slow_scale: r => t('guard.human.slow_scale', { conv: p(r,'min_conversions')||3, ratio: p(r,'cpa_ratio')||0.8, pct: p(r,'scale_pct')||20, cap: p(r,'max_daily_budget_usd')||100 }),
+  roas_scale: r => t('guard.human.roas_scale', { conv: p(r,'min_conversions')||3, roas: p(r,'roas_threshold')||3, pct: p(r,'scale_pct')||15, cap: p(r,'max_daily_budget_usd')||100 }),
 }
 const fmtN = (n) => Number(n).toLocaleString()
 const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r))
@@ -113,6 +133,10 @@ const onTypeChange = () => {
   const schema = RULE_TYPES.value[form.value.rule_type]
   form.value.params = {}  // 不预填：输入框留空，空值=用后端默认（避免预埋值误导）
   if (schema) form.value.category = schema.category
+  // 扩量/止损动作集不同：切换类型时归位默认动作（防 scale 动作落在止损规则上/反之）
+  const scale = isScaleType(form.value.rule_type)
+  if (scale && !['scale', 'observe'].includes(form.value.action)) form.value.action = 'scale'
+  if (!scale && form.value.action === 'scale') form.value.action = 'pause'
 }
 const openCreate = () => {
   editing.value = null
@@ -184,6 +208,7 @@ const doInspect = async (force = false) => {
     if (r.skipped === 'lock_busy') { ElMessage.warning(t('guard.inspectLockBusy')); return }
     if (r.error) { ElMessage.error(t('guard.inspectError', { msg: r.error })); return }
     const summary = t('guard.inspectSummary', { evaluated: r.evaluated ?? 0, hits: r.hits ?? 0, paused: r.paused ?? 0 })
+      + (r.scaled ? ' · ' + t('guard.inspectScaled', { n: r.scaled }) : '')
     if (r.details && r.details.length) {
       const names = r.details.slice(0, 3).map(d => d.ad_name || d.ad_id).join('、')
       ElMessage.success(t('guard.inspectSummaryDetail', { summary, names, more: r.details.length > 3 ? t('guard.andMore') : '' }))
@@ -257,9 +282,12 @@ const doInspect = async (force = false) => {
         <div class="form-l"><label>{{ t('guard.actionLabel') }}</label>
           <select v-model="form.action" class="input">
             <option value="observe">{{ t('guard.action.observe_opt') }}</option>
-            <option value="pause">{{ t('guard.action.pause') }}</option>
-            <option value="pause_adset">{{ t('guard.action.pause_adset') }}</option>
-            <option value="pause_campaign">{{ t('guard.action.pause_campaign') }}</option>
+            <option v-if="isScaleType(form.rule_type)" value="scale">{{ t('guard.action.scale') }}</option>
+            <template v-else>
+              <option value="pause">{{ t('guard.action.pause') }}</option>
+              <option value="pause_adset">{{ t('guard.action.pause_adset') }}</option>
+              <option value="pause_campaign">{{ t('guard.action.pause_campaign') }}</option>
+            </template>
           </select>
         </div>
         <div class="form-l"><label>{{ t('guard.convLabelOpt') }}</label>
