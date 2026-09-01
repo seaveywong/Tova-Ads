@@ -28,7 +28,7 @@ class PerfSnapshot(Base):
     kpi_source = Column(Text)        # 解析来源（manual/matrix/objective_fallback/semantic）
     platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（同 ad_id 双平台各一行）
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (UniqueConstraint("ad_id", "platform", "snapshot_date", name="uq_perf_ad_date"),)
+    __table_args__ = (UniqueConstraint("tenant_id", "ad_id", "platform", "snapshot_date", name="uq_perf_ad_date"),)
 
 
 class PerfSnapshotTick(Base):

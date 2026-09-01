@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-09-02（五）— TikTok 平台接入 P0-P4 全量（两波+复审修复）+ 落地页发布 2×P0
+
+### 概述
+用户批准 TK 现在启动（不等 FB 过审，sandbox 可建广告）。commit `516883b`（波1 P0/P1/P2）+ `0461595`（波2 P3/P4）+ 复审修复（本 commit）。迁移 0070-0074（5 个）。**硬红线=零 FB 风险**——复审逐路径验证成立（纯 FB 生产态全等价），并清掉 3 个「一连 TT 即炸」的 P0。
+
+### 变更（按 Phase）
+| Phase | 内容 |
+|---|---|
+| P0 数据层 | accounts.platform + tt_credentials/account_tt_credentials/tt_apps（RLS fail-closed+DML/序列 GRANT）+ perf/ads_cache/allowances/templates 加 platform（perf 唯一键重建）+ 分发器 |
+| P1 令牌 | tt_client（v1.3+自计数限流器+duck-type FbClient 方法面）+ OAuth（轮换 token 原子写回）+ tt_token_refresh cron 6h（锁 114）+ Tokens 页 FB/TT 分区（倒计时/寿命红标）|
+| P2 像素 | FB CAPI 补齐（**默认关**、同 event_id 三发去重、landing 模板最小 diff 只加 eventID）+ TT 像素建时自动 S2S 点亮 |
+| P3 广告 | tt_ad_builder + 素材 file_id 管道（行锁缓存，0073）+ runner/preflight TT 分支（平台守卫/像素 code 解析/出生 DISABLE）+ kpi_mapping TT 映射 + 前端平台切换+TT 术语 |
+| P4 平台化 | 巡检入口含 TT 租户+worker TT 分支（KPI 防误杀护栏/observe-only 扩量）+ dashboard platform 参数（all==fb 等价实证）+ topbar 平台切换器（usePlatform）+ useStatus TT 枚举 + Assets TK 9:16 徽标 |
+
+### 复审修复（当场）
+- 🔴 P0-1 混合租户 FB 导入 500：iter_tenant_clients 的 TtClient 补 app_id + fb.py 聚合循环 except 扩 TtApiError
+- 🔴 P0-2 TT 账户无纳管路径（整链不可达）：/tt/loadable-accounts + /tt/import（显式纳管铁律，未授权一律 not_found）
+- 🔴 P0-3 perf 唯一键跨租户撞号腐蚀：0074 键加 tenant_id + upsert 查询补租户过滤
+- P1-4 ads_cache_sync platform 过滤（TT 未接前防错标）；删调试残留 .tmp_check.mjs
+
+### 遗留（记录）
+- TT 紧急暂停缺位（真烧钱只能 TT 后台手停）——连 sandbox 后优先补
+- FB CAPI 防双计技术闸（现仅 UI 提示"先重发布再开"）；Tokens 页 TT 导入 UI（后端就绪）；ads_cache TT 实体映射；ActionLog 无 platform 列；tt_apps policy WITH CHECK 收紧（连同 fb_apps）；TT 扩量真 set_budget
+- sandbox 校准点：objective 枚举/分块上传字段/ad operation_status——拿到 app_id 实测后修
+
+### 验证
+smoke20 19/19（迁移/RLS×3/序列/回填/fb_capi 全 off/FB 六端点红线回归）+ smoke21 12/12（dashboard 三态等价/TT 模板 CRUD+preflight/KPI 映射）+ 修复后 7/7（perf 新键/tt import/FB 回归）。真 sandbox E2E 等用户 app_id（指引：TK_开发者申请指引.md）。
+
+---
+
 ## 2026-09-02（四）— 留档清账三波：Settings旋钮UI + 令牌页4项 + P2大池分级 + #187落地页集成验证
 
 ### 概述

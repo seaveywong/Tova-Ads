@@ -44,7 +44,8 @@ def iter_tenant_clients(db: Session, tenant_id: int) -> list:
     TtClient = _tt_client_cls()
     if TtClient is not None:
         for tc in _iter_tt_creds(db, tenant_id):
-            pairs.append((tc, TtClient(decrypt(tc.access_token_enc))))
+            # app_id 必传：get_ad_accounts 等端点要它；缺失时抛 TtApiError 会炸调用方
+            pairs.append((tc, TtClient(decrypt(tc.access_token_enc), app_id=tc.app_id or "")))
     return pairs
 
 

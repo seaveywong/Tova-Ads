@@ -12,6 +12,7 @@ from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
+from ..core.tt_client import TtApiError
 from ..models.fb import FbCredential, Account, AccountFbCredential
 from ..schemas.fb import StoreCredentialIn, FbCredentialOut, ImportAccountsIn
 
@@ -849,7 +850,8 @@ def get_assets(
             for p in fb.get_pages():
                 if p.get("id") and p["id"] not in seen_page:
                     seen_page.add(p["id"]); pages.append(p)
-        except FbApiError:
+        except (FbApiError, TtApiError):
+            # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合
             continue
     return {"ad_accounts": accounts, "pages": pages}
 
@@ -932,7 +934,7 @@ def import_accounts(
     for cred, fb in pairs:
         try:
             token_accounts = fb.get_ad_accounts()
-        except FbApiError:
+        except (FbApiError, TtApiError):
             continue
         for acc in token_accounts:
             aid = acc.get("account_id", "")

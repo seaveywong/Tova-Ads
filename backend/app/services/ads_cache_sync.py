@@ -23,7 +23,8 @@ def run_ads_cache_sync():
         return {"skipped": "already running"}
     try:
         accounts = db.query(Account).filter(
-            Account.is_managed == True, Account.account_status == 1  # noqa: E712
+            Account.is_managed == True, Account.account_status == 1,  # noqa: E712
+            Account.platform == "fb",  # TT 的 ads_cache 同步未接（duck-type 实体映射另批）；防 TT 行错标 'fb'
         ).all()
         updated = 0
         for acc in accounts:
@@ -39,9 +40,10 @@ def run_ads_cache_sync():
                 continue
             row = db.query(AdsCache).filter(
                 AdsCache.tenant_id == acc.tenant_id, AdsCache.act_id == acc.act_id,
+                AdsCache.platform == "fb",
             ).first()
             if not row:
-                row = AdsCache(tenant_id=acc.tenant_id, act_id=acc.act_id)
+                row = AdsCache(tenant_id=acc.tenant_id, act_id=acc.act_id, platform="fb")
                 db.add(row)
             row.campaigns_json = json.dumps(campaigns)
             row.adsets_json = json.dumps(adsets)

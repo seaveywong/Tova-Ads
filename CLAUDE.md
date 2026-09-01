@@ -42,9 +42,9 @@ node _sshx.js 'cd /opt/toveads/backend && venv/bin/python -m py_compile <file> &
 坑：`MSYS_NO_PATHCONV=1` 防 Git Bash 路径转换；cwd 漂移报 module not found 就 cd 回 `/d/dev/Mira_One`；前端 build cwd 必须在 frontend。
 
 ## 多租户 / RLS
-两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-111，新增从 112 起）。
+两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-114，新增从 115 起）。
 
 ## 详细文档（按需读，别全读）
 - `TECH_REVIEW.md` — 每次大改的复审记录（概述+变更表+迁移+结论+commit）。改完按 `tech-review-format` 追加。
-- `TK_接入规划.md` — TikTok 接入方案（**未启动，等用户发话**）。
+- `TK_接入规划.md` — TikTok 接入方案（✅ P0-P4 已上线 2026-09-02，剩 sandbox 实测）。`TK_开发者申请指引.md` — 用户侧申请步骤。
 - auto-memory：`toveads-dev-sop`(SOP全流程) · `review-standard`(主管复审6维度) · `i18n-system` · `page-post-follow-mode`(跟帖) · `keepalive-creative-fix`(保活code3) · `token-dispatch-planning`(多令牌) · `landing-pixel-pipeline`。

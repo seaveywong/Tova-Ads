@@ -1127,6 +1127,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 cpc = float(ad.get("cpc", 0) or 0)
                 roas_val = float(ad.get("purchase_roas", 0) or 0)
                 snap = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.tenant_id == tenant_id,
                     PerfSnapshot.ad_id == ad_id,
                     PerfSnapshot.platform == platform,
                     PerfSnapshot.snapshot_date == biz_today,

@@ -361,3 +361,58 @@ def upsert_tt_app(body: TtAppIn,
         return {"configured": True, "app_id": body.app_id.strip()}
     finally:
         sdb.close()
+
+
+# ── TT 账户显式纳管（铁律「账户只显式导入才纳管」，OAuth 只建 is_managed=False 行）──
+class TtImportIn(BaseModel):
+    act_ids: list[str] = []
+
+
+@router.get("/loadable-accounts")
+def tt_loadable_accounts(user: CurrentUser = Depends(require_permission("ads.read")),
+                         db: Session = Depends(get_db)):
+    """列本租户可导入的 TT 账户（OAuth 授权时已建行、尚未纳管的）。"""
+    rows = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id,
+        Account.platform == "tt",
+        Account.is_managed == False,  # noqa: E712
+    ).order_by(Account.id.desc()).all()
+    return [{"act_id": a.act_id, "name": a.name or a.act_id,
+             "tt_credential_id": a.tt_credential_id} for a in rows]
+
+
+@router.post("/import")
+def tt_import(body: TtImportIn, user: CurrentUser = Depends(require_permission("ads.create")),
+              db: Session = Depends(get_db)):
+    """TT 账户显式纳管（is_managed=True）。只收 OAuth 授权过的账户行——未授权的
+    act_id 一律 not_found（不做任何 API 侧隐式拉取）。重复导入=恢复纳管。"""
+    from ..core.log_utils import write_log, new_trace_id
+    cleaned = []
+    for raw in body.act_ids:
+        v = str(raw).replace("act_", "").replace("ACT_", "").strip()
+        if v:
+            cleaned.append(v)
+    cleaned = list(dict.fromkeys(cleaned))  # 去重保序
+    imported, skipped, not_found = [], 0, []
+    for aid in cleaned:
+        acc = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id,
+            Account.act_id == aid,
+            Account.platform == "tt",
+        ).first()
+        if not acc:
+            not_found.append(aid)
+            continue
+        if acc.is_managed:
+            skipped += 1
+            continue
+        acc.is_managed = True
+        imported.append(aid)
+    if imported:
+        write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id, target_type="account", target_id="tt_batch",
+                  action_type="import", source="user", result="success",
+                  metadata={"platform": "tt", "imported": imported})
+    db.commit()
+    return {"imported": imported, "skipped_existing": skipped,
+            "not_found": not_found, "total": len(cleaned)}
