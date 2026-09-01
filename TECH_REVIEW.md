@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-09-02（二）— 5模块深扫修复（账户生命周期+告警正确性+AdManager）+ 切Tab + 复审收尾
+
+### 概述
+三 commit（`b89b011` 切Tab / `73ccb2e` 模块深扫 14 项 / `b4f98c9` 复审 P1+P2×3），17+7 文件。3 agent 并行深扫（告警逻辑/规则引擎/素材库/投放模板/广告管理器+账户增删生命周期）→ 全部实现 → 独立复审（无 P0，P1×1 i18n + P2 若干）→ 复审修复批。
+
+### 变更（按主题）
+| 主题 | 内容 |
+|---|---|
+| 🔴 账户生命周期 P0 | retry 对已移除账户会真往 FB 建广告花钱（cred 兜底走全租户 RR 令牌，无止损覆盖）→ retry_item 请求层原子声明（UPDATE WHERE status='fail' 判 rowcount）+ 纳管守卫 400 + _retry_one/_run_deploy_job 后台二次守卫；unmanage 先数 ACTIVE 广告再删缓存，确认文案明示"广告不会停、止损失效"+移除后提示剩 N 条在投；dashboard 已移除账户不再误报"巡检未覆盖" |
+| 告警/规则正确性 | observe 规则 TG 消息加"⚠ 仅告警（观察模式）"+action_type=observe_alert+冷却 in_ 扩键；token_expired 按 cred 分键去重；cpa_exceed/consecutive_bad 强制 FB 转化数（原 either 稀释→CPA 被落地点击拉低→漏停；cs=landing 无 actions 时规则不适用）；landing_visits IP 去重；budget 98% 升 critical；sentinel/warmup 全租户 arm 过滤 unmanaged |
+| AdManager | 跨币种消耗：perf_snapshots.spend 已是 USD（models/perf.py:13 实证）→ 后端双列 spend/spend_usd，混选折 USD 展示+排序，单币种本币；cached_at=最旧账户+前端超 1h 橙标；拒审原因弹窗（review_feedback）+creative 缩略图；POST /ads/rename（三层改名，md5 锁+审计+缓存补丁） |
+| preflight | 子码 slug 存在性预检（拼错=部署成功但归因全断）→ subcode_warn_slug 前端 i18n 渲染；汇率缺失 500→400 静态文案入译表 |
+| 切Tab 修复 | 路由 chunk 空闲预取（MainLayout 挂载时，未登录不拉）+ KeepAlive 缓存重数据页（exclude 4 个 query 深链页：AdManager/Landing/LaunchTemplates/Tokens）|
+| 复审 P1+P2 | ERROR_ZH_EN +2 条（预算换算失败/移除纳管重试）EN 自动译；_ASSETS_SUMMARY_CACHE 签名加纳管账户数（unmanage 后不再给 1h 旧计数）|
+
+### 验证
+- 语法门 ✓ / 服务 active ✓ / health 1.3.5 ✓ / 前端 CF Pages ✓
+- smoke（_smoke16）11 PASS / 0 FAIL / 5xx=0：retry 移除守卫 404、preflight 404、guard/status、ads/list cached_at+spend_usd+currency、rename 路由 405、dashboard/fb/guard/budget-check 回归
+- 复审 smoke：译表×3 命中（en 译出/zh 原样）、preflight 404、assets-summary 200×2 缓存命中（fresh=1.3s→cached=0.0s）
+
+### 复审结论（已知限制）
+- 6 个维度通过；关键独立验证：spend=USD 假设成立（guard_engine.py:682 写入侧实证）、retry 原子声明并发安全、unmanage 先数后删
+- 遗留 P2（未做）：runner 内 2 条 FbApiError 静态中文（job item error 无翻译层，EN 用户可见中文，罕见竞态路径）；rename 并发 last-write-wins（15min 同步自愈，预存模式）；pre-迁移0020 旧快照 spend_native=NULL 兜底可能错标币种；被缓存页切回静默旧数据（仅 Dashboard 有自动刷新）
+
+### 生产变更
+无 DB 迁移。后端 12 文件部署 + 前端两次 CF Pages。
+
+---
+
 ## 2026-08-17（二）— 审计第二批修复（P1 剩余 16 项）
 
 ### 概述
