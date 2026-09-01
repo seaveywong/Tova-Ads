@@ -59,8 +59,9 @@ const cleaning = ref(false)
 const platform = ref('fb')
 const ttLoading = ref(false)
 const ttCreds = ref([])
-const ttApp = ref(null)                     // { configured, app_id }
-const ttAppForm = ref({ app_id: '', app_secret: '' })
+const ttApps = ref([])                      // App 卡片列表（照 FB apps 模式）
+const ttAppForm = ref({ name: '', app_id: '', app_secret: '' })
+const ttAppDialog = ref(false)
 const ttAppSaving = ref(false)
 const nowTick = ref(Date.now())
 let ttTimer = null
@@ -71,39 +72,59 @@ const loadTt = async () => {
   catch (e) { ElMessage.error(e.message || t('tokens.ttLoadFail')); ttCreds.value = [] }
   ttLoading.value = false
 }
-const loadTtApp = async () => {
-  try { ttApp.value = await GET('/tt/apps') } catch { ttApp.value = { configured: false, app_id: '' } }
+const loadTtApps = async () => {
+  try { ttApps.value = (await GET('/tt/apps')) || [] } catch { ttApps.value = [] }
 }
 const switchPlatform = (p) => {
   platform.value = p
-  if (p === 'tt') { loadTt(); if (isSuper.value) loadTtApp() }
+  if (p === 'tt') { loadTt(); loadTtApps() }
 }
-const connectTikTok = async () => {
-  try {
-    const r = await GET('/tt/oauth/start')
-    if (r.url) window.location.href = r.url
-  } catch (e) { ElMessage.error(t('tokens.ttStartFail') + (e.message || '')) }
+const _ttOAuthUrl = async (apk) => {
+  const q = apk ? `?app_pk=${apk}` : ''
+  try { const r = await GET(`/tt/oauth/start${q}`); return r.url || '' }
+  catch (e) { ElMessage.error(t('tokens.ttStartFail') + (e.message || '')); return '' }
 }
-const copyTtOAuth = async () => {  // 与 FB copyOAuth 同款：复制授权链接（剪贴板失败弹窗显示）
+const startTtOAuth = async (a) => {  // 从 App 卡片发起（与 FB startOAuth 同款）
+  const url = await _ttOAuthUrl(a?.id || 0)
+  if (url) window.location.href = url
+}
+const copyTtOAuth = async (a) => {  // 与 FB copyOAuth 同款：复制授权链接
+  const url = await _ttOAuthUrl(a?.id || 0)
+  if (!url) return
   try {
-    const r = await GET('/tt/oauth/start')
-    if (!r.url) return
-    await navigator.clipboard.writeText(r.url)
+    await navigator.clipboard.writeText(url)
     ElMessage.success(t('tokens.oauthLinkCopied'))
   } catch (e) {
-    ElMessage.error(t('tokens.ttStartFail') + (e.message || ''))
+    ElMessageBox.alert(url, t('tokens.oauthUrlTitle'), { confirmButtonText: t('common.close') }).catch(() => {})
   }
 }
 const saveTtApp = async () => {
   if (!ttAppForm.value.app_id.trim() || !ttAppForm.value.app_secret.trim()) return ElMessage.warning(t('tokens.ttAppFillBoth'))
   ttAppSaving.value = true
   try {
-    await POST('/tt/apps', { app_id: ttAppForm.value.app_id.trim(), app_secret: ttAppForm.value.app_secret.trim() })
+    await POST('/tt/apps', {
+      name: ttAppForm.value.name.trim(),
+      app_id: ttAppForm.value.app_id.trim(),
+      app_secret: ttAppForm.value.app_secret.trim(),
+    })
     ElMessage.success(t('tokens.ttAppSaved'))
-    ttAppForm.value = { app_id: '', app_secret: '' }
-    await loadTtApp()
+    ttAppDialog.value = false
+    ttAppForm.value = { name: '', app_id: '', app_secret: '' }
+    await loadTtApps()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   ttAppSaving.value = false
+}
+const delTtApp = async (a) => {
+  try {
+    await ElMessageBox.confirm(t('tokens.ttAppDeleteConfirm', { name: a.name }), t('common.confirm'), {
+      type: 'warning', confirmButtonClass: 'el-button--danger',
+    })
+  } catch { return }
+  try {
+    await DELETE(`/tt/apps/${a.id}`)
+    ElMessage.success(t('common.opOk'))
+    await loadTtApps()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const parseTT = (s) => {
   if (!s || s === 'None') return null
@@ -569,7 +590,7 @@ const deleteToken = async (tk) => {
         <button v-if="isSuper" class="btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
       </div>
       <div v-else class="bar-r">
-        <button class="btn primary" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+        <button class="btn primary" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
         <button class="btn" @click="openTtLoad">{{ t('tokens.importAccounts') }}</button>
         <button class="btn" @click="copyTtOAuth">{{ t('tokens.copyOAuthUrl') }}</button>
       </div>
@@ -577,15 +598,37 @@ const deleteToken = async (tk) => {
 
     <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
       <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
-      <div v-if="isSuper" class="tt-app-card">
-        <div class="tt-app-title">{{ t('tokens.ttAppTitle') }}</div>
-        <div class="tt-app-hint">{{ t('tokens.ttAppHint', { appId: ttApp?.app_id || t('tokens.ttAppNotConfigured') }) }}</div>
-        <div class="tt-app-form">
-          <input v-model="ttAppForm.app_id" class="input" :placeholder="t('tokens.ttAppIdPh')" />
-          <input v-model="ttAppForm.app_secret" type="password" autocomplete="new-password" class="input" :placeholder="t('tokens.ttAppSecretPh')" />
-          <button class="btn primary" :disabled="ttAppSaving" @click="saveTtApp">{{ t('tokens.ttAppSave') }}</button>
+      <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接） -->
+      <div class="tt-apps-head">
+        <span class="tt-app-title">{{ t('tokens.ttAppsTitle') }}</span>
+        <button v-if="isSuper" class="btn" @click="ttAppDialog = true">{{ t('tokens.ttAddApp') }}</button>
+      </div>
+      <div v-if="ttApps.length" class="tt-apps">
+        <div v-for="a in ttApps" :key="`${a.source}:${a.id}`" class="oauth-app">
+          <span class="oa-name">{{ a.name || a.app_id }}</span>
+          <span class="badge" :class="{sys:true}">{{ a.source==='env' ? 'ENV' : t('tokens.systemApp') }}</span>
+          <span class="oa-actions">
+            <button v-if="isSuper && a.id" class="oa-btn ghost" @click="delTtApp(a)">{{ t('common.delete') }}</button>
+            <button class="oa-btn ghost" @click="copyTtOAuth(a)">{{ t('tokens.copyOAuthUrl') }}</button>
+            <button class="oa-btn" @click="startTtOAuth(a)">{{ t('tokens.openInBrowser') }}</button>
+          </span>
         </div>
       </div>
+      <div v-else class="tt-app-card">
+        <div class="tt-app-hint">{{ isSuper ? t('tokens.ttNoAppsSuper') : t('tokens.ttNoAppsUser') }}</div>
+      </div>
+      <!-- 超管添加/更新 App 弹窗（name 可选；同 app_id 再存=更新 secret） -->
+      <el-dialog v-model="ttAppDialog" :title="t('tokens.ttAddApp')" width="420px" append-to-body>
+        <div class="form-l">
+          <input v-model="ttAppForm.name" class="input" :placeholder="t('tokens.ttAppNamePh')" />
+          <input v-model="ttAppForm.app_id" class="input" :placeholder="t('tokens.ttAppIdPh')" />
+          <input v-model="ttAppForm.app_secret" type="password" autocomplete="new-password" class="input" :placeholder="t('tokens.ttAppSecretPh')" />
+        </div>
+        <template #footer>
+          <button class="btn" @click="ttAppDialog = false">{{ t('common.cancel') }}</button>
+          <button class="btn primary" :disabled="ttAppSaving" @click="saveTtApp">{{ t('tokens.ttAppSave') }}</button>
+        </template>
+      </el-dialog>
       <div v-if="ttCreds.length" class="tt-list">
         <div v-for="c in ttCreds" :key="c.id" class="tt-card">
           <span class="c-st"><span class="dot" :class="ttStatusMeta(c).dot"></span>{{ ttStatusMeta(c).label }}</span>
@@ -607,7 +650,7 @@ const deleteToken = async (tk) => {
             <label>{{ t('tokens.ttRefreshLeft') }}</label>
             <span class="tt-cell-v">
               <span class="st-tag" :class="ttRefreshDays(c).cls" :title="ttRefreshDays(c).cls==='err' ? t('tokens.ttReauthTip') : ''">{{ ttRefreshDays(c).days != null ? t('tokens.ttDaysUnit', { n: ttRefreshDays(c).days }) : '—' }}</span>
-              <button v-if="ttRefreshDays(c).cls === 'err'" class="btn tt-reauth" @click="connectTikTok">{{ t('tokens.ttReauth') }}</button>
+              <button v-if="ttRefreshDays(c).cls === 'err'" class="btn tt-reauth" @click="startTtOAuth()">{{ t('tokens.ttReauth') }}</button>
             </span>
           </div>
           <div class="c-op" @click.stop>
@@ -626,7 +669,7 @@ const deleteToken = async (tk) => {
       <div v-else-if="!ttLoading" class="empty empty-cta">
         <div class="empty-title">{{ t('tokens.ttEmptyTitle') }}</div>
         <div class="empty-step">{{ t('tokens.ttEmptyHint') }}</div>
-        <button class="btn primary empty-cta-btn" @click="connectTikTok">{{ t('tokens.connectTikTok') }}</button>
+        <button class="btn primary empty-cta-btn" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
       </div>
     </div>
 
@@ -1075,6 +1118,8 @@ const deleteToken = async (tk) => {
 .tt-wrap{display:flex;flex-direction:column;gap:10px}
 .tt-note{font-size:11px;color:var(--t3);line-height:1.6}
 .tt-app-card{background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:12px 14px}
+.tt-apps-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tt-apps{display:flex;flex-direction:column;gap:6px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px}
 .tt-app-title{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px}
 .tt-app-hint{font-size:11px;color:var(--t3);margin-bottom:8px;word-break:break-all}
 .tt-app-form{display:flex;gap:8px;flex-wrap:wrap}

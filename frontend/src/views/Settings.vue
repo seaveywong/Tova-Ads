@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GET, PATCH, PUT, POST } from '../api'
+import { GET, PATCH, PUT, POST, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -346,7 +346,89 @@ const resetWebhookToken = async () => {
   whSaving.value = false
 }
 
-onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
+// 邮箱转发（超管）—— CF Email Routing：目的地邮箱（CF 发验证邮件）+ 别名映射
+const em = ref({ domain: '', status: 'unconfigured', dns_ready: false, missing_dns: [], addresses: [], routes: [] })
+const emLoading = ref(false)
+const emEnabling = ref(false)
+const emAddrForm = ref('')
+const emAddrSaving = ref(false)
+const emRouteForm = ref({ alias: '', destination_email: '' })
+const emRouteSaving = ref(false)
+const emVerifiedAddrs = computed(() => (em.value.addresses || []).filter(a => a.verified))
+const emStatusMeta = computed(() => ({
+  enabled: { cls: 'ok', label: t('settings.emStatusEnabled') },
+  disabled: { cls: 'warn', label: t('settings.emStatusDisabled') },
+}[em.value.status] || { cls: 'warn', label: t('settings.emStatusUnconfigured') }))
+const loadEmailRouting = async () => {
+  if (!isSuper.value) return
+  emLoading.value = true
+  try { em.value = await GET('/settings/email-routing') }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  emLoading.value = false
+}
+const enableEmailRouting = async () => {
+  emEnabling.value = true
+  try {
+    const r = await POST('/settings/email-routing/enable', {})
+    ElMessage.success(t('settings.emEnabledMsg', { n: r.dns_added ?? 0 }))
+    await loadEmailRouting()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  emEnabling.value = false
+}
+const addEmAddress = async () => {
+  const email = emAddrForm.value.trim()
+  if (!email || !email.includes('@')) return ElMessage.warning(t('settings.emAddrInvalid'))
+  emAddrSaving.value = true
+  try {
+    const r = await POST('/settings/email-routing/destinations', { email })
+    ElMessage[r.existed ? 'info' : 'success'](r.existed ? t('settings.emAddrExisted') : t('settings.emAddrAdded'))
+    emAddrForm.value = ''
+    await loadEmailRouting()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  emAddrSaving.value = false
+}
+const delEmAddress = async (a) => {
+  try {
+    await ElMessageBox.confirm(t('settings.emAddrDelConfirm', { email: a.email }), t('common.confirm'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+  } catch { return }
+  try {
+    await DELETE(`/settings/email-routing/destinations/${a.id}`)
+    ElMessage.success(t('settings.emDeleted'))
+    await loadEmailRouting()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+}
+const addEmRoute = async () => {
+  const alias = emRouteForm.value.alias.trim().toLowerCase()
+  if (!alias) return ElMessage.warning(t('settings.emAliasRequired'))
+  if (!emRouteForm.value.destination_email) return ElMessage.warning(t('settings.emDestRequired'))
+  emRouteSaving.value = true
+  try {
+    await POST('/settings/email-routing/routes', { alias, destination_email: emRouteForm.value.destination_email })
+    ElMessage.success(t('settings.emRouteAdded'))
+    emRouteForm.value = { alias: '', destination_email: '' }
+    await loadEmailRouting()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  emRouteSaving.value = false
+}
+const toggleEmRoute = async (r) => {
+  try { await PATCH(`/settings/email-routing/routes/${r.id}`, { enabled: !r.enabled }) }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  await loadEmailRouting()
+}
+const delEmRoute = async (r) => {
+  try {
+    await ElMessageBox.confirm(t('settings.emRouteDelConfirm', { alias: r.alias_email }), t('common.confirm'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+  } catch { return }
+  try {
+    await DELETE(`/settings/email-routing/routes/${r.id}`)
+    ElMessage.success(t('settings.emDeleted'))
+    await loadEmailRouting()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+}
+
+onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -431,6 +513,7 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-guard-tuning', label: t('settings.gtTitle') })
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
+    secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
     secs.push({ id: 'sec-retention', label: t('settings.retentionTitle') })
     secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
@@ -588,6 +671,69 @@ const runKeepaliveNow = async () => {
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
       <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : t('settings.fillNewTokenPh')" /></div>
       <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
+    </div>
+
+    <!-- 邮箱转发（超管）：状态行 + 目的地邮箱 + 别名映射 -->
+    <div v-if="isSuper" id="sec-email" class="card">
+      <div class="t">{{ t('settings.emTitle') }}</div>
+      <div class="d">{{ t('settings.emDesc', { domain: em.domain || 'tovaads.com' }) }}</div>
+
+      <!-- 状态行：Routing 状态 + DNS 就绪 + 启用/刷新 -->
+      <div class="em-status-row">
+        <span class="wh-chip" :class="emStatusMeta.cls">{{ emStatusMeta.label }}</span>
+        <span v-if="em.status === 'enabled'" class="wh-chip" :class="em.dns_ready ? 'ok' : 'warn'">
+          {{ em.dns_ready ? t('settings.emDnsReady') : t('settings.emDnsMissing', { n: (em.missing_dns || []).length }) }}
+        </span>
+        <button v-if="em.status !== 'enabled'" class="btn em-inline-btn" :disabled="emEnabling || emLoading" @click="enableEmailRouting">
+          {{ emEnabling ? t('settings.emEnabling') : t('settings.emEnableBtn') }}
+        </button>
+        <button class="btn em-inline-btn" :disabled="emLoading" @click="loadEmailRouting">{{ t('common.refresh') }}</button>
+      </div>
+      <div v-if="em.status !== 'enabled'" class="em-hint">{{ t('settings.emEnableHint') }}</div>
+
+      <!-- 目的地邮箱 -->
+      <div class="sub-t" style="margin-top:18px">{{ t('settings.emDestTitle') }}</div>
+      <div class="d" style="margin-bottom:8px">{{ t('settings.emDestDesc') }}</div>
+      <div class="em-list">
+        <div v-for="a in (em.addresses || [])" :key="a.id" class="em-row">
+          <span class="em-email">{{ a.email }}</span>
+          <span class="wh-chip" :class="a.verified ? 'ok' : 'warn'">
+            {{ a.verified ? t('settings.emAddrVerified') : t('settings.emAddrPending') }}
+          </span>
+          <button class="em-del" @click="delEmAddress(a)">{{ t('common.delete') }}</button>
+        </div>
+        <div v-if="!(em.addresses || []).length" class="em-empty">{{ t('settings.emNoAddrs') }}</div>
+      </div>
+      <div class="em-add-row">
+        <input v-model="emAddrForm" class="input" :placeholder="t('settings.emAddrPh')" @keyup.enter="addEmAddress" />
+        <button class="btn em-inline-btn" :disabled="emAddrSaving" @click="addEmAddress">
+          {{ emAddrSaving ? t('common.loading') : t('common.add') }}
+        </button>
+      </div>
+
+      <!-- 别名映射 -->
+      <div class="sub-t" style="margin-top:18px">{{ t('settings.emRouteTitle') }}</div>
+      <div class="d" style="margin-bottom:8px">{{ t('settings.emRouteDesc', { domain: em.domain || 'tovaads.com' }) }}</div>
+      <div class="em-list">
+        <div v-for="r in (em.routes || [])" :key="r.id" class="em-row">
+          <code class="em-alias">{{ r.alias_email }}</code>
+          <span class="em-arrow">→</span>
+          <span class="em-email">{{ r.destination_email }}</span>
+          <el-switch :model-value="r.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" @change="toggleEmRoute(r)" />
+          <button class="em-del" @click="delEmRoute(r)">{{ t('common.delete') }}</button>
+        </div>
+        <div v-if="!(em.routes || []).length" class="em-empty">{{ t('settings.emNoRoutes') }}</div>
+      </div>
+      <div class="em-add-row">
+        <input v-model="emRouteForm.alias" class="input em-alias-input" :placeholder="t('settings.emAliasPh')" @keyup.enter="addEmRoute" />
+        <span class="em-domain">@{{ em.domain || 'tovaads.com' }}</span>
+        <el-select v-model="emRouteForm.destination_email" :placeholder="t('settings.emPickDestPh')" style="flex:1" size="default">
+          <el-option v-for="a in emVerifiedAddrs" :key="a.id" :value="a.email" :label="a.email" />
+        </el-select>
+        <button class="btn em-inline-btn" :disabled="emRouteSaving" @click="addEmRoute">
+          {{ emRouteSaving ? t('common.loading') : t('settings.emRouteAdd') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="isSuper" id="sec-webhook" class="card">
@@ -820,4 +966,22 @@ const runKeepaliveNow = async () => {
 .wh-chip.ok{background:rgba(48,209,97,.12);color:var(--success)}
 .wh-chip.warn{background:rgba(255,159,10,.12);color:var(--warning)}
 .wh-app-names{font-size:11px;color:var(--t3)}
+/* 邮箱转发 */
+.em-status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.em-inline-btn{margin-top:0;padding:6px 12px;font-size:12px}
+.em-hint{font-size:11px;color:var(--t3);margin-top:8px}
+.em-list{display:flex;flex-direction:column;gap:4px}
+.em-row{display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border-radius:6px;font-size:13px}
+.em-email{color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.em-alias{font-family:monospace;font-size:12px;color:var(--ac);flex-shrink:0}
+.em-arrow{color:var(--t3);flex-shrink:0}
+.em-row .wh-chip{flex-shrink:0}
+.em-row .el-switch{flex-shrink:0;margin-left:auto}
+.em-del{margin-left:8px;background:transparent;border:none;color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0}
+.em-del:hover{color:var(--error)}
+.em-empty{padding:12px;text-align:center;color:var(--t3);font-size:12px}
+.em-add-row{display:flex;align-items:center;gap:8px;margin-top:10px}
+.em-alias-input{max-width:150px;flex:0 1 150px}
+.em-domain{color:var(--t3);font-size:12px;flex-shrink:0}
+@media (max-width:768px){.em-add-row{flex-wrap:wrap}.em-alias-input{flex:1 1 100%;max-width:none}.em-domain{order:2}.em-add-row .el-select{order:3;flex:1 1 100%}}
 </style>

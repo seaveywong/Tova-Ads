@@ -107,21 +107,31 @@ def _iso(dt) -> str | None:
 
 
 @router.get("/oauth/start")
-def tt_oauth_start(user: CurrentUser = Depends(require_permission("ads.create")),
+def tt_oauth_start(app_pk: int = 0,
+                   user: CurrentUser = Depends(require_permission("ads.create")),
                    db: Session = Depends(get_db)):
     """生成 TikTok 授权 URL（前端拿到 url 后 window.location 跳转）。
+    app_pk=指定 tt_apps 行（从 App 卡片发起，照 FB 模式）；0=第一行（兼容旧入口）。
     scope 不指定 = 授权 App 在开发者后台申请的全部 scope。"""
     sdb = SuperSessionLocal()
     try:
-        app_cfg = resolve_tt_app(sdb)
+        app_id = ""
+        if app_pk:
+            row = sdb.query(TtApp).filter(TtApp.id == app_pk).first()
+            if not row:
+                raise HTTPException(404, "TikTok App 不存在")
+            app_id = row.app_id
+        if not app_id:
+            app_cfg = resolve_tt_app(sdb)
+            if not app_cfg:
+                raise HTTPException(400, "尚未配置 TikTok App（超管在令牌页 TikTok 分区配置，或设 TT_APP_ID/TT_APP_SECRET）")
+            app_id = app_cfg[0]
+        state = _sign_state({
+            "uid": user.id, "tid": user.tenant_id, "ts": int(time.time()),
+            "apk": app_pk or 0,
+        })
     finally:
         sdb.close()
-    if not app_cfg:
-        raise HTTPException(400, "尚未配置 TikTok App（超管在令牌页 TikTok 分区配置，或设 TT_APP_ID/TT_APP_SECRET）")
-    app_id = app_cfg[0]
-    state = _sign_state({
-        "uid": user.id, "tid": user.tenant_id, "ts": int(time.time()),
-    })
     redirect_uri = f"{settings.public_base_url}/tt/oauth/callback"
     params = {
         "app_id": app_id,
@@ -146,10 +156,19 @@ def tt_oauth_callback(request: Request):
     tenant_id, uid = state["tid"], state["uid"]
     db = SuperSessionLocal()
     try:
-        app_cfg = resolve_tt_app(db)
-        if not app_cfg:
-            return _done_page(False, "TikTok App 未配置")
-        app_id, secret = app_cfg
+        # 按 state 记录的 app_pk 选 App（从哪个卡片发起就用哪个的 secret 换码）
+        apk = int(state.get("apk") or 0)
+        if apk:
+            row = db.query(TtApp).filter(TtApp.id == apk).first()
+            if not row:
+                return _done_page(False, "TikTok App 已被删除，请重新从令牌页发起连接")
+            from ..core.encryption import decrypt as _dec
+            app_id, secret = row.app_id, _dec(row.app_secret_enc)
+        else:
+            app_cfg = resolve_tt_app(db)
+            if not app_cfg:
+                return _done_page(False, "TikTok App 未配置")
+            app_id, secret = app_cfg
 
         try:
             tok = TtClient.exchange_auth_code(app_id, secret, auth_code)
@@ -311,26 +330,28 @@ def list_tt_credentials(user: CurrentUser = Depends(require_permission("ads.read
 class TtAppIn(BaseModel):
     app_id: str
     app_secret: str
+    name: str = ""
 
 
 @router.get("/apps")
-def get_tt_app(user: CurrentUser = Depends(require_permission("ads.read")),
-               db: Session = Depends(get_db)):
-    """当前系统级 TT App 配置状态（secret 不返回）。"""
-    if not getattr(user, "is_superadmin", False):
-        raise HTTPException(403, "仅超管可查看 TikTok App 配置")
+def list_tt_apps(user: CurrentUser = Depends(require_permission("ads.read")),
+                 db: Session = Depends(get_db)):
+    """系统级 TT App 列表（照 /fb/apps 形状：id/name/app_id/is_system；secret 不返回）。
+    所有用户可见——从 App 卡片发起连接（FB 同款流）。env 兜底伪行 id=0 不可编辑。"""
+    import os
     sdb = SuperSessionLocal()
     try:
-        app = sdb.query(TtApp).filter(
+        rows = sdb.query(TtApp).filter(
             TtApp.tenant_id.is_(None), TtApp.is_system.is_(True)
-        ).order_by(TtApp.id).first()
-        if app:
-            return {"configured": True, "app_id": app.app_id}
-        import os
-        env_id = (os.environ.get("TT_APP_ID") or "").strip()
-        if env_id:
-            return {"configured": True, "app_id": env_id, "source": "env"}
-        return {"configured": False, "app_id": ""}
+        ).order_by(TtApp.id).all()
+        out = [{"id": r.id, "name": r.name or r.app_id, "app_id": r.app_id,
+                "is_system": True, "source": "db"} for r in rows]
+        if not out:
+            env_id = (os.environ.get("TT_APP_ID") or "").strip()
+            if env_id:
+                out = [{"id": 0, "name": env_id, "app_id": env_id,
+                        "is_system": True, "source": "env"}]
+        return out
     finally:
         sdb.close()
 
@@ -339,7 +360,7 @@ def get_tt_app(user: CurrentUser = Depends(require_permission("ads.read")),
 def upsert_tt_app(body: TtAppIn,
                   user: CurrentUser = Depends(require_permission("ads.create")),
                   db: Session = Depends(get_db)):
-    """系统级 TT App 配置（超管；重复调用=更新 app_id/secret）。"""
+    """添加/更新系统级 TT App（超管；按 app_id 去重=更新 secret/name）。"""
     if not getattr(user, "is_superadmin", False):
         raise HTTPException(403, "仅超管可配置 TikTok App")
     if not body.app_id.strip() or not body.app_secret.strip():
@@ -347,19 +368,47 @@ def upsert_tt_app(body: TtAppIn,
     sdb = SuperSessionLocal()
     try:
         app = sdb.query(TtApp).filter(
-            TtApp.tenant_id.is_(None), TtApp.is_system.is_(True)
-        ).order_by(TtApp.id).first()
+            TtApp.tenant_id.is_(None), TtApp.is_system.is_(True),
+            TtApp.app_id == body.app_id.strip(),
+        ).first()
         if app:
-            app.app_id = body.app_id.strip()
             app.app_secret_enc = encrypt(body.app_secret.strip())
+            if body.name.strip():
+                app.name = body.name.strip()
         else:
             sdb.add(TtApp(
                 tenant_id=None, app_id=body.app_id.strip(),
+                name=body.name.strip() or body.app_id.strip(),
                 app_secret_enc=encrypt(body.app_secret.strip()),
                 is_system=True,
             ))
         sdb.commit()
-        return {"configured": True, "app_id": body.app_id.strip()}
+        return {"saved": True, "app_id": body.app_id.strip()}
+    finally:
+        sdb.close()
+
+
+@router.delete("/apps/{app_pk}")
+def delete_tt_app(app_pk: int,
+                  user: CurrentUser = Depends(require_permission("ads.create")),
+                  db: Session = Depends(get_db)):
+    """删除系统级 TT App（超管）。有 active 凭证引用该 app_id 时拒删（刷新会失效）。"""
+    if not getattr(user, "is_superadmin", False):
+        raise HTTPException(403, "仅超管可删除 TikTok App")
+    sdb = SuperSessionLocal()
+    try:
+        app = sdb.query(TtApp).filter(TtApp.id == app_pk).first()
+        if not app:
+            raise HTTPException(404, "TikTok App 不存在")
+        from ..models.tt import TtCredential
+        used = sdb.query(TtCredential).filter(
+            TtCredential.status == "active", TtCredential.app_id == app.app_id
+        ).count()
+        if used:
+            raise HTTPException(400, f"该 App 仍有 {used} 个有效令牌在使用，请先删除对应令牌")
+        sdb.delete(app)
+        sdb.commit()
+        return {"deleted": True, "id": app_pk}
     finally:
         sdb.close()
 

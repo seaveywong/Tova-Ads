@@ -2,6 +2,7 @@
 import json
 import os
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
@@ -374,3 +375,264 @@ def set_webhook(body: WebhookIn, user: CurrentUser = Depends(require_superadmin)
               action_type="update", source="user", result="success",
               metadata={"field": "verify_token"})
     return {"saved": True}
+
+
+# ── 邮箱转发（超管）── CF Email Routing 产品化：平台域（tovaads.com）别名 → 目的地邮箱
+# 库表 email_routes（系统级，tenant_id 恒 NULL）照 tt_apps 先例；写路径走 super session
+# （BYPASSRLS——0075 收紧后 RLS 会话写不了系统行）。
+# CF 侧模型：目的地邮箱（addresses，CF 发验证邮件）→ 转发规则（rules，matchers=收件地址
+# literal，actions=forward 到 address_id）。规则只能指向已验证的 address_id。
+import re as _re
+from urllib.parse import urlparse as _urlparse
+
+from ..core.database import get_system_db
+from ..core.cf_client import CfClient
+from ..models.system import EmailRoute
+
+_ALIAS_RE = _re.compile(r"^[a-z0-9._-]+$")
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _em_domain() -> str:
+    """平台主域（Email Routing 的 zone，从 frontend_base_url 取 host）。"""
+    host = _urlparse(settings.frontend_base_url or "https://tovaads.com").hostname or ""
+    return host.lower().strip()
+
+
+def _em_ctx() -> tuple[CfClient, str, str]:
+    """(CfClient, zone_id, domain)。CF 未配置 / zone 不存在 → HTTPException。"""
+    token = os.environ.get("CF_API_TOKEN") or settings.cf_api_token
+    acct = os.environ.get("CF_ACCOUNT_ID") or settings.cf_account_id
+    if not token or not acct:
+        raise HTTPException(500, "CF 未配置，请先在「域名服务配置」填 Token 和账户 ID")
+    cf = CfClient(token, acct)
+    domain = _em_domain()
+    zid = cf.get_zone_id(domain)
+    if not zid:
+        raise HTTPException(400, "CF 上找不到平台域名的 Zone（域名须托管在 CF）")
+    return cf, zid, domain
+
+
+def _addr_verified(a: dict) -> bool:
+    """CF 目的地地址是否已验证（verified 布尔 / status 字符串两种返回形状都兼容）。"""
+    v = a.get("verified")
+    if isinstance(v, bool):
+        return v
+    return str(a.get("status", "")).lower() == "verified"
+
+
+def _dns_key(rec: dict) -> tuple:
+    """DNS 记录比对键（type+name+content 归一：大小写/尾点不敏感）。"""
+    return (str(rec.get("type", "")).upper().strip(),
+            str(rec.get("name", "")).rstrip(".").lower().strip(),
+            str(rec.get("content", "")).rstrip(".").lower().strip())
+
+
+def _em_missing_dns(cf: CfClient, zid: str) -> list:
+    """Email Routing 所需 DNS 与现有记录对比，返回缺口（MX/TXT）。"""
+    need = cf.get_email_dns(zid)
+    have_keys = {_dns_key(r) for r in cf.list_dns_records(zid)}
+    return [rec for rec in need if _dns_key(rec) not in have_keys]
+
+
+def _route_dict(r: EmailRoute, domain: str, cf_rules: dict) -> dict:
+    cf_enabled = (cf_rules.get(r.rule_id) or {}).get("enabled") if r.rule_id else None
+    return {"id": r.id, "alias": r.alias, "alias_email": f"{r.alias}@{domain}",
+            "destination_email": r.destination_email, "enabled": bool(r.enabled),
+            "cf_enabled": cf_enabled,
+            "created_at": r.created_at.isoformat() if r.created_at else None}
+
+
+@router.get("/email-routing")
+def get_email_routing(user: CurrentUser = Depends(require_superadmin),
+                      db: Session = Depends(get_system_db)):
+    """CF 实时状态（routing 状态/DNS 缺口/目的地邮箱）+ 本地映射 join CF 规则启停。"""
+    cf, zid, domain = _em_ctx()
+    routing = cf.get_email_routing(zid) or {}
+    status = routing.get("status") or "unconfigured"
+    missing = _em_missing_dns(cf, zid) if status in ("enabled", "disabled") else []
+    addresses = cf.list_email_addresses(zid) if status in ("enabled", "disabled") else []
+    cf_rules = {r.get("id"): r for r in cf.list_email_rules(zid)} if status == "enabled" else {}
+    rows = db.query(EmailRoute).order_by(EmailRoute.alias).all()
+    return {
+        "domain": domain,
+        "status": status,
+        "dns_ready": status == "enabled" and not missing,
+        "missing_dns": [{"type": m.get("type"), "name": m.get("name"), "content": m.get("content")}
+                        for m in missing],
+        "addresses": [{"id": a.get("id"), "email": a.get("email"), "verified": _addr_verified(a)}
+                      for a in addresses],
+        "routes": [_route_dict(r, domain, cf_rules) for r in rows],
+    }
+
+
+@router.post("/email-routing/enable")
+def enable_email_routing(user: CurrentUser = Depends(require_superadmin),
+                         db: Session = Depends(get_system_db)):
+    """启用 Email Routing + 自动补缺失 DNS（MX/TXT；域名 DNS 在 CF 托管可自动写）。"""
+    cf, zid, domain = _em_ctx()
+    try:
+        cf.enable_email_routing(zid)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)[:300])
+    added = 0
+    for rec in _em_missing_dns(cf, zid):
+        try:
+            cf.add_dns_record(zid, {"type": rec.get("type"), "name": rec.get("name"),
+                                    "content": rec.get("content"),
+                                    "priority": rec.get("priority", 0),
+                                    "proxied": bool(rec.get("proxied", False))})
+            added += 1
+        except RuntimeError as e:
+            raise HTTPException(502, f"DNS 记录补齐失败（已补 {added} 条）：{str(e)[:200]}")
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="update", source="user", result="success",
+              metadata={"action": "enable", "dns_added": added, "domain": domain})
+    db.commit()
+    return {"status": "enabled", "dns_added": added}
+
+
+class EmailDestinationIn(BaseModel):
+    email: str
+
+
+@router.post("/email-routing/destinations")
+def add_email_destination(body: EmailDestinationIn,
+                          user: CurrentUser = Depends(require_superadmin),
+                          db: Session = Depends(get_system_db)):
+    """添加目的地邮箱。CF 立即发验证邮件（pending → 用户点链接后 verified）。幂等：已存在直接返回。"""
+    email = body.email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(400, "目的地邮箱格式不正确")
+    cf, zid, _ = _em_ctx()
+    existing = [a for a in cf.list_email_addresses(zid)
+                if str(a.get("email", "")).lower() == email]
+    if existing:
+        a = existing[0]
+        return {"id": a.get("id"), "email": a.get("email", email),
+                "verified": _addr_verified(a), "existed": True}
+    try:
+        a = cf.create_email_address(zid, email)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)[:300])
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="create", source="user", result="success",
+              metadata={"destination": email})
+    db.commit()
+    return {"id": a.get("id"), "email": a.get("email", email),
+            "verified": _addr_verified(a), "existed": False}
+
+
+@router.delete("/email-routing/destinations/{address_id}")
+def delete_email_destination(address_id: str, user: CurrentUser = Depends(require_superadmin),
+                             db: Session = Depends(get_system_db)):
+    """删目的地邮箱。被本地映射引用时 400（先删映射）。"""
+    cf, zid, _ = _em_ctx()
+    target = next((a for a in cf.list_email_addresses(zid) if a.get("id") == address_id), None)
+    if not target:
+        raise HTTPException(404, "目的地邮箱不存在或已删除")
+    email = str(target.get("email", "")).lower()
+    used = db.query(EmailRoute).filter(
+        func.lower(EmailRoute.destination_email) == email).count()
+    if used:
+        raise HTTPException(400, "该邮箱已被转发映射引用，请先删除对应映射")
+    cf.delete_email_address(zid, address_id)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="delete", source="user", result="success",
+              metadata={"destination": email})
+    db.commit()
+    return {"deleted": True}
+
+
+class EmailRouteIn(BaseModel):
+    alias: str
+    destination_email: str
+
+
+@router.post("/email-routing/routes")
+def create_email_route(body: EmailRouteIn, user: CurrentUser = Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    """建转发映射：alias@平台域 → 目的地邮箱。目的地必须已验证（CF 规则只收 verified address_id）。"""
+    alias = body.alias.strip().lower()
+    if not alias or not _ALIAS_RE.match(alias):
+        raise HTTPException(400, "别名只允许小写字母、数字和 . _ - ")
+    if db.query(EmailRoute).filter(EmailRoute.alias == alias).first():
+        raise HTTPException(400, "别名已存在，请换一个")
+    email = body.destination_email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(400, "目的地邮箱格式不正确")
+    cf, zid, domain = _em_ctx()
+    routing = cf.get_email_routing(zid) or {}
+    if routing.get("status") != "enabled":
+        raise HTTPException(400, "Email Routing 未启用，请先启用")
+    target = next((a for a in cf.list_email_addresses(zid)
+                   if str(a.get("email", "")).lower() == email), None)
+    if not target:
+        raise HTTPException(400, "目的地邮箱未添加，请先在目的地邮箱区添加")
+    if not _addr_verified(target):
+        raise HTTPException(400, "目的地邮箱待验证：请先到该邮箱点开 CF 验证邮件")
+    alias_email = f"{alias}@{domain}"
+    try:
+        rule = cf.create_email_rule(zid, alias_email, target["id"])
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)[:300])
+    row = EmailRoute(alias=alias, destination_email=email, rule_id=rule.get("id"), enabled=True)
+    db.add(row)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="create", source="user", result="success",
+              metadata={"alias": alias_email, "destination": email, "cf_rule_id": rule.get("id")})
+    db.commit()
+    return _route_dict(row, domain, {rule.get("id"): rule} if rule.get("id") else {})
+
+
+class EmailRoutePatch(BaseModel):
+    enabled: bool
+
+
+@router.patch("/email-routing/routes/{route_id}")
+def toggle_email_route(route_id: int, body: EmailRoutePatch,
+                       user: CurrentUser = Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    """启停映射（CF 规则 + 本地行双写）。"""
+    row = db.get(EmailRoute, route_id)
+    if not row:
+        raise HTTPException(404, "映射不存在")
+    cf, zid, _ = _em_ctx()
+    if row.rule_id:
+        try:
+            cf.set_email_rule_enabled(zid, row.rule_id, body.enabled)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)[:300])
+    row.enabled = body.enabled
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="update", source="user", result="success",
+              metadata={"alias": row.alias, "enabled": body.enabled})
+    db.commit()
+    return {"id": row.id, "alias": row.alias, "enabled": bool(row.enabled)}
+
+
+@router.delete("/email-routing/routes/{route_id}")
+def delete_email_route(route_id: int, user: CurrentUser = Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    """删映射：先删 CF 规则（404=已不存在，放行）再删本地行。"""
+    row = db.get(EmailRoute, route_id)
+    if not row:
+        raise HTTPException(404, "映射不存在")
+    cf, zid, _ = _em_ctx()
+    if row.rule_id:
+        try:
+            cf.delete_email_rule(zid, row.rule_id)
+        except Exception as e:
+            raise HTTPException(502, f"CF 删除规则失败：{str(e)[:200]}")
+    db.delete(row)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
+              action_type="delete", source="user", result="success",
+              metadata={"alias": row.alias, "destination": row.destination_email})
+    db.commit()
+    return {"deleted": True}

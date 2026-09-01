@@ -217,6 +217,124 @@ class CfClient:
                 logger.warning(f"[CF] add_cname {name}.{root} 可能已存在: {e}")
         return data.get("result", {})
 
+    # ── Email Routing（zone 级：平台域邮箱转发，tovaads.com 用）──
+    def get_email_routing(self, zone_id: str) -> dict | None:
+        """Email Routing 设置（result.status: unconfigured/uninitialized/enabled/disabled）。
+
+        未初始化时 CF 返回 success=false → None（视为 unconfigured）。
+        """
+        data = self._get(f"/zones/{zone_id}/email/routing")
+        return data.get("result") if data.get("success") else None
+
+    def enable_email_routing(self, zone_id: str) -> dict:
+        data = self._post(f"/zones/{zone_id}/email/routing/enable")
+        if not data.get("success"):
+            raise RuntimeError(f"CF 启用 Email Routing 失败: {data.get('errors')}")
+        return data.get("result", {})
+
+    def get_email_dns(self, zone_id: str) -> list:
+        """Email Routing 所需 DNS 记录（MX×3 + SPF TXT，含 priority/proxied）。"""
+        data = self._get(f"/zones/{zone_id}/email/routing/dns")
+        return data.get("result", []) if data.get("success") else []
+
+    def list_dns_records(self, zone_id: str) -> list:
+        """zone 全量 DNS 记录（自动翻页，对比 Email Routing 缺口用）。"""
+        out: list[dict] = []
+        page = 1
+        while page <= 20:
+            data = self._get(f"/zones/{zone_id}/dns_records",
+                             params={"per_page": 100, "page": page})
+            result = data.get("result", []) if data.get("success") else []
+            out.extend(result)
+            if len(result) < 100:
+                break
+            page += 1
+        return out
+
+    def add_dns_record(self, zone_id: str, record: dict) -> dict:
+        """添加 DNS 记录（Email Routing 的 MX/TXT 补齐；proxied 传 False）。"""
+        data = self._post(f"/zones/{zone_id}/dns_records", json=record)
+        if not data.get("success"):
+            raise RuntimeError(f"CF 添加 DNS 记录失败: {data.get('errors')}")
+        return data.get("result", {})
+
+    def list_email_addresses(self, zone_id: str) -> list:
+        """目的地邮箱列表（含验证状态；自动翻页）。"""
+        out: list[dict] = []
+        page = 1
+        while page <= 10:
+            data = self._get(f"/zones/{zone_id}/email/routing/addresses",
+                             params={"per_page": 50, "page": page})
+            result = data.get("result", []) if data.get("success") else []
+            out.extend(result)
+            if len(result) < 50:
+                break
+            page += 1
+        return out
+
+    def create_email_address(self, zone_id: str, email: str) -> dict:
+        """添加目的地邮箱。CF 立即发验证邮件，verified=False 直到用户点链接。"""
+        data = self._post(f"/zones/{zone_id}/email/routing/addresses",
+                          json={"email": email})
+        if not data.get("success"):
+            raise RuntimeError(f"CF 添加目的地邮箱失败: {data.get('errors')}")
+        return data.get("result", {})
+
+    def delete_email_address(self, zone_id: str, address_id: str) -> bool:
+        r = httpx.delete(f"{CF_API_BASE}/zones/{zone_id}/email/routing/addresses/{address_id}",
+                         headers=self.headers, timeout=30)
+        if r.status_code == 404:
+            return False  # 本来就没有
+        return r.json().get("success", False)
+
+    def list_email_rules(self, zone_id: str) -> list:
+        """转发规则列表。"""
+        data = self._get(f"/zones/{zone_id}/email/routing/rules")
+        return data.get("result", []) if data.get("success") else []
+
+    def create_email_rule(self, zone_id: str, alias_email: str, address_id: str) -> dict:
+        """建转发规则：发往 alias_email 的邮件 → 目的地 address_id（须已验证）。"""
+        data = self._post(
+            f"/zones/{zone_id}/email/routing/rules",
+            json={"name": f"toveads: {alias_email}",
+                  "enabled": True,
+                  "matchers": [{"type": "literal", "field": "to", "value": alias_email}],
+                  "actions": [{"type": "forward", "value": [address_id]}],
+                  "priority": 0},
+        )
+        if not data.get("success"):
+            raise RuntimeError(f"CF 创建转发规则失败: {data.get('errors')}")
+        return data.get("result", {})
+
+    def set_email_rule_enabled(self, zone_id: str, rule_id: str, enabled: bool) -> dict:
+        """启停转发规则。先 PATCH；个别客户端不接受时回退 GET 原规则改 enabled 全量 PUT。"""
+        r = httpx.patch(f"{CF_API_BASE}/zones/{zone_id}/email/routing/rules/{rule_id}",
+                        headers={**self.headers, "Content-Type": "application/json"},
+                        json={"enabled": enabled}, timeout=30)
+        if r.status_code < 400:
+            data = r.json()
+            if data.get("success"):
+                return data.get("result", {})
+        cur = self._get(f"/zones/{zone_id}/email/routing/rules/{rule_id}")
+        if not cur.get("success"):
+            raise RuntimeError(f"CF 更新转发规则失败: {cur.get('errors')}")
+        body = cur.get("result") or {}
+        body["enabled"] = enabled
+        r2 = httpx.put(f"{CF_API_BASE}/zones/{zone_id}/email/routing/rules/{rule_id}",
+                       headers={**self.headers, "Content-Type": "application/json"},
+                       json=body, timeout=30)
+        data2 = r2.json()
+        if not data2.get("success"):
+            raise RuntimeError(f"CF 更新转发规则失败: {data2.get('errors')}")
+        return data2.get("result", {})
+
+    def delete_email_rule(self, zone_id: str, rule_id: str) -> bool:
+        r = httpx.delete(f"{CF_API_BASE}/zones/{zone_id}/email/routing/rules/{rule_id}",
+                         headers=self.headers, timeout=30)
+        if r.status_code == 404:
+            return False
+        return r.json().get("success", False)
+
     def unbind_custom_domain(self, project_name: str, domain: str) -> bool:
         """解绑 Pages 自定义域名（改前缀/移除域名时清理旧子域名残留）。
 

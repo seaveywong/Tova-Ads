@@ -33,13 +33,16 @@ FAIL_LIMIT = 3                         # 连续失败 N 次 → expired
 DEDUP_MIN = 24 * 60                    # 重新授权告警去重窗口（24h/凭证）
 
 
-def resolve_tt_app(db: Session) -> tuple[str, str] | None:
+def resolve_tt_app(db: Session, app_id: str = "") -> tuple[str, str] | None:
     """TT App 配置：系统级 tt_apps（tenant_id NULL）优先，环境变量兜底。
+    app_id 传入时按凭证的 app_id 精确匹配（多 App 场景 token 刷新必须用自己的
+    secret——app_id/secret 不匹配会 refresh 失败）；不传=第一行（兼容旧行为）。
     返回 (app_id, secret) 或 None。平台级配置用 SuperSessionLocal 读（RLS 不挡系统行）。"""
     from ..models.tt import TtApp
-    app = db.query(TtApp).filter(
-        TtApp.tenant_id.is_(None), TtApp.is_system.is_(True)
-    ).order_by(TtApp.id).first()
+    q = db.query(TtApp).filter(TtApp.tenant_id.is_(None), TtApp.is_system.is_(True))
+    if app_id:
+        q = q.filter(TtApp.app_id == app_id)
+    app = q.order_by(TtApp.id).first()
     if app and app.app_id and app.app_secret_enc:
         try:
             return app.app_id, decrypt(app.app_secret_enc)
@@ -47,10 +50,10 @@ def resolve_tt_app(db: Session) -> tuple[str, str] | None:
             logger.error(f"[TT] 系统级 App secret 解密失败: {e}")
             return None
     # TODO: 正式化为 settings.tt_app_id/tt_app_secret（config.py 配置项归 P0/配置批）
-    app_id = (os.environ.get("TT_APP_ID") or "").strip()
+    env_id = (os.environ.get("TT_APP_ID") or "").strip()
     secret = (os.environ.get("TT_APP_SECRET") or "").strip()
-    if app_id and secret:
-        return app_id, secret
+    if env_id and secret and (not app_id or env_id == app_id):
+        return env_id, secret
     return None
 
 
@@ -171,8 +174,14 @@ def run_tt_token_refresh():
             if cred.refresh_token_enc and (
                 cred.expires_at is None or cred.expires_at < now + ACCESS_MARGIN
             ):
+                # 多 App 场景按凭证自己的 app_id 找 secret（不匹配的 refresh 必失败）；
+                # 凭证无 app_id（旧行）或 app 已删 → 回退第一行
+                cfg = resolve_tt_app(db, (cred.app_id or "").strip()) or app_cfg
+                if not cfg:
+                    logger.warning(f"[TTRefresh] 凭证 {cred.id} 的 App（app_id={cred.app_id}）未配置，跳过刷新")
+                    continue
                 try:
-                    refresh_credential(db, cred, app_id, secret)
+                    refresh_credential(db, cred, cfg[0], cfg[1])
                     refreshed += 1
                     logger.info(f"[TTRefresh] 凭证 {cred.id} 已刷新轮换 (trace={trace_id})")
                 except TtApiError as e:
