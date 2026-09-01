@@ -1,9 +1,9 @@
 """FB OAuth 连接 App：start（跳 FB 授权页）+ callback（换 token + 建凭证）。
 
 callback 是公开端点（FB 跳转回来无 JWT）→ 仿 landing_events 用 SuperSessionLocal
-+ HMAC-signed state 恢复 tenant 上下文（state 编码 uid/tid/app_pk/ts/nonce，用 jwt_secret 签）。
++ HMAC-signed state 恢复 tenant 上下文（state 编码 uid/tid/app_pk/ts，用 jwt_secret 签）。
 """
-import json, hmac, hashlib, base64, secrets, time, logging
+import json, hmac, hashlib, base64, time, logging
 from datetime import datetime, timezone
 from urllib.parse import urlencode, quote
 import httpx
@@ -26,7 +26,7 @@ logger = logging.getLogger("toveads.fb_oauth")
 # 建帖(pages_manage_posts)+webhook订阅(pages_manage_metadata)等过审后加回；当前 token 不含这俩权限。
 OAUTH_SCOPES = "ads_management,ads_read,business_management,pages_show_list,pages_manage_ads,pages_read_engagement"
 STATE_TTL = 600  # state 有效期 10 分钟
-FRONTEND_URL = "https://tovaads.com"
+FRONTEND_URL = settings.frontend_base_url  # OAuth 完成页"返回前端"链接（默认生产域，可 env 覆盖）
 
 
 def _b64u(b: bytes) -> str:
@@ -94,7 +94,7 @@ def oauth_start(app_pk: int, user: CurrentUser = Depends(require_permission("ads
         raise HTTPException(404, "App 不存在或已停用")
     state = _sign_state({
         "uid": user.id, "tid": user.tenant_id, "apk": app.id,
-        "nonce": secrets.token_urlsafe(8), "ts": int(time.time()),
+        "ts": int(time.time()),
     })
     redirect_uri = f"{settings.public_base_url}/fb/oauth/callback"
     params = {

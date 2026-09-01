@@ -43,9 +43,9 @@ def list_notifications(
     elif date_preset == "last_2d":
         since = (datetime.now(BIZ_TZ) - timedelta(days=1)).strftime("%Y-%m-%d"); until = biz_today
     elif date_preset == "last_7d":
-        since = (datetime.now(BIZ_TZ) - timedelta(days=7)).strftime("%Y-%m-%d"); until = biz_today
+        since = (datetime.now(BIZ_TZ) - timedelta(days=6)).strftime("%Y-%m-%d"); until = biz_today
     elif date_preset == "last_30d":
-        since = (datetime.now(BIZ_TZ) - timedelta(days=30)).strftime("%Y-%m-%d"); until = biz_today
+        since = (datetime.now(BIZ_TZ) - timedelta(days=29)).strftime("%Y-%m-%d"); until = biz_today
     elif date_preset:
         since = until = biz_today
     else:

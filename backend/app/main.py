@@ -1,6 +1,6 @@
 """Tove Ads API 入口。"""
 import json
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -48,15 +48,17 @@ class TraceIdMiddleware(BaseHTTPMiddleware):
         response.headers["X-Trace-Id"] = trace_id
         return response
 
-# CORS —— 生产放 tovaads.com（主域 + www + pages.dev 默认域）；本地开发加 localhost:5173（Vite 默认端口）
+# CORS —— 生产放 tovaads.com（主域 + www + pages.dev 默认域）；localhost 仅非生产环境放行
+_origins = [
+    "https://tovaads.com",           # 生产前端（主域）
+    "https://www.tovaads.com",       # 生产前端（带 www）
+    "https://tovaads.pages.dev",     # CF Pages 默认域（自定义域名生效前 / 冒烟测试）
+]
+if settings.app_env != "production":
+    _origins.append("http://localhost:5173")  # 本地开发（Vite 默认端口）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",         # 本地开发（Vite）
-        "https://tovaads.com",           # 生产前端（主域）
-        "https://www.tovaads.com",       # 生产前端（带 www）
-        "https://tovaads.pages.dev",     # CF Pages 默认域（自定义域名生效前 / 冒烟测试）
-    ],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -264,25 +266,33 @@ def _apply_log_filters(q, *, actor_type="", actor_user_id=0, action_type="",
         q = q.filter(ActionLog.result == result)
     if trace_id:
         q = q.filter(ActionLog.trace_id == trace_id)
-    # 日期范围（用户传 YYYY-MM-DD，按 UTC 日处理；date_to 含当天 → +1天用 <）
-    try:
-        if date_from:
-            df = datetime.fromisoformat(date_from.strip())
-            if df.tzinfo is None:
-                df = df.replace(tzinfo=timezone.utc)
-            q = q.filter(ActionLog.created_at >= df)
-    except Exception:
-        pass
-    try:
-        if date_to:
-            dt = datetime.fromisoformat(date_to.strip())
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if "T" not in date_to:  # 纯日期 → 包含整天
-                dt = dt + timedelta(days=1)
-            q = q.filter(ActionLog.created_at < dt)
-    except Exception:
-        pass
+    # 日期范围：纯日期 YYYY-MM-DD 按北京业务日解释（与前端 useDateRange / notify.py 同基准），
+    # 转 UTC 窗口过滤；带时间的 ISO 串按自身时区（无时区当 UTC）。格式错 → 400（原静默忽略整段筛选）。
+    BIZ_TZ = timezone(timedelta(hours=8))
+    if date_from:
+        s = date_from.strip()
+        try:
+            if "T" in s:
+                df = datetime.fromisoformat(s)
+                if df.tzinfo is None:
+                    df = df.replace(tzinfo=timezone.utc)
+            else:
+                df = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc)
+        except ValueError:
+            raise HTTPException(400, "date_from 格式应为 YYYY-MM-DD")
+        q = q.filter(ActionLog.created_at >= df)
+    if date_to:
+        s = date_to.strip()
+        try:
+            if "T" in s:
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc) + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(400, "date_to 格式应为 YYYY-MM-DD")
+        q = q.filter(ActionLog.created_at < dt)
     return q
 
 
@@ -372,12 +382,9 @@ def list_log_actors(
             ActionLog.actor_user_id.isnot(None),
             ActionLog.created_at >= since,
         ).all()]
-        out = []
-        for uid in uids:
-            u = sdb.get(User, uid)
-            if u:
-                out.append({"id": u.id, "email": u.email})
-        return out
+        # 批量取用户（原逐 uid sdb.get = N+1）
+        users = sdb.query(User).filter(User.id.in_(uids)).all() if uids else []
+        return [{"id": u.id, "email": u.email} for u in users]
     finally:
         if user.is_superadmin:
             sdb.close()

@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     cf_account_id: str = ""
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
+    # 前端 base URL（OAuth 完成页"返回前端"链接用）
+    frontend_base_url: str = "https://tovaads.com"
 
     # AI 全局配置（无损切换厂商：Gemini/OpenAI/DeepSeek/Grok，均 OpenAI 兼容）
     # 切换 = 改 base_url + key + model，不改代码（审计"AI 厂商无损切换"）

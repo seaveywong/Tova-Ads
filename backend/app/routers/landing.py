@@ -705,7 +705,9 @@ class PageUpdateIn(BaseModel):
     dedup_window_hours: int | None = None
 
 
-def _page_to_dict(p, db: Session = None) -> dict:
+def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
+    """stats（列表调用方可传）= {"sub_counts": {pid: n}, "event_counts": {(pid, event_type): n}}
+    —— 批量预取，替代每页 4 条 COUNT（N+1）；单页调用不传则逐项查（原行为）。"""
     import json as _json
     from ..models.launch import LandingAdLink
     ids, rules, targets = [], {}, []
@@ -722,7 +724,9 @@ def _page_to_dict(p, db: Session = None) -> dict:
     except Exception:
         targets = []
     sub_count = 0
-    if db is not None:
+    if stats is not None:
+        sub_count = stats["sub_counts"].get(p.id, 0)
+    elif db is not None:
         sub_count = db.query(LandingAdLink).filter(
             LandingAdLink.page_id == p.id, LandingAdLink.status != "archived"
         ).count()
@@ -764,7 +768,12 @@ def _page_to_dict(p, db: Session = None) -> dict:
     preview_url = (f"https://{pub_host}/?_pv={p.preview_token}"
                    if (p.preview_enabled and p.preview_token and pub_host) else "")
     visit_count = click_count = block_count = 0
-    if db is not None:
+    if stats is not None:
+        ec = stats["event_counts"]
+        visit_count = ec.get((p.id, "visit"), 0)
+        click_count = ec.get((p.id, "click"), 0) + ec.get((p.id, "submit"), 0)
+        block_count = ec.get((p.id, "block"), 0)
+    elif db is not None:
         try:
             from ..models.landing_event import LandingEvent
             visit_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type == "visit").count()
@@ -805,11 +814,31 @@ def list_landing_pages(
     db: Session = Depends(get_db),
 ):
     """列本租户落地页（status != archived），附 subcode_count。"""
-    from ..models.launch import LandingPage
+    from ..models.launch import LandingPage, LandingAdLink
+    from ..models.landing_event import LandingEvent
+    from sqlalchemy import func as _f
     rows = db.query(LandingPage).filter(
         LandingPage.tenant_id == user.tenant_id, LandingPage.status != "archived"
     ).order_by(LandingPage.id.desc()).all()
-    return [_page_to_dict(p, db) for p in rows]
+    # 计数批量预取（原每页 4 条 COUNT = N+1）
+    pids = [p.id for p in rows]
+    sub_counts, event_counts = {}, {}
+    if pids:
+        sub_counts = dict(db.query(
+            LandingAdLink.page_id, _f.count(LandingAdLink.id)
+        ).filter(
+            LandingAdLink.page_id.in_(pids), LandingAdLink.status != "archived"
+        ).group_by(LandingAdLink.page_id).all())
+        event_counts = {
+            (pid_, et): c for pid_, et, c in db.query(
+                LandingEvent.page_id, LandingEvent.event_type, _f.count(LandingEvent.id)
+            ).filter(
+                LandingEvent.page_id.in_(pids),
+                LandingEvent.event_type.in_(["visit", "click", "submit", "block"]),
+            ).group_by(LandingEvent.page_id, LandingEvent.event_type).all()
+        }
+    stats = {"sub_counts": sub_counts, "event_counts": event_counts}
+    return [_page_to_dict(p, db, stats) for p in rows]
 
 
 @router.get("/pages/{pid}")

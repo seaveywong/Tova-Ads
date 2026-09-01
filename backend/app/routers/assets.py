@@ -416,7 +416,7 @@ def fb_upload_image(aid: int, body: FbUploadIn,
         raise HTTPException(404, "素材文件丢失")
     with open(filepath, "rb") as f:
         image_bytes = f.read()
-    fb = client_for_account(db, user.tenant_id, body.act_id)
+    fb = client_for_account(db, user.tenant_id, body.act_id, "write")  # 上传 image_hash 是写操作，选写令牌
     if not fb:
         raise HTTPException(400, "未绑定有效 FB 凭证")
     try:

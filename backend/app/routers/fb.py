@@ -7,8 +7,8 @@ from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.database import get_db, get_system_db
+from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
@@ -1164,3 +1164,158 @@ def unmanage_account(
         pass  # 清缓存失败不阻断取消纳管主流程
     db.commit()
     return {"unmanaged": True, "act_id": aid, "active_ads_at_removal": active_ads}
+
+
+# ── 数据健康诊断 / 脏数据清洗（超管，令牌页挂账项）──
+# 只读扫描列出令牌/账户/关联表的脏数据；data-clean 手动清理悬挂关联行（幂等，写 action_logs）。
+# 不自动跑：正常写路径（delete_credential/unmanage/import）已各自清理，这里兜历史遗留与中途失败残渣。
+_CRED_STATUS_ENUM = ("active", "rate_limited", "limited", "expired")
+_TOKEN_TYPE_ENUM = ("user", "manage", "operate")
+_AFC_STATUS_ENUM = ("active", "disabled")
+
+
+def _scan_token_data_health(db: Session) -> dict:
+    """全平台扫描令牌/账户关联脏数据（BYPASSRLS，超管专用）。返回 {totals, issues, cleanable}。"""
+    from ..models.fb import TokenHealth
+    creds = db.query(FbCredential).all()
+    accounts = db.query(Account).all()
+    afcs = db.query(AccountFbCredential).all()
+    ths = db.query(TokenHealth).all()
+
+    cred_by_id = {c.id: c for c in creds}
+    acct_by_id = {a.id: a for a in accounts}
+    issues: dict = {}
+
+    def _issue(key: str, cleanable: bool, rows: list):
+        issues[key] = {"count": len(rows), "cleanable": cleanable, "samples": rows[:20]}
+
+    # ① fb_credentials.status 不在枚举（写路径只产 active/expired/rate_limited/limited）
+    _issue("cred_bad_status", False, [
+        {"tenant_id": c.tenant_id, "id": c.id, "alias": c.alias, "status": c.status}
+        for c in creds if (c.status or "") not in _CRED_STATUS_ENUM])
+
+    # ② token_type 不在枚举（含 "'user'" 这类引号脏值；归一只救引号/大小写，真非法值不动）
+    _issue("cred_bad_token_type", True, [
+        {"tenant_id": c.tenant_id, "id": c.id, "alias": c.alias, "token_type": c.token_type}
+        for c in creds
+        if (c.token_type or "").strip().strip("'\"").lower() not in _TOKEN_TYPE_ENUM])
+
+    # ③ accounts.fb_credential_id 悬挂：指向已删令牌 / 跨租户令牌
+    rows = []
+    for a in accounts:
+        if not a.fb_credential_id:
+            continue
+        c = cred_by_id.get(a.fb_credential_id)
+        reason = "missing_cred" if c is None else (
+            "cross_tenant" if c.tenant_id != a.tenant_id else None)
+        if reason:
+            rows.append({"tenant_id": a.tenant_id, "account_id": a.id, "act_id": a.act_id,
+                         "fb_credential_id": a.fb_credential_id, "reason": reason})
+    _issue("account_dangling_cred", True, rows)
+
+    # ④ account_fb_credentials：悬挂（account/cred 已删）/ 租户错位 / status 非法
+    dangling, mismatch, bad_status = [], [], []
+    for r in afcs:
+        a, c = acct_by_id.get(r.account_id), cred_by_id.get(r.fb_credential_id)
+        if a is None or c is None:
+            dangling.append({"tenant_id": r.tenant_id, "id": r.id,
+                             "account_id": r.account_id, "fb_credential_id": r.fb_credential_id,
+                             "reason": "missing_account" if a is None else "missing_cred"})
+        elif a.tenant_id != r.tenant_id or c.tenant_id != r.tenant_id:
+            mismatch.append({"tenant_id": r.tenant_id, "id": r.id,
+                             "account_id": r.account_id, "fb_credential_id": r.fb_credential_id})
+        if (r.status or "") not in _AFC_STATUS_ENUM:
+            bad_status.append({"tenant_id": r.tenant_id, "id": r.id, "status": r.status})
+    _issue("afc_dangling", True, dangling)
+    _issue("afc_tenant_mismatch", True, mismatch)
+    _issue("afc_bad_status", False, bad_status)
+
+    # ⑤ token_health 悬挂（凭证已删）
+    _issue("token_health_dangling", True, [
+        {"tenant_id": th.tenant_id, "id": th.id, "fb_credential_id": th.fb_credential_id}
+        for th in ths if th.fb_credential_id not in cred_by_id])
+
+    # ⑥ accounts.act_id 空/空白（只报告：修复需人工判断，清了会丢历史关联）
+    _issue("account_empty_actid", False, [
+        {"tenant_id": a.tenant_id, "id": a.id, "name": a.name}
+        for a in accounts if not (a.act_id or "").strip()])
+
+    return {
+        "totals": {"credentials": len(creds), "accounts": len(accounts),
+                   "account_fb_credentials": len(afcs), "token_health": len(ths)},
+        "issues": issues,
+        "cleanable": sum(v["count"] for v in issues.values() if v["cleanable"]),
+    }
+
+
+@router.get("/credentials/data-health")
+def credentials_data_health(user: CurrentUser = Depends(require_superadmin),
+                            db: Session = Depends(get_system_db)):
+    """超管诊断：全平台令牌/账户关联表脏数据扫描（只读，列出计数+明细摘要）。"""
+    return _scan_token_data_health(db)
+
+
+@router.post("/credentials/data-clean")
+def credentials_data_clean(user: CurrentUser = Depends(require_superadmin),
+                           db: Session = Depends(get_system_db)):
+    """超管手动清理（幂等，可重复执行；不删令牌/账户本身）：
+    - account_fb_credentials：account 或 cred 已删、或租户错位 → 删行
+    - token_health：凭证已删 → 删行
+    - accounts.fb_credential_id 悬挂（已删/跨租户）→ 置 NULL（重绑由 reassociate 孤儿自愈兜底）
+    - fb_credentials.token_type 引号/大小写脏值 → 归一（真非法值不动，留在 data-health 报告）
+    status 非法值与空 act_id 只报告不自动改（需人工判断）。变更按租户写 action_logs。"""
+    from ..models.fb import TokenHealth
+    from ..core.log_utils import write_log, new_trace_id
+
+    cred_tenant = dict(db.query(FbCredential.id, FbCredential.tenant_id).all())
+    acct_tenant = dict(db.query(Account.id, Account.tenant_id).all())
+
+    changes: dict[int, dict] = {}  # tenant_id -> 各类变更计数（写日志用）
+
+    def _hit(tid: int, key: str):
+        ch = changes.setdefault(tid, {})
+        ch[key] = ch.get(key, 0) + 1
+
+    # ① 悬挂/错位的多令牌关联行 → 删
+    for r in db.query(AccountFbCredential).all():
+        a_t = acct_tenant.get(r.account_id)
+        c_t = cred_tenant.get(r.fb_credential_id)
+        if a_t is None or c_t is None or a_t != r.tenant_id or c_t != r.tenant_id:
+            db.delete(r)
+            _hit(r.tenant_id, "afc_deleted")
+
+    # ② 悬挂的 token_health 行 → 删
+    for th in db.query(TokenHealth).all():
+        if th.fb_credential_id not in cred_tenant:
+            db.delete(th)
+            _hit(th.tenant_id, "token_health_deleted")
+
+    # ③ 账户主令牌悬挂 → 置 NULL
+    for a in db.query(Account).filter(Account.fb_credential_id.isnot(None)).all():
+        if cred_tenant.get(a.fb_credential_id) != a.tenant_id:
+            a.fb_credential_id = None
+            _hit(a.tenant_id, "primary_cred_nulled")
+
+    # ④ token_type 引号/大小写脏值或 NULL → 归一（归一后仍非枚举的不动，留在报告）
+    for c in db.query(FbCredential).all():
+        raw = c.token_type or ""
+        norm = raw.strip().strip("'\"").lower() or "user"  # NULL/空白 → 模型默认（写权限仍以 scope 快照为准）
+        if norm in _TOKEN_TYPE_ENUM and norm != raw:
+            c.token_type = norm
+            _hit(c.tenant_id, "token_type_normalized")
+
+    result = {"afc_deleted": sum(ch.get("afc_deleted", 0) for ch in changes.values()),
+              "token_health_deleted": sum(ch.get("token_health_deleted", 0) for ch in changes.values()),
+              "primary_cred_nulled": sum(ch.get("primary_cred_nulled", 0) for ch in changes.values()),
+              "token_type_normalized": sum(ch.get("token_type_normalized", 0) for ch in changes.values())}
+    result["cleaned_total"] = sum(result.values())
+
+    if changes:
+        trace_id = new_trace_id()
+        for tid, ch in changes.items():
+            write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="user",
+                      actor_user_id=user.id, target_type="fb_credential", target_id="data_clean",
+                      action_type="data_clean", source="admin", result="success",
+                      trigger_detail=json.dumps(ch, ensure_ascii=False))
+        db.commit()
+    return result

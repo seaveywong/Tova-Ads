@@ -126,6 +126,8 @@ def update_certified(cid: int, body: CertifiedPageUpdate,
     if "payer_identity_id" in data and data["payer_identity_id"] is not None:
         if not data["payer_identity_id"].isdigit():
             raise HTTPException(400, "payer_identity_id 必须是数字")
+    if data.get("status") is not None and data["status"] not in ("active", "disabled"):
+        raise HTTPException(400, "status 只能是 active 或 disabled")
     for k, v in data.items():
         setattr(row, k, v)
     trace_id = new_trace_id()

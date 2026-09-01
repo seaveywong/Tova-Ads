@@ -113,29 +113,6 @@ watch(datePreset, () => {
   if (trendGran.value === old) loadTrend()  // 粒度没变也要重拉(日期变了)；粒度变则 trendGran watcher 触发
 })
 
-// ── 账户搜索（fuse.js 模糊搜索 name + act_id）──
-const searchQuery = ref('')
-const statusFilter = ref('all') // all / ok / error
-
-const fuse = computed(() => new Fuse(data.value.accounts || [], {
-  keys: ['name', 'act_id'],
-  threshold: 0.3,
-  ignoreLocation: true,
-}))
-
-const filteredAccounts = computed(() => {
-  let accs = data.value.accounts
-  // 状态筛选
-  if (statusFilter.value === 'ok') accs = accs.filter(a => !a.error)
-  else if (statusFilter.value === 'error') accs = accs.filter(a => a.error)
-  // 模糊搜索
-  if (searchQuery.value.trim()) {
-    const ids = new Set(fuse.value.search(searchQuery.value).map(r => r.item.act_id))
-    accs = accs.filter(a => ids.has(a.act_id))
-  }
-  return accs
-})
-
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
 const rangeQuery = () => {
@@ -331,9 +308,8 @@ const fmtSpendDual = (native, usd, cur) => {
   if (cur === 'USD') return { native: fmtUsd(native), usd: '' }
   return { native: `${fmt(native)} ${cur}`, usd: `≈ ${fmtUsd(usd)}` }
 }
-// 计算列（CVR/CPM 前端派生）
+// 计算列（CVR 前端派生）
 const cvr = (acc) => acc.clicks > 0 ? (acc.conversions / acc.clicks * 100) : 0
-const cpm = (acc) => acc.impressions > 0 && acc.spend_usd > 0 ? (acc.spend_usd / acc.impressions * 1000) : 0
 
 // 任务卡
 const expandedCard = ref(null)
@@ -538,24 +514,12 @@ const toggleKpi = (i) => {
   }
 }
 
-const notifIcon = (level) => level === 'critical' ? '🔴' : level === 'warning' ? '🟡' : '🔵'
-const goNotif = (n) => {
-  if (n.trace_id) router.push({ path: '/guard', query: { trace_id: n.trace_id } })
-  else router.push('/guard')
-}
 // 告警详情改用抽屉（el-drawer）展示——彻底避开 sticky 顶条遮挡（之前 inline 展开被顶部条挡）
 const notifDrawerOpen = ref(false)
 const activeNotif = ref(null)
 const openNotifDrawer = (n) => {
   activeNotif.value = n
   notifDrawerOpen.value = true
-}
-// 从告警 body 解析某 key 的值（"账户：xxx（ID yyy）"→"xxx（ID yyy）"），供抽屉标题/突出展示
-const notifField = (key) => {
-  const n = activeNotif.value
-  if (!n || !n.body) return ''
-  const row = parseBody(n.body).find(r => r.key === key)
-  return row ? row.val : ''
 }
 // 抽屉标题：动作 + 具体账户 + 广告（让用户一眼看到哪个账户哪个广告出问题、采取了什么动作）
 const notifTitle = computed(() => activeNotif.value?.title || t('dashboard.notifDetail'))
@@ -695,17 +659,6 @@ const dateOptions = computed(() => DATE_PRESETS.map(p => ({ label: p.label, key:
 // last_synced = 最近快照写入时间（有活跃广告才有新快照，0 广告时不更新≠巡检停了）。
 // 心跳每 5min 写一条 → 有心跳=巡检正常（不管有没有快照/广告）。
 const INSPECT_INTERVAL_MS = 5 * 60 * 1000
-const parseSynced = (s) => {
-  if (!s) return null
-  let iso = String(s).replace(' ', 'T').split('.')[0]
-  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += 'Z'
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? null : d
-}
-const nextInspectionAt = computed(() => {
-  const d = parseSynced(data.value.last_synced)
-  return d ? new Date(d.getTime() + INSPECT_INTERVAL_MS) : null
-})
 // 巡检状态：基于巡检心跳（每轮巡检必写 inspection_heartbeat，不受广告/快照影响）
 // —— 比基于 last_synced（快照，0 广告时不写）稳健，0 广告也不会误报停滞
 const inspectState = computed(() => {

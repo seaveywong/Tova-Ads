@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
+import { isSuperadminSync } from '../router'
 const { t, locale } = useI18n()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
@@ -46,6 +47,13 @@ const loadSelected = ref({})
 const loadIdText = ref('')
 const loadImporting = ref(false)
 
+// 数据健康（超管）：令牌/账户关联脏数据诊断 + 手动清理
+const isSuper = ref(isSuperadminSync())
+const healthOpen = ref(false)
+const healthLoading = ref(false)
+const health = ref(null)
+const cleaning = ref(false)
+
 const load = async () => {
   loading.value = true
   try { tokens.value = await GET('/fb/credentials') }
@@ -59,6 +67,43 @@ const loadSummary = async () => {
 const loadAtRisk = async () => {
   try { atRiskAccounts.value = await GET('/fb/accounts/at-risk') }
   catch { atRiskAccounts.value = [] }
+}
+
+// 数据健康（超管）
+const ISSUE_LABELS = {
+  cred_bad_status: 'hIssueCredBadStatus',
+  cred_bad_token_type: 'hIssueCredBadTokenType',
+  account_dangling_cred: 'hIssueAccountDanglingCred',
+  afc_dangling: 'hIssueAfcDangling',
+  afc_tenant_mismatch: 'hIssueAfcTenantMismatch',
+  afc_bad_status: 'hIssueAfcBadStatus',
+  token_health_dangling: 'hIssueTokenHealthDangling',
+  account_empty_actid: 'hIssueAccountEmptyActid',
+}
+const healthIssues = computed(() => {
+  const iss = health.value?.issues || {}
+  return Object.keys(ISSUE_LABELS)
+    .filter(k => iss[k] && iss[k].count > 0)
+    .map(k => ({ key: k, label: t('tokens.' + ISSUE_LABELS[k]), ...iss[k] }))
+})
+const sampleText = (s) => Object.entries(s || {}).map(([k, v]) => `${k}=${v}`).join(' ')
+const openHealth = async () => { popOverlay(); healthOpen.value = true; await fetchHealth() }
+const fetchHealth = async () => {
+  healthLoading.value = true
+  try { health.value = await GET('/fb/credentials/data-health') }
+  catch (e) { ElMessage.error(e.message || t('tokens.healthLoadFail')); health.value = null }
+  healthLoading.value = false
+}
+const runClean = async () => {
+  try { await ElMessageBox.confirm(t('tokens.cleanConfirm'), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) }
+  catch { return }
+  cleaning.value = true
+  try {
+    const r = await POST('/fb/credentials/data-clean', {})
+    ElMessage.success(t('tokens.cleanDone', { afc: r.afc_deleted || 0, th: r.token_health_deleted || 0, cred: r.primary_cred_nulled || 0, tt: r.token_type_normalized || 0 }))
+    await fetchHealth()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  cleaning.value = false
 }
 onMounted(() => {
   load(); loadSummary(); loadAtRisk(); loadApps()
@@ -342,6 +387,7 @@ const deleteToken = async (tk) => {
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
         <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
         <button class="btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
+        <button v-if="isSuper" class="btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
       </div>
     </div>
 
@@ -544,6 +590,33 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
+    <div v-if="healthOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="healthOpen=false">
+      <div class="modal wide">
+        <div class="m-title">{{ t('tokens.healthTitle') }}</div>
+        <div v-loading="healthLoading">
+          <div v-if="health" class="hint-left health-meta">
+            {{ t('tokens.healthMeta', { creds: health.totals.credentials, accounts: health.totals.accounts, links: health.totals.account_fb_credentials, th: health.totals.token_health }) }}
+          </div>
+          <div v-if="healthIssues.length" class="health-list">
+            <div v-for="iss in healthIssues" :key="iss.key" class="health-row">
+              <span class="h-count" :class="iss.cleanable ? 'warn' : ''">{{ iss.count }}</span>
+              <span class="h-label">{{ iss.label }}</span>
+              <span class="tag" :class="iss.cleanable ? 'operate' : 'user'">{{ iss.cleanable ? t('tokens.hCleanable') : t('tokens.hManualOnly') }}</span>
+              <div class="h-samples">
+                <div v-for="(s, i) in iss.samples.slice(0, 3)" :key="i" class="h-sample">{{ sampleText(s) }}</div>
+                <div v-if="iss.count > iss.samples.length" class="h-sample">+{{ iss.count - iss.samples.length }} …</div>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="!healthLoading" class="hint">{{ t('tokens.healthAllClean') }}</div>
+        </div>
+        <div class="m-foot">
+          <button class="btn" @click="healthOpen=false">{{ t('common.close') }}</button>
+          <button class="btn primary" :disabled="cleaning || !(health && health.cleanable > 0)" @click="runClean">{{ cleaning ? t('tokens.cleaning') : t('tokens.healthCleanBtn') }}</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="importOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="importOpen=false">
       <div class="modal">
         <div class="m-title">{{ t('tokens.connectFacebook') }}</div>
@@ -689,6 +762,17 @@ const deleteToken = async (tk) => {
 .load-area{min-height:120px;resize:vertical;font-family:'SF Mono','Fira Code',monospace;font-size:12px}
 .hint-left{font-size:11px;color:var(--t3);margin-bottom:8px;line-height:1.5}
 .hint-left code{font-family:'SF Mono',monospace;font-size:10px;background:var(--bg3);padding:0 4px;border-radius:3px}
+
+/* 数据健康 modal（超管） */
+.health-meta{margin-bottom:6px;font-variant-numeric:tabular-nums}
+.health-list{max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--bd);border-radius:6px;padding:6px;background:var(--bg3)}
+.health-row{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:4px;flex-wrap:wrap}
+.health-row:hover{background:var(--bg2)}
+.h-count{font-size:13px;font-weight:600;min-width:26px;text-align:right;color:var(--t2);font-variant-numeric:tabular-nums}
+.h-count.warn{color:var(--warning)}
+.h-label{font-size:13px;color:var(--t1);flex:1}
+.h-samples{width:100%;display:flex;flex-direction:column;gap:2px}
+.h-sample{font-size:10px;color:var(--t3);font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center}
 .modal{background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:var(--shadow-dropdown)}

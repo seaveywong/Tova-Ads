@@ -119,12 +119,17 @@ def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(
     """团队列表 + 概况（成员数/广告账户数），超管用。"""
     from ..models.fb import Account
     tenants = db.query(Tenant).order_by(Tenant.id).all()
+    # 计数批量预取（原每租户 2 条 COUNT = N+1）
+    member_counts = dict(db.query(
+        TenantMembership.tenant_id, func.count(TenantMembership.id)
+    ).group_by(TenantMembership.tenant_id).all())
+    account_counts = dict(db.query(
+        Account.tenant_id, func.count(Account.id)
+    ).filter(Account.is_managed == True).group_by(Account.tenant_id).all())  # noqa: E712
     result = []
     for t in tenants:
-        member_count = db.query(func.count(TenantMembership.id)).filter(
-            TenantMembership.tenant_id == t.id).scalar() or 0
-        account_count = db.query(func.count(Account.id)).filter(
-            Account.tenant_id == t.id, Account.is_managed == True).scalar() or 0
+        member_count = member_counts.get(t.id, 0)
+        account_count = account_counts.get(t.id, 0)
         result.append({
             "id": t.id, "name": t.name, "plan": t.plan, "status": t.status,
             "members": member_count, "accounts": account_count,

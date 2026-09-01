@@ -20,6 +20,14 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 # 30s 内存缓存（照搬 1.0 _SUMMARY_CACHE）
 _CACHE = {}
 _CACHE_TTL = 30
+_CACHE_MAX = 300  # 条目上限：key 含日期/账户组合，长期运行缓慢膨胀，超限淘汰最旧
+
+
+def _cache_put(key: str, now: float, val):
+    _CACHE[key] = (now, val)
+    if len(_CACHE) > _CACHE_MAX:
+        for _k in sorted(_CACHE, key=lambda _k: _CACHE[_k][0])[: len(_CACHE) - _CACHE_MAX]:
+            _CACHE.pop(_k, None)
 
 # 业务日基准：北京时区（UTC+8）——看数据用。
 # snapshot_date 是账户本地日（和 FB insights 对齐），看板按业务日历日字符串查
@@ -329,9 +337,7 @@ def dashboard(
         "accounts": account_details,
     }
 
-    _CACHE[cache_key] = (now, result)
-    if len(_CACHE) > 500:   # key 含日期字符串只增不减——防长期运行无界增长
-        _CACHE.clear()
+    _cache_put(cache_key, now, result)
     return result
 
 
@@ -721,9 +727,7 @@ def landing_trend(
         "date_preset": date_preset or "custom",
         "labels": labels, "visits": visits, "clicks": clicks, "blocked": blocked,
     }
-    _CACHE[cache_key] = (now, result)
-    if len(_CACHE) > 500:   # key 含日期字符串只增不减——防长期运行无界增长
-        _CACHE.clear()
+    _cache_put(cache_key, now, result)
     return result
 
 

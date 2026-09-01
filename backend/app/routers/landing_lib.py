@@ -75,6 +75,30 @@ def _pixel_usage(db: Session, tenant_id: int, pixel_id: str) -> dict:
             "used_by": [{"id": r.id, "title": r.title} for r in used[:10]]}
 
 
+def _pixel_usage_map(db: Session, tenant_id: int) -> dict:
+    """全像素用量一次算（列表用，避免每像素全表扫；_pixel_usage 保留给单像素场景）。
+    口径同 _pixel_usage：legacy pixel_id 单值 OR pixel_ids JSON 数组含此像素，一页只计一次。"""
+    import json as _json
+    rows = db.query(LandingPage).filter(
+        LandingPage.tenant_id == tenant_id,
+        LandingPage.status != "archived",
+    ).all()
+    usage: dict = {}
+    for r in rows:
+        ids = []
+        if r.pixel_ids:
+            try:
+                ids = _json.loads(r.pixel_ids)
+            except Exception:
+                ids = []
+        for pid in set(ids + ([r.pixel_id] if r.pixel_id else [])):
+            m = usage.setdefault(pid, {"usage_count": 0, "used_by": []})
+            m["usage_count"] += 1
+            if len(m["used_by"]) < 10:
+                m["used_by"].append({"id": r.id, "title": r.title})
+    return usage
+
+
 def _domain_usage(db: Session, tenant_id: int, domain: str) -> dict:
     rows = db.query(LandingPage).filter(
         LandingPage.tenant_id == tenant_id,
@@ -119,15 +143,18 @@ def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
     rows = db.query(LandingPixel).filter(
         LandingPixel.id.in_(db.query(subq.c.max_id))
     ).order_by(LandingPixel.id.desc()).all()
+    # 用量/绑定账户数批量预取（原每像素 2 组查询 = N+1）
+    usage_map = _pixel_usage_map(db, user.tenant_id)
+    act_map = dict(db.query(
+        LandingPixel.pixel_id, _f.count(LandingPixel.id)
+    ).filter(
+        LandingPixel.tenant_id == user.tenant_id,
+        LandingPixel.status != "archived",
+    ).group_by(LandingPixel.pixel_id).all())
     out = []
     for p in rows:
-        u = _pixel_usage(db, user.tenant_id, p.pixel_id)
-        # 统计该像素绑了几个账户
-        act_count = db.query(_f.count(LandingPixel.id)).filter(
-            LandingPixel.tenant_id == user.tenant_id,
-            LandingPixel.pixel_id == p.pixel_id,
-            LandingPixel.status != "archived",
-        ).scalar() or 0
+        u = usage_map.get(p.pixel_id) or {"usage_count": 0, "used_by": []}
+        act_count = act_map.get(p.pixel_id, 0)
         out.append({"id": p.id, "pixel_id": p.pixel_id, "pixel_name": p.pixel_name,
                     "note": p.note, "status": p.status, "act_count": act_count,
                     "platform": p.platform or "fb",
@@ -213,9 +240,6 @@ def test_pixel_s2s(pid: int,
     return {"ok": ok, "code": code, "message": result.get("message", ""),
             "event_id": event_id,
             "hint": "请到 TK Events Manager → 该像素 → Test Events 标签查看（秒级可见）" if ok else "TK API 返回错误，请检查 token/test_code 是否正确"}
-
-
-@router.delete("/pixels/{pid}")
 
 
 @router.delete("/pixels/{pid}")

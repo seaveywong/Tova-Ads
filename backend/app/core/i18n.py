@@ -58,6 +58,20 @@ NOTIFY = {
             "en": "Account: <b>{name}</b> (act_{act_id})\nStatus: no valid token covers it, cannot read or operate\nAction: please re-bind a token, or load a token that manages this account",
         },
     },
+    "low_balance": {
+        "title": {"zh": "账户可用额度低 · {name}", "en": "Low Available Balance · {name}"},
+        "body": {
+            "zh": "账户：<b>{name}</b>（act_{act_id}）\n可用额度：<b>${avail:.2f}</b>（阈值 ${threshold:.0f}）\n口径：花费上限 − 已消耗\n处理：及时充值或上调花费上限，避免广告停投",
+            "en": "Account: <b>{name}</b> (act_{act_id})\nAvailable: <b>${avail:.2f}</b> (threshold ${threshold:.0f})\nBasis: spend cap - spent\nAction: top up or raise the spend cap to keep ads delivering",
+        },
+    },
+    "low_balance_prepaid": {
+        "title": {"zh": "账户余额低 · {name}", "en": "Low Account Balance · {name}"},
+        "body": {
+            "zh": "账户：<b>{name}</b>（act_{act_id}）\n预付费余额：<b>${avail:.2f}</b>（阈值 ${threshold:.0f}）\n处理：及时充值，余额耗尽广告将停投",
+            "en": "Account: <b>{name}</b> (act_{act_id})\nPrepaid balance: <b>${avail:.2f}</b> (threshold ${threshold:.0f})\nAction: top up soon, ads stop once the balance runs out",
+        },
+    },
     "account_permission_error": {
         "title": {"zh": "权限不足 · {name}", "en": "Permission Denied · {name}"},
         "body": {

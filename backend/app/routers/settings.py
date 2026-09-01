@@ -1,6 +1,7 @@
 """系统设置路由：调度配置 + AI 配置。平台级，超管才能改。"""
+import json
 import os
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
@@ -11,6 +12,7 @@ from ..core.retention import (get_retention_config, save_retention_config,
                               run_data_retention, get_last_run, DEFAULT_RETENTION)
 from ..core.config import settings
 from ..core.log_utils import write_log, new_trace_id
+from ..models.system import SystemSetting
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -50,6 +52,78 @@ def set_schedule(body: ScheduleIn, user: CurrentUser = Depends(require_superadmi
     from ..main import reschedule_jobs
     reschedule_jobs(cfg)
     return {"effective": effective_intervals(cfg)}
+
+
+# ── 巡检与告警调优（超管）──
+# 三个系统旋钮（平台级，system_settings.value 存 JSON 数字）：
+#   guard_concurrency    巡检并发 1-8（guard_engine._max_workers 每轮现读，下一轮生效）
+#   guard_learning_hours 学习期保护小时数，0=关（guard_engine 每轮现读）
+#   notify_storm_cap     每租户每事件当日告警上限，0=不封顶（notify_utils 60s TTL 缓存，保存后主动失效）
+class GuardTuningIn(BaseModel):
+    guard_concurrency: int
+    guard_learning_hours: int
+    notify_storm_cap: int
+
+
+def _setting_num(db: Session, key: str, default: float) -> float:
+    """读 system_settings 数值（value 存 JSON）。缺省/脏值 → default（与 guard_engine._sys_float 同语义）。"""
+    try:
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row and row.value not in (None, ""):
+            return float(json.loads(row.value))
+    except Exception:
+        pass
+    return default
+
+
+@router.get("/guard-tuning")
+def get_guard_tuning(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
+    """三键当前生效值 + 默认值。生效值按读方口径钳制（并发 1-8、风暴上限 ≥0）。"""
+    from ..services.guard_engine import DEFAULT_CONCURRENCY, DEFAULT_LEARNING_HOURS
+    from ..core.notify_utils import DEFAULT_STORM_CAP
+    conc = max(1, min(int(_setting_num(db, "guard_concurrency", DEFAULT_CONCURRENCY)), 8))
+    learn = _setting_num(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
+    storm = max(0, int(_setting_num(db, "notify_storm_cap", DEFAULT_STORM_CAP)))
+    return {
+        "guard_concurrency": conc,
+        "guard_learning_hours": int(learn) if learn == int(learn) else learn,
+        "notify_storm_cap": storm,
+        "defaults": {
+            "guard_concurrency": int(DEFAULT_CONCURRENCY),
+            "guard_learning_hours": int(DEFAULT_LEARNING_HOURS),
+            "notify_storm_cap": int(DEFAULT_STORM_CAP),
+        },
+    }
+
+
+@router.put("/guard-tuning")
+def set_guard_tuning(body: GuardTuningIn, user: CurrentUser = Depends(require_superadmin),
+                     db: Session = Depends(get_db)):
+    """写三键（value 存 JSON 数字）。storm_cap 写后失效 TTL 缓存立即生效；另两键下一轮巡检现读。"""
+    if not 1 <= body.guard_concurrency <= 8:
+        raise HTTPException(400, "巡检并发需为 1-8 的整数")
+    if not 0 <= body.guard_learning_hours <= 720:
+        raise HTTPException(400, "学习期保护需为 0-720 的整数（0=关闭）")
+    if not 0 <= body.notify_storm_cap <= 1000:
+        raise HTTPException(400, "告警风暴上限需为 0-1000 的整数（0=不封顶）")
+    for key, val in (("guard_concurrency", body.guard_concurrency),
+                     ("guard_learning_hours", body.guard_learning_hours),
+                     ("notify_storm_cap", body.notify_storm_cap)):
+        row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row:
+            row.value = json.dumps(val)
+        else:
+            db.add(SystemSetting(key=key, value=json.dumps(val)))
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="system_setting", target_id="guard_tuning",
+              action_type="update", source="user", result="success",
+              metadata={"guard_concurrency": body.guard_concurrency,
+                        "guard_learning_hours": body.guard_learning_hours,
+                        "notify_storm_cap": body.notify_storm_cap})
+    db.commit()
+    from ..core.notify_utils import reset_storm_cap_cache
+    reset_storm_cap_cache()
+    return get_guard_tuning(user=user, db=db)
 
 
 # ── AI 配置（超管）──

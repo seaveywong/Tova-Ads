@@ -139,6 +139,15 @@ ERROR_ZH_EN: dict[str, str] = {
         "This ad account is no longer managed; retry is disabled (re-import it to deploy again)"
     ),
 
+    # ---- settings.py / 巡检与告警旋钮 ----
+    "巡检并发需为 1-8 的整数": "Inspection concurrency must be an integer between 1 and 8",
+    "学习期保护需为 0-720 的整数（0=关闭）": (
+        "Learning-phase protection must be an integer between 0 and 720 (0 = disabled)"
+    ),
+    "告警风暴上限需为 0-1000 的整数（0=不封顶）": (
+        "Alert storm cap must be an integer between 0 and 1000 (0 = uncapped)"
+    ),
+
     # ---- audiences.py / 受众 ----
     "查询词 q 不能为空": "Query parameter q cannot be empty",
     "strategy 必须是 broad_interest/broad_only/interest_only": (

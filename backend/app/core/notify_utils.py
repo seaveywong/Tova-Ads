@@ -303,3 +303,41 @@ def emit_orphan_account_alerts(db: Session, tenant_id: int,
     if sent:
         db.commit()
     return sent
+
+
+def emit_low_balance_alert_if_due(db: Session, tenant_id: int, *, act_id: str,
+                                  name: str, avail_usd: float, threshold_usd: float,
+                                  basis: str = "spend_cap", cooldown_hours: int = 6) -> bool:
+    """账户可用额度低于阈值 → warning 告警 + TG（余额告警打通通知模块）。
+
+    口径由调用方算好传入（与看板一致）：
+    - basis="spend_cap"：可用 = spend_cap − amount_spent（USD）
+    - basis="prepaid_balance"：无花费上限的预付费账户退回 FB balance（>0 才判；
+      后付费账户 balance 是账单/欠款，不作告警依据）
+    dedup：action_logs(action_type=low_balance_alert, target_id=act_id) 近 cooldown_hours（默认 6h）。
+    返回是否真发了。
+    """
+    if avail_usd is None or threshold_usd is None or float(threshold_usd) <= 0:
+        return False
+    if dedup_recent(db, tenant_id, "low_balance_alert", target_id=act_id,
+                    cooldown_min=cooldown_hours * 60):
+        return False
+    from .log_utils import write_log, new_trace_id
+    trace_id = new_trace_id()
+    from .i18n import tenant_locale, notify_text
+    _loc = tenant_locale(db, tenant_id)
+    _key = "low_balance_prepaid" if basis == "prepaid_balance" else "low_balance"
+    _title, _body = notify_text(_loc, _key,
+                                name=_esc(name or act_id), act_id=act_id,
+                                avail=float(avail_usd), threshold=float(threshold_usd))
+    emit_notification(db, tenant_id=tenant_id, level="warning",
+                      event_type="low_balance", trace_id=trace_id,
+                      title=_title, body=_body,
+                      target_type="account", target_id=act_id, send_tg=True)
+    write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+              target_type="account", target_id=act_id,
+              action_type="low_balance_alert", source="account_sync",
+              result="alerted",
+              trigger_detail=f"avail_usd={float(avail_usd):.2f} threshold={float(threshold_usd):.0f} basis={basis}")
+    db.commit()
+    return True

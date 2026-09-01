@@ -49,6 +49,41 @@ def _last_notified_status(db, tenant_id: int, act_id: str):
         return None
 
 
+def _balance_alert_threshold(db) -> float:
+    """低额告警阈值（USD）：system_settings.balance_alert_threshold（JSON 数字，默认 20；0=关闭）。"""
+    try:
+        from ..models.system import SystemSetting
+        row = db.query(SystemSetting).filter(SystemSetting.key == "balance_alert_threshold").first()
+        if row and row.value not in (None, ""):
+            return float(json.loads(row.value))
+    except Exception:
+        pass
+    return 20.0
+
+
+def _maybe_low_balance_alert(db, tenant_id: int, acc, threshold_usd: float) -> bool:
+    """账户可用额度 < 阈值 → 告警（6h dedup，notify_utils 兜文案/TG）。
+
+    口径与看板一致（guard_engine.calc_available_balance）：
+    - 有花费上限：可用 = spend_cap − amount_spent（USD）
+    - 无上限：退回 FB balance（>0 视为预付费余额；≤0 是后付费账单/欠款，不判）
+    """
+    from .guard_engine import calc_available_balance, from_minor_units, to_usd
+    from ..core.notify_utils import emit_low_balance_alert_if_due
+    avail_usd, kind = calc_available_balance(acc.spend_cap, acc.amount_spent, acc.currency)
+    basis = "spend_cap"
+    if kind != "limited":
+        bal = from_minor_units(acc.balance, acc.currency)
+        if bal is None or bal <= 0:
+            return False
+        avail_usd, basis = round(to_usd(bal, acc.currency), 2), "prepaid_balance"
+    if avail_usd is not None and avail_usd < threshold_usd:
+        return emit_low_balance_alert_if_due(
+            db, tenant_id, act_id=acc.act_id, name=acc.name,
+            avail_usd=avail_usd, threshold_usd=threshold_usd, basis=basis)
+    return False
+
+
 def run_account_status_sync():
     """定时同步账户状态/余额，变动到异常 → emit 告警。每 30min。"""
     lock = acquire_run_lock(110)
@@ -56,6 +91,8 @@ def run_account_status_sync():
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
     synced = alerted = recovered = 0
+    low_balance_alerts = 0
+    threshold_usd = _balance_alert_threshold(db)  # 0=关；一次巡检读一遍
     try:
         creds = db.query(FbCredential).filter(FbCredential.status == "active").all()
         for cred in creds:
@@ -141,6 +178,13 @@ def run_account_status_sync():
                                   metadata={"status": 1, "old": old_status, "recovered": True})
                         recovered += 1
                 acc.account_status = new_status
+                # 可用额度低告警（仅活跃账户；阈值 balance_alert_threshold，0=关；6h dedup）
+                if threshold_usd > 0 and new_status == 1:
+                    try:
+                        if _maybe_low_balance_alert(db, tenant_id, acc, threshold_usd):
+                            low_balance_alerts += 1
+                    except Exception as e:
+                        logger.warning(f"[AccountSync] 低额告警检查失败 act {act_id}: {e}")
                 # 同步该账户像素到像素库（绑 act_id，子码级像素用）
                 try:
                     sync_pixels_for_act(db, fb, tenant_id, act_id)
@@ -156,8 +200,8 @@ def run_account_status_sync():
                 db.rollback()
                 continue
         db.commit()
-        logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复")
+        logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复，{low_balance_alerts} 低额告警")
     finally:
         db.close()
         release_run_lock(lock, 110)
-    return {"synced": synced, "alerted": alerted}
+    return {"synced": synced, "alerted": alerted, "low_balance_alerts": low_balance_alerts}

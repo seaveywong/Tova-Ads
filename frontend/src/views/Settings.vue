@@ -107,6 +107,37 @@ const saveSched = async () => {
   schedSaving.value = false
 }
 
+// 巡检与告警调优（超管）—— 并发/学习期/风暴上限三旋钮
+const gt = ref({ guard_concurrency: null, guard_learning_hours: null, notify_storm_cap: null, defaults: {} })
+const gtSaving = ref(false)
+const GT_ROWS = [
+  { key: 'guard_concurrency', labelKey: 'settings.gtConc', hintKey: 'settings.gtConcHint', min: 1, max: 8 },
+  { key: 'guard_learning_hours', labelKey: 'settings.gtLearn', hintKey: 'settings.gtLearnHint', min: 0, max: 720 },
+  { key: 'notify_storm_cap', labelKey: 'settings.gtStorm', hintKey: 'settings.gtStormHint', min: 0, max: 1000 },
+]
+const loadGuardTuning = async () => {
+  if (!isSuper.value) return
+  try { gt.value = await GET('/settings/guard-tuning') } catch {}
+}
+const saveGuardTuning = async () => {
+  for (const r of GT_ROWS) {
+    const v = Number(gt.value[r.key])
+    if (gt.value[r.key] === '' || gt.value[r.key] === null || Number.isNaN(v))
+      return ElMessage.warning(t('settings.gtFillAll'))
+    if (v < r.min || v > r.max) return ElMessage.warning(t('settings.gtRange', { min: r.min, max: r.max }))
+  }
+  gtSaving.value = true
+  try {
+    gt.value = await PUT('/settings/guard-tuning', {
+      guard_concurrency: Number(gt.value.guard_concurrency),
+      guard_learning_hours: Number(gt.value.guard_learning_hours),
+      notify_storm_cap: Number(gt.value.notify_storm_cap),
+    })
+    ElMessage.success(t('common.saved'))
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
+  gtSaving.value = false
+}
+
 // AI 配置（超管）
 const AI_PRESETS = {
   'https://api.deepseek.com/v1': { label: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] },
@@ -315,7 +346,7 @@ const resetWebhookToken = async () => {
   whSaving.value = false
 }
 
-onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
+onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning()]); _setupObserver() })   // 并行——原 7 串行吃满 7 个 RTT
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -397,6 +428,7 @@ const anchorSections = computed(() => {
   ]
   if (isSuper.value) {
     secs.push({ id: 'sec-schedule', label: t('settings.scheduleTitle') })
+    secs.push({ id: 'sec-guard-tuning', label: t('settings.gtTitle') })
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
@@ -495,6 +527,20 @@ const runKeepaliveNow = async () => {
         <span class="eff">{{ t('settings.minSuffix', { n: sched.sentinel_minutes }) }}</span>
       </div>
       <button class="btn primary" :disabled="schedSaving" @click="saveSched">{{ t('settings.saveAndApply') }}</button>
+    </div>
+
+    <div v-if="isSuper" id="sec-guard-tuning" class="card">
+      <div class="t">{{ t('settings.gtTitle') }}</div>
+      <div class="d">{{ t('settings.gtDesc') }}</div>
+      <template v-if="gt.guard_concurrency !== null">
+        <div class="ret-head"><span>{{ t('settings.gtParamCol') }}</span><span>{{ t('settings.gtValueCol') }}</span><span>{{ t('settings.gtDescCol') }}</span></div>
+        <div v-for="r in GT_ROWS" :key="r.key" class="ret-row" :class="{ forever: r.min === 0 && gt[r.key] === 0 }">
+          <span class="ret-name">{{ t(r.labelKey) }}</span>
+          <input v-model.number="gt[r.key]" type="number" :min="r.min" :max="r.max" step="1" class="ret-input" />
+          <span class="ret-hint">{{ t(r.hintKey, { d: gt.defaults[r.key] }) }}</span>
+        </div>
+        <button class="btn primary" :disabled="gtSaving" @click="saveGuardTuning">{{ t('common.save') }}</button>
+      </template>
     </div>
 
     <div v-if="isSuper" id="sec-ai" class="card">
