@@ -221,7 +221,7 @@ export default {
   },
   login: {
     title: 'Tova Ads',
-    subtitle: 'Facebook & TikTok Ad Management Platform',
+    subtitle: 'Intelligent Ad Management Platform',
     email: 'Email',
     emailPlaceholder: 'Enter email',
     password: 'Password',

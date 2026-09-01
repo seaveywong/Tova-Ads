@@ -232,7 +232,7 @@ export default {
   },
   login: {
     title: 'Tova Ads',
-    subtitle: 'Facebook · TikTok 广告智能管理平台',
+    subtitle: '广告智能管理平台',
     email: '邮箱',
     emailPlaceholder: '请输入邮箱',
     password: '密码',

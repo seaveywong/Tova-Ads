@@ -1,6 +1,6 @@
 # ToveAds 2.0 — 项目入口（CLAUDE.md）
 
-多租户 FB 广告管理 SaaS。Python FastAPI 后端（Vultr）+ Vue3/Element Plus 前端（Cloudflare Pages）。
+多平台（Facebook/TikTok）多租户广告管理 SaaS。Python FastAPI 后端（Vultr）+ Vue3/Element Plus 前端（Cloudflare Pages）。
 **新会话/新 AI 先读此文件**，再按需读详细文档。改任何东西前看 auto-memory `toveads-dev-sop`（铁律+部署+坑）。
 
 ## 铁律（违反出事，详见 auto-memory）
