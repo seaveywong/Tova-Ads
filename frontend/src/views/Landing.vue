@@ -483,10 +483,10 @@ const savePixel = async () => {
   pixelSaving.value = true
   try {
     if (pixelForm.value.id) {
-      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined })
+      await PUT(`/landing-lib/pixels/${pixelForm.value.id}`, { pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined })
       ElMessage.success(t('common.saved'))
     } else {
-      await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined })
+      await POST('/landing-lib/pixels', { pixel_id: pixelForm.value.pixel_id.trim(), pixel_name: pixelForm.value.pixel_name, note: pixelForm.value.note, platform: pixelForm.value.platform, tt_access_token: pixelForm.value.tt_access_token || undefined, test_event_code: pixelForm.value.test_event_code || undefined })
       ElMessage.success(t('common.done'))
     }
     await loadLib()

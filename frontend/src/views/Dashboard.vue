@@ -6,6 +6,8 @@ import { useLatest } from '../composables/useLatest'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { useRouter } from 'vue-router'
+import { isSuperadminSync } from '../router'
+const isSuper = isSuperadminSync()
 import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
@@ -816,7 +818,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <span v-if="lastInspectedDisplay" class="sync-time">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
           <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
           <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</button>
-          <button class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
+          <button v-if="isSuper" class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
           <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">📋 {{ t('dashboard.copySpendBtn') }}</button>
           <button class="refresh-btn" :disabled="exporting" @click="exportAccounts">⬇ {{ exporting ? t('common.loading') : t('common.exportCsv') }}</button>
         </div>

@@ -132,6 +132,7 @@ def list_pixels(user: CurrentUser = Depends(require_permission("ads.read")),
                     "note": p.note, "status": p.status, "act_count": act_count,
                     "platform": p.platform or "fb",
                     "tt_has_token": bool(p.tt_access_token_enc) if (p.platform or "fb") == "tt" else False,
+                    "test_event_code": p.test_event_code or "",   # 编辑回显（测试码定期过期，明文可见便于更新）
                     **u})
     return out
 
@@ -146,7 +147,8 @@ def create_pixel(body: PixelIn, user: CurrentUser = Depends(require_permission("
         raise HTTPException(400, "该像素已在库中")
     row = LandingPixel(tenant_id=user.tenant_id, created_by=user.id,
                        pixel_id=body.pixel_id, pixel_name=body.pixel_name or None, note=body.note or None,
-                       platform=body.platform or "fb")
+                       platform=body.platform or "fb",
+                       test_event_code=(body.test_event_code or None) if body.platform == "tt" else None)
     if body.platform == "tt" and body.tt_access_token:
         from ..core.encryption import encrypt
         row.tt_access_token_enc = encrypt(body.tt_access_token)

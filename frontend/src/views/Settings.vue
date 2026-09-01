@@ -637,7 +637,7 @@ const runKeepaliveNow = async () => {
       </div>
       <div class="ka-actions">
         <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? t('settings.saving') : t('common.save') }}</button>
-        <button class="btn" :disabled="kaRunning" @click="runKeepaliveNow">{{ kaRunning ? t('common.loading') : t('settings.kaRunNow') }}</button>
+        <button v-if="isSuper" class="btn" :disabled="kaRunning" @click="runKeepaliveNow">{{ kaRunning ? t('common.loading') : t('settings.kaRunNow') }}</button>
       </div>
     </div>
 
