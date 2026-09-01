@@ -292,6 +292,21 @@ def manual_sentinel_patrol(user: CurrentUser = Depends(require_superadmin)):
 _EMERGENCY_STATE: dict = {}
 
 
+def _emergency_state_write(db, tenant_id: int, st: dict):
+    """状态落 DB system_settings（gunicorn 4 worker——进程内 dict 另一 worker 读不到，
+    轮询会第一拍就假报'已暂停 0 条'。DB 是跨 worker 真相源）。"""
+    import json as _json
+    from ..models.system import SystemSetting
+    key = f'emergency_state_{tenant_id}'
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    val = _json.dumps(st)
+    if row:
+        row.value = val
+    else:
+        db.add(SystemSetting(key=key, value=val))
+    db.commit()
+
+
 def _bg_emergency_pause(tenant_id: int, user_email: str):
     """后台执行全局紧急暂停：同步 ads_cache → 逐个 PAUSE → 回读核验（advisory lock 113 单实例互斥）。"""
     from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
@@ -319,6 +334,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             return
         db = SuperSessionLocal()
         _st = _EMERGENCY_STATE[tenant_id]
+        _emergency_state_write(db, tenant_id, dict(_st))
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
@@ -377,8 +393,17 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                     _st["errors"].append(f"{acc.name}: {len(still_active)} 条仍 ACTIVE（FB 写延迟）: {[str(i)[-8:] for i in still_active[:3]]}")
             except Exception:
                 pass  # 核验查询失败不阻断（信任 set_status 的成功返回）
+            # 每账户拍一次进度到 DB（前端轮询跨 worker 可见；紧急暂停低频，写代价可忽略）
+            try:
+                _emergency_state_write(db, tenant_id, dict(_st))
+            except Exception:
+                pass
 
         _st["errors"] = _st["errors"][:10]
+        try:
+            _emergency_state_write(db, tenant_id, dict(_st))   # 终态落 DB（跨 worker）
+        except Exception:
+            pass
     except Exception as e:
         if _EMERGENCY_STATE.get(tenant_id):
             _errs = _EMERGENCY_STATE[tenant_id].get("errors") or []
@@ -390,6 +415,14 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             release_run_lock(lock, 113)
         if _EMERGENCY_STATE.get(tenant_id):
             _EMERGENCY_STATE[tenant_id]["running"] = False
+            try:
+                _sdb = SuperSessionLocal()
+                try:
+                    _emergency_state_write(_sdb, tenant_id, dict(_EMERGENCY_STATE[tenant_id]))
+                finally:
+                    _sdb.close()
+            except Exception:
+                pass
 
 
 @router.post("/emergency-pause")
@@ -406,9 +439,21 @@ def emergency_pause(background_tasks: BackgroundTasks,
 
 @router.get("/emergency-status")
 def emergency_status(user: CurrentUser = Depends(require_permission("ads.pause"))):
-    """紧急暂停进度（本 worker 进程内；多 worker 下读到的可能是旧态，前端轮询有上限兜底）。"""
-    st = _EMERGENCY_STATE.get(user.tenant_id)
-    return st or {"running": False, "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
+    """紧急暂停进度（DB 真相源——进程内 dict 多 worker 读不到会假报'暂停 0 条'）。"""
+    import json as _json
+    from ..core.database import SuperSessionLocal
+    from ..models.system import SystemSetting
+    _sdb = SuperSessionLocal()
+    try:
+        row = _sdb.query(SystemSetting).filter(SystemSetting.key == f'emergency_state_{user.tenant_id}').first()
+        if row:
+            try:
+                return _json.loads(row.value)
+            except Exception:
+                pass
+    finally:
+        _sdb.close()
+    return {"running": False, "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
 
 
 # ── 预热（warmup）arm/disarm（doc 03 §6）──

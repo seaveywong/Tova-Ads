@@ -901,6 +901,10 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             it.status = "fail"; it.error = (e.friendly or str(e))[:300]; it.error_code = e.category
         except Exception as e:
             it.status = "fail"; it.error = str(e)[:300]; it.error_code = "error"
+        # 失败也要收口 job：不回收 → retry 置的 running 永停 → 模板部署被 409 锁死到重启
+        if it.status == "fail" and job:
+            job.status = "partial_failed"   # 此 item 仍 fail → failed≥1，必落 partial_failed
+            job.finished_at = datetime.now(timezone.utc)
         sdb.commit()
     finally:
         sdb.close()

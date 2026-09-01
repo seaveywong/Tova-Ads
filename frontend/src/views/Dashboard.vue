@@ -667,7 +667,8 @@ const NOTIF_EVENT_LABEL_KEY = {
   token_rate_limited: 'dashboard.evThrottled', orphan_account: 'dashboard.evOrphan', inspection_stalled: 'dashboard.evInspectStalled',
   budget_progress_50: 'dashboard.evBudget', budget_progress_75: 'dashboard.evBudget', budget_progress_90: 'dashboard.evBudget', budget_progress_98: 'dashboard.evBudget',
   account_status_change: 'dashboard.evStatusChange', account_status_recovered: 'dashboard.evStatusRecovered', sentinel_pause: 'dashboard.evSentinel',
-  landing_blocked: 'dashboard.evLandingBlocked', leads_new: 'dashboard.evLeadsNew', leads_sync_failed: 'dashboard.evLeadsFail',
+  landing_blocked: 'dashboard.evLandingBlocked', landing_health: 'dashboard.evLandingBlocked', landing_worker_error: 'dashboard.evLandingBlocked',
+  leads_new: 'dashboard.evLeadsNew', leads_sync_failed: 'dashboard.evLeadsFail',
   subcode_cleanup: 'dashboard.evSubcodeCleanup',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
