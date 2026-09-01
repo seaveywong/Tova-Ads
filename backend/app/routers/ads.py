@@ -3,6 +3,7 @@
 对齐 FB Ads Manager：三层独立列表 + perf 聚合消耗。手动刷新（refresh=1）强制重拉。
 """
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -160,8 +161,13 @@ def _ad_act_lookup(db: Session, tenant_id: int) -> dict:
 
 
 def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to: str) -> dict:
-    """ad 级 perf 聚合 → {ad_id: {spend, conv, impressions, clicks, reach}}。act_id 空=跨账户全部。"""
-    q = db.query(PerfSnapshot.ad_id, func.sum(PerfSnapshot.spend), func.sum(PerfSnapshot.conversions),
+    """ad 级 perf 聚合 → {ad_id: {spend(本币), spend_usd, conv, ...}}。act_id 空=跨账户全部。
+
+    perf_snapshots.spend 巡检写入时已 to_usd 换算（USD），spend_native 是本币原值——
+    跨账户 SUM(spend) 即为正确 USD 合计，无需再按币种换算；本币合计只在单广告（单账户单币种）内有意义。
+    """
+    q = db.query(PerfSnapshot.ad_id, func.sum(PerfSnapshot.spend), func.sum(PerfSnapshot.spend_native),
+                 func.sum(PerfSnapshot.conversions),
                  func.sum(PerfSnapshot.impressions), func.sum(PerfSnapshot.clicks), func.sum(PerfSnapshot.reach)).filter(
         PerfSnapshot.tenant_id == tenant_id)
     if act_id:
@@ -171,17 +177,27 @@ def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to:
     if date_to:
         q = q.filter(PerfSnapshot.snapshot_date <= date_to)
     rows = q.group_by(PerfSnapshot.ad_id).all()
-    return {r[0]: {"spend": float(r[1] or 0), "conv": int(r[2] or 0),
-                   "impressions": int(r[3] or 0), "clicks": int(r[4] or 0), "reach": int(r[5] or 0)} for r in rows}
+    out = {}
+    for r in rows:
+        usd = float(r[1] or 0)
+        native = float(r[2] or 0)
+        if native == 0 and usd > 0:
+            native = usd  # 旧快照行缺 spend_native（列上线前写入）——按 USD 金额兜底展示
+        out[r[0]] = {"spend": native, "spend_usd": usd, "conv": int(r[3] or 0),
+                     "impressions": int(r[4] or 0), "clicks": int(r[5] or 0), "reach": int(r[6] or 0)}
+    return out
 
 
 def _attach_perf(items: list, perf_map: dict) -> list:
     out = []
     for it in items:
-        p = perf_map.get(it.get("id"), {"spend": 0.0, "conv": 0, "impressions": 0, "clicks": 0, "reach": 0})
-        spend, conv, imp, clk, reach = p["spend"], p["conv"], p["impressions"], p["clicks"], p["reach"]
-        out.append({**it, "spend": round(spend, 2), "conversions": conv,
+        p = perf_map.get(it.get("id"), {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
+                                        "impressions": 0, "clicks": 0, "reach": 0})
+        spend, usd, conv = p["spend"], p["spend_usd"], p["conv"]
+        imp, clk, reach = p["impressions"], p["clicks"], p["reach"]
+        out.append({**it, "spend": round(spend, 2), "spend_usd": round(usd, 2), "conversions": conv,
                     "cpa": round(spend / conv, 2) if conv else 0.0,
+                    "cpa_usd": round(usd / conv, 2) if conv else 0.0,
                     "impressions": imp, "clicks": clk, "reach": reach,
                     "frequency": round(imp / reach, 2) if reach else 0.0,
                     "ctr": round(clk / imp * 100, 2) if imp else 0.0})
@@ -245,30 +261,34 @@ def list_ads(
     ).all()
     acc_map = {a.act_id: a.name for a in _acc_rows}
     cur_map = {a.act_id: (a.currency or "USD") for a in _acc_rows}
-    # 合并三层（跨账户）+ 标 act_id/account_name
+    # 合并三层（跨账户）+ 标 act_id/account_name/currency
     all_campaigns, all_adsets, all_ads = [], [], []
     ad_to_adset, ad_to_camp = {}, {}
     for c in caches:
         for cm in json.loads(c.campaigns_json or "[]"):
             cm["act_id"] = c.act_id; cm["account_name"] = acc_map.get(c.act_id, c.act_id)
+            cm["currency"] = cur_map.get(c.act_id, "USD")
             all_campaigns.append(cm)
         for as_ in json.loads(c.adsets_json or "[]"):
             as_["act_id"] = c.act_id; as_["account_name"] = acc_map.get(c.act_id, c.act_id)
+            as_["currency"] = cur_map.get(c.act_id, "USD")
             all_adsets.append(as_)
         for ad in json.loads(c.ads_json or "[]"):
             ad["act_id"] = c.act_id; ad["account_name"] = acc_map.get(c.act_id, c.act_id)
+            ad["currency"] = cur_map.get(c.act_id, "USD")
             ad_to_adset[ad.get("id")] = _id_of(ad.get("adset_id"))
             ad_to_camp[ad.get("id")] = _id_of(ad.get("campaign_id"))
             all_ads.append(ad)
-    # perf 跨账户 + adset/campaign 聚合
+    # perf 跨账户 + adset/campaign 聚合（本币/USD 双列——跨币种 rollup 只有 USD 合计有意义）
     perf = _perf_map(db, user.tenant_id, act_id, date_from, date_to)
     adset_perf, camp_perf = {}, {}
     for ad_id, p in perf.items():
         for tgt, key in [(adset_perf, ad_to_adset.get(ad_id)), (camp_perf, ad_to_camp.get(ad_id))]:
             if not key:
                 continue
-            d = tgt.setdefault(key, {"spend": 0.0, "conv": 0, "impressions": 0, "clicks": 0, "reach": 0})
-            d["spend"] += p["spend"]; d["conv"] += p["conv"]
+            d = tgt.setdefault(key, {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
+                                     "impressions": 0, "clicks": 0, "reach": 0})
+            d["spend"] += p["spend"]; d["spend_usd"] += p["spend_usd"]; d["conv"] += p["conv"]
             d["impressions"] += p["impressions"]; d["clicks"] += p["clicks"]; d["reach"] += p["reach"]
     def _conv_budget(items):
         for it in items:
@@ -295,10 +315,16 @@ def list_ads(
         ad["object_story_id"] = _sid
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
 
+    # cached_at 取全部账户的最旧值（语义=最迟也是这个时间的数据）
+    _cached_ats = [c.updated_at for c in caches if c.updated_at]
+    _curs = {cur_map.get(c.act_id, "USD") for c in caches}
+    mixed_currency = len(_curs) > 1
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
-        "cached_at": str(caches[0].updated_at) if caches and caches[0].updated_at else "",
+        "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",
         "refreshing": refreshing,
+        "mixed_currency": mixed_currency,
+        "currency": "USD" if mixed_currency else (next(iter(_curs)) if _curs else "USD"),
         "campaigns": _conv_budget(_attach_perf(all_campaigns, camp_perf)),
         "adsets": _conv_budget(_attach_perf(all_adsets, adset_perf)),
         "ads": _attach_perf(all_ads, perf),
@@ -422,6 +448,81 @@ def delete_ad(
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "删除失败"))
     return r
+
+
+class RenameIn(BaseModel):
+    act_id: str
+    node_id: str
+    level: str = "ad"  # ad/adset/campaign
+    name: str
+
+
+@router.post("/rename")
+def rename_ad_node(
+    body: RenameIn,
+    user: CurrentUser = Depends(require_permission("ads.update")),
+    db: Session = Depends(get_db),
+):
+    """改名（campaign/adset/ad 通用，POST /{node_id} {"name"}）。ad_ops 同款：node 级 advisory
+    lock + 回读验证 + ads_cache patch + SuperSessionLocal 审计。权限对齐 status/budget=ads.update。
+    """
+    import hashlib
+    from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+    from ..core.log_utils import write_log, new_trace_id
+    name = (body.name or "").strip()
+    if not name or len(name) > 200:
+        raise HTTPException(400, "名称不能为空且不超过 200 字符")
+    if body.level not in ("ad", "adset", "campaign"):
+        raise HTTPException(400, "level 必须是 ad/adset/campaign")
+    fb = client_for_account(db, user.tenant_id, body.act_id, "write")
+    if not fb:
+        raise HTTPException(400, "无可用写令牌（operate/manage）")
+    lock_key = int(hashlib.md5(f"ad_rename:{body.node_id}".encode()).hexdigest()[:8], 16)
+    lock = acquire_run_lock(lock_key)
+    if not lock:
+        raise HTTPException(409, "该对象正在被其他操作处理")
+    try:
+        before = fb.get_node(body.node_id, "id,name")
+        fb.rename_node(body.node_id, name)
+        time.sleep(0.8)
+        after = fb.get_node(body.node_id, "id,name")
+        verified = (after.get("name") or "").strip() == name
+        # patch ads_cache（写后立即生效，不等 15min 同步）
+        row = db.query(AdsCache).filter(
+            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == body.act_id).first()
+        if row:
+            for field in ["campaigns_json", "adsets_json", "ads_json"]:
+                raw = getattr(row, field)
+                if not raw:
+                    continue
+                try:
+                    items = json.loads(raw)
+                    changed = False
+                    for it in items:
+                        if it.get("id") == body.node_id or str(it.get("id")) == str(body.node_id):
+                            it["name"] = name
+                            changed = True
+                    if changed:
+                        setattr(row, field, json.dumps(items))
+                except Exception:
+                    pass
+        db.commit()
+        _sdb = SuperSessionLocal()
+        try:
+            write_log(_sdb, tenant_id=user.tenant_id, trace_id=new_trace_id(),
+                      actor_type="user", actor_user_id=0,
+                      target_type="ad", target_id=body.node_id,
+                      action_type="manual_rename", source="ad_ops",
+                      result="success" if verified else "partial",
+                      trigger_detail=f"level={body.level} old={before.get('name')} new={name}")
+            _sdb.commit()
+        finally:
+            _sdb.close()
+        return {"success": True, "verified": verified, "name": name}
+    except FbApiError as e:
+        return {"success": False, "error": e.friendly, "fb_error": e.friendly}
+    finally:
+        release_run_lock(lock, lock_key)
 
 
 # ── 广告级跳转链接覆盖（多广告复用一子码时，给单条广告配独立 target_url）──

@@ -222,8 +222,12 @@ def sentinel_arm(body: SentinelArmIn, user: CurrentUser = Depends(require_permis
     query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
     if body.act_ids:
         query = query.filter(Account.act_id.in_(body.act_ids))
-    elif user.role == "operator":
-        query = query.filter(Account.owner_user_id == user.id)
+    else:
+        # 全租户/全名下批量 arm 只碰在管账户：软删账户（is_managed=false）被 arm 后，
+        # 重新导入即被哨兵全停（意外 kill）。显式指定 act_ids 不受限（用户点名要 arm）
+        query = query.filter(Account.is_managed.is_(True))
+        if user.role == "operator":
+            query = query.filter(Account.owner_user_id == user.id)
     count = query.update({Account.sentinel_armed: True}, synchronize_session="fetch")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, action_type="sentinel_arm", source="user",
@@ -268,6 +272,7 @@ def guard_status(user: CurrentUser = Depends(require_permission("ads.pause")),
     allowances = sum(1 for a in allow_cand if local_today.get(a.act_id) == a.allowance_date)
     armed = db.query(Account).filter(
         Account.tenant_id == user.tenant_id,
+        Account.is_managed.is_(True),  # 与 arm 口径一致：软删账户不计入 armed 数
         (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)).count()
     return {"rules_enabled": rules_count, "allowances_today": allowances, "sentinel_armed_accounts": armed}
 
@@ -468,6 +473,9 @@ def warmup_arm(body: WarmupArmIn, user: CurrentUser = Depends(require_permission
     query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
     if body.act_ids:
         query = query.filter(Account.act_id.in_(body.act_ids))
+    else:
+        # 全名下批量预热只碰在管账户（软删账户不 arm warming；显式点名不受限）
+        query = query.filter(Account.is_managed.is_(True))
     count = query.update({Account.warmup_state: "warming"}, synchronize_session="fetch")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, action_type="warmup_arm", source="user",

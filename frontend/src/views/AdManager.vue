@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
@@ -45,11 +45,18 @@ const optLabel = (o) => OPT_MAP.value[o] || o || '-'
 const _idOf = (v) => (v && typeof v === 'object') ? v.id : v
 // 金额走中央 useFormat（'-' 显示与 AdManager 现状一致，用单横线）；reach 0→'-' 为"无触达"提示语义，本地保留
 import { fmtUsd as _fmtUsd } from '../composables/useFormat'
+import { fmtTime } from '../composables/useTz'
 const fmtMoney = (v) => (v == null) ? '-' : _fmtUsd(v).replace('—', '-')
+// 币种感知金额：USD → $；非 USD 本币 → "数值 币种代码"（与看板 fmtSpendDual 同约定，本币不加 $）
+const fmtAmount = (v, cur) => {
+  if (v == null) return '-'
+  if (!cur || cur === 'USD') return _fmtUsd(v).replace('—', '-')
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + cur
+}
 const fmtNum = (v) => (v == null || v === 0) ? '-' : Number(v).toLocaleString()
 const fmtBudget = (a, ctx) => {
-  if (a.daily_budget_amount != null) return t('adm.budgetDaily', { v: fmtMoney(a.daily_budget_amount) })
-  if (a.lifetime_budget_amount != null) return t('adm.budgetLifetime', { v: fmtMoney(a.lifetime_budget_amount) })
+  if (a.daily_budget_amount != null) return t('adm.budgetDaily', { v: fmtAmount(a.daily_budget_amount, a.currency) })
+  if (a.lifetime_budget_amount != null) return t('adm.budgetLifetime', { v: fmtAmount(a.lifetime_budget_amount, a.currency) })
   return ctx === 'campaign' ? t('adm.budgetAdsetLevel') : t('adm.budgetCampaignLevel')
 }
 const hasBudget = (a) => a.daily_budget_amount != null || a.lifetime_budget_amount != null
@@ -103,6 +110,24 @@ const _rankMap = { ACTIVE: 0, PAUSED: 1, CAMPAIGN_PAUSED: 2, ADSET_PAUSED: 3, PE
 const statusRank = (s) => _rankMap[s] ?? 9
 const sortIcon = (key) => sortKey.value === key ? (sortDir.value === 'desc' ? '▼' : '▲') : ''
 
+// 当前筛选下实体的币种集合：>1 = 多币种混选 → Spend/CPA 折算 USD 展示与排序（本币裸加无意义）
+const viewCurs = computed(() => {
+  const s = new Set()
+  for (const arr of [data.value.campaigns, data.value.adsets, data.value.ads])
+    for (const it of (arr || [])) if (actMatch(it) && it.currency) s.add(it.currency)
+  return s
+})
+const mixedCur = computed(() => viewCurs.value.size > 1)
+const viewCur = computed(() => (mixedCur.value || !viewCurs.value.size) ? 'USD' : [...viewCurs.value][0])
+const fmtSpendCol = (a) => mixedCur.value ? fmtMoney(a.spend_usd) : fmtAmount(a.spend, viewCur.value)
+const fmtCpaCol = (a) => mixedCur.value ? (a.cpa_usd ? fmtMoney(a.cpa_usd) : '-') : (a.cpa ? fmtAmount(a.cpa, viewCur.value) : '-')
+
+// 数据时间（ads_cache 最旧账户的 updated_at）超 1h 变橙提示
+const cacheStale = computed(() => {
+  const ts = data.value.cached_at ? new Date(data.value.cached_at).getTime() : NaN
+  return !isNaN(ts) && (Date.now() - ts > 3600e3)
+})
+
 const curList = computed(() => {
   let arr
   if (tab.value === 'campaign') arr = data.value.campaigns || []
@@ -116,7 +141,8 @@ const curList = computed(() => {
   return arr.slice().sort((a, b) => {
     if (sortKey.value === '_status_rank') { const d = statusRank(a.effective_status) - statusRank(b.effective_status); return sortDir.value === 'desc' ? d : -d }
     // 用户主动选了排序列：该列为主排序，状态仅作同值兜底（否则"消耗降序"时 PAUSED 永远压底，找不到已停的高消耗）
-    let va = Number(a[sortKey.value] || 0), vb = Number(b[sortKey.value] || 0)
+    const _sk = (mixedCur.value && (sortKey.value === 'spend' || sortKey.value === 'cpa')) ? sortKey.value + '_usd' : sortKey.value
+    let va = Number(a[_sk] || 0), vb = Number(b[_sk] || 0)
     if (va !== vb) return sortDir.value === 'desc' ? vb - va : va - vb
     return statusRank(a.effective_status) - statusRank(b.effective_status)
   })
@@ -200,7 +226,53 @@ const batchStatus = async (status) => {
   try { const r = await POST('/ads/batch-status', { items }); ElMessage.success(t('adm.batchResult', { ok: r.success_count, n: items.length })); await load(); selected.value = new Set() } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
-const onAction = (cmd, item) => { if (cmd === 'toggle') toggleStatus(item); else if (cmd === 'budget') openBudget(item); else if (cmd === 'delete') deleteItem(item); else if (cmd === 'redirect') openRedirect(item); else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', ad_id: item.id } }); else if (cmd === 'diagnose') openDiagnose(item); else if (cmd === 'reuse') router.push({ name: 'launch-templates', query: { reuse_post: item.object_story_id } }) }
+// 创意缩略图 + 拒审原因（/ads/list 透传 FB creative.thumbnail_url / review_feedback，纯前端展示）
+const thumbOf = (a) => a?.creative?.thumbnail_url || ''
+const showThumb = (a) => {
+  const u = thumbOf(a)
+  if (!u) return
+  ElMessageBox.alert(h('img', { src: u, style: 'width:100%;border-radius:8px;display:block' }), t('adm.thumbTitle'), { confirmButtonText: t('common.confirm') })
+}
+// FB review_feedback 结构不固定——递归收集字符串（跳过纯数字 id），逐行展示
+const rfText = (rf) => {
+  if (!rf) return ''
+  if (typeof rf === 'string') return rf
+  const lines = []
+  const walk = (o) => {
+    if (o == null || lines.length >= 15) return
+    if (typeof o === 'string' || typeof o === 'number') {
+      const s = String(o).trim()
+      if (s && !/^\d+$/.test(s)) lines.push(s)
+    } else if (Array.isArray(o)) o.forEach(walk)
+    else if (typeof o === 'object') Object.values(o).forEach(walk)
+  }
+  walk(rf)
+  return lines.join('\n')
+}
+const rfOf = (a) => rfText(a.review_feedback)
+const showReview = (a) => {
+  const txt = rfOf(a)
+  if (!txt) return
+  ElMessageBox.alert(h('div', { style: 'white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.7;max-height:50vh;overflow:auto' }, txt), t('adm.reviewFlagTitle'), { confirmButtonText: t('common.confirm') })
+}
+// 改名（campaign/adset/ad 通用）
+const renameItem = async (item) => {
+  try {
+    const { value } = await ElMessageBox.prompt(t('adm.renamePrompt'), t('adm.renameTitle', { name: item.name }), {
+      inputValue: item.name, confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
+      inputValidator: (v) => (!v || !v.trim()) ? t('adm.renameEmpty') : (v.trim().length > 200 ? t('adm.renameTooLong') : true),
+    })
+    const name = value.trim()
+    opLoading.value = true
+    try {
+      const r = await POST('/ads/rename', { act_id: item.act_id, node_id: item.id, level: curLevel(), name })
+      if (r.success) { item.name = r.name || name; ElMessage.success(t('adm.renamed')) }
+      else ElMessage.error(r.error || t('common.opFail'))
+    } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  } catch (e) { /* 用户取消 */ }
+  opLoading.value = false
+}
+const onAction = (cmd, item) => { if (cmd === 'toggle') toggleStatus(item); else if (cmd === 'rename') renameItem(item); else if (cmd === 'budget') openBudget(item); else if (cmd === 'delete') deleteItem(item); else if (cmd === 'redirect') openRedirect(item); else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', ad_id: item.id } }); else if (cmd === 'diagnose') openDiagnose(item); else if (cmd === 'reuse') router.push({ name: 'launch-templates', query: { reuse_post: item.object_story_id } }) }
 
 // 广告诊断
 const diagOpen = ref(false)
@@ -304,6 +376,7 @@ const subscribeLeads = async () => {
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
       <button class="ctrl-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load(true)" style="margin-left:auto">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
+      <span v-if="data.cached_at" class="cache-at" :class="{ stale: cacheStale }" :title="cacheStale ? t('adm.cacheStaleTip') : ''">{{ t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) }}</span>
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">
@@ -323,35 +396,35 @@ const subscribeLeads = async () => {
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <template v-if="tab === 'campaign'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid">{{ c.account_name }} · {{ c.id }}</div></div>
           <div>{{ objLabel(c.objective) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(c) }" @click.stop="hasBudget(c) && openBudget(c)">{{ fmtBudget(c, 'campaign') }}</div>
-          <div>{{ fmtMoney(c.spend) }}</div><div>{{ c.conversions || 0 }}</div><div>{{ c.cpa ? fmtMoney(c.cpa) : '-' }}</div><div>{{ fmtNum(c.reach) }}</div><div>{{ c.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, c)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ c.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(c)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div>{{ fmtSpendCol(c) }}</div><div>{{ c.conversions || 0 }}</div><div>{{ fmtCpaCol(c) }}</div><div>{{ fmtNum(c.reach) }}</div><div>{{ c.frequency || '-' }}</div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, c)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ c.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(c)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
       <template v-else-if="tab === 'adset'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid">{{ s.account_name }} · {{ s.id }}</div></div>
           <div>{{ optLabel(s.optimization_goal) }}</div>
           <div class="budget-cell" :class="{ editable: hasBudget(s) }" @click.stop="hasBudget(s) && openBudget(s)">{{ fmtBudget(s, 'adset') }}</div>
-          <div>{{ fmtMoney(s.spend) }}</div><div>{{ s.conversions || 0 }}</div><div>{{ s.cpa ? fmtMoney(s.cpa) : '-' }}</div><div>{{ fmtNum(s.reach) }}</div><div>{{ s.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, s)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ s.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(s)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div>{{ fmtSpendCol(s) }}</div><div>{{ s.conversions || 0 }}</div><div>{{ fmtCpaCol(s) }}</div><div>{{ fmtNum(s.reach) }}</div><div>{{ s.frequency || '-' }}</div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, s)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ s.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(s)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
       <template v-else>
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" @click="sortBy('cpa')">CPA{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
         <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
-          <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}</div>
-          <div class="nm">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid">{{ a.account_name }} · {{ a.id }}</div></div>
+          <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="a.effective_status === 'DISAPPROVED' && rfOf(a)" class="rf-flag" :title="t('adm.reviewFlagHint')" @click.stop="showReview(a)">⚠</span></div>
+          <div class="nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" />{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid">{{ a.account_name }} · {{ a.id }}</div></div>
           <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="t('adm.slugTitle', { slug: a.slug, pass: a.landing_pass||0 })">/a/{{ a.slug }}</code><span v-else class="muted" :title="t('adm.slugEmptyTitle')">{{ t('adm.slugEmpty') }}</span></div>
-          <div>{{ fmtMoney(a.spend) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ a.cpa ? fmtMoney(a.cpa) : '-' }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? a.ctr + '%' : '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">📌 {{ t('adm.reuseThisPost') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+          <div>{{ fmtSpendCol(a) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ fmtCpaCol(a) }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? a.ctr + '%' : '-' }}</div>
+          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">📌 {{ t('adm.reuseThisPost') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
         </div>
       </template>
       <div v-if="!curList.length && !loading" class="empty">{{ t('common.noData') }}</div>
@@ -547,6 +620,11 @@ const subscribeLeads = async () => {
 .budget-input:focus { outline: none; border-color: var(--ac) }
 .quick-btns { display: flex; gap: 6px; margin-top: 4px }
 .rd-mark { font-size: 10px; color: var(--ac); background: rgba(10,132,255,.12); padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 400; vertical-align: middle }
+.ad-thumb { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 6px; cursor: zoom-in }
+.rf-flag { color: var(--error); cursor: pointer; font-size: 11px; margin-left: 2px }
+.rf-flag:hover { opacity: .8 }
+.cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
+.cache-at.stale { color: var(--warning) }
 .rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--ac); color: #fff; border-radius: 8px }
 .rd-form { display: flex; flex-direction: column; gap: 8px }
 .rd-form label { font-size: 12px; color: var(--t3) }

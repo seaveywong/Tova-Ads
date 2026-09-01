@@ -117,7 +117,8 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     conversions：FB 转化数（KPI resolver，目标感知）。
     landing_clicks：落地通过量（click+redirect，按钮点击/跳转）。
     landing_visits：落地访问量（visit+redirect，到达量，含未点击）。
-    conversion_source（rule）：fb/landing/either。
+    conversion_source（rule）：fb/landing/either。CPA 类规则（cpa_exceed/consecutive_bad）
+        恒用 FB conversions，不受 either/landing 稀释（虚增转化会拉低 CPA → 超标漏停）。
     landing_metric（rule params）：pass（通过量，默认）/ visit（访问量）。
     """
     # 转化归因：按规则 conversion_source + landing_metric 取 effective conversions
@@ -126,9 +127,15 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     landing_metric = (raw_params.pop("landing_metric", None) or "pass").lower()
     # landing 侧取哪个指标：pass=通过量(click+redirect) / visit=访问量(visit+redirect)
     landing_val = landing_clicks if landing_metric == "pass" else landing_visits
-    # CPA 类规则不受 either 稀释（落地点击≠购买，CPA 必须按真实转化算）
-    # 空耗类规则用 either 防误杀（有点击说明不是纯空耗）
-    if cs == "landing":
+    # CPA 类规则（cpa_exceed/consecutive_bad）强制用 FB 转化数：落地点击/访问≠转化，
+    #   either 取 max 或 landing 顶替都会虚增转化 → CPA 被拉低 → 超标漏停。
+    #   cs=landing 且 FB insights 无 actions（算不出真实 CPA）时规则不适用，不用落地数顶替。
+    # 空耗类规则（bleed_abs/click_no_conv 等）保持 either/landing 兜底（落地有通过量
+    #   说明不是纯空耗，防误杀）。
+    if rule.rule_type in ("cpa_exceed", "consecutive_bad"):
+        if cs == "landing" and not (ad_insights.get("actions") or []):
+            return False, ""  # CPA 规则不适用：无 FB actions，宁可漏告不拿落地数顶替 CPA
+    elif cs == "landing":
         conversions = landing_val
     elif cs == "either" and landing_val > conversions:
         conversions = landing_val
@@ -330,7 +337,8 @@ def run_inspection(force: bool = False):
                     if e.category == "token_expired":
                         if _cred:
                             _cred.status = "expired"
-                        emit_token_expired_if_due(db, tenant_id, _alias)
+                        emit_token_expired_if_due(db, tenant_id, _alias,
+                                                  cred_id=(_cred.id if _cred else None))
                     elif e.category in ("permissions", "permission"):
                         # 权限不足告警（交接包 §6.2：分级告警）。dedup 6h/账户，避免每轮巡检 spam
                         if not dedup_recent(db, tenant_id, "account_permission_error", acc.act_id, 360):
@@ -479,8 +487,11 @@ def run_inspection(force: bool = False):
                                 LandingEvent.ip_hash.isnot(None),
                                 _local_date_expr == acc_today,
                             ).scalar() or 0
-                            # 访问量（visit + redirect）
-                            landing_visits = db.query(_f.count(LandingEvent.id)).filter(
+                            # 访问量（visit + redirect）—— 同样按 ip_hash 去重（爬虫/同人刷新
+                            # 会刷高访问量 → 空耗规则被虚假"转化"豁免）；ip_hash 为空的行不丢：
+                            # COALESCE 成逐行唯一值各自计 1（worker 正常事件都带 ip_hash）
+                            landing_visits = db.query(_f.count(_f.distinct(_f.coalesce(
+                                LandingEvent.ip_hash, _f.concat("row:", LandingEvent.id))))).filter(
                                 LandingEvent.tenant_id == tenant_id,
                                 LandingEvent.ad_id == ad_id,
                                 LandingEvent.event_type.in_(["visit", "redirect"]),
@@ -539,7 +550,9 @@ def run_inspection(force: bool = False):
                                 ActionLog.tenant_id == tenant_id,
                                 ActionLog.target_id == ad_id,
                                 ActionLog.trigger_type == rule.rule_type,
-                                ActionLog.action_type == "pause",
+                                # observe 规则记 observe_alert（不再是"pause"）——冷却同样认它，
+                                # 否则 observe 每 5min 巡检都重写一条日志（通知侧另有 60min dedup）
+                                ActionLog.action_type.in_(["pause", "observe_alert"]),
                                 ActionLog.result == "success",
                                 ActionLog.created_at >= succ_cd,
                             ).first()
@@ -610,9 +623,12 @@ def run_inspection(force: bool = False):
                                 pause_result = "fail"
 
                         # 记日志（账户/系列/组/广告 ID + 本币花销 + 动作 + trace_id）
+                        # observe 分支记 observe_alert（日志中心 action 筛选是自由文本，
+                        # 不与 pause 混淆——用户能区分"真停了"vs"只告警"）
                         write_log(db, tenant_id=tenant_id, trace_id=trace_id,
                                   actor_type="system", target_type="ad", target_id=ad_id,
-                                  action_type="pause", source="rule_engine", result=pause_result,
+                                  action_type="observe_alert" if ra == "observe" else "pause",
+                                  source="rule_engine", result=pause_result,
                                   trigger_type=rule.rule_type,
                                   trigger_detail=f"{detail} | act={acc.act_id}({acc.currency}) "
                                                  f"camp={campaign_id} adset={adset_id} ad={ad_id} "
@@ -627,14 +643,23 @@ def run_inspection(force: bool = False):
                         # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
                         if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):
                             _loc = tenant_locale(db, tenant_id)
+                            # 动作位：observe 必须显式说"未暂停"（消息与真暂停区分，防用户误读）
+                            if ra == "observe":
+                                _action_disp = ("⚠ Alert only (observe mode, NOT paused)"
+                                                if _loc == "en" else "⚠ 仅告警（观察模式，未暂停）")
+                            else:
+                                _action_disp = action_text  # 已暂停广告/组/系列 PAUSED… / 暂停失败…
                             _t_rp, _b_rp = notify_text(_loc, "rule_pause",
                                 category=_esc(category), name=_esc(acc.name),
                                 act_id=acc.act_id, ad_name=_esc(ad_name), ad_id=ad_id,
                                 adset_id=(adset_id or '-'), campaign_id=(campaign_id or '-'),
                                 rule_name=_esc(rule.name), detail=_esc(detail),
+                                action=_action_disp,
                                 spend=fmt_spend(spend, acc.currency), conv=conv,
                                 kpi_label=_esc(kpi.get('kpi_label') or '-'),
                                 source_label=_esc(SOURCE_LABELS.get(kpi.get('source'), kpi.get('source') or '-')))
+                            if ra == "observe":
+                                _t_rp = ("[Observe] " if _loc == "en" else "[观察] ") + _t_rp
                             emit_notification(
                                 db, tenant_id=tenant_id, level="warning",
                                 event_type="rule_pause", trace_id=trace_id,

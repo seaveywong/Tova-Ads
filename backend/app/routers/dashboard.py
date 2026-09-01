@@ -275,6 +275,8 @@ def dashboard(
             _recent = acc.last_inspected_at and acc.last_inspected_at > datetime.now(timezone.utc) - timedelta(minutes=15)
             if acc.account_status != 1:
                 err = None  # 禁用/异常账户本就不巡检，不算巡检未覆盖（避免误报停滞）
+            elif not acc.is_managed:
+                err = None  # 已移除纳管的账户本就不巡检——不该催用户去"处理"故意移除的账户
             elif acc_local != today:
                 err = "cross_tz"  # 跨时区（账户本地日≠北京业务日）—— code，前端按 locale 显示
             elif _recent:

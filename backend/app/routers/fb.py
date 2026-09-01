@@ -1109,6 +1109,17 @@ def unmanage_account(
     ).first()
     if not acc:
         raise HTTPException(404, "账户未纳管")
+    # 先数 ACTIVE 广告（删缓存前数——前端确认文案要告知"广告不会停、止损失效"）
+    active_ads = 0
+    try:
+        import json as _json
+        from ..models.ads_cache import AdsCache as _AC2
+        _c = db.query(_AC2).filter(_AC2.tenant_id == user.tenant_id, _AC2.act_id == aid).first()
+        if _c and _c.ads_json:
+            active_ads = sum(1 for _a in _json.loads(_c.ads_json or "[]")
+                             if str(_a.get("effective_status", "")) == "ACTIVE")
+    except Exception:
+        pass
     acc.is_managed = False
     # 清哨兵/预热状态：取消纳管后不应再被哨兵停广告；恢复纳管时也不会带着旧 armed 立刻被停
     acc.sentinel_armed = False
@@ -1123,4 +1134,4 @@ def unmanage_account(
     except Exception:
         pass
     db.commit()
-    return {"unmanaged": True, "act_id": aid}
+    return {"unmanaged": True, "act_id": aid, "active_ads_at_removal": active_ads}

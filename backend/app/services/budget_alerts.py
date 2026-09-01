@@ -15,7 +15,7 @@ from ..core.notify_utils import emit_notification, emit_token_expired_if_due
 from ..core.i18n import tenant_locale, notify_text
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.encryption import decrypt
-from ..core.fb_tokens import client_for_account
+from ..core.fb_tokens import client_for_account, cred_for_account_op
 from ..models.fb import FbCredential, Account
 from ..models.log import ActionLog
 
@@ -49,7 +49,10 @@ def check_account_budget_progress(
     except FbApiError as e:
         logger.warning(f"[Budget] 账户 {acc.act_id} 读取失败: {e.friendly}")
         if e.category == "token_expired":
-            emit_token_expired_if_due(db, tenant_id, f"act_{acc.act_id}")
+            # 按凭证 dedup（cred_id 优先）：多令牌同晚全灭各告各的，不被第一条压制
+            _cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
+            emit_token_expired_if_due(db, tenant_id, f"act_{acc.act_id}",
+                                      cred_id=(_cred.id if _cred else None))
         return []
 
     alerts = []
@@ -111,7 +114,9 @@ def check_account_budget_progress(
                       trigger_type=f"budget_progress_{tier}", trigger_detail=f"tier={tier}",
                       metadata={"act_id": acc.act_id, "progress": round(progress, 1),
                                 "spend": spend, "budget": budget})
-            emit_notification(db, tenant_id=tenant_id, level="warning",
+            # 98% 档升级 critical（TG 必达语义：预算几乎烧完，最后一道提醒）；文案不变
+            emit_notification(db, tenant_id=tenant_id,
+                              level=("critical" if tier >= 98 else "warning"),
                               event_type=f"budget_progress_{tier}", trace_id=trace_id,
                               title=_title, body=_body,
                               target_type="adset", target_id=adset_id)

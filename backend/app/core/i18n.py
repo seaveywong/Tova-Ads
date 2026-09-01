@@ -76,8 +76,8 @@ NOTIFY = {
     "rule_pause": {
         "title": {"zh": "止损【{category}】· {name}", "en": "Stop-Loss [{category}] · {name}"},
         "body": {
-            "zh": "账户：{name}（<code>{act_id}</code>）\n广告：{ad_name}（<code>{ad_id}</code>）\n广告组：<code>{adset_id}</code>\n系列：<code>{campaign_id}</code>\n规则：{rule_name}\n触发：<b>{detail}</b>\n消耗：<b>{spend}</b> ｜ 转化：<b>{conv}</b>\nKPI：{kpi_label}（{source_label}）",
-            "en": "Account: {name} (<code>{act_id}</code>)\nAd: {ad_name} (<code>{ad_id}</code>)\nAd set: <code>{adset_id}</code>\nCampaign: <code>{campaign_id}</code>\nRule: {rule_name}\nTrigger: <b>{detail}</b>\nSpend: <b>{spend}</b> | Conversions: <b>{conv}</b>\nKPI: {kpi_label} ({source_label})",
+            "zh": "账户：{name}（<code>{act_id}</code>）\n广告：{ad_name}（<code>{ad_id}</code>）\n广告组：<code>{adset_id}</code>\n系列：<code>{campaign_id}</code>\n规则：{rule_name}\n触发：<b>{detail}</b>\n动作：<b>{action}</b>\n消耗：<b>{spend}</b> ｜ 转化：<b>{conv}</b>\nKPI：{kpi_label}（{source_label}）",
+            "en": "Account: {name} (<code>{act_id}</code>)\nAd: {ad_name} (<code>{ad_id}</code>)\nAd set: <code>{adset_id}</code>\nCampaign: <code>{campaign_id}</code>\nRule: {rule_name}\nTrigger: <b>{detail}</b>\nAction: <b>{action}</b>\nSpend: <b>{spend}</b> | Conversions: <b>{conv}</b>\nKPI: {kpi_label} ({source_label})",
         },
     },
     "sentinel_pause": {

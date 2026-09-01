@@ -195,12 +195,14 @@ const handleAction = (cmd, tk) => {
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
     try {
-      await ElMessageBox.confirm(t('tokens.unmanageConfirm', { name: a.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
-      await DELETE(`/fb/accounts/${a.account_id}`)
-      ElMessage.success(t('tokens.unmanaged'))
+      await ElMessageBox.confirm(
+        t('tokens.unmanageConfirm', { name: a.name }) + '\n\n' + t('tokens.unmanageWarning'),
+        t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
+      const r = await DELETE(`/fb/accounts/${a.account_id}`)
+      ElMessage.success(t('tokens.unmanaged') + (r?.active_ads_at_removal ? t('tokens.unmanageAdsLeft', { n: r.active_ads_at_removal }) : ''))
       if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
       await Promise.all([load(), loadSummary(), loadAtRisk()])
-    } catch {}
+    } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
   }
 }
 

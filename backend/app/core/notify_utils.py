@@ -128,16 +128,21 @@ def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None):
 
 
 def emit_token_expired_if_due(db: Session, tenant_id: int, alias: str = "",
-                              cooldown_min: int = 60) -> bool:
+                              cooldown_min: int = 60,
+                              cred_id: int | str | None = None) -> bool:
     """FB token 失效时发 critical 告警（系统级，06_附录 §四）。
 
-    dedup：近 cooldown_min 内已发过 token_expired → 不重复（防 spam）。
+    dedup：近 cooldown_min 内已发过该凭证的 token_expired → 不重复（防 spam）。
+    去重维度 = 凭证（cred_id 优先，调用方拿不到就退 alias）：多令牌租户同晚多 token
+    全灭时每个凭证各告一条，不再被第一条压制。
     返回是否真发了。本次踩坑（token 死了全线 FB 挂却无告警）印证这是最高价值系统告警。
     """
+    dedup_key = str(cred_id) if cred_id not in (None, "") else (alias or "unknown")
     since = datetime.now(timezone.utc) - timedelta(minutes=cooldown_min)
     recent = db.query(ActionLog).filter(
         ActionLog.tenant_id == tenant_id,
         ActionLog.action_type == "token_expired",
+        ActionLog.target_id == dedup_key,
         ActionLog.created_at >= since,
     ).first()
     if recent:
@@ -149,13 +154,15 @@ def emit_token_expired_if_due(db: Session, tenant_id: int, alias: str = "",
                                 alias=_esc(alias or '未命名'))
     emit_notification(db, tenant_id=tenant_id, level="critical",
                       event_type="token_expired", trace_id=trace_id,
-                      title=_title, body=_body, send_tg=True)
-    # action_logs 记录（dedup 用 + 超管系统日志）
+                      title=_title, body=_body, send_tg=True,
+                      target_type="fb_credential", target_id=dedup_key)
+    # action_logs 记录（dedup 用 + 超管系统日志）—— target_id 带凭证标识（dedup 按凭证分键）
     from .log_utils import write_log, new_trace_id
     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-              target_type="fb_credential", action_type="token_expired",
+              target_type="fb_credential", target_id=dedup_key,
+              action_type="token_expired",
               source="rule_engine", result="fail",
-              trigger_detail=f"alias={alias}")
+              trigger_detail=f"alias={alias} cred={dedup_key}")
     db.commit()
     return True
 
