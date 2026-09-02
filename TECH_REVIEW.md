@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-09-02（六~七）— 交付打磨批：品牌中立化/Settings Tab 化/全站 UX 重做/邮箱转发修复/告警平台隔离
+
+### 概述
+用户 /goal「正式交付前完善体」。6 个 commit（d8dfe19/304ce7e/a2f1b85/3f9a50b/12013ef + email fix）。迁移 0077→0078。零 FB 风险红线全程保持。
+
+### 变更（按主题）
+| 主题 | 内容 |
+|---|---|
+| 品牌中立化 | 登录页副标题去平台名（广告智能管理平台）；功能性 FB 指代文案保留 |
+| Settings Tab 化 | 12 卡长页→真 Tab（用户建议）；🔴修 sSuper 未定义（超管 9 Tab 白屏）+保活 v-if 优先级；Tab 进 URL；个人/平台分组 |
+| 全站 UX/UI 重做 | 两路审查（数据 4 页+运营 11 页）→两路实施：PlatformSeg 全局组件（平台切换唯一入口=数据页内，删顶栏下拉）；Dashboard 两行式 sticky+KPI 3 语义色+移动端收纳；Ads/AdManager 表格 min-width+汇总行+异常档+搜索；LandingLogs 筛选重组；Tokens/Guard/LaunchTemplates/Assets 等 11 页交互打磨（批量 AI 单次弹窗/双向 dirty-guard/平台筛选 chip）；--t3 对比度 4.5:1；全局按钮三态+plat-chip |
+| 🔴 邮箱转发修复 | Failed to fetch 三连根因：DKIM TXT>255 拆两段引号→比对失配重复添加（81058）；CF status=ready 未归一；账户级 token 不支持地址/规则端点。修：归一+幂等+ready→enabled+CF 卡新增「邮箱管理 Token」字段（用户级）；enable 实测 200+DNS 就绪 |
+| 告警平台隔离 | 迁移 0078 notifications.platform；emit_notification 加 platform 参数（17 站点全标注真实平台）；/notifications?platform= 过滤；Dashboard 告警面板随平台切换器联动 |
+
+### 复审（用户点名×2）
+locale 语法 P0（vue-i18n @ 保留字符+我方修复引入的 JS 语法错）+ P1×3（扩量 TT 汇率对称/手动刷新按凭证 app_id/止损冷却平台隔离）全部当场修；i18n 保留字符扫描器 _scan_i18n.cjs 入库。
+
+### 遗留
+- 邮箱转发：等用户创建**用户级 CF Token**（CF→My Profile→API Tokens，Zone·tovaads.com 的 Email Routing Addresses·Edit + DNS·Edit + Zone·Read）填入「域名服务配置→邮箱管理 Token」→ 即可加 seaveywong@gmail.com 目的地+别名映射
+- LaunchTemplates blankForm 预填默认值（budget 5 等）违反 no-prefill 规范——需用户拍板口径
+- 审查 P2 清单（双币种约定统一/emoji→icon/页面标题双轨等）
+
+---
+
 ## 2026-09-02（五）— TikTok 平台接入 P0-P4 全量（两波+复审修复）+ 落地页发布 2×P0
 
 ### 概述
