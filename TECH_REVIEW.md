@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-09-02（七·晚）— P1 加固批：fb_apps policy 收紧 + ads_cache 唯一键补 platform + .env 清洗 + 邮箱转发 i18n
+
+### 概述
+「其他逻辑还有没有要改」扫描定出的 4 个 P1 全修。commit `c00516a`。迁移 0079→0081。
+
+### 变更表
+| 变更 | 说明 | 验证 |
+|---|---|---|
+| 0080 fb_apps policy WITH CHECK 收紧 | 0023 遗留（0075 只修了 tt_apps，fb_apps 留档）——租户会话可写 tenant_id NULL 系统行。收紧后系统行只走 BYPASSRLS | 6 用例 RLS 冒烟全过（见下） |
+| fb_apps.py 系统行写改 SuperSession | **0080 的前置**：create(is_system)/update/delete 系统行原本走 get_db（RLS 受限），收紧后会被 WITH CHECK 拒 → 系统行写路径切 SuperSessionLocal（对齐 tt_oauth 模式）；租户行仍走 get_db | c6 SuperSession 建+软删系统行 PASS |
+| 0081 ads_cache 唯一索引加 platform | (tenant,act)→(tenant,act,platform)，防跨平台 act_id 撞号互覆写（纯防御——FB act_ 前缀 vs TT 纯数字实际不撞） | 存量 3 行全保留，alembic head=0081 |
+| ads.py rename cache patch 补 platform='fb' | 同类查漏：该 lookup 缺 platform 过滤（FB 分支 patch 错行风险） | py_compile+import 门 |
+| settings.py .env 值清洗 | _write_env_and_reload 值含换行会破坏整个 .env → strip+400 拒（「配置值不能包含换行」） | 语法门 |
+| error_i18n 邮箱转发段 13 条 | Zone 未找到/10405 引导/别名/验证等 zh→en，en 用户不再裸中文 | 表加载=app 启动 ✓ |
+
+### RLS 冒烟结论（服务器实跑）
+每用例独立 session（还原真实单请求生命周期）：租户建自己 App ✓ / 租户建系统行 **被拒** ✓ / 租户改系统行 **被拒** ✓ / 租户改+软删自己行 ✓ / SuperSession 建系统行+软删 ✓。
+
+### 关键发现（留档）
+- **set_config(is_local=false) 在事务内执行后，rollback 会把它一并回滚**（commit 才固化）。请求中途捕获异常 rollback 再继续写 → 该连接 RLS 上下文蒸发 → 写被拒/读 0 行。这是**全系统既有行为**（旧 policy 同样拒），非本批引入；正常请求路径（deps 设上下文→写→commit）不受影响。
+- pg_dump 用 `.env` 的 `DATABASE_SUPER_URL` 提取密码；`-w` 防 PGPASSWORD 没接上时挂死（本次 0 字节挂 10 分钟教训）。
+
+### 生产变更
+- alembic 0080+0081 已应用；备份 `/root/backup_db_0080.sql.gz`（pre-migration 全量）。
+- 服务 restart 后 health ok，journal 无 ERR（4 条 gunicorn 重启噪音）。
+
+---
+
 ## 2026-09-02（六~七）— 交付打磨批：品牌中立化/Settings Tab 化/全站 UX 重做/邮箱转发修复/告警平台隔离
 
 ### 概述
