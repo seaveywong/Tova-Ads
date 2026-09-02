@@ -25,10 +25,12 @@ def run_ads_cache_sync():
             Account.is_managed == True, Account.account_status == 1,  # noqa: E712
         ).all()
         updated = 0
+        _no_token: dict[int, int] = {}  # tenant_id → 无令牌纳管账户数（停更告警用）
         for acc in accounts:
             platform = _acc_platform(acc)
             client = client_for_account(db, acc.tenant_id, acc.act_id, "read")
             if client is None:
+                _no_token[acc.tenant_id] = _no_token.get(acc.tenant_id, 0) + 1
                 continue
             try:
                 if _sync_one(db, acc.tenant_id, acc.act_id, client,
@@ -41,6 +43,20 @@ def run_ads_cache_sync():
                 continue
         db.commit()
         logger.info(f"[AdsCache] 同步完成: {updated} 个账户")
+        # 停更告警：纳管账户全都没有可用令牌 → 数据静默停更（2026-09 发现停 19 天无人知）。
+        # 每租户 24h 去重一条 warning；有可用令牌正常更新的租户不收。
+        if _no_token:
+            from ..core.notify_utils import emit_notification, dedup_recent
+            from ..core.i18n import notify_text, tenant_locale
+            for tid, n in _no_token.items():
+                if dedup_recent(db, tid, "sync_stalled", "ads_cache", 24 * 3600):
+                    continue
+                _loc = tenant_locale(db, tid)
+                _title, _body = notify_text(_loc, "sync_stalled", n=n)
+                emit_notification(db, tenant_id=tid, level="warning",
+                                  event_type="sync_stalled",
+                                  title=_title, body=_body)
+                db.commit()
         return {"updated": updated}
     except Exception as e:
         logger.error(f"[AdsCache] 异常: {e}", exc_info=True)

@@ -72,6 +72,13 @@ NOTIFY = {
             "en": "Account: <b>{name}</b> (act_{act_id})\nPrepaid balance: <b>${avail:.2f}</b> (threshold ${threshold:.0f})\nAction: top up soon, ads stop once the balance runs out",
         },
     },
+    "sync_stalled": {
+        "title": {"zh": "数据同步已停 · 无可用令牌", "en": "Data Sync Stalled · No Usable Token"},
+        "body": {
+            "zh": "{n} 个纳管账户无可用广告令牌，报表/广告缓存已停止更新。\n请到「令牌管理」重新授权，恢复后数据自动补齐。",
+            "en": "{n} managed ad accounts have no usable ad token; reports and ad cache have stopped updating.\nPlease re-authorize in Token Management. Data will resume automatically afterwards.",
+        },
+    },
     "account_permission_error": {
         "title": {"zh": "权限不足 · {name}", "en": "Permission Denied · {name}"},
         "body": {
