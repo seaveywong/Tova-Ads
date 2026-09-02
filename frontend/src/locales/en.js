@@ -901,6 +901,7 @@ export default {
     resetConfirm: 'Reset all mappings to system defaults? Your custom config will be overwritten.',
     resetDone: 'Reset to defaults', resetDefault: 'Reset to Defaults',
     tabMatrix: 'Mapping Matrix', tabObjective: 'Objective Fallback', tabFallback: 'Fallback Priority',
+    ttObjectiveHint: 'TikTok report fields differ from FB insights; inspection picks the field by objective. Conversions also fall back to the row goal conversions, so mapping gaps never cause false bleed stops.',
     tabPoor: 'Low-quality Fields', tabLabels: 'Field Labels',
     fallbackHint: 'On L5 semantic fallback, pick the first non-zero conversion by this priority',
     poorHint: 'These fields are not treated as conversions (view/click/engagement types); skipped during fallback',

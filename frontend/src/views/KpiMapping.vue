@@ -75,6 +75,15 @@ const resetDefault = async () => {
           <span class="kv-val">{{ v }}</span>
           <span class="kv-label">{{ FIELD_LABEL(v) }}</span>
         </div>
+        <!-- TikTok 目标映射（tt_by_objective；TT 巡检转化口径）-->
+        <div class="obj-head" style="margin-top:18px">TikTok</div>
+        <div class="hint" style="margin-bottom:8px">{{ t('kpi.ttObjectiveHint') }}</div>
+        <div v-for="(v, k) in mapping?.tt_by_objective" :key="k" class="kv-readonly">
+          <span class="kv-key">{{ k }}</span>
+          <span class="arrow">→</span>
+          <span class="kv-val">{{ v }}</span>
+          <span class="kv-label">{{ FIELD_LABEL(v) }}</span>
+        </div>
       </div>
 
       <div v-if="tab==='fallback'" class="tab-content">

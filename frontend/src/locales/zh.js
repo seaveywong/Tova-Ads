@@ -912,6 +912,7 @@ export default {
     resetConfirm: '恢复全部映射为系统默认值？当前自定义配置将被覆盖。',
     resetDone: '已恢复默认', resetDefault: '恢复默认',
     tabMatrix: '映射矩阵', tabObjective: 'Objective 兜底', tabFallback: '兜底优先级',
+    ttObjectiveHint: 'TikTok 报表字段与 FB insights 不同名，巡检按目标取对应口径；转化数另取报表行 goal conversions 兜底，防映射缺位误判空耗。',
     tabPoor: '劣质字段', tabLabels: '字段标签',
     fallbackHint: 'L5 语义兜底时按此优先级找第一个非零转化',
     poorHint: '以下字段不作为转化（浏览/点击/互动类），兜底时跳过',
