@@ -328,14 +328,18 @@ class CfClient:
         data = self._get(f"/zones/{zone_id}/email/routing/rules")
         return data.get("result", []) if data.get("success") else []
 
-    def create_email_rule(self, zone_id: str, alias_email: str, address_id: str) -> dict:
-        """建转发规则：发往 alias_email 的邮件 → 目的地 address_id（须已验证）。"""
+    def create_email_rule(self, zone_id: str, alias_email: str, destination_email: str) -> dict:
+        """建转发规则：发往 alias_email 的邮件 → destination_email（须已在 CF 验证）。
+
+        actions.value 引用的是目的地【邮箱地址】而非 address_id——传 id CF 报
+        2007 "must specify forwarding emails"（2026-09 实测教训）。
+        """
         data = self._post(
             f"/zones/{zone_id}/email/routing/rules",
             json={"name": f"toveads: {alias_email}",
                   "enabled": True,
                   "matchers": [{"type": "literal", "field": "to", "value": alias_email}],
-                  "actions": [{"type": "forward", "value": [address_id]}],
+                  "actions": [{"type": "forward", "value": [destination_email]}],
                   "priority": 0},
         )
         if not data.get("success"):

@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-09-03 — 邮箱转发全线打通（CF 权限模型纠偏 + 4 层根因 + 令牌体系重建）
+
+### 概述
+用户在 CF UI 建不出正确权限的令牌（「电子邮件路由地址」藏在**帐户**类别下，与规则所在的区域类别不同），改走 API 通道：用用户已配的管理令牌（API Tokens Write）直接 `POST /user/tokens` 建出专用令牌。commit `2aa1f0c`+`b400c6a`+`33554f6`+`a27d969`。
+
+### 根因链（4 层，逐层挖出）
+| # | 根因 | 修复 |
+|---|---|---|
+| 1 | 用户粘贴令牌带双引号 → Authorization 头 6003/6111 | 保存/读取自动去引号+空白（_clean_token） |
+| 2 | 缓存 zone_id 坏（带引号+少2字符，30 位） | 从帐内 Tunnel token policy 提取权威 32 位值重写 |
+| 3 | **CF 权限模型**：Email Routing Addresses=帐户级组、Rules/DNS=区域级；且地址端点已迁 `/accounts/{acct}/email/routing/addresses`（zone 老路径 403） | API 建令牌（帐户策略挂地址组+区域策略挂规则/DNS）；cf_client 三方法切帐户路径 |
+| 4 | 建规则 actions.value 传了 address_id → CF 2007 "must specify forwarding emails" | 改传目的地邮箱地址（实测建+删全通） |
+
+### 附带兜底
+- get_email_routing 状态端点 403（缺 Zone Settings:Read）→ MX 记录兜底判 ready
+- get_email_dns 失败 → CF 标准 MX×3+SPF TXT 兜底；_em_missing_dns 双键匹配（"@" vs 全域名）
+
+### 令牌体系（最终）
+| 令牌 | 用途 | 存储 |
+|---|---|---|
+| cfat_…753c6（用户建，帐户级） | 主令牌：Pages/DNS/zone（DNS 写实测✅） | .env CF_API_TOKEN |
+| tovaads-email-routing（API 建） | 邮箱转发专用（规则+DNS 区域级+地址帐户级） | SystemSetting cf_email_token |
+| Tovaads（用户级管理令牌） | 令牌铸造用 | .env CF_ADMIN_TOKEN |
+| tovaads-main（API 建，热备） | 主令牌备份（Pages/DNS/ZoneRead/ZoneSettingsRead） | 仅存于 CF，未入配置 |
+
+### 生产验证
+邮箱转发 Tab 全链路：状态 enabled（MX 兜底）/ DNS 缺口 0 / 目的地 1 个 verified / 映射建+删实测通过（smokemap99 建后即清）。落地页发布链路随主令牌复活。
+
+### 教训留档
+- CF 用户令牌 policy 资源键格式：`com.cloudflare.api.account.zone.<zid>` / `com.cloudflare.api.account.<acct>`（老式 `Zone:<id>` 已拒）
+- 建令牌响应明文在 `result.value`；PUT 改 policy 不换明文
+- 帐户令牌过不了 `user/tokens/verify`（401 属正常），验证帐户令牌用实际端点探测
+
+---
+
 ## 2026-09-02（七·晚）— P1 加固批：fb_apps policy 收紧 + ads_cache 唯一键补 platform + .env 清洗 + 邮箱转发 i18n
 
 ### 概述

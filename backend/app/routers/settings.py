@@ -682,7 +682,8 @@ def create_email_route(body: EmailRouteIn, user: CurrentUser = Depends(require_s
         raise HTTPException(400, "目的地邮箱待验证：请先到该邮箱点开 CF 验证邮件")
     alias_email = f"{alias}@{domain}"
     try:
-        rule = cf.create_email_rule(zid, alias_email, target["id"])
+        # actions.value 用目的地邮箱地址（非 address_id），见 cf_client.create_email_rule
+        rule = cf.create_email_rule(zid, alias_email, email)
     except RuntimeError as e:
         raise HTTPException(502, str(e)[:300])
     row = EmailRoute(alias=alias, destination_email=email, rule_id=rule.get("id"), enabled=True)
