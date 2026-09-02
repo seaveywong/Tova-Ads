@@ -247,7 +247,7 @@ onMounted(async () => {
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
       <template v-for="d in displayRows" :key="d.type === 'grp' ? 'grp-' + d.key : d.a.act_id">
-        <div v-if="d.type === 'grp'" class="grp-title"><span class="grp-dot" :class="d.key"></span>{{ d.label }} <span class="grp-n">({{ d.n }})</span></div>
+        <div v-if="d.type === 'grp'" class="grp-title" :class="d.key"><span class="grp-dot" :class="d.key"></span>{{ d.label }} <span class="grp-n">({{ d.n }})</span></div>
         <div v-else class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
         <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
@@ -343,12 +343,14 @@ onMounted(async () => {
 .acc-search:focus { outline: none; border-color: var(--ac) }
 .acc-search::placeholder { color: var(--t3) }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1080px }
+.row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1080px; font-variant-numeric: tabular-nums }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
-/* platform=all 时 FB/TT 分段标题：品牌点 + 小字 + 分割线 */
-.grp-title { display: flex; align-items: center; gap: 7px; padding: 9px 12px 7px; font-size: 12px; font-weight: 600; color: var(--t2); border-bottom: 1px solid var(--bd); letter-spacing: 0.02em }
-.grp-n { color: var(--t3); font-weight: 400 }
+.row:not(.head):hover { background: var(--bg2) }
+/* platform=all 时 FB/TT 分段标题：品牌点 + 粗体 + 底色带；TT 段头上加分割线与段间距 */
+.grp-title { display: flex; align-items: center; gap: 7px; padding: 10px 12px 8px; font-size: 12px; font-weight: 700; color: var(--t1); border-bottom: 1px solid var(--bd); letter-spacing: 0.03em; background: var(--bg2) }
+.grp-title.tt { border-top: 1px solid var(--bd2); margin-top: 6px }
+.grp-n { color: var(--t3); font-weight: 500 }
 .grp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--t3) }
 .grp-dot.fb { background: #1877f2 }
 .grp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%) }

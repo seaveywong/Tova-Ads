@@ -37,11 +37,13 @@ const queryLabel = () => props.customLabel || t('common.search')
             :class="{ active: modelValue === opt.key && !showCustom }"
             @click="pick(opt.key)">{{ opt.label }}</button>
     <button class="date-btn" :class="{ active: showCustom }" @click="toggleCustom">{{ t('common.custom') }}</button>
-    <div v-if="showCustom" class="custom-range">
-      <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
-      <input type="date" v-model="customTo" class="date-input" />
-      <button class="date-btn apply" @click="applyCustom">{{ queryLabel() }}</button>
-    </div>
+    <Transition name="dpb">
+      <div v-if="showCustom" class="custom-range">
+        <input type="date" v-model="customFrom" class="date-input" /><span class="date-sep">—</span>
+        <input type="date" v-model="customTo" class="date-input" />
+        <button class="date-btn apply" @click="applyCustom">{{ queryLabel() }}</button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -55,4 +57,7 @@ const queryLabel = () => props.customLabel || t('common.search')
 .date-input { background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); padding: 5px 10px; font-size: 13px; color-scheme: dark; font-family: inherit }
 .date-input:focus { outline: none; border-color: var(--ac) }
 .date-sep { color: var(--t3); font-size: 13px }
+/* 自定义区间展开/收起过渡（淡入+轻上移，展开方向与按钮行一致） */
+.dpb-enter-active, .dpb-leave-active { transition: opacity 0.18s ease, transform 0.18s ease }
+.dpb-enter-from, .dpb-leave-to { opacity: 0; transform: translateY(-3px) }
 </style>

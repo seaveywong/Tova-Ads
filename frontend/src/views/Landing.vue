@@ -634,12 +634,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     </div>
 
     <div class="list" v-loading="loading">
-      <div v-for="p in sortedPages" :key="p.id" class="lp-card">
+      <div v-for="p in sortedPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-title">{{ p.title }}</span>
-          <span v-if="p.last_fb_status==='fail'" class="tag" style="background:var(--error);color:#fff" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">{{ t('landing.fbBlocked') }}</span>
-          <span v-else-if="p.last_fb_status==='warn'" class="tag" style="background:var(--warning);color:#fff" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
+          <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
+          <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} {{ t('landing.domainsUnit') }}</span>
           <span class="tag">{{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
           <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
@@ -1070,9 +1070,14 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .list{display:flex;flex-direction:column;gap:10px}
 .lp-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:12px 14px}
+/* 异常卡片整体标红/标黄（FB屏蔽>待复查 置顶，左侧色条一眼可见） */
+.lp-card.alert-fail{border-color:rgba(255,69,58,.6);box-shadow:inset 3px 0 0 var(--error)}
+.lp-card.alert-warn{border-color:rgba(255,159,10,.55);box-shadow:inset 3px 0 0 var(--warning)}
 .lp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .lp-title{font-size:14px;font-weight:600;color:var(--t1)}
 .tag{font-size:10px;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--t3)}
+.tag.fb-block{background:var(--error);color:#fff;font-weight:600}
+.tag.fb-warn{background:var(--warning);color:#fff;font-weight:600}
 .st-tag{font-size:10px;padding:1px 7px;border-radius:9px}
 .st-tag.ok{background:rgba(48,209,88,.15);color:var(--success)}
 .st-tag.off{background:var(--bg3);color:var(--t3)}
@@ -1177,13 +1182,13 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .edit-hint{color:var(--t3);font-size:10px;margin-left:4px}
 .sub-target-add{font-size:11px;color:var(--t3);padding:4px 0;cursor:pointer}
 .sub-target-add:hover{color:var(--ac)}
-.sub-slug{color:var(--ac);font-family:'SF Mono',monospace}
-.sub-ad{color:var(--t3);font-family:'SF Mono',monospace;font-size:11px}
-.sub-pass{color:var(--success);font-size:11px;font-weight:600}
+.sub-slug{color:var(--ac);font-family:'SF Mono',monospace;white-space:nowrap}
+.sub-ad{color:var(--t3);font-family:'SF Mono',monospace;font-size:11px;white-space:nowrap}
+.sub-pass{color:var(--success);font-size:11px;font-weight:600;white-space:nowrap}
 .fb-badge{font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;white-space:nowrap}
 .fb-badge.pass{color:var(--success);background:rgba(52,199,89,.1)}
 .fb-badge.fail{color:var(--error);background:rgba(255,69,58,.1)}
 .fb-badge.warn{color:var(--warning);background:rgba(255,159,10,.1)}
-.sub-ops{display:flex;gap:4px;align-items:center;margin-left:auto;flex-shrink:0}
+.sub-ops{display:flex;gap:5px;align-items:center;margin-left:auto;flex-shrink:0;flex-wrap:wrap;row-gap:4px}
 .mb.spin{opacity:.5;pointer-events:none}
 </style>

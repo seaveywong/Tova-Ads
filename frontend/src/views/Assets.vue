@@ -32,6 +32,7 @@ const uploadOpen = ref(false)
 const uploadFiles = ref([])  // [{file, name, tags, country, uploadTagsStr, countryStr, status}]
 const uploadSaving = ref(false)
 const uploadProgress = ref({ now: 0, total: 0 })
+const uploadStats = ref({ ok: 0, fail: 0, dup: 0 })  // 上传结果计数（进度条下方的汇总行）
 // 预览大图/视频
 const previewAsset = ref(null)
 const openPreview = (a) => { previewAsset.value = a }
@@ -127,7 +128,7 @@ const allTags = computed(() => {
 })
 
 // 上传
-const openUpload = () => { uploadFiles.value = []; uploadOpen.value = true }
+const openUpload = () => { uploadFiles.value = []; uploadStats.value = { ok: 0, fail: 0, dup: 0 }; uploadProgress.value = { now: 0, total: 0 }; uploadOpen.value = true }
 const onFileChange = (e) => {
   const files = Array.from(e.target.files || [])
   files.forEach(f => uploadFiles.value.push({ file: f, name: f.name, uploadTagsStr: '', countryStr: '', status: 'pending' }))
@@ -145,6 +146,7 @@ const submitUpload = async () => {
   let ok = 0, fail = 0, dup = 0
   const total = uploadFiles.value.length
   uploadProgress.value = { now: 0, total }
+  uploadStats.value = { ok: 0, fail: 0, dup: 0 }
   for (const item of uploadFiles.value) {
     uploadProgress.value.now++
     item.status = 'uploading'
@@ -176,9 +178,10 @@ const submitUpload = async () => {
       ok++
     } catch (e) {
       item.status = 'fail'
-      item.error = e.message || ''   // 失败原因存 item（列表 title 显示，可自救）
+      item.error = e.message || ''   // 失败原因存 item（列表行内显示，可自救）
       fail++
     }
+    uploadStats.value = { ok, fail, dup }   // 逐个刷新（进度条下的汇总行）
   }
   uploadSaving.value = false
   if (ok) { ElMessage.success(t('assets.uploadOkCount', { n: ok })); uploadOpen.value = false; await load() }
@@ -389,6 +392,16 @@ const remove = async (a) => {
   }
 }
 
+// 卡片 ⋯ 下拉分发（低频操作收进下拉，卡片只留 AI分析/详情 主按钮）
+const onCardCmd = (cmd, a) => {
+  if (cmd === 'copy') openEdit(a)
+  else if (cmd === 'rename') startRename(a)
+  else if (cmd === 'tags') editTags(a)
+  else if (cmd === 'delete') remove(a)
+}
+// 详情弹窗 → 编辑文案/受众（先关详情再开编辑，避免两层弹窗叠着）
+const openEditFromDetail = () => { const a = previewAsset.value; closePreview(); if (a) openEdit(a) }
+
 const aiStatusText = (a) => {
   if (analyzingIds.value.has(a.id)) return aiStatus('analyzing').label
   return aiStatus(a.ai_status).label
@@ -476,40 +489,48 @@ const countryLabel = (code) => {
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
-          <span v-if="isTkVertical(a)" class="tk-badge" :title="t('assets.tkVerticalTitle')">{{ t('assets.tkVertical') }}</span>
+          <span v-if="isTkVertical(a)" class="tk-badge" :title="t('assets.tkVerticalTitle')">♪ {{ t('assets.tkVertical') }}</span>
           <span class="type-badge">{{ a.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
+          <!-- AI 状态角标：分析中=转圈 / 完成=绿✓ / 失败=红✕（错误详情看「详情」弹窗） -->
+          <span v-if="analyzingIds.has(a.id)" class="ai-dot analyzing" :title="analyzeStageText(a)"></span>
+          <span v-else-if="a.ai_status === 'done'" class="ai-dot done" :title="t('assets.aiAnalyzed', { p: purposeText(a.ai_purpose) })">✓</span>
+          <span v-else-if="a.ai_status === 'failed'" class="ai-dot failed" :title="a.ai_error || t('assets.retryHint')">✕</span>
         </div>
         <div class="card-body">
           <!-- 名称（双击编辑） -->
           <div v-if="editingId === a.id" class="name-edit">
             <input v-model="editingName" class="name-input" @keyup.enter="saveRename(a)" @blur="saveRename(a)" />
           </div>
-          <div v-else class="name" :title="a.name" @dblclick="startRename(a)">{{ a.name }}</div>
-          <!-- AI 文案预览（首条 headline） -->
-          <div v-if="a.ai_status === 'done' && (a.ai_copy?.headlines || [])[0]" class="copy-teaser" :title="(a.ai_copy.headlines || []).join(' / ')">{{ (a.ai_copy.headlines || [])[0] }}</div>
-          <!-- 分析失败原因 -->
-          <div v-if="a.ai_status === 'failed'" class="ai-failed" :title="a.ai_error">⚠ {{ t('assets.analyzeFailed') }} · {{ (a.ai_error || t('assets.retryHint')).slice(0, 30) }}</div>
-          <!-- 标签 -->
+          <div v-else class="name" :title="t('assets.dblclickRename')" @dblclick="startRename(a)">{{ a.name }}</div>
+          <!-- 标签（国家/FB 上传标记收进同一行 chip） -->
           <div class="tag-row">
             <span v-for="tg in (a.tags || []).slice(0,2)" :key="tg" class="tag-chip">{{ tg }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
+            <span v-if="a.country" class="country-chip" :title="t('assets.countryTitle', { c: countryLabel(a.country) })">{{ a.country }}</span>
             <span v-if="a.fb_image_hash" class="fb-mark" :title="t('assets.fbUploaded')">FB</span>
-            <span v-if="a.ai_status === 'done'" class="ai-mark" :title="t('assets.aiAnalyzed', { p: purposeText(a.ai_purpose) })">AI{{ a.ai_purpose ? '·' + purposeText(a.ai_purpose).slice(0, 14) : '' }}</span>
           </div>
           <div class="card-meta">
             <span class="meta-size">{{ fmtSize(a.file_size) }}</span>
             <span v-if="a.width" class="meta-dim">{{ a.width }}×{{ a.height }}</span>
             <span class="meta-id">#{{ a.id }}</span>
-            <span v-if="a.country" class="meta-country-badge" @click.stop="openEdit(a)" :title="t('assets.countryTitle', { c: countryLabel(a.country) })">{{ a.country }}</span>
           </div>
         </div>
         <div class="card-ops">
           <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
             {{ analyzingIds.has(a.id) ? analyzeStageText(a) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
           </button>
-          <button class="op" @click="openEdit(a)">{{ t('assets.copyAudience') }}</button>
-          <button class="op" @click="startRename(a)">{{ t('assets.rename') }}</button>
-          <button class="op danger" @click="remove(a)">{{ t('common.delete') }}</button>
+          <button class="op" @click="openPreview(a)">{{ t('assets.detail') }}</button>
+          <el-dropdown trigger="click" @command="cmd => onCardCmd(cmd, a)">
+            <button class="op dots" @click.stop>⋯</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="copy">{{ t('assets.copyAudience') }}</el-dropdown-item>
+                <el-dropdown-item command="rename">{{ t('assets.rename') }}</el-dropdown-item>
+                <el-dropdown-item command="tags">{{ t('assets.editTagsMenu') }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided class="danger">{{ t('common.delete') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
       <div v-if="!assets.length && !loading" class="empty">
@@ -538,6 +559,12 @@ const countryLabel = (code) => {
         <div class="drop-hint">{{ t('assets.dropHint') }}</div>
       </div>
       <div v-if="uploadFiles.length" class="upload-list">
+        <!-- 批量上传进度：n/m 进度条 + 成功/失败/重复 汇总（逐个实时刷新） -->
+        <div v-if="uploadSaving || uploadStats.ok || uploadStats.fail || uploadStats.dup" class="upload-progress">
+          <div class="upload-progress-track"><div class="upload-progress-fill" :style="{ width: (uploadProgress.total ? Math.round(uploadProgress.now / uploadProgress.total * 100) : 0) + '%' }"></div></div>
+          <span class="upload-progress-text">{{ t('assets.uploadingProgress', { n: uploadProgress.now, m: uploadProgress.total }) }}</span>
+          <span class="upload-progress-stats">{{ t('assets.uploadSummary', uploadStats) }}</span>
+        </div>
         <div v-for="(item, i) in uploadFiles" :key="i" class="upload-item">
           <div class="upload-item-info">
             <span class="upload-name">{{ item.file.name }}</span>
@@ -551,7 +578,7 @@ const countryLabel = (code) => {
           </select>
           <input v-model="item.uploadTagsStr" class="upload-tags-input" :placeholder="t('assets.tagsInputPh')" />
           <span v-if="item.status === 'done'" class="upload-status done">✓ {{ t('assets.uploadDone') }}</span>
-          <span v-if="item.status === 'fail'" class="upload-status fail" :title="item.error || ''">✗ {{ t('common.fail') }}</span>
+          <span v-if="item.status === 'fail'" class="upload-status fail">✗ {{ item.error || t('common.fail') }}</span>
           <span v-if="item.status === 'dup'" class="upload-status dup">⚠ {{ item.error }}</span>
           <span v-if="item.status === 'uploading'" class="upload-status uploading">{{ t('assets.uploadingDots') }}</span>
         </div>
@@ -612,17 +639,23 @@ const countryLabel = (code) => {
       </template>
     </el-dialog>
 
-    <!-- 预览弹窗 -->
-    <el-dialog v-model="previewAsset" :title="previewAsset?.name" width="800px" @close="closePreview" append-to-body>
+    <!-- 素材详情弹窗（点缩略图/「详情」打开：大图/视频 + 元信息 + AI 结果 + 快捷操作） -->
+    <el-dialog v-model="previewAsset" :title="t('assets.detailTitle', { name: previewAsset?.name || '' })" width="800px" @close="closePreview" append-to-body>
       <div v-if="previewAsset" style="text-align:center">
         <img v-if="previewAsset.type === 'image'" :src="previewAsset.public_url" style="max-width:100%;max-height:70vh;border-radius:8px" />
         <video v-else-if="previewAsset.type === 'video'" :src="previewAsset.public_url" controls style="max-width:100%;max-height:70vh;border-radius:8px" />
         <div style="margin-top:10px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
           <span class="meta-info">{{ previewAsset.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
+          <span v-if="isTkVertical(previewAsset)" class="meta-info" style="color:#ff6f8d;font-weight:600">♪ {{ t('assets.tkVertical') }}</span>
           <span v-if="previewAsset.file_size" class="meta-info">{{ fmtSize(previewAsset.file_size) }}</span>
           <span v-if="previewAsset.width" class="meta-info">{{ previewAsset.width }}×{{ previewAsset.height }}</span>
           <span v-if="previewAsset.country" class="meta-info">{{ countryLabel(previewAsset.country) }}</span>
           <span class="meta-info">#{{ previewAsset.id }}</span>
+        </div>
+        <!-- AI 分析失败：错误详情 + 重试入口（卡片上只有红✕角标） -->
+        <div v-if="previewAsset.ai_status === 'failed'" class="preview-ai preview-ai-failed">
+          <div class="preview-ai-title">✕ {{ t('assets.analyzeFailed') }}</div>
+          <div class="preview-ai-line">{{ previewAsset.ai_error || t('assets.retryHint') }}</div>
         </div>
         <div v-if="previewAsset.ai_status === 'done'" class="preview-ai">
           <div class="preview-ai-title">{{ t('assets.aiCopyTitle', { p: purposeText(previewAsset.ai_purpose) }) }}</div>
@@ -633,6 +666,12 @@ const countryLabel = (code) => {
           <div v-if="previewAsset.ai_audience?.audience_note" class="preview-ai-line"><b>{{ t('assets.audienceColon') }}</b>{{ previewAsset.ai_audience.audience_note }}</div>
         </div>
       </div>
+      <template #footer>
+        <button v-if="aiOn && previewAsset" class="btn" :disabled="analyzingIds.has(previewAsset.id)" @click="analyze(previewAsset)">
+          {{ analyzingIds.has(previewAsset.id) ? t('assets.analyzingDots') : (previewAsset.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
+        </button>
+        <button v-if="previewAsset" class="btn primary" @click="openEditFromDetail">{{ t('assets.copyAudience') }}</button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -671,12 +710,14 @@ const countryLabel = (code) => {
 .card-check input { appearance: none; width: 12px; height: 12px; margin: 0; cursor: pointer; }
 .card-check.on::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; position: absolute; }
 
-/* 卡片文案预览/失败 */
-.copy-teaser { font-size: 11px; color: var(--t3); line-height: 1.4; margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ai-failed { font-size: 11px; color: var(--error); margin-top: 3px; cursor: help; }
-
-/* 卡片国家快捷选 */
-.meta-country { font-size: 10px; color: var(--t3); background: transparent; border: 1px solid var(--bd); border-radius: 4px; padding: 1px 4px; cursor: pointer; font-family: inherit; max-width: 90px; }
+/* AI 状态角标（thumb 右上）：分析中=转圈 / 完成=绿✓ / 失败=红✕ */
+.ai-dot { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; }
+.ai-dot.done { background: rgba(48, 209, 88, .92); color: #fff; }
+.ai-dot.failed { background: rgba(255, 69, 58, .92); color: #fff; cursor: help; }
+.ai-dot.analyzing { background: rgba(0, 0, 0, .35); border: 2px solid rgba(10, 132, 255, .3); border-top-color: var(--ac); animation: ai-spin .8s linear infinite; cursor: progress; }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+/* 国家 chip（标签行内，非按钮——改国家走详情/编辑弹窗） */
+.country-chip { font-size: 10px; padding: 1px 5px; background: var(--acg); color: var(--ac); border-radius: 4px; font-weight: 600; }
 
 /* AI 参数条 */
 .ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; }
@@ -704,9 +745,9 @@ const countryLabel = (code) => {
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
 .thumb { max-width: 100%; max-height: 100%; object-fit: cover; width: 100%; height: 100%; }
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
-.tk-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(254,44,85,.85); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; }
+/* TK 竖屏徽章：TikTok 品牌红 + 加粗，一眼可辨 */
+.tk-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(254,44,85,.9); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; letter-spacing: .3px; }
 .type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; }
-.country-badge { position: absolute; top: 4px; right: 4px; background: rgba(10,132,255,.85); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
 .card-body { padding: 8px 10px; flex: 1; }
 .name { font-size: 13px; color: var(--t1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .name-edit { display: flex; }
@@ -715,16 +756,15 @@ const countryLabel = (code) => {
 .tag-chip { font-size: 10px; padding: 1px 6px; background: var(--bg3); color: var(--t2); border-radius: 8px; }
 .tag-more { font-size: 10px; padding: 1px 5px; color: var(--t3); }
 .fb-mark { font-size: 9px; padding: 1px 5px; background: rgba(10,132,255,.15); color: var(--ac); border-radius: 4px; font-weight: 600; }
-.ai-mark { font-size: 9px; padding: 1px 5px; background: rgba(48,209,88,.15); color: var(--success); border-radius: 4px; font-weight: 600; }
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
-.meta-country-badge { font-size: 10px; padding: 1px 5px; background: var(--acg); color: var(--ac); border-radius: 3px; cursor: pointer; font-weight: 600; }
-.card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; }
+.card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; align-items: center; }
 .op { background: none; border: none; color: var(--t3); font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 .op:hover { background: var(--bg3); color: var(--t1); }
 .op.danger:hover { color: var(--error); }
 .op.primary-op { color: var(--ac); }
 .op.primary-op:hover { background: rgba(10,132,255,.12); }
+.op.dots { font-size: 15px; line-height: 1; padding: 2px 8px; margin-left: auto; }
 .op:disabled { opacity: .5; cursor: wait; }
 .empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--t3); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .empty-cta { align-self: center; }
@@ -746,9 +786,15 @@ const countryLabel = (code) => {
 .upload-name-input:focus, .upload-tags-input:focus, .upload-country-select:focus { border-color: var(--ac); outline: none; }
 .upload-status { font-size: 11px; }
 .upload-status.done { color: var(--success); }
-.upload-status.fail { color: var(--error); }
+.upload-status.fail { color: var(--error); display: block; word-break: break-all; margin-top: 2px; }
 .upload-status.dup { color: var(--warning); word-break: break-all; margin-top: 2px; }
 .upload-status.uploading { color: var(--ac); }
+/* 批量上传进度条 + 汇总 */
+.upload-progress { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.upload-progress-track { flex: 1; min-width: 120px; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+.upload-progress-fill { height: 100%; background: var(--ac); border-radius: 3px; transition: width .25s; }
+.upload-progress-text { font-size: 11px; color: var(--ac); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.upload-progress-stats { font-size: 11px; color: var(--t3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .meta-info { font-size: 12px; color: var(--t3); }
 
 /* AI 编辑弹窗 */
@@ -761,6 +807,8 @@ const countryLabel = (code) => {
 .edit-textarea { resize: vertical; }
 .edit-tip { font-size: 11px; color: var(--t3); padding: 8px 10px; background: var(--bg3); border-radius: 6px; }
 .preview-ai { margin-top: 14px; padding: 10px; background: var(--bg3); border-radius: 8px; text-align: left; }
+.preview-ai-failed .preview-ai-title { color: var(--error); }
+.preview-ai-failed .preview-ai-line { color: var(--t2); word-break: break-word; }
 .preview-ai-title { font-size: 12px; color: var(--t3); margin-bottom: 6px; }
 .preview-ai-line { font-size: 13px; color: var(--t1); margin-top: 4px; line-height: 1.5; }
 </style>

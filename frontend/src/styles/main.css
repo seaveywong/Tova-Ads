@@ -147,6 +147,9 @@ a { color: var(--ac); text-decoration: none; }
 .el-dropdown__popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
 .el-dropdown-menu__item { color: var(--t1) !important; }
 .el-dropdown-menu__item:hover { background: var(--bg3) !important; }
+/* 危险操作菜单项（删除/归档等，popper 传送 body 需全局定义） */
+.el-dropdown-menu__item.danger { color: var(--error) !important; }
+.el-dropdown-menu__item.danger:hover { background: rgba(255, 69, 58, .1) !important; }
 .el-loading-mask { background: var(--bg) !important; opacity: 0.7; }
 .el-badge__content { border: none !important; }
 .el-popper { background: var(--bg2) !important; border-color: var(--bd) !important; }

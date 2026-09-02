@@ -127,6 +127,8 @@ watch(platform, () => {
   if (platActIds.value) selectedActs.value = selectedActs.value.filter(id => platActIds.value.has(id))
 })
 const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
+// 按 act_id 反查平台（账户多选已选 tag 内渲染平台色 chip 用；#label slot 只拿得到 value）
+const platChipOf = (actId) => platChip(accounts.value.find(x => x.act_id === actId))
 // 已按平台筛选时行内平台 chip 冗余——隐藏（账户下拉选项仍带前缀）
 const platChipByAct = (actId) => {
   if (platform.value !== 'all') return ''
@@ -325,15 +327,24 @@ const CS_ZH = computed(() => ({ fb: t('adm.csFb'), landing: t('adm.csLanding'), 
 const goLandingLogs = (slug, adId) => { router.push({ name: 'landing', query: { tab: 'logs', slug, ad_id: adId } }) }
 const loadRedirectMap = async () => { try { redirectMap.value = await GET('/ads/redirects/map') } catch (e) {} }
 const openRedirect = (item) => { redirectTarget.value = { id: item.id, name: item.name }; redirectInput.value = redirectMap.value[item.id] || ''; redirectDialog.value = true }
+const redirectSaving = ref(false)
 const saveRedirect = async () => {
+  if (redirectSaving.value) return   // 防双击重复 POST
+  redirectSaving.value = true
   const adId = redirectTarget.value.id
   try { await POST('/ads/redirects', { ad_id: adId, target_url: redirectInput.value.trim() })
     if (redirectInput.value.trim()) { redirectMap.value = { ...redirectMap.value, [adId]: redirectInput.value.trim() } }
     else { const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m }
     ElMessage.success(redirectInput.value.trim() ? t('adm.redirectSet') : t('adm.redirectRestored')); redirectDialog.value = false
-  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + ': ' + (e.message || '')) }
+  redirectSaving.value = false
 }
-const openRedirectMgmt = async () => { redirectMgmtOpen.value = true; try { redirectList.value = await GET('/ads/redirects') } catch (e) {} }
+const mgmtLoading = ref(false)
+const openRedirectMgmt = async () => {
+  redirectMgmtOpen.value = true; mgmtLoading.value = true
+  try { redirectList.value = await GET('/ads/redirects') } catch (e) {}
+  mgmtLoading.value = false
+}
 const removeRedirect = async (adId) => { try { await DELETE('/ads/redirects/' + adId); const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m; redirectList.value = redirectList.value.filter(r => r.ad_id !== adId); ElMessage.success(t('adm.redirectRestored')) } catch (e) {} }
 const resetRedirects = async () => {
   try { await ElMessageBox.confirm(t('adm.resetRedirectsMsg'), t('common.confirm'), { type: 'warning' })
@@ -442,7 +453,14 @@ const subscribeLeads = async () => {
   <div class="page">
     <div class="ctrl-bar">
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
-      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" /></el-select>
+      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
+        <template #label="{ label, value }">
+          <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
+        </template>
+        <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="a.name">
+          <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}
+        </el-option>
+      </el-select>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
@@ -567,9 +585,9 @@ const subscribeLeads = async () => {
         <div class="rd-hint">{{ t('adm.redirectHint') }}</div>
       </div>
       <template #footer>
-        <button class="ctrl-btn" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
-        <button v-if="redirectMap[redirectTarget?.id]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">{{ t('adm.restoreDefault') }}</button>
-        <button class="ctrl-btn primary" @click="saveRedirect">{{ t('common.save') }}</button>
+        <button class="ctrl-btn" :disabled="redirectSaving" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
+        <button v-if="redirectMap[redirectTarget?.id]" class="ctrl-btn" :disabled="redirectSaving" @click="redirectInput=''; saveRedirect()">{{ t('adm.restoreDefault') }}</button>
+        <button class="ctrl-btn primary" :disabled="redirectSaving" @click="saveRedirect">{{ redirectSaving ? t('common.saving') + '…' : t('common.save') }}</button>
       </template>
     </el-dialog>
 
@@ -578,7 +596,7 @@ const subscribeLeads = async () => {
         <span class="rd-cnt">{{ t('adm.redirectMgmtCount', { n: redirectList.length }) }}</span>
         <button class="ctrl-btn sm" :disabled="!redirectList.length" @click="resetRedirects">{{ t('adm.restoreAllDefault') }}</button>
       </div>
-      <div class="rd-mgmt-list" v-loading="false">
+      <div class="rd-mgmt-list" v-loading="mgmtLoading">
         <div v-for="r in redirectList" :key="r.ad_id" class="rd-mgmt-row">
           <code class="rd-mid">{{ r.ad_id }}</code>
           <span class="rd-murl" :title="r.target_url">{{ r.target_url }}</span>
@@ -695,6 +713,7 @@ const subscribeLeads = async () => {
 .row:last-child { border-bottom: none }
 .row.sel { background: rgba(10,132,255,.08); border-left: 2px solid var(--ac); padding-left: 6px }
 .row:hover { background: var(--bg2) }
+.row.sel:hover { background: rgba(10,132,255,.1) }
 /* 表尾汇总行（sticky bottom：滚动容器内可滚时贴底，否则随表尾） */
 .row.sum { position: sticky; bottom: 0; z-index: 2; background: var(--bg2); border-top: 1px solid var(--bd2); border-bottom: none }
 .sum-label { font-size: 11px; color: var(--t3); font-weight: 600 }

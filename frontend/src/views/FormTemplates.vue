@@ -22,6 +22,8 @@ const saving = ref(false)
 // 平台（fb/tt）：建时选（openFormNew(p)），编辑跟随模板；payload 部署时按平台构建
 const fPlat = ref('fb')
 const isTtForm = computed(() => fPlat.value === 'tt')
+// 新建表单 → 选平台弹窗（建后不可改；v-model 绑定）
+const formPlatDialog = ref(false)
 // 列表平台筛选（表单 tab；消息模板为 FB Messenger 专属不过滤）
 const formPlatFilter = ref('all')
 const filteredForms = computed(() =>
@@ -390,6 +392,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
           <span class="pp-dot tt"></span>{{ t('formtpl.newFormTt') }}
         </button>
       </div>
+      <div class="pp-hint">{{ t('formtpl.pickPlatHint') }}</div>
     </el-dialog>
 </template>
 
@@ -401,15 +404,13 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .tab.on{background:var(--bg2);color:var(--t1)}
 .btn{padding:7px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
-.btn.tt-create { border-color: #fe2c55; color: #ff6f8d; background: rgba(254,44,85,.08); }
-.btn.tt-create:hover { background: rgba(254,44,85,.15); }
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
-/* 编辑器平台只读标（列表 chip 用 main.css 全局 .plat-chip） */
-.plat-ro{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:10px}
-.plat-ro.fb{background:rgba(24,119,242,.14);color:#5aa2ff}
-.plat-ro.tt{background:rgba(254,44,85,.14);color:#ff6f8d}
+/* 编辑器平台只读标（列表 chip 用 main.css 全局 .plat-chip；视觉对齐 LaunchTemplates .plat-ro） */
+.plat-ro{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:600;padding:4px 14px;border-radius:8px;border:1px solid}
+.plat-ro.fb{background:rgba(24,119,242,.08);color:#5aa2ff;border-color:rgba(24,119,242,.35)}
+.plat-ro.tt{background:rgba(254,44,85,.08);color:#ff6f8d;border-color:rgba(254,44,85,.35)}
 .ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
@@ -481,8 +482,10 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 <style scoped>
 .plat-pick { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 0; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg2); cursor: pointer; font-size: 14px; font-family: inherit; color: var(--t1); transition: border-color .15s, background .15s; }
 .plat-pick:hover { border-color: var(--ac); background: var(--bg3); }
+.plat-pick.fb:hover { border-color: #1877f2; }
 .plat-pick.tt:hover { border-color: #fe2c55; }
 .pp-dot { width: 10px; height: 10px; border-radius: 50%; }
 .pp-dot.fb { background: #1877f2; }
 .pp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%); }
+.pp-hint { font-size: 11px; color: var(--t3); margin-top: 10px; line-height: 1.5; }
 </style>

@@ -32,6 +32,8 @@ export default {
     framePart: ' / {n} 帧',
     tkVertical: 'TK 9:16 适用',
     tkVerticalTitle: '竖屏视频（高宽比 ≥ 2:3），满足 TikTok 9:16 视频版位规格',
+    detail: '详情', detailTitle: '素材详情 · {name}', dblclickRename: '双击重命名', editTagsMenu: '改标签',
+    uploadSummary: '成功 {ok} · 失败 {fail} · 重复 {dup}',
   },
   en: {
     typeImage: 'Image', typeVideo: 'Video', tagPh: 'Tag', searchNamePh: 'Search name',
@@ -65,5 +67,7 @@ export default {
     framePart: ' / {n} frames',
     tkVertical: 'TK 9:16 ready',
     tkVerticalTitle: 'Vertical video (height/width ≥ 2:3) fits the TikTok 9:16 video placement spec',
+    detail: 'Details', detailTitle: 'Asset details · {name}', dblclickRename: 'Double-click to rename', editTagsMenu: 'Edit tags',
+    uploadSummary: '{ok} ok · {fail} failed · {dup} duplicates',
   },
 }

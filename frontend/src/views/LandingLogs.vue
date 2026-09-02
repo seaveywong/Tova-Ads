@@ -82,7 +82,7 @@ const srcTitle = (e) => {
   if (e.source_type === 'external') return trim(`${pf} · ${t('lplogs.srcExternalTitle', { adId: e.ad_id })}${e.source_detail ? '· ' + e.source_detail : ''}`)
   if (e.source_type === 'placeholder') return `${pf} · ${t('lplogs.srcPlaceholderTitle', { adId: e.ad_id })}`
   if (e.source_platform === 'facebook') return t('lplogs.srcFbTitle')
-  if (e.referrer) return t('lplogs.sourceLabel') + '：' + e.referrer
+  if (e.referrer) return t('lplogs.sourceLabel') + ': ' + e.referrer
   return t('lplogs.directUnknown')
 }
 // ASN 展示：名称优先，机房标红（机房=非真人可疑：爬虫/刷量/VPN）
@@ -230,12 +230,16 @@ const redirectAd = ref('')
 const redirectInput = ref('')
 const loadRedirectMap = async () => { try { redirectMap.value = await GET('/ads/redirects/map') } catch (e) {} }
 const openRedirect = (adId) => { redirectAd.value = adId; redirectInput.value = redirectMap.value[adId] || ''; redirectDialog.value = true }
+const redirectSaving = ref(false)
 const saveRedirect = async () => {
+  if (redirectSaving.value) return   // 防双击重复 POST
+  redirectSaving.value = true
   try { await POST('/ads/redirects', { ad_id: redirectAd.value, target_url: redirectInput.value.trim() })
     if (redirectInput.value.trim()) redirectMap.value = { ...redirectMap.value, [redirectAd.value]: redirectInput.value.trim() }
     else { const m = { ...redirectMap.value }; delete m[redirectAd.value]; redirectMap.value = m }
     ElMessage.success(redirectInput.value.trim() ? t('lplogs.redirectSet') : t('lplogs.redirectReset')); redirectDialog.value = false
-  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  } catch (e) { ElMessage.error(t('common.fail') + ': ' + (e.message || '')) }
+  redirectSaving.value = false
 }
 const eventLabel = (v) => EVENT_TYPES.value.find(x => x.v === v)?.l || v || '-'
 const decisionLabel = (v) => DECISIONS.value.find(x => x.v === v)?.l || v || ''
@@ -270,11 +274,11 @@ watch(() => route.query, (q) => {
     <div class="ctrl-bar">
       <h2 class="title">{{ t('lplogs.pageTitle') }} <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
       <DatePresetBar :presets="DATE_PRESETS" v-model="preset" @preset="setPreset" @custom="onCustomRange" />
-      <el-select v-model="fPage" class="fl-sel w-lg" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
+      <el-select v-model="fPage" class="fl-sel" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />
         <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
       </el-select>
-      <el-select v-model="fAct" class="fl-sel w-lg" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
+      <el-select v-model="fAct" class="fl-sel" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
         <el-option :value="''" :label="t('lplogs.allAccounts')" />
         <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" />
       </el-select>
@@ -284,7 +288,7 @@ watch(() => route.query, (q) => {
       <el-select v-model="fDecision" class="fl-sel" @change="search">
         <el-option v-for="o in DECISIONS" :key="o.v" :value="o.v" :label="o.l" />
       </el-select>
-      <el-select v-model="fSource" class="fl-sel w-src" @change="search">
+      <el-select v-model="fSource" class="fl-sel" @change="search">
         <el-option :value="''" :label="t('lplogs.allSources')" />
         <el-option value="controlled" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcControlled')" />
         <el-option value="external" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcExternal')" />
@@ -350,9 +354,9 @@ watch(() => route.query, (q) => {
         <div style="font-size:11px;color:var(--t3);line-height:1.5">{{ t('lplogs.redirectDialogDesc') }}</div>
       </div>
       <template #footer>
-        <button class="ctrl-btn" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
-        <button v-if="redirectMap[redirectAd]" class="ctrl-btn" @click="redirectInput=''; saveRedirect()">{{ t('lplogs.resetDefault') }}</button>
-        <button class="ctrl-btn primary" @click="saveRedirect">{{ t('common.save') }}</button>
+        <button class="ctrl-btn" :disabled="redirectSaving" @click="redirectDialog = false">{{ t('common.cancel') }}</button>
+        <button v-if="redirectMap[redirectAd]" class="ctrl-btn" :disabled="redirectSaving" @click="redirectInput=''; saveRedirect()">{{ t('lplogs.resetDefault') }}</button>
+        <button class="ctrl-btn primary" :disabled="redirectSaving" @click="saveRedirect">{{ redirectSaving ? t('common.saving') + '…' : t('common.save') }}</button>
       </template>
     </el-dialog>
   </div>
@@ -369,10 +373,8 @@ watch(() => route.query, (q) => {
 .txt.q { width: 180px }
 .txt:focus { outline: none; border-color: var(--ac) }
 .txt::placeholder { color: var(--t3) }
-/* el-select 筛选（与 .txt 同 32px 高，默认尺寸） */
-.fl-sel { width: 108px; flex-shrink: 0 }
-.fl-sel.w-lg { width: 150px }
-.fl-sel.w-src { width: 128px }
+/* el-select 筛选（与 .txt 同 32px 高，默认尺寸；5 个下拉统一宽度） */
+.fl-sel { width: 140px; min-width: 130px; flex-shrink: 0 }
 .fl-sel :deep(.el-input__wrapper) { height: 32px; min-height: 32px; border-radius: var(--rs); box-shadow: 0 0 0 1px var(--bd) inset; background: var(--bg2) }
 .fl-sel :deep(.el-input__inner) { height: 32px; line-height: 30px; font-size: 13px }
 .ctrl-btn { height: 32px; padding: 0 14px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap }

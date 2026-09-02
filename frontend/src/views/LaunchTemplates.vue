@@ -1028,13 +1028,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     <div class="grid" v-loading="loading">
       <div v-for="tpl in filteredList" :key="tpl.id" class="card">
         <div class="card-head">
-          <span class="card-name">{{ tpl.name }}</span>
+          <span class="card-name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
           <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
             {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
           </span>
         </div>
-        <div class="card-meta"><span v-if="tpl.platform === 'tt'" class="card-plat">🎵 TikTok</span><span class="card-obj">{{ objLabel(tpl.objective) }}</span><span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span></div>
-        <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
+        <div class="card-meta">
+          <span class="card-obj">{{ objLabel(tpl.objective) }}</span>
+          <span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span>
+          <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">🚀 {{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
+        </div>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
@@ -1045,7 +1048,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <el-dropdown-item command="edit">{{ t('common.edit') }}</el-dropdown-item>
                 <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
                 <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
-                <el-dropdown-item command="archive" divided>{{ t('launch.archive') }}</el-dropdown-item>
+                <el-dropdown-item command="archive" divided class="danger">{{ t('launch.archive') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -1393,7 +1396,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </div>
         </template>
         <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建） -->
-        <template v-if="form.objective === 'OUTCOME_LEADS'">
+        <template v-if="form.objective === 'OUTCOME_LEADS' && !isTt">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
           </div>
@@ -1401,7 +1404,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
               <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
             </el-select>
-            <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat') }}</span>
+            <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
           </div>
           <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
             <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
@@ -1485,7 +1488,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             </template>
             <template v-else-if="deployTpl?.platform === 'tt'">
               <label>{{ t('launch.ttPixelLabel') }}</label>
-              <el-select v-model="deployItems[a.act_id].pixel_id" size="small" style="width:100%">
+              <el-select v-model="deployItems[a.act_id].pixel_id" size="small" filterable style="width:100%">
                 <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.autoPick') })" />
                 <el-option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id" :label="(p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')'" />
               </el-select>
@@ -1644,15 +1647,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-obj{font-size:11px;color:var(--ac);white-space:nowrap}
-.card-plat{font-size:11px;color:var(--t2);background:var(--bg3);padding:1px 8px;border-radius:8px;white-space:nowrap}
-.card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap}
+.card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.pending{color:var(--warning);background:rgba(255,159,10,.13)}
 .card-warn{font-size:11px;color:var(--warning);padding:2px 0}
-.card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap}
+.card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap;align-items:center}
 .card-copy{font-size:11px;color:var(--t2);font-style:italic;max-height:32px;overflow:hidden}
-/* 已部署清单入口（卡片）+ 抽屉 */
-.card-dep{align-self:flex-start;background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:0;font-family:inherit}
+/* 已部署清单入口（卡片 meta 行尾）+ 抽屉 */
+.card-dep{background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:0;font-family:inherit;margin-left:auto;white-space:nowrap}
 .card-dep:hover{text-decoration:underline}
 .dep-job{border:1px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:8px}
 .dep-job-head{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--bg3)}

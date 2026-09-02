@@ -356,10 +356,10 @@ const doInspect = async (force = false) => {
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
 .bar-l{font-size:11px;color:var(--t3);flex:1}
 .bar-r{display:flex;gap:8px}
-/* 分类筛选 chip（全部/止损/成本/下滑/扩量 + 计数） */
-.cat-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.cat-chip{height:26px;padding:0 12px;border:1px solid var(--bd);border-radius:13px;background:var(--bg3);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;transition:all .15s}
-.cat-chip b{font-weight:600;margin-left:5px;color:var(--t1)}
+/* 分类筛选 chip（全部/止损/成本/下滑/扩量 + 计数；紧凑单行） */
+.cat-chips{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.cat-chip{height:24px;padding:0 10px;border:1px solid var(--bd);border-radius:12px;background:var(--bg3);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;transition:all .15s;display:inline-flex;align-items:center;gap:4px}
+.cat-chip b{font-weight:600;font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums}
 .cat-chip:hover{color:var(--t1);border-color:var(--bd2)}
 .cat-chip.on{background:var(--acg);border-color:var(--ac);color:var(--ac)}
 .cat-chip.on b{color:var(--ac)}
