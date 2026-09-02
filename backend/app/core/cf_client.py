@@ -227,14 +227,26 @@ class CfClient:
                 logger.warning(f"[CF] add_cname {name}.{root} 可能已存在: {e}")
         return data.get("result", {})
 
-    # ── Email Routing（zone 级：平台域邮箱转发，tovaads.com 用）──
+    # ── Email Routing（平台域邮箱转发，tovaads.com 用）──
+    # 权限模型（2026-09 实测）：规则/DNS 是 zone 级权限；目的地地址是 account 级权限
+    # 且端点已迁到 /accounts/{acct}/email/routing/addresses（zone 老路径返回 403/404）。
     def get_email_routing(self, zone_id: str) -> dict | None:
         """Email Routing 设置（result.status: unconfigured/uninitialized/enabled/disabled）。
 
         未初始化时 CF 返回 success=false → None（视为 unconfigured）。
+        用户级邮箱 token 缺 Zone Settings:Read 时状态端点 403 → 用 MX 记录兜底判定。
         """
         data = self._get(f"/zones/{zone_id}/email/routing")
-        return data.get("result") if data.get("success") else None
+        if data.get("success"):
+            return data.get("result")
+        try:
+            mx = [r for r in self.list_dns_records(zone_id)
+                  if r.get("type") == "MX" and "mx.cloudflare.net" in (r.get("content") or "")]
+            if mx:
+                return {"status": "ready", "enabled": True}
+        except Exception:
+            pass
+        return None
 
     def enable_email_routing(self, zone_id: str) -> dict:
         data = self._post(f"/zones/{zone_id}/email/routing/enable")
@@ -243,9 +255,19 @@ class CfClient:
         return data.get("result", {})
 
     def get_email_dns(self, zone_id: str) -> list:
-        """Email Routing 所需 DNS 记录（MX×3 + SPF TXT，含 priority/proxied）。"""
+        """Email Routing 所需 DNS 记录（MX×3 + SPF TXT，含 priority/proxied）。
+
+        dns 端点同样需要 Zone Settings:Read——失败时返回 CF 标准记录集兜底。
+        """
         data = self._get(f"/zones/{zone_id}/email/routing/dns")
-        return data.get("result", []) if data.get("success") else []
+        if data.get("success"):
+            return data.get("result", [])
+        return [
+            {"type": "MX", "name": "@", "content": "route1.mx.cloudflare.net", "priority": 13, "proxied": False},
+            {"type": "MX", "name": "@", "content": "route2.mx.cloudflare.net", "priority": 86, "proxied": False},
+            {"type": "MX", "name": "@", "content": "route3.mx.cloudflare.net", "priority": 89, "proxied": False},
+            {"type": "TXT", "name": "@", "content": "v=spf1 include:_spf.mx.cloudflare.net ~all"},
+        ]
 
     def list_dns_records(self, zone_id: str) -> list:
         """zone 全量 DNS 记录（自动翻页，对比 Email Routing 缺口用）。"""
@@ -269,11 +291,15 @@ class CfClient:
         return data.get("result", {})
 
     def list_email_addresses(self, zone_id: str) -> list:
-        """目的地邮箱列表（含验证状态；自动翻页）。"""
+        """目的地邮箱列表（含验证状态；自动翻页）。
+
+        端点是 account 级（/accounts/{acct}/email/routing/addresses，地址属帐户共享）；
+        zone_id 参数保留兼容签名，实际不参与路径。
+        """
         out: list[dict] = []
         page = 1
         while page <= 10:
-            data = self._get(f"/zones/{zone_id}/email/routing/addresses",
+            data = self._get(f"/accounts/{self.account_id}/email/routing/addresses",
                              params={"per_page": 50, "page": page})
             result = data.get("result", []) if data.get("success") else []
             out.extend(result)
@@ -284,14 +310,14 @@ class CfClient:
 
     def create_email_address(self, zone_id: str, email: str) -> dict:
         """添加目的地邮箱。CF 立即发验证邮件，verified=False 直到用户点链接。"""
-        data = self._post(f"/zones/{zone_id}/email/routing/addresses",
+        data = self._post(f"/accounts/{self.account_id}/email/routing/addresses",
                           json={"email": email})
         if not data.get("success"):
             raise RuntimeError(f"CF 添加目的地邮箱失败: {data.get('errors')}")
         return data.get("result", {})
 
     def delete_email_address(self, zone_id: str, address_id: str) -> bool:
-        r = httpx.delete(f"{CF_API_BASE}/zones/{zone_id}/email/routing/addresses/{address_id}",
+        r = httpx.delete(f"{CF_API_BASE}/accounts/{self.account_id}/email/routing/addresses/{address_id}",
                          headers=self.headers, timeout=30)
         if r.status_code == 404:
             return False  # 本来就没有

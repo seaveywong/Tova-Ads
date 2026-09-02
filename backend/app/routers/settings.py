@@ -494,10 +494,16 @@ def _dns_key(rec: dict) -> tuple:
 
 
 def _em_missing_dns(cf: CfClient, zid: str) -> list:
-    """Email Routing 所需 DNS 与现有记录对比，返回缺口（MX/TXT）。"""
+    """Email Routing 所需 DNS 与现有记录对比，返回缺口（MX/TXT）。
+
+    双键匹配：全键（type+name+content）命中即算有；name 对不上（兜底记录集用 "@"，
+    zone 列表用全域名）时退回 type+content 匹配——Email Routing 只在 apex 加 MX/TXT，
+    内容唯一，不会误判。"""
     need = cf.get_email_dns(zid)
     have_keys = {_dns_key(r) for r in cf.list_dns_records(zid)}
-    return [rec for rec in need if _dns_key(rec) not in have_keys]
+    have_tc = {(k[0], k[2]) for k in have_keys}
+    return [rec for rec in need
+            if _dns_key(rec) not in have_keys and (_dns_key(rec)[0], _dns_key(rec)[2]) not in have_tc]
 
 
 def _route_dict(r: EmailRoute, domain: str, cf_rules: dict) -> dict:
