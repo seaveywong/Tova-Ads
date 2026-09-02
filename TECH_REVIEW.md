@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-09-03（二）— 两轮复审：断层与假实现清剿
+
+### 概述
+用户 /goal「复审2次看最近修改有没有断层和功能没真正实现的」。R1=原作者沿调用链+生产实测；R2=独立 Agent 新鲜视角扫前后端一致性。共发现 **1 P1 + 9 P2，全部修复**。commit `f0f22c2`(R1)+`39134f7`(R2)。
+
+### R1 发现（自审+实测未覆盖路径）
+| # | 问题 | 修复 | 验证 |
+|---|---|---|---|
+| 1 | enable 端点邮箱专用令牌 403(10000)——「启用」按钮对新域名必挂 | enable 走主令牌客户端（幂等实测） | PASS |
+| 2 | zid 缓存读取无清洗（历史脏值就是带引号进的缓存） | `_clean_token` 包裹 | 代码级 |
+| 3 | 缓存 miss 时仅邮箱令牌查 zone（缺 Zone:Read 直接 400，主令牌有权限却不兜底） | 主令牌兜底查+缓存 | 代码级 |
+| 4 | toggle 响应缺 cf_enabled | 补齐 | 代码级 |
+| ✅ | apex("@) DNS 写 / 映射建-停-启-删全生命周期 | — | 实测全 PASS |
+
+### R2 发现（独立 Agent）
+| # | 级别 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | **P1** | guard.py 紧急暂停(FB组)读 ads_cache 无 platform 过滤——0081 后同 act_id 双平台行共存，撞号时 FB client 去停 TT 广告 id→真 FB 广告漏停（资金安全） | 补 `platform=="fb"` |
+| 2 | P2 | ads.py diagnose 反查账户同样缺 platform | _ad_act_lookup 值改 (act_id, platform) 元组 |
+| 3 | P2 | fb_apps update_app 系统行走 sdb 后返回旧对象（expire_on_commit=False） | db.refresh(app) |
+| 4 | P2 | enabled 态 DNS 有缺口时 UI 无任何修复入口（启用按钮隐藏、无独立补齐端点） | 前端按钮条件扩展：enabled+缺口也显示「补齐 DNS」（复用幂等 enable）+zh/en key |
+| 5 | P2 | error_i18n 漏「CF 未配置，请先在…」key（en 用户裸中文） | 补录 |
+| 6 | P2 | CF 删目的地/删规则 success=false 被吞（本地照删、CF 残留=转发仍生效而 UI 显示已删） | cf_client 两删除方法改抛错 + settings 捕获 502 |
+| 7 | P2 | ads_cache 模型 docstring 唯一键描述过时 | 更新 |
+| 8 | P2 | _round1_live.py 误入库 | 删除 |
+
+### R2 同时核实通过项
+邮箱转发前后端 7 端点一一对应无 stub、响应字段全一致、zh/en 210 key 成对；PRODUCT_MANUAL 第十章无假宣称；0080 policy 对 OAuth/webhook 读路径无影响；0081 无 ON CONFLICT 破坏面、sync 已带 platform；R1 三项修复确已生效。
+
+### 生产验证
+后端 restart+health OK；前端 CF Pages 部署成功（`f731bf3a.tovaads.pages.dev`）；enable 幂等复测 PASS。
+
+---
+
 ## 2026-09-03 — 邮箱转发全线打通（CF 权限模型纠偏 + 4 层根因 + 令牌体系重建）
 
 ### 概述
