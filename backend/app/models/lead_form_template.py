@@ -8,17 +8,19 @@ from ..core.database import Base
 
 
 class LeadFormTemplate(Base):
-    """Instant Form 模板：可复用的表单配置。部署时建到 FB leadgen_forms → 存 fb_form_id 复用。"""
+    """Instant Form 模板：可复用的表单配置。同一套编辑器 config，部署时按 platform
+    构建对应 payload（fb→FB leadgen_forms / tt→TT Instant Form）→ 存 form_id 复用。"""
     __tablename__ = "lead_form_templates"
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
     created_by = Column(BigInteger, ForeignKey("users.id"))
     name = Column(Text, nullable=False)
     description = Column(Text)
+    platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（编辑器共用，payload 按 platform 构建）
     config_json = Column(Text)      # 完整表单配置 JSON（form_title/privacy_url/locale/custom_questions/extra_contact_fields/thank_you_*/...）
-    config_hash = Column(Text)      # 部署时 config 的哈希（变了不复用旧 FB 表单，强制重建）
-    fb_form_id = Column(Text)       # 部署成功后 FB 返回的 form_id（复用免重建）
-    fb_page_id = Column(Text)       # 建在哪个 page 上（fb_form_id 绑 page）
+    config_hash = Column(Text)      # 部署时 config 的哈希（变了不复用旧表单，强制重建）
+    fb_form_id = Column(Text)       # 部署成功后平台返回的 form_id（FB/TT 通用缓存，复用免重建）
+    fb_page_id = Column(Text)       # 建在哪个载体上（FB=page_id / TT=advertiser_id，form_id 绑载体）
     locale = Column(Text, default="en_US")
     status = Column(Text, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

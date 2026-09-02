@@ -997,7 +997,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sec-title">{{ t('landing.pixelList') }}</div>
       <div class="sub-list">
         <div v-for="p in pixels" :key="p.id" class="sub-row">
-          <span class="plat-badge" :class="p.platform || 'fb'"></span>
+          <span :class="['plat-chip', p.platform || 'fb']">{{ (p.platform || 'fb').toUpperCase() }}</span>
           <code>{{ p.pixel_id }}</code>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
           <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? t('landing.hasToken') : t('landing.noToken') }}</span>
@@ -1122,11 +1122,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .subdomain-tag{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:3px 8px;font-size:12px}
 .sub-link{color:var(--ac);text-decoration:none;font-family:monospace}
 .sub-del{background:none;border:none;color:var(--error);cursor:pointer;font-size:11px;padding:0 2px}
-.plat-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;flex:none}
-.plat-badge.fb{background:#1877f2;color:#fff}
-.plat-badge.fb::after{content:"f";font-weight:700;font-size:11px;font-family:Arial,sans-serif}
-.plat-badge.tt{background:#000;color:#fff}
-.plat-badge.tt::after{content:"♪";font-weight:700;font-size:12px}
+/* 像素库平台标识统一用 main.css 全局 .plat-chip */
 .tag.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .tag.warn{color:var(--warning);background:rgba(255,159,10,.13)}
 /* 品牌标识 */

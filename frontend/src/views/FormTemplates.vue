@@ -19,6 +19,13 @@ const editingForm = ref(null)
 const fCfg = ref({})
 const fMeta = ref({ name: '', description: '', locale: 'en_US' })
 const saving = ref(false)
+// 平台（fb/tt）：建时选（openFormNew(p)），编辑跟随模板；payload 部署时按平台构建
+const fPlat = ref('fb')
+const isTtForm = computed(() => fPlat.value === 'tt')
+// 列表平台筛选（表单 tab；消息模板为 FB Messenger 专属不过滤）
+const formPlatFilter = ref('all')
+const filteredForms = computed(() =>
+  formPlatFilter.value === 'all' ? forms.value : forms.value.filter(f => (f.platform || 'fb') === formPlatFilter.value))
 
 // 消息编辑
 const msgOpen = ref(false)
@@ -63,9 +70,13 @@ const blankForm = () => ({
   is_optimized_for_quality: true,
   welcome_message: '', block_display_for_non_targeted: false,
 })
-const openFormNew = () => { editingForm.value = null; fMeta.value = { name: '', description: '', locale: 'en_US' }; fCfg.value = blankForm(); formOpen.value = true }
+const openFormNew = (p) => {
+  editingForm.value = null; fPlat.value = p === 'tt' ? 'tt' : 'fb'
+  fMeta.value = { name: '', description: '', locale: 'en_US' }; fCfg.value = blankForm(); formOpen.value = true
+}
 const openFormEdit = (t) => {
-  editingForm.value = t; fMeta.value = { name: t.name, description: t.description, locale: t.locale }
+  editingForm.value = t; fPlat.value = (t.platform === 'tt') ? 'tt' : 'fb'
+  fMeta.value = { name: t.name, description: t.description, locale: t.locale }
   const cfg = { ...blankForm(), ...(t.config || {}) }
   // _keyAuto：key 仍处自动态（服务端原值为空）时 label 改动可继续同步 slug
   cfg.custom_questions = (cfg.custom_questions || []).map(q => ({ ...q, _keyAuto: !q.key }))
@@ -92,7 +103,7 @@ const saveForm = async () => {
     // 剥掉前端内部标记（_keyAuto），不进 config 存储/FB 请求
     const cfgOut = JSON.parse(JSON.stringify(fCfg.value))
     cfgOut.custom_questions = (cfgOut.custom_questions || []).map(({ _keyAuto, ...q }) => q)
-    const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, config: cfgOut }
+    const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, platform: fPlat.value, config: cfgOut }
     if (editingForm.value) { await PUT('/form-templates/forms/' + editingForm.value.id, body); ElMessage.success(t('common.saved')) }
     else { await POST('/form-templates/forms', body); ElMessage.success(t('common.create') + t('common.success')) }
     formOpen.value = false; await load()
@@ -177,17 +188,37 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 <template>
   <div class="page">
     <div class="bar">
-      <div class="tabs">
-        <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">Instant Form</button>
-        <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="tabs">
+          <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">Instant Form</button>
+          <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
+        </div>
+        <div v-if="tab==='form'" class="tabs">
+          <button :class="['tab',{on:formPlatFilter==='all'}]" @click="formPlatFilter='all'">{{ t('common.all') }}</button>
+          <button :class="['tab',{on:formPlatFilter==='fb'}]" @click="formPlatFilter='fb'">Facebook</button>
+          <button :class="['tab',{on:formPlatFilter==='tt'}]" @click="formPlatFilter='tt'">TikTok</button>
+        </div>
       </div>
-      <button class="btn primary" @click="tab==='form'?openFormNew():openMsgNew()">{{ t('formtpl.newBtn', { kind: tab==='form' ? t('formtpl.formUnit') : t('formtpl.msgUnit') }) }}</button>
+      <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
+      <el-dropdown v-if="tab==='form'" trigger="click" @command="p => openFormNew(p)">
+        <button class="btn primary">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }} ▾</button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="fb">📘 {{ t('formtpl.newFormFb') }}</el-dropdown-item>
+            <el-dropdown-item command="tt">🎵 {{ t('formtpl.newFormTt') }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <button v-else class="btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
     </div>
 
     <!-- Instant Form 列表 -->
     <div v-if="tab==='form'" class="grid" v-loading="loading">
-      <div v-for="item in forms" :key="item.id" class="card">
-        <div class="card-head"><span class="card-name">{{ item.name }}</span><span v-if="item.fb_form_id" class="badge ok">{{ t('formtpl.deployed') }}</span></div>
+      <div v-for="item in filteredForms" :key="item.id" class="card">
+        <div class="card-head">
+          <span class="card-name"><span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>{{ item.name }}</span>
+          <span v-if="item.fb_form_id" class="badge ok">{{ t('formtpl.deployed') }}</span>
+        </div>
         <div class="card-meta">
           <span>{{ (item.config||{}).form_title || '—' }}</span>
           <span>{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
@@ -199,7 +230,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
           <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button>
         </div>
       </div>
-      <div v-if="!forms.length && !loading" class="empty">{{ t('formtpl.noForms') }}</div>
+      <div v-if="!filteredForms.length && !loading" class="empty">{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
     </div>
 
     <!-- Messenger 列表 -->
@@ -222,21 +253,27 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
       <div class="form">
         <button class="btn ai-top-btn" :disabled="aiLoading" @click="openAssetPicker('form')">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAssetForm') }}</button>
         <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="fMeta.name" class="inp" :placeholder="t('formtpl.tplNamePh')" /></div>
+        <div class="row">
+          <label>{{ t('formtpl.platform') }}</label>
+          <div><span :class="['plat-ro', isTtForm ? 'tt' : 'fb']">{{ isTtForm ? '🎵 TikTok' : '📘 Facebook' }}</span></div>
+          <span v-if="isTtForm" class="hint">{{ t('formtpl.ttFieldNote') }}</span>
+        </div>
         <hr class="sep" />
         <div class="sec-title">{{ t('formtpl.secFormInfo') }}</div>
         <div class="row"><label>{{ t('formtpl.formTitle') }}</label><input v-model="fCfg.form_title" class="inp" :placeholder="t('formtpl.formTitlePh')" /></div>
         <div class="row"><label>{{ t('formtpl.formDesc') }}</label><input v-model="fCfg.description" class="inp" :placeholder="t('formtpl.formDescPh')" /></div>
         <div class="row"><label>{{ t('formtpl.language') }}</label><el-select v-model="fMeta.locale" style="width:100%" size="small"><el-option v-for="l in LOCALES" :key="l.v" :value="l.v" :label="l.l" /></el-select></div>
         <div class="row"><label>{{ t('formtpl.privacyUrl') }}</label><input v-model="fCfg.privacy_url" class="inp" :placeholder="t('formtpl.privacyUrlPh')" /></div>
-        <div class="row"><label>{{ t('formtpl.privacyLinkText') }}</label><input v-model="fCfg.privacy_link_text" class="inp" /></div>
-        <div class="row"><label>{{ t('formtpl.formVisibility') }}</label>
+        <!-- 以下为 FB Instant Form 专属设置，TT 表单无对应概念 → 隐藏 -->
+        <div v-if="!isTtForm" class="row"><label>{{ t('formtpl.privacyLinkText') }}</label><input v-model="fCfg.privacy_link_text" class="inp" /></div>
+        <div v-if="!isTtForm" class="row"><label>{{ t('formtpl.formVisibility') }}</label>
           <el-select v-model="fCfg.is_optimized_for_quality" style="width:100%" size="small">
             <el-option :value="true" :label="t('formtpl.visibilityRestricted')" />
             <el-option :value="false" :label="t('formtpl.visibilityPublic')" />
           </el-select>
         </div>
-        <div class="row"><label>{{ t('formtpl.welcomeMessage') }}</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" :placeholder="t('formtpl.welcomeMessagePh')"></textarea></div>
-        <div class="row"><label>{{ t('formtpl.targetCountryOnly') }}</label>
+        <div v-if="!isTtForm" class="row"><label>{{ t('formtpl.welcomeMessage') }}</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" :placeholder="t('formtpl.welcomeMessagePh')"></textarea></div>
+        <div v-if="!isTtForm" class="row"><label>{{ t('formtpl.targetCountryOnly') }}</label>
           <el-switch v-model="fCfg.block_display_for_non_targeted" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
           <span class="hint">{{ t('formtpl.targetCountryHint') }}</span>
         </div>
@@ -267,9 +304,12 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         <div class="sec-title">{{ t('formtpl.secThankYou') }}</div>
         <div class="row"><label>{{ t('formtpl.thankTitle') }}</label><input v-model="fCfg.thank_you_title" class="inp" :placeholder="t('formtpl.thankTitlePh')" /></div>
         <div class="row"><label>{{ t('formtpl.thankBody') }}</label><textarea v-model="fCfg.thank_you_body" class="inp ta" rows="2"></textarea></div>
-        <div class="row"><label>{{ t('formtpl.buttonText') }}</label><input v-model="fCfg.thank_you_button_text" class="inp" :placeholder="t('formtpl.buttonTextPh')" /></div>
-        <div class="row"><label>{{ t('formtpl.buttonLink') }}</label><input v-model="fCfg.thank_you_website_url" class="inp" placeholder="https://..." /></div>
-        <div class="row"><label>{{ t('formtpl.followUpLink') }}</label><input v-model="fCfg.follow_up_url" class="inp" placeholder="https://..." /></div>
+        <!-- FB thank_you_page 按钮/跟进链接为 FB 专属 → TT 隐藏 -->
+        <template v-if="!isTtForm">
+          <div class="row"><label>{{ t('formtpl.buttonText') }}</label><input v-model="fCfg.thank_you_button_text" class="inp" :placeholder="t('formtpl.buttonTextPh')" /></div>
+          <div class="row"><label>{{ t('formtpl.buttonLink') }}</label><input v-model="fCfg.thank_you_website_url" class="inp" placeholder="https://..." /></div>
+          <div class="row"><label>{{ t('formtpl.followUpLink') }}</label><input v-model="fCfg.follow_up_url" class="inp" placeholder="https://..." /></div>
+        </template>
       </div>
       <template #footer>
         <button class="btn" @click="formOpen=false">{{ t('common.cancel') }}</button>
@@ -360,6 +400,10 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
+/* 编辑器平台只读标（列表 chip 用 main.css 全局 .plat-chip） */
+.plat-ro{display:inline-block;font-size:11px;font-weight:600;padding:2px 10px;border-radius:10px}
+.plat-ro.fb{background:rgba(24,119,242,.14);color:#5aa2ff}
+.plat-ro.tt{background:rgba(254,44,85,.14);color:#ff6f8d}
 .ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

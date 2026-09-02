@@ -522,6 +522,90 @@ def lead_form_safe_payload(payload: dict) -> dict:
     return kept
 
 
+# ── TikTok Instant Form（表单模板 platform='tt' 用；编辑器 config 与 FB 共用一套）──
+# 字段映射为常识版（官方 Business API v1.3 Lead Gen 文档结构），sandbox 校准点：
+# 端点路径 lead/form/create/、question_type 枚举、choices/键名以 sandbox 实测为准，
+# 不符只改本函数（调用方 launch_templates/_resolve_lead_form 与 form_templates.deploy）。
+
+# FB 编辑器联系字段 → TT 内置 question_type（小写）。不在表内的 FB 字段 TT 无对应 → 丢弃。
+_TT_CONTACT_FIELD_MAP = {
+    "EMAIL": "email", "PHONE": "phone", "FIRST_NAME": "name", "LAST_NAME": "last_name",
+    "CITY": "city", "STATE": "state", "ZIP_CODE": "zip_code", "COUNTRY": "country",
+    "DATE_OF_BIRTH": "date_of_birth", "GENDER": "gender", "MARITAL_STATUS": "marital_status",
+}
+
+
+def build_tt_lead_form_payload(
+    form_title: str,
+    privacy_url: str,
+    target_countries: list[str] | None = None,
+    description: str = "",
+    custom_questions: list[dict] | None = None,
+    extra_contact_fields: list[str] | None = None,
+    thank_you_title: str = "",
+    thank_you_body: str = "",
+    name_prefix: str = "Tova",
+    display_name: str = "",
+) -> dict:
+    """构造 TikTok Instant Form 创建 payload（lead/form/create/）。
+
+    与 build_lead_form_payload 平行：同一套编辑器 config 进，按平台出各自 payload。
+    映射：name→form_name；questions type→TT 枚举（CUSTOM+options→single_choice、
+    CUSTOM 无 options→open_text、联系字段→内置类型）；privacy_policy.url→privacy_policy_url；
+    thank_you_*→成功页文案。FB 特有项（welcome_message/is_optimized_for_quality/
+    follow_up_url 等）不迁移——TT 表单无对应概念。locale 不带（TT 表单语言跟随广告主）。
+    """
+    if not form_title:
+        raise ValueError("表单标题 form_title 必填")
+    if not privacy_url:
+        raise ValueError("privacy_url 必填")
+
+    # ── questions：联系字段（按国家路由，同 FB 逻辑）+ 自定义问题 ──
+    primary = default_contact_field(target_countries or [])
+    questions: list[dict] = [
+        {"question_type": "name", "label": "Name"},                      # sandbox 校准：内置字段 label 是否必填
+        {"question_type": primary, "label": "Email" if primary == "email" else "Phone"},
+    ]
+    seen = {"name", primary}
+    for f in (extra_contact_fields or []):
+        tt_type = _TT_CONTACT_FIELD_MAP.get((f or "").upper().strip(), "")
+        if tt_type and tt_type not in seen:
+            seen.add(tt_type)
+            questions.append({"question_type": tt_type})
+    for q in (custom_questions or []):
+        opts = [str(o.get("value", o)).strip() for o in (q.get("options") or []) if str(o.get("value", o)).strip()]
+        if opts:
+            questions.append({"question_type": "single_choice",
+                              "label": q.get("label", ""), "choices": opts})
+        else:
+            questions.append({"question_type": "open_text", "label": q.get("label", "")})
+
+    payload: dict[str, Any] = {
+        "form_name": f"[{name_prefix}] {form_title}",
+        "display_name": display_name or form_title,   # 对外显示名（不挂内部前缀）
+        "privacy_policy_url": privacy_url,
+        "questions": questions,
+    }
+    if description:
+        payload["description"] = description
+    if thank_you_title or thank_you_body:
+        payload["thank_you"] = {"title": thank_you_title, "body": thank_you_body}  # sandbox 校准：成功页文案键名
+    return payload
+
+
+def tt_lead_form_id_from_result(result: dict) -> str:
+    """解析 lead/form/create/ 响应的 form_id（键名容错：form_id / form_ids[0]）。
+
+    sandbox 校准点：官方返回结构以实测为准，不符只改这里。
+    """
+    data = (result or {}).get("data") or {}
+    fid = data.get("form_id")
+    if not fid:
+        ids = data.get("form_ids") or []
+        fid = ids[0] if ids else None
+    return str(fid) if fid else ""
+
+
 # ── Messenger 消息模板（page_welcome_message / VISUAL_EDITOR）── 详见 02_附录_消息模板.md
 
 # CJK 字符检测（AI 守卫：非 CJK 语言禁 CJK 字符，02_附录 §3.2）

@@ -9,7 +9,6 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { usePlatform } from '../composables/usePlatform'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
-import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -442,7 +441,6 @@ const subscribeLeads = async () => {
 <template>
   <div class="page">
     <div class="ctrl-bar">
-      <PlatformSeg v-model="platform" size="small" />
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px"><el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" /></el-select>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
@@ -466,7 +464,7 @@ const subscribeLeads = async () => {
       <div :class="['tab', { on: tab === 'ad' }]" @click="tab = 'ad'; selected = new Set()">{{ t('adm.tabAd') }}</div>
       <div :class="['tab', { on: tab === 'lead' }]" @click="switchLeadTab">{{ t('adm.tabLead') }}</div>
       <div v-if="drillName" class="drill-tag">{{ drillName }} <span @click="clearDrill">✕</span></div>
-      <span v-if="platform !== 'all'" class="scope-chip">{{ platform === 'fb' ? 'Facebook' : 'TikTok' }} · {{ t('adm.scopeAccounts', { n: platAccounts.length }) }}</span>
+      <span v-if="platform !== 'all'" :class="['scope-chip', platform]">{{ platform === 'fb' ? 'Facebook' : 'TikTok' }} · {{ t('adm.scopeAccounts', { n: platAccounts.length }) }}</span>
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <template v-if="tab === 'campaign'">
@@ -687,8 +685,10 @@ const subscribeLeads = async () => {
 .tab.on { color: var(--t1); border-bottom-color: var(--ac); font-weight: 600 }
 .drill-tag { margin-left: auto; font-size: 11px; color: var(--t2); background: var(--bg3); padding: 2px 8px; border-radius: 10px }
 .drill-tag span { cursor: pointer; color: var(--t3); margin-left: 4px }
-/* Tab 行右缘平台范围 chip（平台≠all 时显示） */
+/* Tab 行右缘平台范围 chip（平台≠all 时显示，品牌色语境） */
 .scope-chip { margin-left: auto; display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border-radius: 10px; background: var(--bg3); color: var(--t2); font-size: 11px; white-space: nowrap }
+.scope-chip.fb { background: rgba(24,119,242,.12); color: #5aa2ff }
+.scope-chip.tt { background: rgba(254,44,85,.1); color: #ff6f8d }
 .tbl { border: 1px solid var(--bd); border-radius: 8px; overflow-x: auto }
 .row { display: grid; gap: 4px; padding: 5px 8px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); font-variant-numeric: tabular-nums }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }

@@ -202,6 +202,7 @@ export default {
   },
   layout: {
     platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）', platformKey: '平台 ',
+    platformScopeAll: '全部平台 · 数据跨平台汇总', platformScopeFb: 'Facebook · 数据按此平台过滤', platformScopeTt: 'TikTok · 数据按此平台过滤',
     sentinel: '哨兵',
     rulesCount: '规则 {n} 条',
     safetyGuard: '安全守护',

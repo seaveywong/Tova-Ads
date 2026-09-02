@@ -12,7 +12,6 @@ import { showError } from '../composables/useError'
 import { usePlatform } from '../composables/usePlatform'
 import Fuse from 'fuse.js'
 import DatePresetBar from '../components/DatePresetBar.vue'
-import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -29,6 +28,19 @@ const filteredAccounts = computed(() => {
   if (!searchQ.value.trim()) return platAccounts.value
   const fuseAcc = new Fuse(platAccounts.value, { keys: ['name', 'act_id'], threshold: 0.3 })
   return fuseAcc.search(searchQ.value.trim()).map(r => r.item)
+})
+// 展示行（platform=all 时按 FB/TT 分段：段头「Facebook (N)」+ 数据行；单平台时纯数据行）
+const displayRows = computed(() => {
+  const row = (a) => ({ type: 'row', a })
+  if (platform.value !== 'all') return filteredAccounts.value.map(row)
+  const fb = filteredAccounts.value.filter(a => (a.platform || 'fb') === 'fb')
+  const tt = filteredAccounts.value.filter(a => (a.platform || 'fb') === 'tt')
+  const out = []
+  if (fb.length) out.push({ type: 'grp', key: 'fb', label: 'Facebook', n: fb.length })
+  fb.forEach(a => out.push(row(a)))
+  if (tt.length) out.push({ type: 'grp', key: 'tt', label: 'TikTok', n: tt.length })
+  tt.forEach(a => out.push(row(a)))
+  return out
 })
 // 切平台：勾选里已不可见的账户清掉（防批量操作打到隐藏行）
 watch(platform, () => {
@@ -215,7 +227,6 @@ onMounted(async () => {
   <div class="page">
     <div class="date-bar">
       <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ filteredAccounts.length }}</span></h2>
-      <PlatformSeg v-model="platform" size="small" />
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <input v-model="searchQ" class="acc-search" :placeholder="t('ads.searchPh')" />
       <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
@@ -235,42 +246,45 @@ onMounted(async () => {
         <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
-      <div v-for="a in filteredAccounts" :key="a.act_id" class="row">
-        <div @click.stop><input type="checkbox" :checked="isAccSelected(a.act_id)" @change="toggleAcc(a.act_id)" /></div>
-        <div><span class="dot" :class="statusDot(a.account_status)"></span>{{ statusLabel(a.account_status) }}<span v-if="a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
+      <template v-for="d in displayRows" :key="d.type === 'grp' ? 'grp-' + d.key : d.a.act_id">
+        <div v-if="d.type === 'grp'" class="grp-title"><span class="grp-dot" :class="d.key"></span>{{ d.label }} <span class="grp-n">({{ d.n }})</span></div>
+        <div v-else class="row">
+        <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
+        <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
         <div class="acc">
-          <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: a.act_id } })"><span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ (a.name && a.name !== a.act_id) ? a.name : t('ads.unnamedAccount') }}</div>
-          <div class="acc-id" @click="copyId(a.act_id)">{{ a.act_id }}</div>
+          <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: d.a.act_id } })"><span v-if="platChip(d.a)" :class="['plat-chip', platChip(d.a)]">{{ platChip(d.a).toUpperCase() }}</span>{{ (d.a.name && d.a.name !== d.a.act_id) ? d.a.name : t('ads.unnamedAccount') }}</div>
+          <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}</div>
         </div>
-        <div>{{ fmtMoney(a.balance, a.currency) }}<span v-if="a.balance_usd != null && a.currency !== 'USD'" class="sub"> ≈${{ a.balance_usd }}</span></div>
+        <div>{{ fmtMoney(d.a.balance, d.a.currency) }}<span v-if="d.a.balance_usd != null && d.a.currency !== 'USD'" class="sub"> ≈${{ d.a.balance_usd }}</span></div>
         <div>
-          <span v-if="a.available_usd != null">${{ a.available_usd }}</span>
-          <span v-else class="tag">{{ balKindLabel(a.balance_kind) }}</span>
+          <span v-if="d.a.available_usd != null">${{ d.a.available_usd }}</span>
+          <span v-else class="tag">{{ balKindLabel(d.a.balance_kind) }}</span>
         </div>
-        <div>{{ fmtMoney(a.recent_spend, a.currency) }}</div>
-        <div>{{ a.recent_conversions || 0 }}</div>
-        <div>{{ cpa(a) }}</div>
+        <div>{{ fmtMoney(d.a.recent_spend, d.a.currency) }}</div>
+        <div>{{ d.a.recent_conversions || 0 }}</div>
+        <div>{{ cpa(d.a) }}</div>
         <div>
-          <span class="tag" :class="a.bound_available ? 'ok' : (a.bound_alias ? 'warn' : 'off')"
-                :title="boundTokenTitle(a)">
-            {{ a.bound_alias || t('ads.unbound') }}
+          <span class="tag" :class="d.a.bound_available ? 'ok' : (d.a.bound_alias ? 'warn' : 'off')"
+                :title="boundTokenTitle(d.a)">
+            {{ d.a.bound_alias || t('ads.unbound') }}
           </span>
-          <span v-if="(a.pool_count||0) > 1" class="pool-n" :title="a.pool_aliases || t('ads.poolTooltip', { n: a.pool_count })">+{{ (a.pool_count||0) - 1 }}</span>
+          <span v-if="(d.a.pool_count||0) > 1" class="pool-n" :title="d.a.pool_aliases || t('ads.poolTooltip', { n: d.a.pool_count })">+{{ (d.a.pool_count||0) - 1 }}</span>
         </div>
         <div class="ops">
-          <el-dropdown trigger="click" @command="cmd => onCmd(cmd, a)" placement="bottom-end">
+          <el-dropdown trigger="click" @command="cmd => onCmd(cmd, d.a)" placement="bottom-end">
             <button class="more-btn">⚙</button>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
                 <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
-                <el-dropdown-item command="warmup" divided>{{ a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
+                <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
                 <el-dropdown-item command="remove">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
         </div>
-      </div>
+        </div>
+      </template>
       <div v-if="!filteredAccounts.length && !loading" class="empty" :class="{ 'empty-cta': !accounts.length }">
         <template v-if="accounts.length">
           <div class="empty-title">{{ t('ads.noMatch') }}</div>
@@ -327,6 +341,12 @@ onMounted(async () => {
 .row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1080px }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
+/* platform=all 时 FB/TT 分段标题：品牌点 + 小字 + 分割线 */
+.grp-title { display: flex; align-items: center; gap: 7px; padding: 9px 12px 7px; font-size: 12px; font-weight: 600; color: var(--t2); border-bottom: 1px solid var(--bd); letter-spacing: 0.02em }
+.grp-n { color: var(--t3); font-weight: 400 }
+.grp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--t3) }
+.grp-dot.fb { background: #1877f2 }
+.grp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%) }
 .acc-name { font-weight: 600; color: var(--t1) }
 .acc-name.clk { cursor: pointer }
 .acc-name.clk:hover { color: var(--ac); text-decoration: underline }

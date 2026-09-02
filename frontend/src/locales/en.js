@@ -191,6 +191,7 @@ export default {
   },
   layout: {
     platformFilter: 'Platform filter (dashboard / ad manager filter by selected platform)', platformKey: 'Platform ',
+    platformScopeAll: 'All platforms · data aggregated across platforms', platformScopeFb: 'Facebook · data filtered to this platform', platformScopeTt: 'TikTok · data filtered to this platform',
     sentinel: 'Sentinel',
     rulesCount: '{n} rules',
     safetyGuard: 'Safety Guard',

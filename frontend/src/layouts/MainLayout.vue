@@ -8,6 +8,8 @@ import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
+import PlatformSeg from '../components/PlatformSeg.vue'
+import { usePlatform } from '../composables/usePlatform'
 
 // 登录后的主壳挂载时预取全部路由 chunk（未登录不拉，见 App.vue）
 prefetchRoutes()
@@ -21,7 +23,15 @@ const { locale, toggle: toggleLocale } = useLocale()
 const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin' }
 const roleLabel = (r) => (r && ROLE_KEY[r]) ? t(ROLE_KEY[r]) : (r || '')
 
-// 平台切换已下放各数据页页头（components/PlatformSeg.vue），顶栏不再承载
+// 全局平台上下文（usePlatform 单例，localStorage 'tova_platform'）：全局条是唯一写入入口，
+// 各数据页只读 platform 联动过滤。选中 FB/TT 时 main-area 挂品牌顶线类（2px 语境色条）。
+const { platform } = usePlatform()
+const platformScope = computed(() => t(
+  platform.value === 'fb' ? 'layout.platformScopeFb'
+  : platform.value === 'tt' ? 'layout.platformScopeTt'
+  : 'layout.platformScopeAll'
+))
+const brandTopline = computed(() => (platform.value === 'all' ? '' : 'brand-topline-' + platform.value))
 
 // 移动端侧边栏抽屉态
 const isMobile = ref(false)
@@ -268,7 +278,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
       </div>
     </aside>
 
-    <div class="main-area">
+    <div class="main-area" :class="brandTopline">
       <header class="topbar">
         <div class="topbar-left">
           <button v-if="isMobile" class="hamburger" @click="sidebarOpen = !sidebarOpen" aria-label="菜单">
@@ -335,6 +345,12 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           </el-dropdown>
         </div>
       </header>
+
+      <!-- 全局平台上下文条：全站唯一的平台切换入口（写 usePlatform 单例），右缘显当前范围说明 -->
+      <div class="platform-context-bar">
+        <PlatformSeg size="bar" :title="t('layout.platformFilter')" />
+        <span class="pc-scope">{{ platformScope }}</span>
+      </div>
 
       <main class="content">
         <!-- keep-alive 缓存重数据页：切 Tab 即回显不重拉（Dashboard 有 60s 自动刷新兜新鲜度）。

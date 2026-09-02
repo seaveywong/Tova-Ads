@@ -30,9 +30,14 @@ const data = ref({
 const recentNotifs = ref([])
 const trendData = ref({ labels: [], spend: [], conversions: [], cpa: [], granularity: 'day' })
 const trendGran = ref('day')  // 颗粒度：5min / 30min / hour / day
-const spendCanvas = ref(null)
-const convCanvas = ref(null)
-const cpaCanvas = ref(null)
+const trendCanvas = ref(null)
+// 主趋势图（全宽单图 + 指标切换）：后端趋势只有 spend/conversions/cpa 三条序列
+const trendMetric = ref('spend')
+const TREND_SERIES = computed(() => [
+  { key: 'spend', label: t('dashboard.seriesSpend'), color: 'rgb(10,132,255)' },
+  { key: 'conversions', label: t('dashboard.seriesConv'), color: 'rgb(48,209,88)' },
+  { key: 'cpa', label: t('dashboard.seriesCpa'), color: 'rgb(245,158,11)' },
+])
 let _charts = []
 const GRAN_OPTS = computed(() => [
   { value: '5min', label: t('dashboard.gran5min') },
@@ -100,15 +105,15 @@ const renderTrendCharts = () => {
         plugins: { legend: { display: false } } },
     }))
   }
-  mk(spendCanvas.value, t('dashboard.seriesSpend'), d.spend, 'rgb(10,132,255)')
-  mk(convCanvas.value, t('dashboard.seriesConv'), d.conversions, 'rgb(48,209,88)')
-  mk(cpaCanvas.value, t('dashboard.seriesCpa'), d.cpa, 'rgb(245,158,11)')
+  const s = TREND_SERIES.value.find(x => x.key === trendMetric.value)
+  if (s) mk(trendCanvas.value, s.label, d[s.key] || [], s.color)
 }
 watch(trendData, () => nextTick(renderTrendCharts))
 // 主题切换：图表初始化时读主题色，切主题后需重建才能更新网格/文字颜色
 const _themeObserver = new MutationObserver(() => nextTick(renderTrendCharts))
 _themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 watch(trendGran, () => loadTrend())
+watch(trendMetric, () => nextTick(renderTrendCharts))   // 指标切换只重画图，不重拉数据
 watch(datePreset, () => {
   const old = trendGran.value
   trendGran.value = autoGran()
@@ -117,6 +122,7 @@ watch(datePreset, () => {
 
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
+const mobileFilters = ref(false)  // 移动端：日期+筛选行折叠开关（桌面恒展开）
 const { platform } = usePlatform()
 // 分区范围 chip：平台≠all 时显示 "Facebook · N 账户"（后端已按平台过滤 accounts，直接取长度）
 const scopeChip = computed(() => {
@@ -393,13 +399,95 @@ const columnFmt = (col, acc) => {
   return acc[col]
 }
 
-// KPI 明细内搜索
+// KPI/账户明细内搜索
 const detailSearch = ref('')
-const filteredKpiAccs = computed(() => {
-  if (!kpiDetail.value || kpiDetail.value.type !== 'accounts') return []
-  let accs = kpiDetail.value.accs
+
+// ── KPI 分层重排：4 核心大卡（点击=账户明细表切到该指标视角）+ 4 次要小卡 ──
+const accountView = ref('spend')  // 账户明细表视角：spend/conv/cpa/roas/balance
+const setAccountView = (mode) => {
+  accountView.value = mode
+  detailSearch.value = ''          // 切视角清空搜索（不同视角行集不同，残留会误过滤）
+  selectedIds.value = new Set()    // 勾选是余额视角专用，残留会带出旧选择
+}
+// 核心卡迷你趋势线（SVG polyline，复用趋势接口序列；不足 2 点不画）
+const sparkPoints = (arr) => {
+  const a = (arr || []).filter(v => typeof v === 'number' && !isNaN(v))
+  if (a.length < 2) return ''
+  const w = 100, h = 26, pad = 3
+  const min = Math.min(...a), max = Math.max(...a)
+  const span = (max - min) || 1
+  return a.map((v, i) => `${((i / (a.length - 1)) * w).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`).join(' ')
+}
+const coreCards = computed(() => [
+  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : '' },
+  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions) },
+  { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
+  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas', spark: '' },  // 趋势接口无 ROAS 序列，不画
+])
+const ctrDisplay = computed(() => data.value.total_impressions > 0 ? ((data.value.total_clicks / data.value.total_impressions) * 100).toFixed(2) + '%' : '—')
+const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
+const subCards = computed(() => [
+  { label: t('dashboard.kpiImpressions'), value: fmt(data.value.total_impressions) },
+  { label: t('dashboard.kpiClicks'), value: fmt(data.value.total_clicks) },
+  { label: t('dashboard.kpiCtr'), value: ctrDisplay.value },
+  { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), mode: 'balance', alert: rechargeAlertCount.value },
+])
+
+// ── 守护概览 3 格（自动止损/今日放行/巡检覆盖；点击展开对应明细面板）──
+const kpiMode = ref(null)  // pause / allowance / coverage
+const coverageText = computed(() => { const m = (data.value.accounts || []).filter(a => a.is_managed !== false); return `${m.filter(a => !a.error || a.error === 'cross_tz').length}/${m.length}` })
+const guardCells = computed(() => [
+  { mode: 'pause', label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), danger: data.value.pause_count > 0 },
+  { mode: 'allowance', label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count) },
+  { mode: 'coverage', label: t('dashboard.kpiCoverage'), value: coverageText.value, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }) },
+])
+const toggleKpiMode = (mode) => {
+  kpiMode.value = kpiMode.value === mode ? null : mode
+  if (kpiMode.value !== null) { selectedIds.value = new Set(); detailSearch.value = '' }  // 勾选/搜索各面板共享，切换时清空
+}
+
+// ── 账户明细表（原 KPI accounts 明细分支常驻化，五视角）──
+const VIEW_TABS = computed(() => [
+  { mode: 'spend', label: t('dashboard.viewSpend') },
+  { mode: 'conv', label: t('dashboard.viewConv') },
+  { mode: 'cpa', label: t('dashboard.viewCpa') },
+  { mode: 'roas', label: t('dashboard.viewRoas') },
+  { mode: 'balance', label: t('dashboard.viewBalance') },
+])
+const accountsTable = computed(() => {
+  const mode = accountView.value
+  // balance 是账户属性不依赖快照（看全部）；性能视角只看无异常账户（error 账户去守护格看）
+  let accs = mode === 'balance' ? [...(data.value.accounts || [])] : (data.value.accounts || []).filter(a => !a.error)
+  if (mode === 'spend') accs.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))
+  else if (mode === 'conv') accs.sort((a, b) => (a.conversions || 0) - (b.conversions || 0))  // 低在上（无转化需关注）
+  else if (mode === 'cpa') accs.sort((a, b) => (b.cpa || 0) - (a.cpa || 0))  // 高在上（成本高需关注）
+  else if (mode === 'roas') accs.sort((a, b) => (a.roas || 0) - (b.roas || 0))  // 低在上（ROAS差需关注）
+  else if (mode === 'balance') accs.sort((a, b) => {
+    // unlimited/very_high_limit 排最后（不紧急）；limited 内 0 优先 → 低到高（越低越紧急）
+    const aLim = a.balance_kind === 'limited', bLim = b.balance_kind === 'limited'
+    if (aLim && !bLim) return -1
+    if (bLim && !aLim) return 1
+    const av = a.balance || 0, bv = b.balance || 0
+    if (av <= 0 && bv > 0) return -1
+    if (bv <= 0 && av > 0) return 1
+    return av - bv
+  })
+  const cols = mode === 'balance'
+    ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }]
+    : [
+        { key: 'name', label: t('dashboard.colAccount'), left: true, bold: mode === 'spend' },
+        { key: 'spend_dual', label: t('dashboard.colSpend'), fmt: (v, a) => fmtSpendDual(a.spend, a.spend_usd, a.currency).native, bold: mode === 'spend' },
+        { key: 'spend_usd', label: t('dashboard.colUsd'), fmt: fmtUsd, bold: mode === 'spend' },
+        { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt, bold: mode === 'conv' },
+        { key: 'cpa', label: t('dashboard.colCpa'), fmt: fmtUsd, bold: mode === 'cpa' },
+        { key: 'roas', label: t('dashboard.colRoas'), fmt: (v) => v ? v + '×' : '—', bold: mode === 'roas' },
+      ]
+  return { mode, accs, cols }
+})
+const filteredAccounts = computed(() => {
+  let accs = accountsTable.value.accs
   // 余额/充值视图排除已移除账户（不可操作）；消耗/性能视图保留（历史数据要看）
-  if (kpiDetail.value.mode === 'balance') accs = accs.filter(a => !a.removed)
+  if (accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
   if (detailSearch.value.trim()) {
     const fuseAcc = new Fuse(accs, { keys: ['name', 'act_id'], threshold: 0.3 })
     accs = fuseAcc.search(detailSearch.value).map(r => r.item)
@@ -433,30 +521,17 @@ const forceRefresh = async () => {
   }
 }
 
-// KPI 卡点击展开
-const kpiExpanded = ref(null)
-// KPI 卡语义 3 色：红=自动暂停、橙=警告类（CPA）、绿=正向转化；其余中性 --ac(blue)/灰(gray)
-const cards = computed(() => [
-  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, color: 'blue', mode: 'spend', clickable: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : '' },
-  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), color: 'green', mode: 'conv', clickable: true },
-  { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), color: 'orange', mode: 'cpa', clickable: true },
-  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', color: 'gray', mode: 'roas', clickable: true },
-  { label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), color: 'red', mode: 'pause', clickable: data.value.pause_count > 0 },
-  { label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count), color: 'gray', mode: 'allowance', clickable: data.value.allowance_count > 0 },
-  { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), color: 'gray', mode: 'balance', clickable: true },
-  { label: t('dashboard.kpiCoverage'), value: `${(data.value.accounts || []).filter(a => !a.error || a.error === 'cross_tz').length}/${(data.value.accounts || []).length}`, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }), color: 'gray', mode: 'coverage', clickable: true },
-])
+// 守护明细面板（自动止损/今日放行=日志表；巡检覆盖=账户状态表；账户五视角明细在左侧常驻表）
 const kpiDetail = computed(() => {
-  if (kpiExpanded.value === null) return null
-  const card = cards.value[kpiExpanded.value]
-  if (!card?.clickable) return null
-  const mode = card.mode
+  const mode = kpiMode.value
+  if (!mode) return null
+  const label = { pause: t('dashboard.kpiAutoPause'), allowance: t('dashboard.kpiAllowance'), coverage: t('dashboard.kpiCoverage') }[mode]
 
   // 止损明细：从 pause_details 构建（不是 accounts）
   if (mode === 'pause') {
     const logs = data.value.pause_details || []
     return {
-      mode, title: card.label + ' · ' + t('dashboard.detailTitle'),
+      mode, title: label + ' · ' + t('dashboard.detailTitle'),
       type: 'logs',
       logs: logs.map(l => ({
         col1: l.target_id || '—',
@@ -473,7 +548,7 @@ const kpiDetail = computed(() => {
   if (mode === 'allowance') {
     const logs = data.value.allowance_details || []
     return {
-      mode, title: card.label + ' · ' + t('dashboard.detailTitle'),
+      mode, title: label + ' · ' + t('dashboard.detailTitle'),
       type: 'logs',
       logs: logs.map(l => ({
         col1: l.account_name || l.act_id || '—',
@@ -489,7 +564,7 @@ const kpiDetail = computed(() => {
 
   if (mode === 'coverage') {
     const statusOrder = (a) => (a.error === 'uncovered') ? 0 : (a.error ? 1 : 2)  // 巡检未覆盖在上（紧急）→跨时区→可巡检
-    const accs = [...(data.value.accounts || [])].sort((a, b) => statusOrder(a) - statusOrder(b) || (a.name || '').localeCompare(b.name || ''))
+    const accs = [...(data.value.accounts || [])].filter(a => a.is_managed !== false).sort((a, b) => statusOrder(a) - statusOrder(b) || (a.name || '').localeCompare(b.name || ''))
     return {
       mode, title: t('dashboard.kpiCoverage') + ' · ' + t('dashboard.coverageByAccount'), type: 'accounts', accs,
       cols: [
@@ -499,44 +574,18 @@ const kpiDetail = computed(() => {
       ],
     }
   }
-  // 账户明细模式（spend/conv/cpa/roas/balance；balance 不 filter——余额是账户属性不依赖快照）
-  let accs = mode === 'balance' ? [...(data.value.accounts || [])] : (data.value.accounts || []).filter(a => !a.error)
-  if (mode === 'spend') accs.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))
-  else if (mode === 'conv') accs.sort((a, b) => (a.conversions || 0) - (b.conversions || 0))  // 低在上（无转化需关注）
-  else if (mode === 'cpa') accs.sort((a, b) => (b.cpa || 0) - (a.cpa || 0))  // 高在上（成本高需关注）
-  else if (mode === 'roas') accs.sort((a, b) => (a.roas || 0) - (b.roas || 0))  // 低在上（ROAS差需关注）
-  else if (mode === 'balance') accs.sort((a, b) => {
-    // unlimited/very_high_limit 排最后（不紧急）；limited 内 0 优先 → 低到高（越低越紧急）
-    const aLim = a.balance_kind === 'limited', bLim = b.balance_kind === 'limited'
-    if (aLim && !bLim) return -1
-    if (bLim && !aLim) return 1
-    const av = a.balance || 0, bv = b.balance || 0
-    if (av <= 0 && bv > 0) return -1
-    if (bv <= 0 && av > 0) return 1
-    return av - bv
-  })
-  let cols = mode === 'balance'
-    ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }]
-    : [
-        { key: 'name', label: t('dashboard.colAccount'), left: true, bold: mode === 'spend' },
-        { key: 'spend_dual', label: t('dashboard.colSpend'), fmt: (v, a) => fmtSpendDual(a.spend, a.spend_usd, a.currency).native, bold: mode === 'spend' },
-        { key: 'spend_usd', label: t('dashboard.colUsd'), fmt: fmtUsd, bold: mode === 'spend' },
-        { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt, bold: mode === 'conv' },
-        { key: 'cpa', label: t('dashboard.colCpa'), fmt: fmtUsd, bold: mode === 'cpa' },
-        { key: 'roas', label: t('dashboard.colRoas'), fmt: (v) => v ? v + '×' : '—', bold: mode === 'roas' },
-      ]
-  return { mode, accs, cols, title: card.label + ' · ' + t('dashboard.detailByAccount'), type: 'accounts' }
+  return null
 })
-const toggleKpi = (i) => {
-  if (!cards.value[i]?.clickable) return
-  if (kpiExpanded.value === i) {
-    kpiExpanded.value = null
-  } else {
-    detailSearch.value = ''  // 切换卡片时清空搜索
-    selectedIds.value = new Set()  // 清空勾选（面板间共享，防残留）
-    kpiExpanded.value = i
+// 巡检覆盖明细搜索（与账户表共用 detailSearch，开面板时已清空）
+const filteredCoverageAccs = computed(() => {
+  if (kpiDetail.value?.type !== 'accounts') return []
+  let accs = kpiDetail.value.accs
+  if (detailSearch.value.trim()) {
+    const fuseAcc = new Fuse(accs, { keys: ['name', 'act_id'], threshold: 0.3 })
+    accs = fuseAcc.search(detailSearch.value).map(r => r.item)
   }
-}
+  return accs
+})
 
 // 告警详情改用抽屉（el-drawer）展示——彻底避开 sticky 顶条遮挡（之前 inline 展开被顶部条挡）
 const notifDrawerOpen = ref(false)
@@ -727,18 +776,8 @@ const updateCountdown = () => {
   countdown.value = ''
 }
 
-// 分区锚点（上下分区 + sticky 顶栏跳转 + 滚动高亮当前区）
-const activeSection = ref('ads')
-let _anchorLock = false  // 点击跳转期间锁住高亮，防 smooth 滚动途中 observer 抢回
-const scrollToSection = (id) => {
-  activeSection.value = id  // 点击即高亮（用户明确意图，不等 observer）
-  _anchorLock = true
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  setTimeout(() => { _anchorLock = false }, 800)
-}
 let _timer = null
 let _refreshTimer = null
-let _sectionObserver = null
 const addAllowance = async (log) => {
   if (!log.act_id || !log.ad_id) return ElMessage.warning(t('dashboard.missingActAdId'))
   try {
@@ -746,7 +785,7 @@ const addAllowance = async (log) => {
     ElMessage.success(t('dashboard.allowanceAdded'))
     await loadDashboard(true)
     loadTrend()
-    kpiExpanded.value = null
+    kpiMode.value = null
   } catch (e) { ElMessage.error(t('dashboard.allowanceAddFail') + (e.message || '')) }
 }
 const removeAllowance = async (log) => {
@@ -755,7 +794,7 @@ const removeAllowance = async (log) => {
     ElMessage.success(t('dashboard.allowanceRemoved'))
     await loadDashboard(true)
     loadTrend()
-    kpiExpanded.value = null
+    kpiMode.value = null
   } catch (e) { ElMessage.error(t('dashboard.allowanceRemoveFail') + (e.message || '')) }
 }
 
@@ -767,32 +806,52 @@ onMounted(() => {
   _refreshTimer = setInterval(() => {
     if (document.hidden) return
     // 用户正在操作（展开明细/勾选账户）时跳过自动刷新，避免打断
-    if (selectedIds.value.size > 0 || kpiExpanded.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
+    if (selectedIds.value.size > 0 || kpiMode.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
     loadDashboard()
   }, 60000)
-  const obs = new IntersectionObserver((entries) => {
-    // 锁定期间不抢高亮（点击跳转的 smooth 滚动中）；松开后才跟手动滚动
-    if (_anchorLock) return
-    entries.forEach(e => { if (e.isIntersecting) activeSection.value = e.target.id })
-  }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 })
-  ;['ads', 'landing'].forEach(id => { const el = document.getElementById(id); if (el) obs.observe(el) })
-  _sectionObserver = obs
 })
-onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); if (_sectionObserver) _sectionObserver.disconnect(); _themeObserver.disconnect(); _ltThemeObserver.disconnect(); _charts.forEach(c => c?.destroy()); _ltCharts.forEach(c => c?.destroy()) })
+onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); _themeObserver.disconnect(); _ltThemeObserver.disconnect(); _charts.forEach(c => c?.destroy()); _ltCharts.forEach(c => c?.destroy()) })
 </script>
 
 <template>
   <div class="dashboard">
     <div class="top-loader" :class="{ active: appLoading }"><div class="top-loader-bar"></div></div>
 
-    <div class="sticky-top">
-      <div class="filter-row r1">
-        <PlatformSeg v-model="platform" size="small" />
-        <div class="fg-sep">
-          <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
-        </div>
+    <!-- 页头（不 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 复制/导出/刷新 -->
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('dashboard.pageTitle') }}</h1>
+        <span v-if="lastUpdated" class="ph-fresh">{{ t('dashboard.dataUpTo', { ago: fmtAgo(lastUpdated) }) }}</span>
       </div>
-      <div class="filter-row r2">
+      <div class="ph-actions">
+        <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
+        <button class="head-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">
+          <el-icon><Document /></el-icon><span class="btn-txt">{{ t('dashboard.copySpendBtn') }}</span>
+        </button>
+        <button class="head-btn" :disabled="exporting" @click="exportAccounts" :title="t('common.exportCsv')">
+          <el-icon><Download /></el-icon><span class="btn-txt">{{ exporting ? t('common.loading') : t('common.exportCsv') }}</span>
+        </button>
+        <button class="head-btn primary" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">
+          <el-icon><Refresh /></el-icon><span class="btn-txt">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</span>
+        </button>
+        <button v-if="isSuper" class="head-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
+      </div>
+    </header>
+
+    <!-- 工具栏（sticky 两行）：① 平台分段 + 系统时间 ② 日期预设 + 转化分类 + 账户多选 -->
+    <div class="toolbar">
+      <div class="tb-row tb-plat">
+        <PlatformSeg v-model="platform" />
+        <div class="sys-info">
+          <span v-if="lastInspectedDisplay" class="sync-time hide-m">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
+          <span v-if="sysTimesTitle" class="sync-time only-m sys-times" :title="sysTimesTitle"><el-icon><Clock /></el-icon></span>
+        </div>
+        <button class="head-btn mobile-filter-btn" @click="mobileFilters = !mobileFilters">
+          <el-icon><Filter /></el-icon>{{ t('dashboard.filters') }}
+        </button>
+      </div>
+      <div class="tb-row tb-filters" :class="{ open: mobileFilters }">
+        <DatePresetBar :presets="dateOptions" v-model="datePreset" @preset="() => { showCustom = false; loadDashboard() }" @custom="onCustomRange" />
         <div class="labeled-select">
           <span class="ls-label">{{ t('dashboard.convCat') }}</span>
           <el-select v-model="conversionCategory" @change="loadDashboard()" size="small" class="filter-select"
@@ -805,154 +864,196 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <el-option value="traffic" :label="t('dashboard.convTraffic')" />
           </el-select>
         </div>
-        <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
-                   @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
-                   :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
-          <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="platPrefix(a) + a.name" />
-        </el-select>
-        <div class="sys-info">
-          <span v-if="lastUpdated" class="sync-time hide-m">{{ t('dashboard.dataUpdated') }} {{ fmtAgo(lastUpdated) }}</span>
-          <span v-if="lastInspectedDisplay" class="sync-time hide-m">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
-          <span v-if="sysTimesTitle" class="sync-time only-m sys-times" :title="sysTimesTitle"><el-icon><Clock /></el-icon></span>
-          <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
-          <button class="refresh-btn" :disabled="loading" @click="refreshData" :title="t('dashboard.refreshTitle')">
-            <el-icon><Refresh /></el-icon><span class="btn-txt">{{ loading ? t('dashboard.refreshing') : t('common.refresh') }}</span>
-          </button>
-          <button v-if="isSuper" class="refresh-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
-          <button class="refresh-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">
-            <el-icon><Document /></el-icon><span class="btn-txt">{{ t('dashboard.copySpendBtn') }}</span>
-          </button>
-          <button class="refresh-btn" :disabled="exporting" @click="exportAccounts" :title="t('common.exportCsv')">
-            <el-icon><Download /></el-icon><span class="btn-txt">{{ exporting ? t('common.loading') : t('common.exportCsv') }}</span>
-          </button>
+        <div class="labeled-select grow">
+          <span class="ls-label">{{ t('dashboard.accountLabel') }}</span>
+          <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
+                     @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
+                     :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
+            <el-option v-for="a in (data.accounts || [])" :key="a.act_id" :value="a.act_id" :label="platPrefix(a) + a.name" />
+          </el-select>
         </div>
       </div>
-      <div class="anchor-strip">
-      <button class="anchor-btn" :class="{ active: activeSection === 'ads' }" @click="scrollToSection('ads')">{{ t('dashboard.secAds') }}</button>
-      <button class="anchor-btn" :class="{ active: activeSection === 'landing' }" @click="scrollToSection('landing')">{{ t('dashboard.secLanding') }}</button>
-    </div>
     </div>
 
-    <section id="ads" class="dash-section ads">
-      <div class="dash-head"><span class="dash-title">{{ t('dashboard.secAds') }}</span><span class="dash-sub">{{ t('dashboard.secAdsSub') }}</span>
-        <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
-        <div class="unit-toggle" :title="multiCurrency && spendUnit === 'native' ? t('dashboard.multiCurHint') : ''">
-          <button class="ut-btn" :class="{ on: spendUnit === 'usd' }" @click="spendUnit = 'usd'">{{ t('dashboard.unitUsd') }}</button>
-          <button class="ut-btn" :class="{ on: spendUnit === 'native' }" @click="spendUnit = 'native'">{{ t('dashboard.unitNative') }}</button>
+    <!-- KPI 层：4 核心大卡（大数字 + 迷你趋势线；点击=账户明细表切到该指标视角）+ 4 次要小卡 -->
+    <div class="kpi-zone" v-loading="loading">
+      <div class="kpi-core-grid">
+        <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
+          <div class="kpi-card-top">
+            <span class="kpi-label">{{ card.label }}</span>
+            <span v-if="card.unit" class="unit-mini" :title="multiCurrency && spendUnit === 'native' ? t('dashboard.multiCurHint') : ''">
+              <button class="um-btn" :class="{ on: spendUnit === 'usd' }" @click.stop="spendUnit = 'usd'">{{ t('dashboard.unitUsd') }}</button>
+              <button class="um-btn" :class="{ on: spendUnit === 'native' }" @click.stop="spendUnit = 'native'">{{ t('dashboard.unitNative') }}</button>
+            </span>
+          </div>
+          <span class="kpi-value">{{ card.value }}</span>
+          <span v-if="card.sub" class="kpi-sub">{{ card.sub }}</span>
+          <svg v-if="card.spark" class="kpi-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">
+            <polyline :points="card.spark" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </div>
       </div>
-      <div class="stat-grid" v-loading="loading">
-        <div v-for="(card, i) in cards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: kpiExpanded === i }]" @click="toggleKpi(i)">
-          <span class="stat-label">{{ card.label }}</span>
-          <span class="stat-value">{{ card.value }}</span>
-          <span v-if="card.sub" class="stat-sub">{{ card.sub }}</span>
-          <el-icon v-if="card.clickable" class="stat-arrow" :class="{ rotated: kpiExpanded === i }"><ArrowDown /></el-icon>
+      <div class="kpi-sub-grid">
+        <div v-for="card in subCards" :key="card.label" class="kpi-mini" :class="{ clickable: !!card.mode, alert: card.alert > 0 }" @click="card.mode && setAccountView(card.mode)">
+          <span class="km-value">{{ card.value }}</span>
+          <span class="km-label">{{ card.label }}</span>
+          <span v-if="card.alert > 0" class="km-badge">{{ t('dashboard.balanceAlertCount', { n: card.alert }) }}</span>
         </div>
       </div>
-      <div v-if="kpiDetail" class="kpi-detail-panel">
-        <div class="detail-header">
-          <span>{{ kpiDetail.title }}</span>
-          <div class="detail-tools">
-            <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
-            <button v-if="kpiDetail.mode === 'spend'" class="copy-ids-btn" @click="copySpendActIds">{{ t('dashboard.copySpendIdBtn') }}</button>
-            <button v-if="kpiDetail.mode === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
-            <el-icon class="detail-close" @click="kpiExpanded = null"><Close /></el-icon>
+    </div>
+
+    <!-- 趋势（主视觉）：全宽单图 + 指标切换 + 颗粒度 + 平台范围回显 -->
+    <div class="card trend-main">
+      <div class="card-header">
+        <div class="tm-title-wrap">
+          <span class="card-title">{{ t('dashboard.trend') }}</span>
+          <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
+        </div>
+        <div class="tm-controls">
+          <div class="status-tabs">
+            <button v-for="s in TREND_SERIES" :key="s.key" class="status-tab" :class="{ active: trendMetric === s.key }" @click="trendMetric = s.key">{{ s.label }}</button>
+          </div>
+          <div class="trend-presets">
+            <button v-for="o in GRAN_OPTS" :key="o.value" class="tp-btn" :class="{ on: trendGran === o.value }" @click="trendGran = o.value">{{ o.label }}</button>
           </div>
         </div>
-        <div v-if="kpiDetail.type === 'accounts'" class="table-scroll">
-          <table class="detail-table">
-            <thead><tr><th v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'">{{ col.label }}</th></tr></thead>
+      </div>
+      <div v-if="trendData.labels?.length" class="trend-main-canvas"><canvas ref="trendCanvas"></canvas></div>
+      <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
+    </div>
+
+    <div class="main-split">
+      <!-- 左：账户明细（常驻表；视角=消耗/转化/CPA/ROAS/余额，行点击跳广告管理器）-->
+      <div class="card accounts-card">
+        <div class="card-header accounts-head">
+          <span class="card-title">{{ t('dashboard.accountsTitle') }}</span>
+          <div class="table-tools">
+            <div class="status-tabs">
+              <button v-for="v in VIEW_TABS" :key="v.mode" class="status-tab" :class="{ active: accountView === v.mode }" @click="setAccountView(v.mode)">{{ v.label }}</button>
+            </div>
+            <input v-model="detailSearch" class="search-input" :placeholder="t('dashboard.searchPh')" />
+            <button v-if="accountView === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
+          </div>
+        </div>
+        <div class="table-scroll acc-scroll">
+          <table class="detail-table accounts-table">
+            <thead><tr><th v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'">{{ col.label }}</th></tr></thead>
             <tbody>
-              <tr v-for="acc in filteredKpiAccs" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (kpiDetail.mode === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
-                <td v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
+              <tr v-for="acc in filteredAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (accountView === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
+                <td v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
                   <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
                   <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="!filteredKpiAccs.length" class="empty">{{ t('dashboard.noMatch') }}</div>
-        </div>
-        <div v-else class="table-scroll">
-          <table class="detail-table">
-            <thead><tr>
-              <th v-for="(h, i) in kpiDetail.headers" :key="i" :class="i === 0 ? 'left' : 'right'">{{ h }}</th>
-              <th v-if="['pause','allowance'].includes(kpiDetail.mode)" class="right">{{ t('common.operation') }}</th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="(log, i) in kpiDetail.logs" :key="i">
-                <td class="left mono">{{ log.col1 }}</td>
-                <td v-for="j in kpiDetail.headers.length - 1" :key="j" class="right mono">{{ log['col' + (j + 1)] }}</td>
-                <td v-if="kpiDetail.mode === 'pause'" class="right"><button class="allow-btn" @click="addAllowance(log)">{{ t('dashboard.allowToday') }}</button></td>
-                <td v-if="kpiDetail.mode === 'allowance'" class="right"><button class="allow-btn remove" @click="removeAllowance(log)">{{ t('dashboard.removeAllowance') }}</button></td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="!kpiDetail.logs.length" class="empty">{{ t('dashboard.noRecords') }}</div>
+          <div v-if="!filteredAccounts.length" class="empty">{{ t('dashboard.noMatch') }}</div>
         </div>
       </div>
-      <div class="trend-section">
-        <div class="trend-bar">
-          <span class="trend-title">{{ t('dashboard.trend') }}</span>
-          <div class="trend-presets">
-            <button v-for="o in GRAN_OPTS" :key="o.value" class="tp-btn" :class="{on:trendGran===o.value}" @click="trendGran=o.value">{{ o.label }}</button>
-          </div>
-        </div>
-        <div class="trend-grid" v-if="trendData.labels?.length">
-          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcSpend') }} $</div><div class="tc-canvas"><canvas ref="spendCanvas"></canvas></div></div>
-          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcConv') }}</div><div class="tc-canvas"><canvas ref="convCanvas"></canvas></div></div>
-          <div class="trend-card"><div class="tc-label">{{ t('dashboard.tcCpa') }} $</div><div class="tc-canvas"><canvas ref="cpaCanvas"></canvas></div></div>
-        </div>
-        <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
-      </div>
-      <div v-show="!loading" class="task-block">
-        <div class="block-title">{{ t('dashboard.todoTitle') }}</div>
-        <div class="task-grid">
-          <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length }]" @click="toggleCard(i)">
-            <div class="task-icon-wrap"><el-icon class="task-icon"><component :is="card.icon" /></el-icon></div>
-            <div class="task-body"><div class="task-title">{{ card.title }}</div><div class="task-desc">{{ card.desc }}</div></div>
-            <el-icon v-if="card.detailAccounts?.length" class="task-expand-icon" :class="{ rotated: expandedCard === i }"><ArrowDown /></el-icon>
-          </div>
-        </div>
-        <div v-if="expandedCard !== null && taskCards[expandedCard]?.detailAccounts?.length" class="detail-panel">
-          <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · {{ t('dashboard.detailTitle') }}</span><div class="detail-tools"><button class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
-          <table class="detail-table">
-            <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabel(col) }}</th></tr></thead>
-            <tbody>
-              <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id) }" @click="toggleSelect(acc.act_id)">
-                <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono"><span v-if="col === 'name' && platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ columnFmt(col, acc) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card notif-card">
-        <div class="card-header">
-          <span class="card-title">{{ t('dashboard.recentNotifs') }}<span v-if="platform !== 'all'" class="scope-chip" style="margin-left:8px">{{ platform === 'tt' ? 'TikTok' : 'Facebook' }}</span><span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
-          <div class="status-tabs">
-            <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }}</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }}</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }}</button>
-            <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }}</button>
-            <button v-if="unreadNotifCount" class="status-tab ack-all" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
-          </div>
-        </div>
-        <div class="notif-list">
-          <div v-for="n in filteredNotifs" :key="n.id" class="notif-row-wrap">
-            <div class="notif-row" :class="{ acked: n.read }" @click="openNotifDrawer(n)">
-              <span class="notif-dot" :class="n.level"></span>
-              <div class="notif-content">
-                <div class="notif-text"><span v-if="notifEventLabel(n.event_type)" class="notif-etype" :class="n.level">{{ notifEventLabel(n.event_type) }}</span>{{ n.title }}</div>
-                <div class="notif-meta">{{ fmtTime(n.created_at) }}</div>
-              </div>
-              <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
-              <span v-else class="acked-tag">{{ t('dashboard.ackedTag') }}</span>
+
+      <!-- 右：守护概览 + 待处理事项 + 最近告警（纵向堆叠）-->
+      <div class="side-stack">
+        <div class="card guard-card">
+          <div class="card-header"><span class="card-title">{{ t('dashboard.guardTitle') }}</span></div>
+          <div class="guard-grid">
+            <div v-for="cell in guardCells" :key="cell.mode" class="guard-cell" :class="{ active: kpiMode === cell.mode, danger: cell.danger }" @click="toggleKpiMode(cell.mode)">
+              <span class="gc-value" :class="{ 'text-danger': cell.danger }">{{ cell.value }}</span>
+              <span class="gc-label">{{ cell.label }}</span>
+              <span v-if="cell.sub" class="gc-sub">{{ cell.sub }}</span>
             </div>
           </div>
-          <div v-if="!filteredNotifs.length" class="empty">{{ notifFilter === 'all' ? t('dashboard.noNotifs') : t('dashboard.noNotifsLevel') }}</div>
+          <div v-if="kpiDetail" class="kpi-detail-panel guard-detail">
+            <div class="detail-header">
+              <span>{{ kpiDetail.title }}</span>
+              <div class="detail-tools">
+                <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
+                <el-icon class="detail-close" @click="kpiMode = null"><Close /></el-icon>
+              </div>
+            </div>
+            <div v-if="kpiDetail.type === 'accounts'" class="table-scroll">
+              <table class="detail-table">
+                <thead><tr><th v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'">{{ col.label }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="acc in filteredCoverageAccs" :key="acc.act_id" @click="router.push({ name: 'ad-manager', query: { act: acc.act_id } })">
+                    <td v-for="col in kpiDetail.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono">
+                      <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ acc.name }}</template>
+                      <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-if="!filteredCoverageAccs.length" class="empty">{{ t('dashboard.noMatch') }}</div>
+            </div>
+            <div v-else class="table-scroll">
+              <table class="detail-table">
+                <thead><tr>
+                  <th v-for="(h, i) in kpiDetail.headers" :key="i" :class="i === 0 ? 'left' : 'right'">{{ h }}</th>
+                  <th v-if="['pause','allowance'].includes(kpiDetail.mode)" class="right">{{ t('common.operation') }}</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="(log, i) in kpiDetail.logs" :key="i">
+                    <td class="left mono">{{ log.col1 }}</td>
+                    <td v-for="j in kpiDetail.headers.length - 1" :key="j" class="right mono">{{ log['col' + (j + 1)] }}</td>
+                    <td v-if="kpiDetail.mode === 'pause'" class="right"><button class="allow-btn" @click="addAllowance(log)">{{ t('dashboard.allowToday') }}</button></td>
+                    <td v-if="kpiDetail.mode === 'allowance'" class="right"><button class="allow-btn remove" @click="removeAllowance(log)">{{ t('dashboard.removeAllowance') }}</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-if="!kpiDetail.logs.length" class="empty">{{ t('dashboard.noRecords') }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-show="!loading" class="card">
+          <div class="card-header"><span class="card-title">{{ t('dashboard.todoTitle') }}</span></div>
+          <div class="task-list">
+            <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length }]" @click="toggleCard(i)">
+              <div class="task-icon-wrap"><el-icon class="task-icon"><component :is="card.icon" /></el-icon></div>
+              <div class="task-body"><div class="task-title">{{ card.title }}</div><div class="task-desc">{{ card.desc }}</div></div>
+              <el-icon v-if="card.detailAccounts?.length" class="task-expand-icon" :class="{ rotated: expandedCard === i }"><ArrowDown /></el-icon>
+            </div>
+          </div>
+          <div v-if="expandedCard !== null && taskCards[expandedCard]?.detailAccounts?.length" class="detail-panel task-detail">
+            <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · {{ t('dashboard.detailTitle') }}</span><div class="detail-tools"><button class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
+            <table class="detail-table">
+              <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabel(col) }}</th></tr></thead>
+              <tbody>
+                <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id) }" @click="toggleSelect(acc.act_id)">
+                  <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono"><span v-if="col === 'name' && platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ columnFmt(col, acc) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card notif-card">
+          <div class="card-header">
+            <span class="card-title">{{ t('dashboard.recentNotifs') }}<span v-if="platform !== 'all'" class="scope-chip" style="margin-left:8px">{{ platform === 'tt' ? 'TikTok' : 'Facebook' }}</span><span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
+            <div class="status-tabs">
+              <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }}</button>
+              <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }}</button>
+              <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }}</button>
+              <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }}</button>
+              <button v-if="unreadNotifCount" class="status-tab ack-all" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
+            </div>
+          </div>
+          <div class="notif-list">
+            <div v-for="n in filteredNotifs" :key="n.id" class="notif-row-wrap">
+              <div class="notif-row" :class="{ acked: n.read }" @click="openNotifDrawer(n)">
+                <span class="notif-dot" :class="n.level"></span>
+                <div class="notif-content">
+                  <div class="notif-text"><span v-if="notifEventLabel(n.event_type)" class="notif-etype" :class="n.level">{{ notifEventLabel(n.event_type) }}</span>{{ n.title }}</div>
+                  <div class="notif-meta">{{ fmtTime(n.created_at) }}</div>
+                </div>
+                <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
+                <span v-else class="acked-tag">{{ t('dashboard.ackedTag') }}</span>
+              </div>
+            </div>
+            <div v-if="!filteredNotifs.length" class="empty">{{ notifFilter === 'all' ? t('dashboard.noNotifs') : t('dashboard.noNotifsLevel') }}</div>
+          </div>
         </div>
       </div>
-    </section>
+    </div>
 
     <el-drawer v-model="notifDrawerOpen" :title="notifTitle" direction="rtl" size="480px" :destroy-on-close="true">
       <div v-if="activeNotif" class="notif-drawer">
@@ -974,7 +1075,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <section id="landing" class="dash-section landing">
       <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span>
         <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
-        <button class="refresh-btn" style="margin-left:auto" @click="exportLanding"><el-icon><Download /></el-icon><span class="btn-txt">{{ t('common.exportCsv') }}</span></button></div>
+        <button class="head-btn" style="margin-left:auto" @click="exportLanding"><el-icon><Download /></el-icon><span class="btn-txt">{{ t('common.exportCsv') }}</span></button></div>
       <div v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
         <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" @click="toggleLandingKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
@@ -1098,15 +1199,42 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .dashboard { display: block; }
 .dashboard > * + * { margin-top: 16px; }
 
-/* 日期栏 + 锚点（合并 sticky 容器，贴 topbar 下；margin:0 和板块同宽对齐）*/
-.sticky-top { position: sticky; top: -24px; z-index: 100; background: var(--bg); padding: 12px 0 0; margin: 0; border-bottom: 1px solid var(--bd); }
-.anchor-strip { display: flex; gap: 4px; padding: 8px 0 10px; }
-.anchor-btn { padding: 5px 16px; background: transparent; color: var(--t3); border: 1px solid transparent; border-radius: var(--rs); font-size: 13px; cursor: pointer; transition: all 0.15s; }
-.anchor-btn:hover { color: var(--t1); background: var(--bg2); }
-.anchor-btn.active { background: var(--ac); color: #fff; }
+/* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
+.ph-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ph-title { margin: 0; font-size: 22px; font-weight: 700; color: var(--t1); letter-spacing: -0.01em; }
+.ph-fresh { font-size: 12px; color: var(--t3); }
+.ph-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 页头/工具栏通用按钮（比旧 refresh-btn 更克制：描边为主，仅刷新用强调色） */
+.head-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; background: var(--bg2); color: var(--t2);
+  border: 1px solid var(--bd); border-radius: var(--rs);
+  font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap; font-family: inherit;
+}
+.head-btn .el-icon { font-size: 14px }
+.head-btn:hover { color: var(--t1); border-color: var(--bd2); }
+.head-btn:disabled { opacity: 0.6; cursor: wait; }
+.head-btn.primary { background: var(--acg); color: var(--ac); border-color: var(--ac); }
+.head-btn.primary:hover { background: var(--ac); color: #fff; }
+.head-btn.force { color: var(--warning); border-color: rgba(255,159,10,.5); background: transparent; }
+.head-btn.force:hover { background: rgba(255,159,10,.12); border-color: var(--warning); }
+.head-btn.force:disabled { opacity: .6; }
 
-/* 分区容器（广告版/落地页版，各自独立卡片组）*/
-.dash-section { background: var(--bg2); border: 1px solid var(--bd); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; scroll-margin-top: 160px; box-shadow: var(--shadow-card); }
+/* ── 工具栏（sticky，两行分组）：① 平台+系统时间（底色略深）② 日期+筛选 ── */
+.toolbar { position: sticky; top: 0; z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
+.tb-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
+.tb-row.tb-plat { background: var(--bg2); }
+.tb-row.tb-filters { border-top: 1px solid var(--bd); }
+.tb-filters .labeled-select.grow { margin-left: auto; }
+.tb-filters .labeled-select.grow .act-filter { width: 220px; }
+.labeled-select { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
+.ls-label { font-size: 12px; color: var(--t3); white-space: nowrap }
+.tb-filters .filter-select { width: 120px; }
+.mobile-filter-btn { display: none; }
+
+/* 分区容器（落地页版整块卡片；广告版区块已拆成独立卡片）*/
+.dash-section { background: var(--bg2); border: 1px solid var(--bd); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-card); }
 .dash-head { display: flex; align-items: baseline; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--bd); }
 .dash-title { font-size: 18px; font-weight: 600; color: var(--t1); display: flex; align-items: center; gap: 10px; }
 .dash-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: var(--ac); }
@@ -1114,37 +1242,32 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .dash-sub { font-size: 12px; color: var(--t3); }
 /* 平台范围 chip（平台≠all 时显示 "Facebook · N 账户"） */
 .scope-chip { display: inline-flex; align-items: center; align-self: center; height: 20px; padding: 0 9px; border-radius: 10px; background: var(--bg3); color: var(--t2); font-size: 11px; white-space: nowrap; }
-/* KPI 本币/USD 切换 */
-.unit-toggle { margin-left: auto; display: flex; gap: 2px; }
-.ut-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
-.ut-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
+/* KPI 本币/USD 切换（收进总消耗卡右上角，迷你两键） */
+.unit-mini { display: inline-flex; gap: 2px; }
+.um-btn { padding: 1px 7px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 10px; cursor: pointer; line-height: 16px; font-family: inherit; }
+.um-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 
-/* 趋势区 */
-.trend-section { margin-bottom: 14px; }
-.trend-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.trend-title { font-size: 13px; font-weight: 600; color: var(--t1); }
+/* 趋势主图（全宽单图 + 指标 tabs + 颗粒度） */
+.tm-title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tm-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .trend-presets { display: flex; gap: 4px; }
 .tp-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
 .tp-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
+.trend-main-canvas { height: 320px; padding: 12px 16px 16px; }
+.trend-empty { text-align: center; color: var(--t3); padding: 48px; font-size: 13px; }
+
+/* 落地页趋势三小图（沿用趋势小卡样式，落地页区内） */
+.trend-section { margin-bottom: 0; }
+.trend-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.trend-title { font-size: 13px; font-weight: 600; color: var(--t1); }
 .trend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-@media (max-width: 768px) { .trend-grid { grid-template-columns: 1fr; } }
 .trend-card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; padding: 10px; }
 .tc-label { font-size: 11px; color: var(--t3); margin-bottom: 4px; }
 .tc-canvas { height: 120px; }
-.trend-empty { text-align: center; color: var(--t3); padding: 24px; font-size: 13px; background: var(--bg2); border: 1px dashed var(--bd); border-radius: 8px; }
 
-/* 分区内子块标题（区别于分区大标题）*/
-.block-title { font-size: 14px; font-weight: 600; color: var(--t1); }
-.task-block { display: flex; flex-direction: column; gap: 8px; }
+/* 任务列表（右列卡片内，单列堆叠） */
+.task-list { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 
-/* sticky 筛选区两行式：r1=平台分段+日期条（竖分隔线隔开）、r2=转化分类+账户+系统信息 */
-.filter-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.filter-row.r2 { gap: 8px; margin-top: 8px; }
-.fg-sep { display: flex; align-items: center; flex-wrap: wrap; border-left: 1px solid var(--bd); padding-left: 12px; min-height: 30px }
-.labeled-select { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
-.ls-label { font-size: 12px; color: var(--t3); white-space: nowrap }
-.filter-row .filter-select { width: 120px; }
-.filter-row .act-filter { width: 180px; }
 .sync-time { font-size: 11px; color: var(--t3); }
 .sync-time.countdown {
   font-family: 'SF Mono', 'Fira Code', monospace; font-variant-numeric: tabular-nums;
@@ -1159,26 +1282,17 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 }
 @keyframes stall-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-/* 系统信息区 */
+/* 工具栏行内系统信息（上次巡检时间戳） */
 .sys-info { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.refresh-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 12px; background: var(--acg); color: var(--ac);
-  border: 1px solid var(--ac); border-radius: var(--rs);
-  font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
-}
-.refresh-btn .el-icon { font-size: 14px }
-.refresh-btn:hover { background: var(--ac); color: #fff; }
-.refresh-btn:disabled { opacity: 0.6; cursor: wait; }
-.refresh-btn.force { color: var(--warning); border-color: rgba(255,159,10,.5); background: transparent; }
-.refresh-btn.force:hover { background: rgba(255,159,10,.12); border-color: var(--warning); }
-.refresh-btn.force:disabled { opacity: .6; }
-/* 移动端：sys-info 文字按钮收成图标 + 两时间戳合并为一个 tooltip 入口 */
+
+/* 移动端：页头按钮收图标 + 工具栏筛选行折叠成「筛选」按钮 + 时间戳合并 tooltip */
 .sync-time.only-m, .sys-times { display: none }
 @media (max-width: 768px) {
-  .sys-info { gap: 8px }
-  .sys-info .btn-txt { display: none }
-  .sys-info .refresh-btn { padding: 5px 8px }
+  .ph-actions .btn-txt { display: none }
+  .ph-actions .head-btn { padding: 6px 8px }
+  .mobile-filter-btn { display: inline-flex; }
+  .tb-row.tb-filters { display: none; }
+  .tb-row.tb-filters.open { display: flex; }
   .sync-time.hide-m { display: none }
   .sys-times { display: inline-flex; align-items: center; cursor: help }
   .sys-times .el-icon { font-size: 13px; color: var(--t3) }
@@ -1201,7 +1315,63 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-search:focus { outline: none; border-color: var(--ac); }
 .detail-search::placeholder { color: var(--t3); }
 
-/* KPI 卡（auto-fit 自适应列数，8 张也不挤）*/
+/* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
+.kpi-zone { display: flex; flex-direction: column; gap: 10px; }
+.kpi-core-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi-card {
+  position: relative; background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px;
+  padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 2px;
+  cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow-card); overflow: hidden;
+}
+.kpi-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; transition: background 0.15s; }
+.kpi-card:hover { border-color: var(--bd2); transform: translateY(-1px); }
+.kpi-card.active { border-color: var(--ac); background: var(--bg3); }
+.kpi-card.active::before { background: var(--ac); }
+.kpi-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.kpi-label { font-size: 12px; color: var(--t3); white-space: nowrap; }
+.kpi-value { font-size: 26px; font-weight: 650; color: var(--t1); letter-spacing: -0.02em; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: 10px; color: var(--t3); }
+.kpi-spark { width: 100%; height: 26px; color: var(--ac); opacity: 0.55; margin-top: 4px; display: block; }
+.kpi-sub-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kpi-mini {
+  position: relative; display: flex; align-items: baseline; gap: 8px;
+  background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; padding: 12px 14px;
+}
+.kpi-mini.clickable { cursor: pointer; transition: all 0.15s; }
+.kpi-mini.clickable:hover { border-color: var(--bd2); transform: translateY(-1px); }
+.kpi-mini.alert { border-color: rgba(255,159,10,.55); }
+.km-value { font-size: 16px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
+.km-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
+.km-badge { margin-left: auto; font-size: 10px; padding: 1px 7px; border-radius: 8px; background: rgba(255,159,10,.15); color: var(--warning); white-space: nowrap; }
+
+/* ── 主区两列：账户明细（左 62%）+ 守护/任务/告警（右 38%）── */
+.main-split { display: grid; grid-template-columns: 62fr 38fr; gap: 16px; align-items: start; }
+.side-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.accounts-card { min-width: 0; }
+.accounts-head { flex-wrap: wrap; row-gap: 8px; }
+.accounts-table tbody tr { cursor: pointer; }
+.accounts-table tbody tr:hover { background: var(--bg3); }
+.accounts-table tbody tr.removed-row { opacity: .55; cursor: default; }
+.accounts-table tbody tr.removed-row:hover { background: transparent; }
+.acc-scroll { max-height: 560px; overflow-y: auto; }
+
+/* 守护概览 3 格（自动止损/今日放行/巡检覆盖） */
+.guard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; }
+.guard-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px;
+  background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px;
+  cursor: pointer; transition: all 0.15s; text-align: center;
+}
+.guard-cell:hover { border-color: var(--bd2); }
+.guard-cell.active { border-color: var(--ac); background: var(--acg); }
+.gc-value { font-size: 20px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
+.guard-cell.danger .gc-value { color: var(--error); }
+.gc-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
+.gc-sub { font-size: 10px; color: var(--t3); margin-top: 2px; }
+.guard-detail { margin: 0 12px 12px; }
+.task-detail { margin: 0 12px 12px; }
+
+/* KPI 汇总小卡（auto-fit，落地页 KPI 行沿用） */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(116px, 1fr)); gap: 10px; }
 .stat-card { background: var(--bg2); border-radius: var(--rs); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--bd); position: relative; overflow: hidden; box-shadow: var(--shadow-card); transition: all 0.15s; }
 .stat-card.clickable { cursor: pointer; }
@@ -1224,8 +1394,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .kpi-detail-panel .detail-table td { cursor: pointer; }
 .kpi-detail-panel .detail-table tbody tr:hover { background: var(--bg3); }
 
-/* 任务卡 */
-.task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+/* 任务卡（右列 task-list 内单列） */
 .task-card {
   display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
   background: var(--bg2); border-radius: var(--rs); border: 1px solid var(--bd);
@@ -1381,5 +1550,15 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .empty { padding: 40px; text-align: center; color: var(--t3); font-size: 14px; }
 
 @media (max-width: 1280px) { .stat-grid { grid-template-columns: repeat(4, 1fr); } .block-detail .block-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 768px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } .block-detail .block-grid { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .block-detail .block-grid { grid-template-columns: 1fr; }
+  .kpi-core-grid { grid-template-columns: repeat(2, 1fr); }   /* 核心 KPI 2×2 */
+  .kpi-sub-grid { grid-template-columns: repeat(2, 1fr); }
+  .trend-main-canvas { height: 240px; }
+  .trend-grid { grid-template-columns: 1fr; }
+  .main-split { grid-template-columns: 1fr; }                 /* 账户/告警两列纵排 */
+  .accounts-head .search-input { width: 120px; }
+  .ph-title { font-size: 18px; }
+}
 </style>

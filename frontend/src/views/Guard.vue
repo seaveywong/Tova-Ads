@@ -67,13 +67,14 @@ const CAT_LABELS = computed(() => [
   [t('guard.cat.bleed'), 'bleed'], [t('guard.cat.cost'), 'cost'], [t('guard.cat.decline'), 'decline'],
   [t('guard.cat.scale'), 'scale'],
 ])
+const CAT_KEYS = ['bleed', 'cost', 'decline', 'scale']
+const CAT_ZH = { '空耗止损': 'bleed', '成本超标': 'cost', '效果下滑': 'decline', '智能扩量': 'scale' }
+// 分类原文 → 稳定 key（zh 建的规则存中文原文；后端仍按原文匹配，这里只做前端筛选/显示）
+const catKey = (c) => CAT_ZH[c] || CAT_LABELS.value.find(([label]) => label === c)?.[1] || ''
 const catLabel = (c) => {
   if (!c) return ''
-  const zh = { '空耗止损': 'bleed', '成本超标': 'cost', '效果下滑': 'decline', '智能扩量': 'scale' }
-  const key = zh[c] || CAT_LABELS.value.find(([label]) => label === c)?.[1]
-  // 显示当前语言；后端仍按原文匹配（_evaluate_rule 用 category 前缀分类）
   const cur = { bleed: t('guard.cat.bleed'), cost: t('guard.cat.cost'), decline: t('guard.cat.decline'), scale: t('guard.cat.scale') }
-  return cur[key] || c
+  return cur[catKey(c)] || c
 }
 
 const rules = ref([])
@@ -83,6 +84,17 @@ const editing = ref(null)
 const form = ref({})
 const inspecting = ref(false)
 const accountsList = ref([])
+// 分类筛选 chip（规则卡片已有 category 数据）：全部 + 有规则的分类，带计数
+const catFilter = ref('all')
+const catChips = computed(() => {
+  const chips = [{ v: 'all', label: t('common.all'), n: rules.value.length }]
+  for (const k of CAT_KEYS) {
+    const n = rules.value.filter(r => catKey(r.category) === k).length
+    if (n) chips.push({ v: k, label: t('guard.cat.' + k), n })
+  }
+  return chips
+})
+const shownRules = computed(() => catFilter.value === 'all' ? rules.value : rules.value.filter(r => catKey(r.category) === catFilter.value))
 // 平台 chip（照 AdManager platChip 模式，样式本地复制一份）：作用账户下拉标 FB/TT
 const platChip = (a) => (a && (a.platform === 'tt' || a.platform === 'fb')) ? a.platform : ''
 
@@ -239,7 +251,9 @@ const doInspect = async (force = false) => {
 <template>
   <div class="page">
     <div class="bar">
-      <div class="bar-l"></div>
+      <div class="bar-l cat-chips">
+        <button v-for="c in catChips" :key="c.v" class="cat-chip" :class="{ on: catFilter === c.v }" @click="catFilter = c.v">{{ c.label }}<b>{{ c.n }}</b></button>
+      </div>
       <div class="bar-r">
         <button v-if="isSuper" class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
         <button v-if="isSuper" class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
@@ -248,7 +262,7 @@ const doInspect = async (force = false) => {
     </div>
 
     <div class="list" v-loading="loading">
-      <div v-for="r in rules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
+      <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
@@ -268,10 +282,15 @@ const doInspect = async (force = false) => {
           </div>
         </div>
       </div>
-      <div v-if="!rules.length && !loading" class="empty empty-cta">
-        <div class="empty-title">{{ t('guard.emptyTitle') }}</div>
-        <div class="empty-step">{{ t('guard.emptyStep') }}</div>
-        <button class="btn primary empty-cta-btn" @click="openCreate">{{ t('guard.newRule') }}</button>
+      <div v-if="!shownRules.length && !loading" class="empty" :class="{ 'empty-cta': !rules.length }">
+        <template v-if="rules.length">
+          <div class="empty-title">{{ t('guard.noRulesInCat') }}</div>
+        </template>
+        <template v-else>
+          <div class="empty-title">{{ t('guard.emptyTitle') }}</div>
+          <div class="empty-step">{{ t('guard.emptyStep') }}</div>
+          <button class="btn primary empty-cta-btn" @click="openCreate">{{ t('guard.newRule') }}</button>
+        </template>
       </div>
     </div>
 
@@ -337,6 +356,13 @@ const doInspect = async (force = false) => {
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
 .bar-l{font-size:11px;color:var(--t3);flex:1}
 .bar-r{display:flex;gap:8px}
+/* 分类筛选 chip（全部/止损/成本/下滑/扩量 + 计数） */
+.cat-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cat-chip{height:26px;padding:0 12px;border:1px solid var(--bd);border-radius:13px;background:var(--bg3);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;transition:all .15s}
+.cat-chip b{font-weight:600;margin-left:5px;color:var(--t1)}
+.cat-chip:hover{color:var(--t1);border-color:var(--bd2)}
+.cat-chip.on{background:var(--acg);border-color:var(--ac);color:var(--ac)}
+.cat-chip.on b{color:var(--ac)}
 .btn{padding:6px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;transition:.15s}
 .btn:hover{background:var(--bg3)}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}

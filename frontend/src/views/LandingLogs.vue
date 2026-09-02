@@ -10,7 +10,6 @@ import { fmtTime as tzFmtTime } from '../composables/useTz'
 import { usePlatform } from '../composables/usePlatform'
 import { countryLabel as _countryLabel } from '../composables/useCountries'
 import DatePresetBar from '../components/DatePresetBar.vue'
-import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -270,7 +269,6 @@ watch(() => route.query, (q) => {
   <div class="page">
     <div class="ctrl-bar">
       <h2 class="title">{{ t('lplogs.pageTitle') }} <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
-      <PlatformSeg v-model="platform" size="small" />
       <DatePresetBar :presets="DATE_PRESETS" v-model="preset" @preset="setPreset" @custom="onCustomRange" />
       <el-select v-model="fPage" class="fl-sel w-lg" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />

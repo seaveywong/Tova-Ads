@@ -672,16 +672,67 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
         return None
 
 
-def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str, post_content: dict = None) -> str:
-    """部署时解析 Instant Form ID（page-aware）。优先级：
-    1. tpl.lead_form_template_id（选了表单模板）→ 同 page 有 fb_form_id 复用；否则按 config 建到「目标 page」
-    2. tpl.lead_form_id（手填的已建 form_id）→ 直接用（用户自负；可能跨 page 失效）
+def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str,
+                       post_content: dict = None, tt=None, act_id: str = "") -> str:
+    """部署时解析 Instant Form ID（page/advertiser-aware）。优先级：
+    1. tpl.lead_form_template_id（选了表单模板）→ 同载体有 form_id 复用；否则按 config 建到「目标载体」
+    2. tpl.lead_form_id（手填的已建 form_id）→ 直接用（用户自负；可能跨载体失效）
     3. 都没有 → AI 从素材文案自动生成 + 建（_ai_auto_create_form）
 
-    注意：form_id 与 page 绑定（FB 校验 form 属于 adset 的 page）。表单模板路径按目标 page
-    解析，所以多账户不同 page 部署每页都拿到正确的 form；手填 lead_form_id 路径不校验 page，
+    注意：form_id 与载体绑定（FB 校验 form 属于 adset 的 page）。表单模板路径按目标载体
+    解析，所以多账户不同载体部署每个都拿到正确的 form；手填 lead_form_id 路径不校验载体，
     仅当未选模板时兜底。
+
+    平台分发：tpl.platform='tt' 走 TT Instant Form（载体=advertiser_id，TT 令牌 tt +
+    act_id 由调用方传；FB 令牌 fb 不用）；platform='fb'（含存量默认）走下方 FB 原路零改动。
     """
+    # ── TikTok 分支（TT Instant Form；tt/act_id 缺齐时逐级降级到手填→AI，仍绝不触 FB 链路）──
+    if (tpl.platform or "fb") == "tt":
+        from ..core.ad_builder import build_tt_lead_form_payload, tt_lead_form_id_from_result
+        # 1. 表单模板（advertiser-aware；编辑器 config 与 FB 共用一套，TT builder 映射枚举）
+        if tpl.lead_form_template_id:
+            from ..models.lead_form_template import LeadFormTemplate
+            ft = sdb.query(LeadFormTemplate).filter(
+                LeadFormTemplate.id == tpl.lead_form_template_id,
+                LeadFormTemplate.tenant_id == tpl.tenant_id).first()
+            if ft and tt and act_id:
+                # 复用仅限 tt 模板缓存的 TT form_id（fb 模板缓存的是 FB id，语义不同不复用）
+                if (ft.platform or "fb") == "tt" and ft.fb_form_id and ft.fb_page_id == act_id:
+                    return ft.fb_form_id
+                cfg = {}
+                if ft.config_json:
+                    try: cfg = json.loads(ft.config_json)
+                    except: cfg = {}
+                try:
+                    payload = build_tt_lead_form_payload(
+                        form_title=cfg.get("form_title", ft.name),
+                        privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                        target_countries=cfg.get("target_countries", []),
+                        description=cfg.get("description", ""),
+                        custom_questions=cfg.get("custom_questions", []),
+                        extra_contact_fields=cfg.get("extra_contact_fields", ["EMAIL"]),
+                        thank_you_title=cfg.get("thank_you_title", ""),
+                        thank_you_body=cfg.get("thank_you_body", ""),
+                        name_prefix="Tova",
+                    )
+                    result = tt.post("lead/form/create/", {**payload, "advertiser_id": act_id})
+                    form_id = tt_lead_form_id_from_result(result)
+                    if form_id:
+                        # 缓存到模板（同 advertiser 下次复用；不同 advertiser 每个重建）
+                        if not ft.fb_form_id or ft.fb_page_id != act_id:
+                            ft.fb_form_id = form_id; ft.fb_page_id = act_id
+                        return form_id
+                except Exception:
+                    pass  # 落到手填/AI 兜底
+        # 2. 手填 lead_form_id
+        if tpl.lead_form_id:
+            return tpl.lead_form_id
+        # 3. AI 兜底（有素材 OR 跟帖有帖内容；fb 参数传 None——TT 链路不用）
+        if tt and act_id and (asset or (post_content and (post_content.get("message") or post_content.get("headline")))):
+            return _ai_auto_create_form(None, sdb, asset, act_id, landing_url, post_content=post_content,
+                                        platform="tt", tt=tt, act_id=act_id)
+        return ""
+    # ── FB 原路（platform='fb' 零改动）──
     # 1. 表单模板（page-aware）
     if tpl.lead_form_template_id:
         from ..models.lead_form_template import LeadFormTemplate
@@ -740,8 +791,13 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
     return ""
 
 
-def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, post_content: dict = None) -> str:
-    """没选表单模板时，从素材 AI 文案（跟帖无素材→用帖内容）自动生成 Instant Form + 建到 FB。返 form_id。"""
+def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, post_content: dict = None,
+                         platform: str = "fb", tt=None, act_id: str = "") -> str:
+    """没选表单模板时，从素材 AI 文案（跟帖无素材→用帖内容）自动生成 Instant Form + 建到平台。返 form_id。
+
+    平台分发：platform='tt' → build_tt_lead_form_payload + tt 令牌建到 advertiser（act_id）；
+    platform='fb'（默认）→ 原路 build_lead_form_payload + fb 令牌建到 page，零改动。
+    """
     from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
     from ..core.ai_client import AiClient, AiError
     ai = AiClient()
@@ -754,7 +810,9 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, 
     if not headlines and not bodies and post_content:
         headlines = [post_content.get("headline", "")] if post_content.get("headline") else []
         bodies = [post_content.get("message", "")] if post_content.get("message") else []
-    sys_msg = "你是 FB Instant Form 设计专家。根据广告素材信息设计潜在客户表单。严格只返回 JSON。"
+    is_tt = platform == "tt"
+    sys_msg = (f"你是 {'TikTok' if is_tt else 'FB'} Instant Form 设计专家。"
+               "根据广告素材信息设计潜在客户表单。严格只返回 JSON。")
     prompt = (
         f"广告标题参考：{headlines[:3]}\n广告正文参考：{bodies[:2]}\n\n"
         "生成 Instant Form 配置 JSON：\n"
@@ -765,6 +823,26 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, 
     )
     data = ai.chat_json([{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
                         temperature=0.7, max_tokens=2048)
+    # TikTok 分支：shared config → TT payload → lead/form/create/（sandbox 校准点）
+    if is_tt:
+        if not (tt and act_id):
+            return ""
+        from ..core.ad_builder import build_tt_lead_form_payload, tt_lead_form_id_from_result
+        try:
+            payload = build_tt_lead_form_payload(
+                form_title=data.get("form_title", (asset.name if asset else None) or (post_content or {}).get("headline") or "Lead Form"),
+                privacy_url="https://tovaads.com/privacy",
+                target_countries=[], description=data.get("description", ""),
+                custom_questions=data.get("custom_questions", []),
+                extra_contact_fields=data.get("extra_contact_fields", ["EMAIL"]),
+                thank_you_title=data.get("thank_you_title", ""),
+                thank_you_body=data.get("thank_you_body", ""),
+                name_prefix="AI",
+            )
+            result = tt.post("lead/form/create/", {**payload, "advertiser_id": act_id})
+            return tt_lead_form_id_from_result(result) or ""
+        except Exception:
+            return ""
     payload = build_lead_form_payload(
         form_title=data.get("form_title", (asset.name if asset else None) or (post_content or {}).get("headline") or "Lead Form"),
         privacy_url="https://tovaads.com/privacy",

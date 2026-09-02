@@ -611,6 +611,10 @@ const setPostSource = (src) => {
 // 平台：编辑器内只读 chip（不可中途切——TT/FB 三件套结构不同，切平台=换链路）；
 // 平台选择在两处：列表筛选 chip + 「+ 新建模板」下拉（openNew(p)）
 const isTt = computed(() => form.value.platform === 'tt')
+// 双平台表单交互核心：表单模板下拉按投放模板平台过滤（TT 模板只列 TT 表单模板，
+// 平台编辑器内只读 → 不存在中途切平台后引用失效的问题）
+const formTemplatesForPlat = computed(() =>
+  formTemplates.value.filter(f => (f.platform || 'fb') === (form.value.platform || 'fb')))
 const clearReusePost = () => { form.value.reuse_post_ref = ''; reusePostPreview.value = null; reuseNeedManualPage.value = false }
 // 卡片完整性判断（列表用，不需打开编辑器）
 const _tplMissing = (tpl) => {
@@ -1004,8 +1008,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div class="seg plat-filter">
           <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
-          <button :class="{on:platFilter==='fb'}" @click="platFilter='fb'">Facebook</button>
-          <button :class="{on:platFilter==='tt'}" @click="platFilter='tt'">TikTok</button>
+          <button class="pf-fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="pf-dot fb"></span>Facebook</button>
+          <button class="pf-tt" :class="{on:platFilter==='tt'}" @click="platFilter='tt'"><span class="pf-dot tt"></span>TikTok</button>
         </div>
         <button class="btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
         <el-dropdown trigger="click" @command="p => openNew(p)">
@@ -1388,15 +1392,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="preview-link">{{ t('common.preview') }}</span>
           </div>
         </template>
-        <!-- 表单类（LEADS + Instant Forms；FB Instant Form 专属） -->
-        <template v-if="form.objective === 'OUTCOME_LEADS' && !isTt">
+        <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建） -->
+        <template v-if="form.objective === 'OUTCOME_LEADS'">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
           </div>
           <div class="row"><label>{{ t('launch.formTemplate') }}</label>
             <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
-              <el-option v-for="f in formTemplates" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
+              <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
             </el-select>
+            <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat') }}</span>
           </div>
           <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
             <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
@@ -1741,6 +1746,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .plat-ro.fb{color:#5aa2ff;border-color:rgba(24,119,242,.35);background:rgba(24,119,242,.08)}
 .plat-ro.tt{color:#ff6f8d;border-color:rgba(254,44,85,.35);background:rgba(254,44,85,.08)}
 .plat-filter button{flex:none}
+/* 平台筛选 chip 品牌样式：与全局平台上下文条同款（FB=品牌蓝 / TT=青粉） */
+.plat-filter button{display:inline-flex;align-items:center;gap:6px}
+.pf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--t3)}
+.pf-dot.fb{background:#1877f2}
+.pf-dot.tt{background:linear-gradient(135deg,#25f4ee 45%,#fe2c55 55%)}
+.plat-filter .pf-fb.on{background:rgba(24,119,242,.15);border-color:rgba(24,119,242,.55);color:#5aa2ff}
+.plat-filter .pf-tt.on{background:rgba(254,44,85,.12);border-color:rgba(254,44,85,.5);color:#ff6f8d}
 .tt-hint{font-size:11px;color:var(--t3);padding:6px 10px;background:var(--bg3);border-radius:6px;margin-bottom:10px;line-height:1.5}
 .reuse-selected{display:flex;align-items:center;gap:8px}
 .reuse-selected-block{display:flex;flex-direction:column;gap:6px}

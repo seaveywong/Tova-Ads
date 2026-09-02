@@ -593,8 +593,8 @@ const deleteToken = async (tk) => {
   <div class="page">
     <div class="bar">
       <div class="seg">
-        <button class="seg-btn" :class="{on:platform==='fb'}" @click="switchPlatform('fb')">Facebook</button>
-        <button class="seg-btn" :class="{on:platform==='tt'}" @click="switchPlatform('tt')">TikTok</button>
+        <button class="seg-btn seg-fb" :class="{on:platform==='fb'}" @click="switchPlatform('fb')"><span class="seg-dot fb"></span>Facebook</button>
+        <button class="seg-btn seg-tt" :class="{on:platform==='tt'}" @click="switchPlatform('tt')"><span class="seg-dot tt"></span>TikTok</button>
       </div>
       <div v-if="platform==='fb'" class="bar-r">
         <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
@@ -609,6 +609,8 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
+    <!-- FB/TT 分区面板：key 随分区切换重挂载，触发 .plat-pane 轻过渡 -->
+    <div :key="platform" class="plat-pane">
     <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
       <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
       <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接） -->
@@ -744,6 +746,7 @@ const deleteToken = async (tk) => {
         <div class="empty-step">③ {{ t('tokens.emptyStep3') }}</div>
         <button class="btn primary empty-cta-btn" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
       </div>
+    </div>
     </div>
 
     <el-drawer v-model="drawerOpen" :title="drawerTitle" direction="rtl" size="480px" :destroy-on-close="true">
@@ -974,9 +977,18 @@ const deleteToken = async (tk) => {
 .page{width:100%}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}
 .seg{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:3px}
-.seg-btn{padding:5px 16px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap}
-.seg-btn.on{background:var(--ac);color:#fff}
+.seg-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 16px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap}
+/* 分区选中态用品牌色（FB=品牌蓝 / TT=青粉），与全局平台上下文条同款语言 */
+.seg-btn.on{font-weight:600}
+.seg-btn.seg-fb.on{background:rgba(24,119,242,.15);color:#5aa2ff}
+.seg-btn.seg-tt.on{background:rgba(254,44,85,.12);color:#ff6f8d}
 .seg-btn:not(.on):hover{color:var(--t1)}
+.seg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--t3)}
+.seg-dot.fb{background:#1877f2}
+.seg-dot.tt{background:linear-gradient(135deg,#25f4ee 45%,#fe2c55 55%)}
+/* FB 表格 / TT 卡片分区切换轻过渡 */
+.plat-pane{animation:pane-in .18s ease}
+@keyframes pane-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .bar-r{display:flex;gap:8px}
 .risk-banner{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);cursor:pointer;margin-bottom:8px}
 .risk-banner:hover{background:rgba(255,159,10,.16)}

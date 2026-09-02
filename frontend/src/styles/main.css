@@ -100,6 +100,37 @@ a { color: var(--ac); text-decoration: none; }
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 
+/* ── 全局平台上下文条（MainLayout：topbar 正下方全宽，滚动时保持可见）──
+   左=PlatformSeg(bar) 切换，右=当前范围说明；全站唯一平台切换入口。 */
+.platform-context-bar {
+  position: sticky;
+  top: 0;
+  z-index: 150;           /* 低于 topbar(200)，高于页内 sticky 元素（Dashboard sticky-top=100） */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 24px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--bd);
+  flex-shrink: 0;
+}
+.pc-scope { margin-left: auto; font-size: 12px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 品牌语境顶线：选中 FB/TT 时应用顶端出现 2px 品牌色条（绑定在 main-area 上）。
+   ::before 绝对定位——不参与 flex 布局；z-index 300 高于 topbar(200)。 */
+.brand-topline-fb, .brand-topline-tt { position: relative; }
+.brand-topline-fb::before, .brand-topline-tt::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  z-index: 300;
+  pointer-events: none;
+}
+.brand-topline-fb::before { background: #1877f2; }
+.brand-topline-tt::before { background: linear-gradient(90deg, #25f4ee, #fe2c55); }
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -137,4 +168,7 @@ a { color: var(--ac); text-decoration: none; }
   .el-dialog { width: 92vw !important; max-width: 92vw !important; margin-top: 8vh !important; }
   /* 小点击目标放大到可点（>=32px） */
   .more-btn, .dots-btn, .mb, .allow-btn { min-height: 32px; min-width: 36px; }
+  /* 全局平台上下文条：移动端收窄（按钮文字保留） */
+  .platform-context-bar { min-height: 40px; padding: 0 12px; gap: 8px; }
+  .pc-scope { font-size: 11px; }
 }

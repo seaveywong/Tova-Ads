@@ -7,14 +7,16 @@ AI：从素材 AI 文案（headlines/bodies/受众）生成表单问题与 Messe
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import first_client
 from ..core.fb_client import FbApiError
-from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload, _CONTACT_FIELD_TYPES, default_contact_field
+from ..core.ad_builder import (build_lead_form_payload, lead_form_safe_payload,
+                               build_tt_lead_form_payload, tt_lead_form_id_from_result,
+                               _CONTACT_FIELD_TYPES, default_contact_field)
 from ..core.ai_client import AiClient, AiError
 from ..core.ai_purposes import AI_LANGUAGE_NAMES
 from ..models.lead_form_template import LeadFormTemplate, MessageTemplate
@@ -48,6 +50,7 @@ def _form_dict(t: LeadFormTemplate) -> dict:
         except: cfg = {}
     return {
         "id": t.id, "name": t.name, "description": t.description or "",
+        "platform": t.platform or "fb",
         "config": cfg, "fb_form_id": t.fb_form_id or "", "fb_page_id": t.fb_page_id or "",
         "locale": t.locale or "en_US", "status": t.status,
         "created_at": str(t.created_at) if t.created_at else "",
@@ -70,16 +73,28 @@ def _msg_dict(t: MessageTemplate) -> dict:
 class FormTemplateIn(BaseModel):
     name: str
     description: str = ""
+    platform: str = "fb"    # fb / tt（编辑器共用一套 config，部署时按平台构建 payload）
     config: dict = {}       # 完整表单配置（form_title/privacy_url/locale/custom_questions/...）
     locale: str = "en_US"
 
+    @field_validator("platform")
+    @classmethod
+    def _norm_platform(cls, v: str) -> str:
+        """平台白名单：只接受 fb/tt（脏值回落 fb——FB 是默认安全侧，与投放模板同款）。"""
+        v = (v or "fb").strip().lower()
+        return v if v in ("fb", "tt") else "fb"
+
 
 @router.get("/forms")
-def list_forms(user: CurrentUser = Depends(require_permission("ads.create")),
+def list_forms(platform: str = "", user: CurrentUser = Depends(require_permission("ads.create")),
                db: Session = Depends(get_db)):
-    rows = db.query(LeadFormTemplate).filter(
+    q = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.tenant_id == user.tenant_id, LeadFormTemplate.status != "archived"
-    ).order_by(LeadFormTemplate.id.desc()).all()
+    )
+    p = (platform or "").strip().lower()
+    if p in ("fb", "tt"):
+        q = q.filter(LeadFormTemplate.platform == p)
+    rows = q.order_by(LeadFormTemplate.id.desc()).all()
     return [_form_dict(t) for t in rows]
 
 
@@ -90,6 +105,7 @@ def save_form(body: FormTemplateIn,
     t = LeadFormTemplate(
         tenant_id=user.tenant_id, created_by=user.id,
         name=body.name, description=body.description,
+        platform=body.platform,
         config_json=json.dumps(body.config, ensure_ascii=False) if body.config else None,
         locale=body.locale or "en_US", status="active",
     )
@@ -120,6 +136,7 @@ def update_form(fid: int, body: FormTemplateIn,
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    # platform 建后不可改（create-time 选择）：缓存 form_id 绑定平台，改平台=换一套 API 语义
     t.name = body.name; t.description = body.description; t.locale = body.locale
     new_cfg = json.dumps(body.config, ensure_ascii=False) if body.config else None
     if _config_hash(new_cfg) != (t.config_hash or ""):
@@ -152,10 +169,53 @@ def delete_form(fid: int, user: CurrentUser = Depends(require_permission("ads.cr
 def deploy_form(fid: int, body: dict,
                 user: CurrentUser = Depends(require_permission("ads.create")),
                 db: Session = Depends(get_db)):
-    """建表单到 FB（page_id 必传）→ 存 fb_form_id。已建的直接返回。"""
+    """建表单到平台载体（FB=page_id / TT=advertiser_id 必传）→ 存 form_id。已建的直接返回。"""
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    # ── TikTok Instant Form：建到 TT 广告主（lead/form/create/，sandbox 校准点）──
+    # fb_form_id/fb_page_id 复用为通用缓存（TT 存 form_id/advertiser_id）
+    if (t.platform or "fb") == "tt":
+        adv_id = str(body.get("advertiser_id", "")).strip()
+        if not adv_id: raise HTTPException(400, "advertiser_id 必填")
+        if t.fb_form_id and t.fb_page_id == adv_id and t.config_hash == _config_hash(t.config_json):
+            return {"form_id": t.fb_form_id, "reused": True}
+        cfg = {}
+        if t.config_json:
+            try: cfg = json.loads(t.config_json)
+            except: cfg = {}
+        from ..core.fb_tokens import tt_client_for_account
+        from ..core.tt_client import TtApiError as _TtApiError
+        tt, _cred = tt_client_for_account(db, user.tenant_id, adv_id, "write")
+        if not tt: raise HTTPException(400, "未绑定 TikTok 令牌")
+        try:
+            payload = build_tt_lead_form_payload(
+                form_title=cfg.get("form_title", t.name),
+                privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                target_countries=cfg.get("target_countries", []),
+                description=cfg.get("description", ""),
+                custom_questions=cfg.get("custom_questions", []),
+                extra_contact_fields=cfg.get("extra_contact_fields", ["EMAIL"]),
+                thank_you_title=cfg.get("thank_you_title", ""),
+                thank_you_body=cfg.get("thank_you_body", ""),
+                name_prefix="Tova",
+            )
+            result = tt.post("lead/form/create/", {**payload, "advertiser_id": adv_id})
+        except _TtApiError as e:
+            raise HTTPException(400, f"表单创建失败：{e.friendly}")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        form_id = tt_lead_form_id_from_result(result)
+        if not form_id: raise HTTPException(400, f"TT 未返回 form_id：{str(result)[:200]}")
+        t.fb_form_id = form_id; t.fb_page_id = adv_id
+        t.config_hash = _config_hash(t.config_json)
+        write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id, target_type="leadgen_form", target_id=form_id,
+                  action_type="create", source="tt_api", result="success",
+                  metadata={"advertiser_id": adv_id, "template_id": fid})
+        db.commit()
+        return {"form_id": form_id, "reused": False}
+    # ── FB Instant Form 原路（零改动）──
     page_id = body.get("page_id", "")
     if not page_id: raise HTTPException(400, "page_id 必填")
     # 已部署到同 page 且 config 未变 → 复用（config 变了必须重建，否则用户改了问题拿到的还是旧表单）
