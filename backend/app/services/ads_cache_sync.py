@@ -56,6 +56,12 @@ def run_ads_cache_sync():
                 emit_notification(db, tenant_id=tid, level="warning",
                                   event_type="sync_stalled",
                                   title=_title, body=_body)
+                # dedup_recent 查 action_logs——emit 后必须写 log，下次才会命中去重
+                from ..core.log_utils import write_log, new_trace_id
+                write_log(db, tenant_id=tid, trace_id=new_trace_id(),
+                          actor_type="system", target_type="sync", target_id="ads_cache",
+                          action_type="sync_stalled", source="ads_cache_sync",
+                          result="fail", trigger_detail=f"no-token accounts: {n}")
                 db.commit()
         return {"updated": updated}
     except Exception as e:
