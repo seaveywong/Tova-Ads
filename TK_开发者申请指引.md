@@ -10,7 +10,10 @@
 
 1. 浏览器打开 `https://business-api.tiktok.com/portal`
 2. 用你现有的 TikTok 广告账户（Ads Manager）账号登录——**用同一主体/邮箱**，后续 app 与广告账户关联最顺
-3. 填开发者资料：公司/主体名称（可填你的个体户主体或 tovaads 运营实体）、联系邮箱、网址（可填 `https://tovaads.com`）
+3. 填开发者资料：
+   - 公司/主体名称：**乳源瑶族自治县星航互动传媒店**（必须与 TT 广告账户主体一致，不一致会被拒；可能要求上传营业执照）
+   - 联系邮箱：**dev@tovaads.com**（2026-09-03 起邮箱转发已通，验证邮件自动转到你的 Gmail——填个人邮箱容易被判非企业）
+   - 网址：`https://tovaads.com`（company 页就是为企业认证准备的）
 4. 邮箱验证 → 进入 portal
 
 **注意**：调研中「大陆主体准入」没有找到成文规定。你已经开通过 TT 广告账户说明主体本身能过；若开发者注册被拒，联系你的 TT 出海代理/客户经理加白（这是最快路径）。
@@ -19,6 +22,8 @@
 
 1. portal → **Apps** → **Create App**（或 "Connect an app"）
 2. 填：App name（如 `TovaAds`）、描述（广告管理工具：管理 campaign/报表/素材）、行业类别选 Marketing/Advertising 相关
+   - **用途描述（英文，直接粘贴）**：
+     > Our SaaS platform helps advertisers manage their own TikTok ad accounts. Via OAuth-authorized access, we use the Marketing API to sync campaign performance reports (spend, impressions, clicks, conversions), create/edit/pause ads and adjust budgets at the owner's instruction, upload creative assets, and run advertiser-configured automated optimization rules. No user data is collected; all data belongs to the authorizing advertiser.
 3. 创建后进 App 详情页，记下：
    - **App ID**（数字）
    - **App Secret**（Show 后复制，只显示一次，存好）
@@ -35,9 +40,20 @@ App 详情 → **Login products / OAuth** 配置：
 
 ## 第 4 步：申请 Marketing API 权限（审核 1-2 周）
 
-App 详情 → **Apply for products / permissions**：
-- 勾选 **Marketing API**（含：广告管理 Campaign management、报表 Reporting、账户管理 Account management、素材管理）
-- 有分级（basic → more access）：先申请基础级，够 MVP 用（建广告/拉报表/传素材）
+App 详情 → **Apply for products / permissions**，产品列表**只勾这 6 个**（对应我们已实现的功能；少选=审核快=被拒率低）：
+
+| ✅ 勾 | 产品 | 用途 |
+|---|---|---|
+| ✅ | 广告账号管理 | OAuth 授权、载入 advertiser |
+| ✅ | 广告管理 | 建/改/停广告、预算、删除 |
+| ✅ | 数据报表 | 消耗/转化回拉（看板+巡检）|
+| ✅ | 创意管理 | 素材上传拿 file_id |
+| ✅ | 受众管理 | 定向受众 |
+| ✅ | Pixel 管理 | 像素 + Events API（确认 Events 能力含在此下，不含则单独勾）|
+
+**不勾**：自动规则（我们有自己的守护引擎，平台原生规则做不了跨平台/落地页数据/学习期保护，且双系统混乱）、DPA 商品库、Reach & Frequency、潜在客户管理（TT 表单将来接了再补申）、应用管理、Payment、TTO/Creator、其余全部。将来要新的随时追加申请，不影响已批的。
+
+- 有分级（basic → more access）：先申请基础级，够 MVP 用
 - 提交后等审——**期间 sandbox 权限已可用，开发照常进行**
 
 ## 第 5 步：Events Manager（Events API 前置，可与审核并行）
