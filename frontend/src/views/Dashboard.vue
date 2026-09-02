@@ -13,7 +13,6 @@ import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
-import PlatformSeg from '../components/PlatformSeg.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -841,7 +840,6 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <!-- 工具栏（sticky 两行）：① 平台分段 + 系统时间 ② 日期预设 + 转化分类 + 账户多选 -->
     <div class="toolbar">
       <div class="tb-row tb-plat">
-        <PlatformSeg v-model="platform" />
         <div class="sys-info">
           <span v-if="lastInspectedDisplay" class="sync-time hide-m">{{ t('dashboard.lastInspect') }} {{ lastInspectedDisplay }}</span>
           <span v-if="sysTimesTitle" class="sync-time only-m sys-times" :title="sysTimesTitle"><el-icon><Clock /></el-icon></span>
@@ -1222,7 +1220,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .head-btn.force:disabled { opacity: .6; }
 
 /* ── 工具栏（sticky，两行分组）：① 平台+系统时间（底色略深）② 日期+筛选 ── */
-.toolbar { position: sticky; top: 0; z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
+.toolbar { position: sticky; top: var(--plat-bar-h, 44px); z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
 .tb-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
 .tb-row.tb-plat { background: var(--bg2); }
 .tb-row.tb-filters { border-top: 1px solid var(--bd); }

@@ -105,7 +105,8 @@ a { color: var(--ac); text-decoration: none; }
 .platform-context-bar {
   position: sticky;
   top: 0;
-  z-index: 150;           /* 低于 topbar(200)，高于页内 sticky 元素（Dashboard sticky-top=100） */
+  z-index: 160;           /* 高于页内一切 sticky（Dashboard 工具栏 100/表头 1） */
+  --plat-bar-h: 44px;     /* 页内 sticky 元素用 top:var(--plat-bar-h) 让位（媒体查询覆盖 40px） */           /* 低于 topbar(200)，高于页内 sticky 元素（Dashboard sticky-top=100） */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -169,6 +170,6 @@ a { color: var(--ac); text-decoration: none; }
   /* 小点击目标放大到可点（>=32px） */
   .more-btn, .dots-btn, .mb, .allow-btn { min-height: 32px; min-width: 36px; }
   /* 全局平台上下文条：移动端收窄（按钮文字保留） */
-  .platform-context-bar { min-height: 40px; padding: 0 12px; gap: 8px; }
+  .platform-context-bar { min-height: 40px; padding: 0 12px; gap: 8px; --plat-bar-h: 40px; }
   .pc-scope { font-size: 11px; }
 }
