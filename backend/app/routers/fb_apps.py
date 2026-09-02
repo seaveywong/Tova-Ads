@@ -115,6 +115,8 @@ def update_app(
         db.commit()
     from ..core.webhook_config import invalidate_app_secret_cache
     invalidate_app_secret_cache()
+    if app.tenant_id is None:
+        db.refresh(app)  # 系统行走 sdb 提交，app 是本 session 旧对象——重读拿新值
     return _app_dict(app)
 
 

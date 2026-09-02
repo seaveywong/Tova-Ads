@@ -158,7 +158,7 @@ def _ad_act_lookup(db: Session, tenant_id: int) -> dict:
             for _a in json.loads(cr.ads_json or "[]"):
                 _aid = str(_id_of(_a.get("id")) if isinstance(_a, dict) else _a.get("id"))
                 if _aid:
-                    m[_aid] = cr.act_id
+                    m[_aid] = (cr.act_id, cr.platform or "fb")  # 带 platform：诊断反查账户时消歧
         except Exception:
             continue
     _AD_ACT_MAP[tenant_id] = (now, m)
@@ -690,13 +690,15 @@ def diagnose_ad(
 
     # 1. 找到这个广告属于哪个账户（反查表 5min 缓存——原每次诊断 json.loads 全部账户 ads_json）
     _ad_short = ad_id.replace("act_", "").strip()
-    _act_id = _ad_act_lookup(db, user.tenant_id).get(_ad_short) or \
-              _ad_act_lookup(db, user.tenant_id).get(ad_id)
-    if not _act_id:
+    _hit = _ad_act_lookup(db, user.tenant_id).get(_ad_short) or \
+           _ad_act_lookup(db, user.tenant_id).get(ad_id)
+    if not _hit:
         raise HTTPException(404, "广告不在缓存中，请先刷新广告列表")
+    _act_id, _cache_plat = _hit  # (act_id, platform)——同 act_id 双平台可共存
 
     acc = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == _act_id,
+        Account.platform == _cache_plat,
         Account.is_managed.is_(True)).first()
     if not acc:
         raise HTTPException(404, "账户未纳管或已移除")

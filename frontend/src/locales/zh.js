@@ -747,6 +747,7 @@ export default {
     emDnsReady: 'DNS 已就绪',
     emDnsMissing: '缺 {n} 条 DNS 记录',
     emEnableBtn: '启用并自动配置 DNS',
+    emFixDnsBtn: '补齐缺失的 DNS 记录',
     emEnabling: '启用中…',
     emEnabledMsg: 'Email Routing 已启用，补了 {n} 条 DNS 记录',
     emEnableHint: '启用需要 3 条 MX + 1 条 SPF TXT 记录，会自动对比现有 DNS 并只补缺失的。',

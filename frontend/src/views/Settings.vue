@@ -696,8 +696,8 @@ const runKeepaliveNow = async () => {
         <span v-if="em.status === 'enabled'" class="wh-chip" :class="em.dns_ready ? 'ok' : 'warn'">
           {{ em.dns_ready ? t('settings.emDnsReady') : t('settings.emDnsMissing', { n: (em.missing_dns || []).length }) }}
         </span>
-        <button v-if="em.status !== 'enabled'" class="btn em-inline-btn" :disabled="emEnabling || emLoading" @click="enableEmailRouting">
-          {{ emEnabling ? t('settings.emEnabling') : t('settings.emEnableBtn') }}
+        <button v-if="em.status !== 'enabled' || (em.missing_dns || []).length" class="btn em-inline-btn" :disabled="emEnabling || emLoading" @click="enableEmailRouting">
+          {{ emEnabling ? t('settings.emEnabling') : (em.status === 'enabled' ? t('settings.emFixDnsBtn') : t('settings.emEnableBtn')) }}
         </button>
         <button class="btn em-inline-btn" :disabled="emLoading" @click="loadEmailRouting">{{ t('common.refresh') }}</button>
       </div>

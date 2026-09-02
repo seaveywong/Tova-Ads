@@ -369,8 +369,11 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                 _st["errors"].append(f"{acc.name}: 同步失败({str(e)[:40]})，用旧缓存")
 
             # ② 从最新缓存拿 ACTIVE 广告
+            # platform=fb：0081 唯一键含 platform 后同 act_id 双平台行可共存，
+            # 漏过滤会拿到 TT 行→FB client 去停 TT 广告 id→真 FB 广告漏停
             cache = db.query(AdsCache).filter(
-                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id).first()
+                AdsCache.tenant_id == tenant_id, AdsCache.act_id == acc.act_id,
+                AdsCache.platform == "fb").first()
             if not cache:
                 _st["errors"].append(f"{acc.name}: 无广告缓存")
                 continue

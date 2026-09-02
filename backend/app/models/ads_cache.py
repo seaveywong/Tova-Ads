@@ -4,7 +4,7 @@ from ..core.database import Base
 
 
 class AdsCache(Base):
-    """每账户一行（tenant_id+act_id 唯一），JSON 存三层广告实体。"""
+    """每账户每平台一行（tenant_id+act_id+platform 唯一，迁移 0081），JSON 存三层广告实体。"""
     __tablename__ = "ads_cache"
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)

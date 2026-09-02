@@ -655,7 +655,10 @@ def delete_email_destination(address_id: str, user: CurrentUser = Depends(requir
         func.lower(EmailRoute.destination_email) == email).count()
     if used:
         raise HTTPException(400, "该邮箱已被转发映射引用，请先删除对应映射")
-    cf.delete_email_address(zid, address_id)
+    try:
+        cf.delete_email_address(zid, address_id)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)[:300])
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
               action_type="delete", source="user", result="success",

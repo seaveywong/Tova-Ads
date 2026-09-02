@@ -150,6 +150,10 @@ ERROR_ZH_EN: dict[str, str] = {
 
     # ---- settings.py / 邮箱转发（CF Email Routing）----
     "配置值不能包含换行": "Config value must not contain line breaks",
+    "CF 未配置，请先在「域名服务配置」填 Token 和账户 ID": (
+        "Cloudflare is not configured; fill in the token and account ID under "
+        "'Domain Service Configuration' first"
+    ),
     "CF 上找不到平台域名的 Zone（域名须托管在 CF，或主 Token 缺 Zone:Read 权限——可先用主 Token 访问一次邮箱转发页自动缓存）": (
         "Cloudflare Zone for the platform domain not found (domain must be hosted on CF, or the "
         "main token lacks Zone:Read — visit the Email Forwarding page once with the main token "

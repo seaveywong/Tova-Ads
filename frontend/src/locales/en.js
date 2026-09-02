@@ -736,6 +736,7 @@ export default {
     emDnsReady: 'DNS ready',
     emDnsMissing: '{n} DNS records missing',
     emEnableBtn: 'Enable & auto-configure DNS',
+    emFixDnsBtn: 'Fix missing DNS records',
     emEnabling: 'Enabling…',
     emEnabledMsg: 'Email Routing enabled, {n} DNS records added',
     emEnableHint: 'Enabling requires 3 MX + 1 SPF TXT records; existing DNS is compared and only missing ones are added.',

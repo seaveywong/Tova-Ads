@@ -321,7 +321,10 @@ class CfClient:
                          headers=self.headers, timeout=30)
         if r.status_code == 404:
             return False  # 本来就没有
-        return r.json().get("success", False)
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if not data.get("success"):
+            raise RuntimeError(f"CF 删除目的地邮箱失败: {data.get('errors') or r.status_code}")
+        return True
 
     def list_email_rules(self, zone_id: str) -> list:
         """转发规则列表。"""
@@ -372,8 +375,11 @@ class CfClient:
         r = httpx.delete(f"{CF_API_BASE}/zones/{zone_id}/email/routing/rules/{rule_id}",
                          headers=self.headers, timeout=30)
         if r.status_code == 404:
-            return False
-        return r.json().get("success", False)
+            return False  # 本来就没有
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if not data.get("success"):
+            raise RuntimeError(f"CF 删除转发规则失败: {data.get('errors') or r.status_code}")
+        return True
 
     def unbind_custom_domain(self, project_name: str, domain: str) -> bool:
         """解绑 Pages 自定义域名（改前缀/移除域名时清理旧子域名残留）。
