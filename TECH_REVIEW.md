@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-09-04 — 落地页整套集成验证（拖欠项 #25/#187 关闭）+ app 域上线 + 官网备用
+
+### 概述
+用户 /goal「打磨完善，不改功能可回退」。三件事：①app.tovaads.com 管理界面上线（CORS+Pages 域）②官网建好停临时域（FB 审核后绑定，暂缓决策）③落地页 E2E 13/13 全通（产品代码零改动，纯验证+清理）。
+
+### 落地页 E2E 结论（13/13 ✅，生产实测）
+建页→CF发布(21s)→DB落库(FB+TT双像素)→可达(预览令牌200+双像素注入)→防护拦截(302→block_target 按设计)→子码生成+router/next(目标+子码级像素)→防护6画像(拦2/6)→自检矩阵(9/10 pass)→落地日志(入库+归因)→编辑重发布(18.5s)→预览模式(开关+令牌)→归档→清理。
+
+**三个假警报（查明均非产品 bug，是测试方法问题）**：
+1. SSL handshake failure = 每部署子域证书签发时序（部署后秒级探测）
+2. HTTP 404 = **防护正确拦截**——机房 IP 国家不在白名单 → 302 → block_target(example.com/blocked 404)
+3. 预览 404 = preview_enabled 未开（按设计令牌失效）
+
+### 清理（顺手修复的存量问题）
+- 5 个孤儿 CF 项目 tovaads-landing-11~15（历史 E2E 残留）+ 4 条 lp12-15.marketbriefnow.xyz DNS 记录
+- DB 垃圾页 #7（ZZZ-AUDIT-TEST）/ #10（_verify187 残留）+ 测试子码 3 条 + 测试事件 8 条
+- 最终状态：仅产品页 #6(RH-Signals, published) + 归档测试页 #15
+
+### app.tovaads.com 上线（零影响验证过）
+Pages 项目 tovaads 加自定义域+CNAME；后端 CORS 加新域（commit 前文）。FB 三登记 URL（回调=api 域/App Domains/隐私政策）零改动。官网已建好停 tovaads-site.pages.dev 待 FB 审核全过后绑定（决策存档 memory domain-architecture-decisions）。
+
+---
+
 ## 2026-09-03（二）— 两轮复审：断层与假实现清剿
 
 ### 概述
