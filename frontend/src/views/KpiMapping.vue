@@ -56,6 +56,7 @@ const resetDefault = async () => {
 
     <div v-loading="loading">
       <div v-if="tab==='matrix'" class="tab-content">
+        <div class="plat-head"><span class="plat-dot fb"></span>Facebook</div>
         <div v-if="!hasMatrix" class="empty-state">{{ t('kpi.matrixEmpty') }}</div>
         <div v-for="(items, obj) in matrixGrouped" :key="obj" class="obj-group">
           <div class="obj-head">{{ obj }}</div>
@@ -66,9 +67,11 @@ const resetDefault = async () => {
             <span class="field-label">{{ item.label }}</span>
           </div>
         </div>
+        <div class="hint tt-note">{{ t('kpi.ttNoMatrix') }}</div>
       </div>
 
       <div v-if="tab==='objective'" class="tab-content">
+        <div class="plat-head"><span class="plat-dot fb"></span>Facebook</div>
         <div v-for="(v, k) in mapping?.by_objective" :key="k" class="kv-readonly">
           <span class="kv-key">{{ k }}</span>
           <span class="arrow">→</span>
@@ -76,7 +79,7 @@ const resetDefault = async () => {
           <span class="kv-label">{{ FIELD_LABEL(v) }}</span>
         </div>
         <!-- TikTok 目标映射（tt_by_objective；TT 巡检转化口径）-->
-        <div class="obj-head" style="margin-top:18px">TikTok</div>
+        <div class="plat-head" style="margin-top:20px"><span class="plat-dot tt"></span>TikTok</div>
         <div class="hint" style="margin-bottom:8px">{{ t('kpi.ttObjectiveHint') }}</div>
         <div v-for="(v, k) in mapping?.tt_by_objective" :key="k" class="kv-readonly">
           <span class="kv-key">{{ k }}</span>
@@ -87,19 +90,23 @@ const resetDefault = async () => {
       </div>
 
       <div v-if="tab==='fallback'" class="tab-content">
+        <div class="plat-head"><span class="plat-dot fb"></span>Facebook</div>
         <div class="hint">{{ t('kpi.fallbackHint') }}</div>
         <div v-for="(f, i) in mapping?.fallback_priority" :key="i" class="list-item">
           <span class="num">{{ i + 1 }}</span>
           <span class="field">{{ f }}</span>
           <span class="field-label">{{ FIELD_LABEL(f) }}</span>
         </div>
+        <div class="hint tt-note">{{ t('kpi.ttNoFallback') }}</div>
       </div>
 
       <div v-if="tab==='poor'" class="tab-content">
+        <div class="plat-head"><span class="plat-dot fb"></span>Facebook</div>
         <div class="hint">{{ t('kpi.poorHint') }}</div>
         <div class="tag-cloud">
           <span v-for="f in mapping?.poor_fallback_types" :key="f" class="poor-tag">{{ f }}</span>
         </div>
+        <div class="hint tt-note">{{ t('kpi.ttNoPoor') }}</div>
       </div>
 
       <div v-if="tab==='labels'" class="tab-content">
@@ -117,6 +124,11 @@ const resetDefault = async () => {
 <style scoped>
 .page{width:100%}
 .tabs{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.plat-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--t2);margin-bottom:10px}
+.plat-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.plat-dot.fb{background:#1877f2}
+.plat-dot.tt{background:linear-gradient(135deg,#25f4ee 45%,#fe2c55 55%)}
+.tt-note{margin-top:16px;padding-top:10px;border-top:1px dashed var(--bd)}
 .tab{padding:6px 12px;border:1px solid var(--bd);background:var(--bg2);color:var(--t2);border-radius:6px;font-size:12px;cursor:pointer}
 .tab.on{background:var(--acg);color:var(--ac);border-color:var(--ac)}
 .reset-btn{margin-left:auto;padding:6px 12px;border:1px solid var(--error);background:transparent;color:var(--error);border-radius:6px;font-size:12px;cursor:pointer}
