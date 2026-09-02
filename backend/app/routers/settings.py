@@ -292,6 +292,15 @@ def get_cf_config(user: CurrentUser = Depends(require_superadmin)):
     }
 
 
+def _clean_token(v: str) -> str:
+    """token/ID 清洗：去首尾空白 + 去成对包裹引号（复制粘贴常带）。"""
+    v = (v or "").strip()
+    for q in ('"', "'"):
+        if len(v) >= 2 and v.startswith(q) and v.endswith(q):
+            v = v[1:-1].strip()
+    return v
+
+
 @router.put("/cf")
 def set_cf_config(body: CfConfigIn, user: CurrentUser = Depends(require_superadmin)):
     """更新 CF 配置 → 写 .env + 更新运行时 settings（即时生效，免重启）。"""
@@ -300,11 +309,11 @@ def set_cf_config(body: CfConfigIn, user: CurrentUser = Depends(require_superadm
     lines = env_path.read_text().splitlines() if env_path.exists() else []
     updates = {}
     if body.cf_api_token:
-        updates["CF_API_TOKEN"] = body.cf_api_token
+        updates["CF_API_TOKEN"] = _clean_token(body.cf_api_token)
     if body.cf_account_id:
-        updates["CF_ACCOUNT_ID"] = body.cf_account_id
+        updates["CF_ACCOUNT_ID"] = _clean_token(body.cf_account_id)
     if body.cf_email_token:
-        _set_sys_setting("cf_email_token", body.cf_email_token.strip())  # SystemSetting（不入 .env）
+        _set_sys_setting("cf_email_token", _clean_token(body.cf_email_token))  # SystemSetting（不入 .env）
     if not updates:
         return {"saved": False, "detail": "无变更"}
     updated_lines, found = [], set()
@@ -445,8 +454,10 @@ def _em_ctx() -> tuple[CfClient, str, str]:
     """邮箱转发专用 CfClient：优先用户级 cf_email_token（Email Routing 的地址/规则
     端点只支持用户级 token；账户级 cfat_ 会 404/10405），无则回退主 token（能做
     启用/DNS，做不了地址/规则）。"""
-    acct = os.environ.get("CF_ACCOUNT_ID") or settings.cf_account_id
-    token = _get_sys_setting("cf_email_token") or os.environ.get("CF_API_TOKEN") or settings.cf_api_token
+    acct = _clean_token(os.environ.get("CF_ACCOUNT_ID") or settings.cf_account_id or "")
+    token = _clean_token(_get_sys_setting("cf_email_token")
+                         or os.environ.get("CF_API_TOKEN")
+                         or settings.cf_api_token or "")
     if not token or not acct:
         raise HTTPException(500, "CF 未配置，请先在「域名服务配置」填 Token 和账户 ID")
     cf = CfClient(token, acct)
