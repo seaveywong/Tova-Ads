@@ -463,10 +463,16 @@ def _em_ctx() -> tuple[CfClient, str, str]:
     cf = CfClient(token, acct)
     domain = _em_domain()
     # zone_id 优先取缓存（查 zone 需要 Zone:Read——用户级邮箱 token 通常没配这个，
-    # 但 Email Routing 端点只需要 zone_id 在 URL 路径里，不需要 Zone:Read）
-    zid = _get_sys_setting(f"cf_zone_id_{domain}")
+    # 但 Email Routing 端点只需要 zone_id 在 URL 路径里，不需要 Zone:Read）。
+    # 读取时同样清洗（历史上缓存里进过带引号的脏值）。
+    zid = _clean_token(_get_sys_setting(f"cf_zone_id_{domain}") or "")
     if not zid:
         zid = cf.get_zone_id(domain)
+        if not zid:
+            # 邮箱令牌缺 Zone:Read 时用主令牌兜底查一次（查到即缓存，之后不再依赖）
+            main_tok = _clean_token(os.environ.get("CF_API_TOKEN") or settings.cf_api_token or "")
+            if main_tok and main_tok != token:
+                zid = CfClient(main_tok, acct).get_zone_id(domain)
         if zid:
             _set_sys_setting(f"cf_zone_id_{domain}", zid)  # 缓存，后续 token 不再需要 Zone:Read
     if not zid:
@@ -557,10 +563,15 @@ def get_email_routing(user: CurrentUser = Depends(require_superadmin),
 @router.post("/email-routing/enable")
 def enable_email_routing(user: CurrentUser = Depends(require_superadmin),
                          db: Session = Depends(get_system_db)):
-    """启用 Email Routing + 自动补缺失 DNS（MX/TXT；域名 DNS 在 CF 托管可自动写）。"""
+    """启用 Email Routing + 自动补缺失 DNS（MX/TXT；域名 DNS 在 CF 托管可自动写）。
+
+    enable 端点对邮箱专用令牌 403（10000，实测 2026-09-03）——走主令牌客户端；
+    后续 DNS 补齐用邮箱令牌（有 DNS Write）即可。"""
     cf, zid, domain = _em_ctx()
+    main_tok = _clean_token(os.environ.get("CF_API_TOKEN") or settings.cf_api_token or "")
     try:
-        cf.enable_email_routing(zid)
+        (CfClient(main_tok, os.environ.get("CF_ACCOUNT_ID") or settings.cf_account_id)
+         if main_tok else cf).enable_email_routing(zid)
     except RuntimeError as e:
         raise HTTPException(502, str(e)[:300])
     added = 0
@@ -720,7 +731,8 @@ def toggle_email_route(route_id: int, body: EmailRoutePatch,
               action_type="update", source="user", result="success",
               metadata={"alias": row.alias, "enabled": body.enabled})
     db.commit()
-    return {"id": row.id, "alias": row.alias, "enabled": bool(row.enabled)}
+    return {"id": row.id, "alias": row.alias, "enabled": bool(row.enabled),
+            "cf_enabled": body.enabled if row.rule_id else None}
 
 
 @router.delete("/email-routing/routes/{route_id}")
