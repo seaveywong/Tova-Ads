@@ -234,10 +234,37 @@ def test_ai(vision: bool = False, user: CurrentUser = Depends(require_superadmin
         return {"ok": False, "detail": str(e)[:120]}
 
 
+def _get_sys_setting(key: str) -> str | None:
+    from ..models.system import SystemSetting
+    from ..core.database import SuperSessionLocal
+    sdb = SuperSessionLocal()
+    try:
+        row = sdb.query(SystemSetting).filter(SystemSetting.key == key).first()
+        return (row.value or "").strip().strip('"') if row and row.value else None
+    finally:
+        sdb.close()
+
+
+def _set_sys_setting(key: str, value: str) -> None:
+    from ..models.system import SystemSetting
+    from ..core.database import SuperSessionLocal
+    sdb = SuperSessionLocal()
+    try:
+        row = sdb.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if row:
+            row.value = json.dumps(value)
+        else:
+            sdb.add(SystemSetting(key=key, value=json.dumps(value)))
+        sdb.commit()
+    finally:
+        sdb.close()
+
+
 # ── CF 配置（超管）──
 class CfConfigIn(BaseModel):
     cf_api_token: str = ""
     cf_account_id: str = ""
+    cf_email_token: str = ""  # 用户级 token（Email Routing 地址/规则管理专用，可选）
 
 
 @router.get("/cf")
@@ -245,10 +272,14 @@ def get_cf_config(user: CurrentUser = Depends(require_superadmin)):
     """返回当前 CF 配置（token 脱敏）。"""
     token = settings.cf_api_token or ""
     masked = token[:6] + "***" + token[-4:] if len(token) > 10 else ("***" if token else "")
+    etok = _get_sys_setting("cf_email_token") or ""
+    emasked = etok[:6] + "***" + etok[-4:] if len(etok) > 10 else ("***" if etok else "")
     return {
         "cf_api_token_masked": masked,
         "cf_api_token_set": bool(token),
         "cf_account_id": settings.cf_account_id or "",
+        "cf_email_token_masked": emasked,
+        "cf_email_token_set": bool(etok),
     }
 
 
@@ -263,6 +294,8 @@ def set_cf_config(body: CfConfigIn, user: CurrentUser = Depends(require_superadm
         updates["CF_API_TOKEN"] = body.cf_api_token
     if body.cf_account_id:
         updates["CF_ACCOUNT_ID"] = body.cf_account_id
+    if body.cf_email_token:
+        _set_sys_setting("cf_email_token", body.cf_email_token.strip())  # SystemSetting（不入 .env）
     if not updates:
         return {"saved": False, "detail": "无变更"}
     updated_lines, found = [], set()
@@ -400,9 +433,11 @@ def _em_domain() -> str:
 
 
 def _em_ctx() -> tuple[CfClient, str, str]:
-    """(CfClient, zone_id, domain)。CF 未配置 / zone 不存在 → HTTPException。"""
-    token = os.environ.get("CF_API_TOKEN") or settings.cf_api_token
+    """邮箱转发专用 CfClient：优先用户级 cf_email_token（Email Routing 的地址/规则
+    端点只支持用户级 token；账户级 cfat_ 会 404/10405），无则回退主 token（能做
+    启用/DNS，做不了地址/规则）。"""
     acct = os.environ.get("CF_ACCOUNT_ID") or settings.cf_account_id
+    token = _get_sys_setting("cf_email_token") or os.environ.get("CF_API_TOKEN") or settings.cf_api_token
     if not token or not acct:
         raise HTTPException(500, "CF 未配置，请先在「域名服务配置」填 Token 和账户 ID")
     cf = CfClient(token, acct)
@@ -422,10 +457,14 @@ def _addr_verified(a: dict) -> bool:
 
 
 def _dns_key(rec: dict) -> tuple:
-    """DNS 记录比对键（type+name+content 归一：大小写/尾点不敏感）。"""
+    """DNS 记录比对键（type+name+content 归一：大小写/尾点/引号不敏感）。
+    TXT 超 255 字符时 zone 里是两段带引号拼接（\"...\" \"...\"），而
+    get_email_dns 返回连续串——剥掉全部引号+内部空白后比对才命中。"""
+    content = str(rec.get("content", "")).rstrip(".").lower().strip()
+    content = content.replace('"', " ").replace(" ", "")
     return (str(rec.get("type", "")).upper().strip(),
             str(rec.get("name", "")).rstrip(".").lower().strip(),
-            str(rec.get("content", "")).rstrip(".").lower().strip())
+            content)
 
 
 def _em_missing_dns(cf: CfClient, zid: str) -> list:
@@ -449,15 +488,32 @@ def get_email_routing(user: CurrentUser = Depends(require_superadmin),
     """CF 实时状态（routing 状态/DNS 缺口/目的地邮箱）+ 本地映射 join CF 规则启停。"""
     cf, zid, domain = _em_ctx()
     routing = cf.get_email_routing(zid) or {}
-    status = routing.get("status") or "unconfigured"
+    # CF status: uninitialized/unconfigured/ready/enabled/disabled——ready 即已启用且 DNS 就绪
+    raw_status = routing.get("status") or "unconfigured"
+    status = "enabled" if raw_status == "ready" else raw_status
     missing = _em_missing_dns(cf, zid) if status in ("enabled", "disabled") else []
-    addresses = cf.list_email_addresses(zid) if status in ("enabled", "disabled") else []
-    cf_rules = {r.get("id"): r for r in cf.list_email_rules(zid)} if status == "enabled" else {}
+    # 地址/规则端点只支持用户级 token——账户级会 404/10405（非 JSON 响应→JSONDecodeError）
+    token_ok = True
+    addresses: list = []
+    cf_rules: dict = {}
+    if status in ("enabled", "disabled"):
+        try:
+            addresses = cf.list_email_addresses(zid)
+        except Exception as e:
+            token_ok = _get_sys_setting("cf_email_token") is not None  # 已配用户级仍失败=真错
+            if token_ok:
+                raise HTTPException(502, f"CF 读取目的地邮箱失败：{str(e)[:150]}")
+        if status == "enabled" and token_ok:
+            try:
+                cf_rules = {r.get("id"): r for r in cf.list_email_rules(zid)}
+            except Exception as e:
+                raise HTTPException(502, f"CF 读取转发规则失败：{str(e)[:150]}")
     rows = db.query(EmailRoute).order_by(EmailRoute.alias).all()
     return {
         "domain": domain,
         "status": status,
         "dns_ready": status == "enabled" and not missing,
+        "token_ok": token_ok,
         "missing_dns": [{"type": m.get("type"), "name": m.get("name"), "content": m.get("content")}
                         for m in missing],
         "addresses": [{"id": a.get("id"), "email": a.get("email"), "verified": _addr_verified(a)}
@@ -484,6 +540,10 @@ def enable_email_routing(user: CurrentUser = Depends(require_superadmin),
                                     "proxied": bool(rec.get("proxied", False))})
             added += 1
         except RuntimeError as e:
+            # 幂等：CF 81058=identical record already exists（比对归一后仍可能因
+            # 拆段/格式差异未命中）——已存在就是我们要的终态，跳过不炸
+            if "81058" in str(e) or "identical record" in str(e).lower():
+                continue
             raise HTTPException(502, f"DNS 记录补齐失败（已补 {added} 条）：{str(e)[:200]}")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
@@ -566,7 +626,7 @@ def create_email_route(body: EmailRouteIn, user: CurrentUser = Depends(require_s
         raise HTTPException(400, "目的地邮箱格式不正确")
     cf, zid, domain = _em_ctx()
     routing = cf.get_email_routing(zid) or {}
-    if routing.get("status") != "enabled":
+    if routing.get("status") not in ("enabled", "ready"):
         raise HTTPException(400, "Email Routing 未启用，请先启用")
     target = next((a for a in cf.list_email_addresses(zid)
                    if str(a.get("email", "")).lower() == email), None)

@@ -225,8 +225,8 @@ const savePwd = async () => {
   pwdSaving.value = false
 }
 // 域名服务配置（超管）
-const cfCfg = ref({ cf_api_token_masked: '', cf_api_token_set: false, cf_account_id: '' })
-const cfForm = ref({ cf_api_token: '', cf_account_id: '' })
+const cfCfg = ref({ cf_api_token_masked: '', cf_api_token_set: false, cf_account_id: '', cf_email_token_masked: '', cf_email_token_set: false })
+const cfForm = ref({ cf_api_token: '', cf_account_id: '', cf_email_token: '' })
 const cfSaving = ref(false)
 const loadCf = async () => {
   if (!isSuper.value) return
@@ -241,6 +241,7 @@ const saveCf = async () => {
     const body = {}
     if (cfForm.value.cf_api_token) body.cf_api_token = cfForm.value.cf_api_token
     if (cfForm.value.cf_account_id && cfForm.value.cf_account_id !== cfCfg.value.cf_account_id) body.cf_account_id = cfForm.value.cf_account_id
+    if (cfForm.value.cf_email_token) body.cf_email_token = cfForm.value.cf_email_token
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); cfSaving.value = false; return }
     await PUT('/settings/cf', body)
     ElMessage.success(t('common.saved'))
@@ -679,6 +680,8 @@ const runKeepaliveNow = async () => {
       <div class="d">{{ t('settings.cfDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
       <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : t('settings.fillNewTokenPh')" /></div>
+      <div class="form-l"><label>{{ t('settings.cfEmailTokenLabel') }}</label><input v-model="cfForm.cf_email_token" class="input" type="password" :placeholder="cfCfg.cf_email_token_set ? cfCfg.cf_email_token_masked : t('settings.cfEmailTokenPh')" />
+        <span class="field-hint">{{ t('settings.cfEmailTokenHint') }}</span></div>
       <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
     </div>
 
@@ -699,6 +702,7 @@ const runKeepaliveNow = async () => {
         <button class="btn em-inline-btn" :disabled="emLoading" @click="loadEmailRouting">{{ t('common.refresh') }}</button>
       </div>
       <div v-if="em.status !== 'enabled'" class="em-hint">{{ t('settings.emEnableHint') }}</div>
+      <div v-if="em.token_ok === false" class="em-hint" style="color:var(--warning)">{{ t('settings.emNeedUserToken') }}</div>
 
       <!-- 目的地邮箱 -->
       <div class="sub-t" style="margin-top:18px">{{ t('settings.emDestTitle') }}</div>
@@ -981,6 +985,7 @@ const runKeepaliveNow = async () => {
 .em-status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .em-inline-btn{margin-top:0;padding:6px 12px;font-size:12px}
 .em-hint{font-size:11px;color:var(--t3);margin-top:8px}
+.field-hint{display:block;font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5}
 .em-list{display:flex;flex-direction:column;gap:4px}
 .em-row{display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border-radius:6px;font-size:13px}
 .em-email{color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
