@@ -484,6 +484,7 @@ const accountsTable = computed(() => {
       ]
   return { mode, accs, cols }
 })
+const hasManagedAccs = computed(() => accountsTable.value.accs.some(a => !a.removed))
 const showRemoved = ref(false)  // 明细表默认只显示纳管账户——当前在管表现是主场景，历史在 KPI 汇总已有
 const filteredAccounts = computed(() => {
   let accs = accountsTable.value.accs
@@ -928,9 +929,19 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
     </div>
 
-    <div v-show="mainTab === 'data'" class="main-split">
+    <div v-show="mainTab === 'data'" class="main-split" :class="{ 'no-accs': !hasManagedAccs }">
       <!-- 左：账户明细（常驻表；视角=消耗/转化/CPA/ROAS/余额，行点击跳广告管理器）-->
-      <div class="card accounts-card">
+      <div v-if="!hasManagedAccs" class="card accounts-card accounts-empty">
+        <div class="acc-empty-banner">
+          <span class="acc-empty-icon">📊</span>
+          <div class="acc-empty-text">
+            <div class="acc-empty-title">{{ t('dashboard.noManagedTitle') }}</div>
+            <div class="acc-empty-sub">{{ t('dashboard.noManagedHint') }}</div>
+          </div>
+          <router-link to="/ads" class="acc-empty-btn">{{ t('dashboard.goImport') }}</router-link>
+        </div>
+      </div>
+      <div v-else class="card accounts-card">
         <div class="card-header accounts-head">
           <span class="card-title">{{ t('dashboard.accountsTitle') }}</span>
           <div class="table-tools">
@@ -1361,6 +1372,14 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 
 /* ── 主区两列：账户明细（左 62%）+ 守护/任务/告警（右 38%）── */
 .main-split { display: grid; grid-template-columns: 62fr 38fr; gap: 16px; align-items: start; }
+.main-split.no-accs { grid-template-columns: 1fr; }
+.accounts-empty { padding: 0; }
+.acc-empty-banner { display: flex; align-items: center; gap: 14px; padding: 20px 24px; }
+.acc-empty-icon { font-size: 28px; }
+.acc-empty-text { flex: 1; }
+.acc-empty-title { font-size: 14px; font-weight: 600; color: var(--t1); }
+.acc-empty-sub { font-size: 12px; color: var(--t3); margin-top: 2px; }
+.acc-empty-btn { color: var(--ac); font-size: 13px; text-decoration: none; border: 1px solid var(--ac); padding: 6px 18px; border-radius: 6px; white-space: nowrap; }
 .side-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .accounts-card { min-width: 0; }
 .accounts-head { flex-wrap: wrap; row-gap: 8px; }
