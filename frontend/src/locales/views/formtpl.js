@@ -2,7 +2,7 @@
 export default {
   zh: {
     tabMsg: 'Messenger 消息', newBtn: '+ 新建{kind}', formUnit: '表单', msgUnit: '消息', deployed: '已部署',
-    newFormFb: '新建 FB 表单', newFormTt: '新建 TikTok 表单', platform: '平台',
+    newFormFb: '新建 Facebook 表单', newFormTt: '新建 TikTok 表单', pickPlatTitle: '选择表单平台', platform: '平台',
     noFormsForPlat: '该平台暂无表单模板',
     ttFieldNote: 'TikTok 表单：Facebook 专属设置（可见性/欢迎语/感谢页按钮/跟进链接）不适用，已隐藏；保存后按 TikTok 结构构建',
     questionsCount: '{n} 个问题', quickRepliesCount: '{n} 个快捷回复', archive: '归档', archived: '已归档',
@@ -35,7 +35,7 @@ export default {
   },
   en: {
     tabMsg: 'Messenger Messages', newBtn: '+ New {kind}', formUnit: 'Form', msgUnit: 'Message', deployed: 'Deployed',
-    newFormFb: 'New FB Form', newFormTt: 'New TikTok Form', platform: 'Platform',
+    newFormFb: 'New Facebook Form', newFormTt: 'New TikTok Form', pickPlatTitle: 'Choose form platform', platform: 'Platform',
     noFormsForPlat: 'No form templates for this platform yet',
     ttFieldNote: 'TikTok form: Facebook-only settings (visibility, welcome message, thank-you button, follow-up link) do not apply and are hidden; the payload is built with the TikTok structure on save',
     questionsCount: '{n} questions', quickRepliesCount: '{n} quick replies', archive: 'Archive', archived: 'Archived',

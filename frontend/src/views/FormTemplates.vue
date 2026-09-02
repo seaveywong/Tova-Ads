@@ -200,10 +200,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         </div>
       </div>
       <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
-      <template v-if="tab==='form'">
-        <button class="btn primary" @click="openFormNew('fb')">{{ t('formtpl.newFormFb') }}</button>
-        <button class="btn tt-create" @click="openFormNew('tt')">{{ t('formtpl.newFormTt') }}</button>
-      </template>
+      <button v-if="tab==='form'" class="btn primary" @click="formPlatDialog = true">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }}</button>
       <button v-else class="btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
     </div>
 
@@ -382,6 +379,18 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
       </div>
     </el-dialog>
   </div>
+
+    <!-- 新建表单 → 选平台弹窗（建后不可改） -->
+    <el-dialog v-model="formPlatDialog" :title="t('formtpl.pickPlatTitle')" width="380px" append-to-body>
+      <div style="display:flex;gap:12px">
+        <button class="plat-pick fb" @click="formPlatDialog = false; openFormNew('fb')">
+          <span class="pp-dot fb"></span>{{ t('formtpl.newFormFb') }}
+        </button>
+        <button class="plat-pick tt" @click="formPlatDialog = false; openFormNew('tt')">
+          <span class="pp-dot tt"></span>{{ t('formtpl.newFormTt') }}
+        </button>
+      </div>
+    </el-dialog>
 </template>
 
 <style scoped>
@@ -467,4 +476,13 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .mm-bubble{background:var(--ac);color:#fff;padding:10px 14px;border-radius:14px 14px 14px 4px;font-size:13px;line-height:1.5;align-self:flex-start;max-width:85%}
 .mm-quick-replies{display:flex;gap:6px;flex-wrap:wrap}
 .mm-qr{font-size:12px;padding:5px 12px;background:var(--bg2);border:1px solid var(--ac);color:var(--ac);border-radius:16px}
+</style>
+
+<style scoped>
+.plat-pick { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 0; border: 1px solid var(--bd); border-radius: 10px; background: var(--bg2); cursor: pointer; font-size: 14px; font-family: inherit; color: var(--t1); transition: border-color .15s, background .15s; }
+.plat-pick:hover { border-color: var(--ac); background: var(--bg3); }
+.plat-pick.tt:hover { border-color: #fe2c55; }
+.pp-dot { width: 10px; height: 10px; border-radius: 50%; }
+.pp-dot.fb { background: #1877f2; }
+.pp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%); }
 </style>

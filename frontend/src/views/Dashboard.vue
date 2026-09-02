@@ -128,7 +128,8 @@ const { platform } = usePlatform()
 const scopeChip = computed(() => {
   if (platform.value === 'all') return ''
   const plat = platform.value === 'fb' ? 'Facebook' : 'TikTok'
-  return `${plat} · ${t('dashboard.scopeAccounts', { n: (data.value.accounts || []).length })}`
+  const _m = (data.value.accounts || []).filter(a => a.is_managed !== false).length
+  return `${plat} · ${t('dashboard.scopeAccounts', { n: _m })}`
 })
 watch(platform, () => {
   // 平台切换：所选账户可能不属于新平台——先清再拉，防"选中但永不匹配"的空数据
@@ -1252,7 +1253,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .main-tabs { display: flex; gap: 4px; margin: 14px 0 2px; }
 .main-tab { padding: 8px 20px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
 .main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
-.toolbar { position: sticky; top: var(--plat-bar-h, 44px); z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
+.toolbar { position: sticky; top: var(--plat-bar-h, 44px); z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); transition: border-radius .2s, box-shadow .2s; }
+.toolbar:has(.tb-row) { contain: paint; }
 .tb-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
 .tb-row.tb-plat { background: var(--bg2); }
 .tb-row.tb-filters { border-top: 1px solid var(--bd); }
