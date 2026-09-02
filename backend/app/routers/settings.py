@@ -442,9 +442,15 @@ def _em_ctx() -> tuple[CfClient, str, str]:
         raise HTTPException(500, "CF 未配置，请先在「域名服务配置」填 Token 和账户 ID")
     cf = CfClient(token, acct)
     domain = _em_domain()
-    zid = cf.get_zone_id(domain)
+    # zone_id 优先取缓存（查 zone 需要 Zone:Read——用户级邮箱 token 通常没配这个，
+    # 但 Email Routing 端点只需要 zone_id 在 URL 路径里，不需要 Zone:Read）
+    zid = _get_sys_setting(f"cf_zone_id_{domain}")
     if not zid:
-        raise HTTPException(400, "CF 上找不到平台域名的 Zone（域名须托管在 CF）")
+        zid = cf.get_zone_id(domain)
+        if zid:
+            _set_sys_setting(f"cf_zone_id_{domain}", zid)  # 缓存，后续 token 不再需要 Zone:Read
+    if not zid:
+        raise HTTPException(400, "CF 上找不到平台域名的 Zone（域名须托管在 CF，或主 Token 缺 Zone:Read 权限——可先用主 Token 访问一次邮箱转发页自动缓存）")
     return cf, zid, domain
 
 
