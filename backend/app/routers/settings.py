@@ -138,9 +138,18 @@ _AI_ENV_ATTR = {
 }
 
 
+def _sanitize_env_value(v) -> str:
+    """env 值清洗：去首尾空白；含换行直接拒（一行一个 KEY=VALUE，换行会破坏整个文件）。"""
+    v = str(v).strip()
+    if "\n" in v or "\r" in v:
+        raise HTTPException(status_code=400, detail="配置值不能包含换行")
+    return v
+
+
 def _write_env_and_reload(updates: dict):
     """写 .env（更新已有行或追加）+ 运行时 settings 热重载。updates = {ENV_KEY: value}。"""
     from pathlib import Path
+    updates = {k: _sanitize_env_value(v) for k, v in updates.items()}
     env_path = Path("/opt/toveads/backend/.env")
     lines = env_path.read_text().splitlines() if env_path.exists() else []
     updated_lines, found = [], set()

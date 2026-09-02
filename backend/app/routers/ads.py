@@ -529,9 +529,10 @@ def rename_ad_node(
         time.sleep(0.8)
         after = fb.get_node(body.node_id, "id,name")
         verified = (after.get("name") or "").strip() == name
-        # patch ads_cache（写后立即生效，不等 15min 同步）
+        # patch ads_cache（写后立即生效，不等 15min 同步；FB 分支只 patch platform=fb 行）
         row = db.query(AdsCache).filter(
-            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == body.act_id).first()
+            AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == body.act_id,
+            AdsCache.platform == "fb").first()
         if row:
             for field in ["campaigns_json", "adsets_json", "ads_json"]:
                 raw = getattr(row, field)

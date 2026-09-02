@@ -148,6 +148,35 @@ ERROR_ZH_EN: dict[str, str] = {
         "Alert storm cap must be an integer between 0 and 1000 (0 = uncapped)"
     ),
 
+    # ---- settings.py / 邮箱转发（CF Email Routing）----
+    "配置值不能包含换行": "Config value must not contain line breaks",
+    "CF 上找不到平台域名的 Zone（域名须托管在 CF，或主 Token 缺 Zone:Read 权限——可先用主 Token 访问一次邮箱转发页自动缓存）": (
+        "Cloudflare Zone for the platform domain not found (domain must be hosted on CF, or the "
+        "main token lacks Zone:Read — visit the Email Forwarding page once with the main token "
+        "to cache it automatically)"
+    ),
+    "目的地邮箱格式不正确": "Invalid destination email address",
+    "当前 CF Token 不支持邮箱地址管理（账户级 token 的限制）。请到「域名服务配置 → 邮箱管理 Token」填入用户级 API Token 后重试": (
+        "The current Cloudflare token cannot manage email addresses (account-level token "
+        "limitation). Enter a user-level API token under 'Domain Service → Email Management "
+        "Token' and retry"
+    ),
+    "目的地邮箱不存在或已删除": "Destination email does not exist or has been deleted",
+    "该邮箱已被转发映射引用，请先删除对应映射": (
+        "This email address is referenced by a forwarding rule; delete the rule first"
+    ),
+    "别名只允许小写字母、数字和 . _ - ": "Alias allows only lowercase letters, digits and . _ -",
+    "别名已存在，请换一个": "Alias already exists; pick another one",
+    "Email Routing 未启用，请先启用": "Email Routing is not enabled; enable it first",
+    "目的地邮箱未添加，请先在目的地邮箱区添加": (
+        "Destination email not added yet; add it in the destination addresses section first"
+    ),
+    "目的地邮箱待验证：请先到该邮箱点开 CF 验证邮件": (
+        "Destination email is pending verification: open the Cloudflare verification email in "
+        "that mailbox first"
+    ),
+    "映射不存在": "Forwarding rule does not exist",
+
     # ---- audiences.py / 受众 ----
     "查询词 q 不能为空": "Query parameter q cannot be empty",
     "strategy 必须是 broad_interest/broad_only/interest_only": (

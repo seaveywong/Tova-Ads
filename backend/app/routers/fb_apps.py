@@ -60,9 +60,19 @@ def create_app(
         status="active",
         created_by=user.id,
     )
-    db.add(app)
-    db.flush()
-    db.commit()
+    # 系统行（tenant_id NULL）走 BYPASSRLS 会话——0080 收紧 policy 后 RLS 会话写不进
+    if body.is_system:
+        sdb = SuperSessionLocal()
+        try:
+            sdb.add(app)
+            sdb.flush()
+            sdb.commit()
+        finally:
+            sdb.close()
+    else:
+        db.add(app)
+        db.flush()
+        db.commit()
     from ..core.webhook_config import invalidate_app_secret_cache
     invalidate_app_secret_cache()
     return _app_dict(app)
@@ -81,13 +91,28 @@ def update_app(
         raise HTTPException(404, "App 不存在")
     if app.is_system and not getattr(user, 'is_superadmin', False):
         raise HTTPException(403, "仅超管可编辑系统级 App")
-    app.name = body.name or app.name
-    app.app_id = body.app_id.strip()
-    if body.app_secret.strip():
-        app.app_secret_enc = encrypt(body.app_secret.strip())
-    app.is_system = body.is_system if getattr(user, 'is_superadmin', False) else app.is_system
-    app.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    # 系统行写走 BYPASSRLS 会话（policy 收紧后 RLS 会话 UPDATE 会被 WITH CHECK 拒）
+    if app.tenant_id is None:
+        sdb = SuperSessionLocal()
+        try:
+            sys_app = sdb.query(FbApp).filter(FbApp.id == app_id).first()
+            sys_app.name = body.name or sys_app.name
+            sys_app.app_id = body.app_id.strip()
+            if body.app_secret.strip():
+                sys_app.app_secret_enc = encrypt(body.app_secret.strip())
+            sys_app.is_system = body.is_system if getattr(user, 'is_superadmin', False) else sys_app.is_system
+            sys_app.updated_at = datetime.now(timezone.utc)
+            sdb.commit()
+        finally:
+            sdb.close()
+    else:
+        app.name = body.name or app.name
+        app.app_id = body.app_id.strip()
+        if body.app_secret.strip():
+            app.app_secret_enc = encrypt(body.app_secret.strip())
+        app.is_system = body.is_system if getattr(user, 'is_superadmin', False) else app.is_system
+        app.updated_at = datetime.now(timezone.utc)
+        db.commit()
     from ..core.webhook_config import invalidate_app_secret_cache
     invalidate_app_secret_cache()
     return _app_dict(app)
@@ -105,8 +130,17 @@ def delete_app(
         raise HTTPException(404, "App 不存在")
     if app.is_system and not getattr(user, 'is_superadmin', False):
         raise HTTPException(403, "仅超管可删除系统级 App")
-    app.status = "deleted"
-    db.commit()
+    # 系统行写走 BYPASSRLS 会话（同上）
+    if app.tenant_id is None:
+        sdb = SuperSessionLocal()
+        try:
+            sdb.query(FbApp).filter(FbApp.id == app_id).update({"status": "deleted"})
+            sdb.commit()
+        finally:
+            sdb.close()
+    else:
+        app.status = "deleted"
+        db.commit()
     from ..core.webhook_config import invalidate_app_secret_cache
     invalidate_app_secret_cache()
     return {"deleted": True, "id": app_id}
