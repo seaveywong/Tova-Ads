@@ -122,6 +122,7 @@ watch(datePreset, () => {
 const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私信/线索/互动/流量）
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
 const mobileFilters = ref(false)  // 移动端：日期+筛选行折叠开关（桌面恒展开）
+const mainTab = ref('data')     // 数据看板 / 落地页数据 两个 Tab（用户点名）
 const { platform } = usePlatform()
 // 分区范围 chip：平台≠all 时显示 "Facebook · N 账户"（后端已按平台过滤 accounts，直接取长度）
 const scopeChip = computed(() => {
@@ -873,8 +874,14 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
     </div>
 
+    <!-- 主内容双 Tab：数据看板 / 落地页数据（用户点名分离） -->
+    <div class="main-tabs">
+      <button class="main-tab" :class="{ on: mainTab === 'data' }" @click="mainTab = 'data'">{{ t('dashboard.tabData') }}</button>
+      <button class="main-tab" :class="{ on: mainTab === 'landing' }" @click="mainTab = 'landing'">{{ t('dashboard.tabLanding') }}</button>
+    </div>
+
     <!-- KPI 层：4 核心大卡（大数字 + 迷你趋势线；点击=账户明细表切到该指标视角）+ 4 次要小卡 -->
-    <div class="kpi-zone" v-loading="loading">
+    <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
       <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
@@ -901,7 +908,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     </div>
 
     <!-- 趋势（主视觉）：全宽单图 + 指标切换 + 颗粒度 + 平台范围回显 -->
-    <div class="card trend-main">
+    <div v-show="mainTab === 'data'" class="card trend-main">
       <div class="card-header">
         <div class="tm-title-wrap">
           <span class="card-title">{{ t('dashboard.trend') }}</span>
@@ -920,7 +927,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
     </div>
 
-    <div class="main-split">
+    <div v-show="mainTab === 'data'" class="main-split">
       <!-- 左：账户明细（常驻表；视角=消耗/转化/CPA/ROAS/余额，行点击跳广告管理器）-->
       <div class="card accounts-card">
         <div class="card-header accounts-head">
@@ -1070,7 +1077,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
     </el-drawer>
 
-    <section id="landing" class="dash-section landing">
+    <section v-show="mainTab === 'landing'" id="landing" class="dash-section landing">
       <div class="dash-head"><span class="dash-title">{{ t('dashboard.secLanding') }}</span><span class="dash-sub">{{ t('dashboard.secLandingSub') }}</span>
         <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
         <button class="head-btn" style="margin-left:auto" @click="exportLanding"><el-icon><Download /></el-icon><span class="btn-txt">{{ t('common.exportCsv') }}</span></button></div>
@@ -1220,6 +1227,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .head-btn.force:disabled { opacity: .6; }
 
 /* ── 工具栏（sticky，两行分组）：① 平台+系统时间（底色略深）② 日期+筛选 ── */
+.main-tabs { display: flex; gap: 4px; margin: 14px 0 2px; }
+.main-tab { padding: 8px 20px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
+.main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 .toolbar { position: sticky; top: var(--plat-bar-h, 44px); z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }
 .tb-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
 .tb-row.tb-plat { background: var(--bg2); }
