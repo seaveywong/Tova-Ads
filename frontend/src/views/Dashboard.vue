@@ -484,10 +484,11 @@ const accountsTable = computed(() => {
       ]
   return { mode, accs, cols }
 })
+const showRemoved = ref(false)  // 明细表默认只显示纳管账户——当前在管表现是主场景，历史在 KPI 汇总已有
 const filteredAccounts = computed(() => {
   let accs = accountsTable.value.accs
-  // 余额/充值视图排除已移除账户（不可操作）；消耗/性能视图保留（历史数据要看）
-  if (accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
+  // 已移除默认不显示（可开「含已移除」）；余额视图强制排除（不可操作）
+  if (!showRemoved.value || accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
   if (detailSearch.value.trim()) {
     const fuseAcc = new Fuse(accs, { keys: ['name', 'act_id'], threshold: 0.3 })
     accs = fuseAcc.search(detailSearch.value).map(r => r.item)
@@ -938,6 +939,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             </div>
             <input v-model="detailSearch" class="search-input" :placeholder="t('dashboard.searchPh')" />
             <button v-if="accountView === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
+              <el-switch v-if="accountView !== 'balance'" :model-value="showRemoved" size="small" @update:model-value="v => showRemoved = v" :active-text="t('dashboard.showRemoved')" style="margin-left:10px" />
           </div>
         </div>
         <div class="table-scroll acc-scroll">
@@ -952,7 +954,12 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
               </tr>
             </tbody>
           </table>
-          <div v-if="!filteredAccounts.length" class="empty">{{ t('dashboard.noMatch') }}</div>
+          <div v-if="!filteredAccounts.length && !accountsTable.value.accs.some(a=>!a.removed)" class="empty" style="padding:40px 20px;text-align:center">
+            <div style="font-size:15px;font-weight:600;margin-bottom:8px">{{ t('dashboard.noManagedTitle') }}</div>
+            <div style="font-size:12px;color:var(--t3);margin-bottom:16px">{{ t('dashboard.noManagedHint') }}</div>
+            <router-link to="/ads" style="color:var(--ac);font-size:13px;text-decoration:none;border:1px solid var(--ac);padding:6px 16px;border-radius:6px">{{ t('dashboard.goImport') }}</router-link>
+          </div>
+          <div v-else-if="!filteredAccounts.length" class="empty">{{ t('dashboard.noMatch') }}</div>
         </div>
       </div>
 
