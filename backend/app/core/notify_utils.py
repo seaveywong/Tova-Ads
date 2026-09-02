@@ -145,6 +145,7 @@ def emit_notification(
     send_tg: bool = True,
     reply_markup=None,
     force_tg: bool = False,
+    platform: str = "fb",  # fb/tt——告警按平台隔离展示（看板切平台时只看该平台告警）
 ) -> bool:
     """发通知：写站内信（带 roles 订阅）+ 按角色路由 TG 到用户级绑定。
 
@@ -162,7 +163,7 @@ def emit_notification(
         tenant_id=tenant_id, user_id=user_id, level=level, event_type=event_type,
         title=title, body=body, trace_id=trace_id,
         target_type=target_type, target_id=target_id,
-        roles=",".join(roles),
+        roles=",".join(roles), platform=platform,
     )
     db.add(notif)
     db.flush()

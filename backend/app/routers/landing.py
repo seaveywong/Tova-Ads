@@ -1444,7 +1444,7 @@ def _emit_health_alert(db, p, res):
                       target_type="landing_page", target_id=str(p.id),
                       roles=["owner", "operator"],
                       title=f"{_prefix}：{p.title}",
-                      body=_body[:200])
+                      body=_body[:200], platform="fb")
 
 
 @router.get("/pages/{pid}/health")

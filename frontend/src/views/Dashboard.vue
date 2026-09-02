@@ -165,7 +165,7 @@ const loadDashboard = async (fresh = false) => {
   try {
     const [dash, notifs, creds] = await Promise.all([
       GET(`/dashboard?${rangeQuery()}${fresh ? '&fresh=true' : ''}`),
-      GET(`/notifications?limit=50`).then(r => Array.isArray(r) ? r : (r?.items || [])).catch(() => []),
+      GET(`/notifications?limit=50${platformQuery()}`).then(r => Array.isArray(r) ? r : (r?.items || [])).catch(() => []),
       GET('/fb/credentials').catch(() => []),
     ])
     if (!isLatest()) return   // 快速切日期/60s 自动刷新并发时旧响应后到——丢弃
@@ -928,7 +928,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
       <div class="card notif-card">
         <div class="card-header">
-          <span class="card-title">{{ t('dashboard.recentNotifs') }} <span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
+          <span class="card-title">{{ t('dashboard.recentNotifs') }}<span v-if="platform !== 'all'" class="scope-chip" style="margin-left:8px">{{ platform === 'tt' ? 'TikTok' : 'Facebook' }}</span><span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
           <div class="status-tabs">
             <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }}</button>
             <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }}</button>

@@ -164,6 +164,7 @@ def _sync_tt_accounts(db) -> tuple[int, int, int]:
                                           f"{TT_STATUS_ADVICE.get(new_status, '')}"),
                                     roles=["owner", "operator"], trace_id=new_trace_id(),
                                     target_type="account", target_id=acc.act_id,
+                                    platform=(acc.platform or "fb"),
                                 )
                             except Exception as e:
                                 logger.warning(f"[AccountSync][TT] 告警发送失败 act {acc.act_id}: {e}")
@@ -187,7 +188,7 @@ def _sync_tt_accounts(db) -> tuple[int, int, int]:
                                       f"状态：<b>{old_label} → 正常</b>（{raw_status}）\n账户已恢复正常。"),
                                 roles=["owner", "operator"], trace_id=new_trace_id(),
                                 target_type="account", target_id=acc.act_id,
-                            )
+                                platform="tt")
                         except Exception as e:
                             logger.warning(f"[AccountSync][TT] 恢复告警发送失败 act {acc.act_id}: {e}")
                         write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
@@ -294,7 +295,7 @@ def run_account_status_sync():
                                       f"状态：<b>{old_label} → 正常</b>\n账户已恢复正常。"),
                                 roles=["owner", "operator"], trace_id=new_trace_id(),
                                 target_type="account", target_id=act_id,
-                            )
+                                platform=(acc.platform or "fb"))
                         except Exception as e:
                             logger.warning(f"[AccountSync] 恢复告警发送失败 act {act_id}: {e}")
                         write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(),

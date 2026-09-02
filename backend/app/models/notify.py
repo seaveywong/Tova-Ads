@@ -17,6 +17,7 @@ class Notification(Base):
     target_id = Column(Text)
     roles = Column(Text)  # 角色订阅（决策①，逗号分隔 owner,operator,finance）；空=全员
     read_at = Column(DateTime(timezone=True))
+    platform = Column(Text, default="fb")  # fb/tt（告警按平台隔离展示）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

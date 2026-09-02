@@ -466,7 +466,7 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
             tenant_id=tenant_id, level=level, event_type="rule_scale",
             trace_id=trace_id, title=_t, body=_b,
             target_type="adset", target_id=(adset_id or ad_id),
-            force_tg=force_tg)})
+            force_tg=force_tg, platform="fb")})
         _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
                  target_id=(adset_id or ad_id), target_type="adset")
 
@@ -622,7 +622,7 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
             tenant_id=tenant_id, level=level, event_type="rule_scale",
             trace_id=trace_id, title=_t, body=_b,
             target_type="adset", target_id=(adset_id or ad_id),
-            force_tg=force_tg)})
+            force_tg=force_tg, platform="tt")})
         _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
                  target_id=(adset_id or ad_id), target_type="adset")
 
@@ -858,7 +858,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
                     emit_notification(db, tenant_id=tenant_id, level="critical",
                         event_type="account_permission_error",
-                        title=_title, body=_body)
+                        title=_title, body=_body, platform=platform)
                     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                         target_type="account", target_id=acc.act_id,
                         action_type="account_permission_error", source="guard",
@@ -883,7 +883,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         affected=_esc('、'.join(_affected[:10]) or '无'))
                     emit_notification(db, tenant_id=tenant_id, level="warning",
                         event_type="token_rate_limited",
-                        title=_t_rl, body=_b_rl)
+                        title=_t_rl, body=_b_rl, platform=platform)
                     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                         target_type=("tt_credential" if platform == "tt" else "fb_credential"),
                         target_id=_rid,
@@ -1274,6 +1274,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             event_type="rule_pause", trace_id=trace_id,
                             title=_t_rp, body=_b_rp,
                             target_type="ad", target_id=ad_id,
+                            platform=platform,
                             reply_markup={"inline_keyboard": [[
                                 {"text": "🛲 加白今日", "callback_data": f"allow|{tenant_id}|{acc.act_id}|{ad_id}"}
                             ]]})})
@@ -1512,7 +1513,7 @@ def run_inspection(force: bool = False):
             emit_notification(
                 db, tenant_id=_tid, level="warning",
                 event_type="coverage_lost", trace_id=trace_id,
-                title=_t_cl, body=_b_cl,
+                title=_t_cl, body=_b_cl, platform="fb",
             )
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
@@ -1700,7 +1701,7 @@ def run_watchdog():
                 _t_is, _b_is = notify_text(_loc, "inspection_stalled", minutes=INSPECTION_STALL_MIN)
                 emit_notification(db, tenant_id=1, level="critical",
                                   event_type="inspection_stalled", trace_id=trace_id,
-                                  title=_t_is, body=_b_is)
+                                  title=_t_is, body=_b_is, platform="fb")
                 write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                           target_type="scheduler", action_type="inspection_stalled_alert",
                           source="watchdog", result="success",
@@ -1732,7 +1733,7 @@ def run_watchdog():
                 _t_ti, _b_ti = notify_text(_loc, "token_invalid", alias=(c.alias or c.id))
                 emit_notification(db, tenant_id=c.tenant_id, level="critical",
                                   event_type="token_invalid", trace_id=trace_id,
-                                  title=_t_ti, body=_b_ti)
+                                  title=_t_ti, body=_b_ti, platform="fb")
                 write_log(db, tenant_id=c.tenant_id, trace_id=trace_id, actor_type="system",
                           target_type="fb_credential", target_id=str(c.id),
                           action_type="token_health_warn", source="watchdog", result="fail")
@@ -1749,7 +1750,7 @@ def run_watchdog():
                                                    alias=(c.alias or c.id), days=remaining.days)
                         emit_notification(db, tenant_id=c.tenant_id, level="warning",
                                           event_type="token_expiring_soon", trace_id=trace_id,
-                                          title=_t_te, body=_b_te)
+                                          title=_t_te, body=_b_te, platform="fb")
                         write_log(db, tenant_id=c.tenant_id, trace_id=trace_id, actor_type="system",
                                   target_type="fb_credential", target_id=str(c.id),
                                   action_type="token_health_warn", source="watchdog", result="success",
@@ -1906,7 +1907,7 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str) -> int:
                                        ad_name=ad_name or ad_id, ad_id=ad_id)
             emit_notification(db, tenant_id=acc.tenant_id, level="critical",
                               event_type="sentinel_pause", trace_id=trace_id,
-                              title=_t_sp, body=_b_sp)
+                              title=_t_sp, body=_b_sp, platform="tt")
             db.commit()
         except Exception as e:
             logger.warning(f"[Sentinel][TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}")
@@ -1990,7 +1991,7 @@ def run_sentinel_patrol():
                         camp_name=camp.get('name',''), camp_id=camp_id)
                     emit_notification(db, tenant_id=acc.tenant_id, level="critical",
                                       event_type="sentinel_pause", trace_id=trace_id,
-                                      title=_t_sp, body=_b_sp)
+                                      title=_t_sp, body=_b_sp, platform="fb")
                     db.commit()
                 except FbApiError as e:
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
@@ -2133,7 +2134,7 @@ def run_subcode_cleanup():
                     _t_sc, _b_sc = notify_text(_loc, "subcode_cleanup", n=len(slugs))
                     emit_notification(db, tenant_id=tid, level="info", send_tg=False,
                         event_type="subcode_cleanup",
-                        title=_t_sc, body=_b_sc)
+                        title=_t_sc, body=_b_sc, platform="fb")
                 except Exception:
                     pass
             db.commit()

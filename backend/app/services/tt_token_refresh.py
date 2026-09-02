@@ -89,7 +89,8 @@ def _notify_reauth(db: Session, cred, tenant_id: int, trace_id: str,
     emit_notification(db, tenant_id=tenant_id, level="warning",
                       event_type="tt_token_expiring", trace_id=trace_id,
                       title=title, body=body, roles=["owner"],
-                      target_type="tt_credential", target_id=str(cred.id))
+                      target_type="tt_credential", target_id=str(cred.id),
+                      platform="tt")
     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
               target_type="tt_credential", target_id=str(cred.id),
               action_type="tt_token_expiring", source="tt_token_refresh",

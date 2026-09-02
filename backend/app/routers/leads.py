@@ -234,8 +234,7 @@ def _sync_leads_run(tenant_id: int, forms: list):
                         title=f"新潜客 × {synced}",
                         body=f"Instant Form 同步到 {synced} 条新潜客（{len(forms)} 个表单）。\n"
                              f"到 AdManager → 潜客 查看或导出。",
-                        roles=["owner", "operator"], trace_id=_tid,
-                    )
+                        roles=["owner", "operator"], trace_id=_tid, platform="fb")
             except Exception:
                 pass   # 通知失败不阻断同步
         # 全部表单都拉失败（如 token 失效）→ warning 通知（否则异步化后用户完全无感知）
@@ -255,8 +254,7 @@ def _sync_leads_run(tenant_id: int, forms: list):
                         title="潜客同步失败",
                         body="全部表单拉取失败（常见原因：令牌失效/权限不足）。\n"
                              f"错误：{fb_errors[0]['error'][:120]}",
-                        roles=["owner", "operator"], trace_id=_tid,
-                    )
+                        roles=["owner", "operator"], trace_id=_tid, platform="fb")
             except Exception:
                 pass
         db.commit()

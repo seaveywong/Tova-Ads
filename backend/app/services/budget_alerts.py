@@ -119,7 +119,8 @@ def check_account_budget_progress(
                               level=("critical" if tier >= 98 else "warning"),
                               event_type=f"budget_progress_{tier}", trace_id=trace_id,
                               title=_title, body=_body,
-                              target_type="adset", target_id=adset_id)
+                              target_type="adset", target_id=adset_id,
+                              platform=(acc.platform or "fb"))
             alerts.append({"adset_id": adset_id, "tier": tier,
                            "progress": round(progress, 1), "spend": spend, "budget": budget})
             break  # 一次只告最高档

@@ -22,6 +22,7 @@ def list_notifications(
     date_preset: str = "",
     date_from: str = "",
     date_to: str = "",
+    platform: str = "",  # all/空=不过滤；fb/tt=只看该平台告警（历史无 platform 行按 fb 口径）
     offset: int = 0,
     limit: int = 100,
 ):
@@ -34,6 +35,8 @@ def list_notifications(
     from datetime import datetime, timezone, timedelta
     BIZ_TZ = timezone(timedelta(hours=8))
     query = db.query(Notification).filter(Notification.tenant_id == user.tenant_id)
+    if platform in ("fb", "tt"):
+        query = query.filter(Notification.platform == platform)
     # 日期范围（业务日 → UTC 窗口，照 dashboard pause 逻辑）
     biz_today = datetime.now(BIZ_TZ).strftime("%Y-%m-%d")
     if date_from and date_to:
