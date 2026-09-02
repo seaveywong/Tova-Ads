@@ -176,6 +176,10 @@ const loadDashboard = async (fresh = false) => {
     ])
     if (!isLatest()) return   // 快速切日期/60s 自动刷新并发时旧响应后到——丢弃
     data.value = dash
+    // 后端 is_managed → 前端 removed（is_managed=false = 已移除纳管）
+    if (data.value.accounts) {
+      data.value.accounts = data.value.accounts.map(a => ({ ...a, removed: a.is_managed === false }))
+    }
     lastUpdated.value = new Date().toISOString()
     recentNotifs.value = notifs
     const allCreds = creds || []

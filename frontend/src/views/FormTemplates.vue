@@ -200,15 +200,10 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         </div>
       </div>
       <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
-      <el-dropdown v-if="tab==='form'" trigger="click" @command="p => openFormNew(p)">
-        <button class="btn primary">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }} ▾</button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="fb">📘 {{ t('formtpl.newFormFb') }}</el-dropdown-item>
-            <el-dropdown-item command="tt">🎵 {{ t('formtpl.newFormTt') }}</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+      <template v-if="tab==='form'">
+        <button class="btn primary" @click="openFormNew('fb')">{{ t('formtpl.newFormFb') }}</button>
+        <button class="btn tt-create" @click="openFormNew('tt')">{{ t('formtpl.newFormTt') }}</button>
+      </template>
       <button v-else class="btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
     </div>
 
@@ -397,6 +392,8 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .tab.on{background:var(--bg2);color:var(--t1)}
 .btn{padding:7px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
+.btn.tt-create { border-color: #fe2c55; color: #ff6f8d; background: rgba(254,44,85,.08); }
+.btn.tt-create:hover { background: rgba(254,44,85,.15); }
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}

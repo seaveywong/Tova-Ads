@@ -236,7 +236,7 @@ const closeNotifsOnOutside = (e) => {
 const currentTitle = computed(() => route.meta.titleKey ? t(route.meta.titleKey) : '')
 
 // 平台上下文条只在数据相关页面显示（设置/成员/日志等无平台过滤语义，显示=假控件）
-const PLATFORM_PAGES = new Set(['dashboard', 'ads', 'ad-manager', 'landing-logs', 'launch-templates', 'form-templates'])
+const PLATFORM_PAGES = new Set(['dashboard', 'ads', 'ad-manager', 'landing-logs'])
 const showPlatformBar = computed(() => PLATFORM_PAGES.has(String(route.name)))
 // 导航点击：先关所有弹窗再跳（防 el-dropdown click-outside 吞第一次点击）
 const navTo = (name) => {
