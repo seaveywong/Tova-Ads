@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TovaAds — One dashboard for Facebook & TikTok ads</title>
+<meta name="description" content="TovaAds unifies multi-account Facebook and TikTok campaign management, automated budget protection, landing pages and conversion attribution in a single platform." />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234f6ef7'/><path d='M9 22V10h7.2c2.9 0 4.8 1.7 4.8 4.3 0 2-1.2 3.5-3 4l3.4 3.7h-3.6l-2.9-3.3H12V22H9zm3-5.6h4c1.5 0 2.4-.8 2.4-2.1s-.9-2.1-2.4-2.1h-4v4.2z' fill='white'/></svg>" />
+<style>
+  :root{--ink:#0f1533;--sub:#5a6285;--brand:#4f6ef7;--brand2:#7c5cff;--bg:#f7f8fd;--card:#fff;--line:#e6e9f5;--ok:#12b76a;}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  nav{position:sticky;top:0;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:9}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{font-weight:800;font-size:20px;letter-spacing:-.3px;display:flex;align-items:center;gap:8px}
+  .logo b{color:var(--brand)}
+  .nav-links{display:flex;gap:22px;font-size:14px;color:var(--sub)}
+  .btn{display:inline-block;padding:9px 18px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:.15s}
+  .btn-primary{background:var(--brand);color:#fff}
+  .btn-primary:hover{background:#3d5bf5}
+  .btn-ghost{border-color:var(--line);background:#fff;color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--brand);color:var(--brand)}
+  .hero{padding:84px 0 64px;text-align:center;background:radial-gradient(1200px 500px at 50% -100px,#e5eaff 0%,var(--bg) 60%)}
+  .hero h1{font-size:clamp(30px,5vw,50px);line-height:1.15;letter-spacing:-1px;font-weight:800;max-width:820px;margin:0 auto}
+  .hero h1 span{background:linear-gradient(90deg,var(--brand),var(--brand2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{font-size:clamp(15px,2vw,19px);color:var(--sub);max-width:640px;margin:20px auto 30px}
+  .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .hero-cta .btn{padding:13px 28px;font-size:16px}
+  .hero-note{margin-top:14px;font-size:13px;color:var(--sub)}
+  section{padding:64px 0}
+  h2{font-size:clamp(24px,3vw,32px);text-align:center;letter-spacing:-.5px;margin-bottom:8px}
+  .sec-sub{text-align:center;color:var(--sub);margin-bottom:44px;font-size:16px}
+  .grid{display:grid;gap:20px}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;transition:.15s}
+  .card:hover{box-shadow:0 8px 28px rgba(79,110,247,.10);transform:translateY(-2px)}
+  .card .ico{font-size:26px;margin-bottom:12px}
+  .card h3{font-size:17px;margin-bottom:8px;letter-spacing:-.2px}
+  .card p{font-size:14px;color:var(--sub)}
+  .steps{counter-reset:s}
+  .step{position:relative;padding-left:56px}
+  .step:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:2px;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:17px}
+  .step h3{font-size:16px;margin:6px 0 6px}
+  .step p{font-size:14px;color:var(--sub)}
+  .mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+  .mod{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;font-size:14px;display:flex;gap:10px;align-items:center}
+  .mod i{font-style:normal}
+  .faq{max-width:760px;margin:0 auto}
+  .faq details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-bottom:12px}
+  .faq summary{font-weight:600;font-size:15px;cursor:pointer}
+  .faq p{margin-top:10px;font-size:14px;color:var(--sub)}
+  .cta-band{background:linear-gradient(120deg,#25307d,var(--brand));border-radius:18px;color:#fff;text-align:center;padding:52px 28px}
+  .cta-band h2{color:#fff}
+  .cta-band p{opacity:.85;margin:10px 0 24px}
+  footer{border-top:1px solid var(--line);padding:36px 0 44px;font-size:13.5px;color:var(--sub)}
+  .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:18px}
+  .foot a:hover{color:var(--brand)}
+  @media(max-width:640px){.nav-links{display:none}}
+</style>
+</head>
+<body>
+<script>
+/* 旧管理界面书签兼容：#/xxx 路由自动跳 app 域 */
+if (location.hash && location.hash.startsWith('#/')) {
+  location.replace('https://app.tovaads.com/' + location.hash);
+}
+</script>
+
+<nav><div class="wrap nav-in">
+  <a class="logo" href="/">Tova<b>Ads</b></a>
+  <div class="nav-links">
+    <a href="#features">Features</a><a href="#how">How it works</a><a href="#faq">FAQ</a>
+  </div>
+  <div style="display:flex;gap:10px">
+    <a class="btn btn-ghost" href="https://app.tovaads.com/#/login">Sign in</a>
+    <a class="btn btn-primary" href="mailto:dev@tovaads.com?subject=Access%20request%20—%20TovaAds">Request access</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <h1>One dashboard for all your <span>Facebook&nbsp;&amp;&nbsp;TikTok</span> ads</h1>
+  <p>Multi-account campaign management, 24/7 automated budget protection, built-in landing pages and per-ad conversion attribution — in a single platform.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="https://app.tovaads.com/#/login">Open the app</a>
+    <a class="btn btn-ghost" href="mailto:dev@tovaads.com?subject=Access%20request%20—%20TovaAds">Request access</a>
+  </div>
+  <div class="hero-note">Works with your own ad accounts via official platform APIs. Your data stays yours.</div>
+</div></header>
+
+<section id="features"><div class="wrap">
+  <h2>Built for teams that run many ad accounts</h2>
+  <p class="sec-sub">Everything performance marketers juggle across spreadsheets and native managers — unified.</p>
+  <div class="grid g4">
+    <div class="card"><div class="ico">🌐</div><h3>Facebook + TikTok, unified</h3><p>Manage both platforms and unlimited ad accounts in one interface. Tokens rotate and refresh automatically — no manual renewals.</p></div>
+    <div class="card"><div class="ico">🛡️</div><h3>24/7 guard engine</h3><p>Automatic stop-loss, cost-cap pausing, smart budget scaling and learning-phase protection. A bad ad never burns past the line you set.</p></div>
+    <div class="card"><div class="ico">🔗</div><h3>Landing pages &amp; attribution</h3><p>Built-in landing page builder with per-ad sub-code tracking, pixel firing verification and bot protection. See exactly which ad converts.</p></div>
+    <div class="card"><div class="ico">✨</div><h3>AI creative assistant</h3><p>Upload creatives, get AI-generated ad copy, headlines and audience suggestions — then deploy them as campaigns in one click.</p></div>
+  </div>
+</div></section>
+
+<section id="how" style="background:#fff"><div class="wrap">
+  <h2>Up and running in three steps</h2>
+  <p class="sec-sub">No engineering required.</p>
+  <div class="grid g3 steps">
+    <div class="step"><h3>Create your workspace</h3><p>Sign up and invite team members with roles — owner, operator, finance.</p></div>
+    <div class="step"><h3>Connect ad accounts</h3><p>Authorize Facebook and TikTok accounts through official OAuth. Import only the accounts you choose.</p></div>
+    <div class="step"><h3>Deploy &amp; let it guard</h3><p>Launch campaigns from templates across accounts at once. The guard engine watches spend around the clock.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Everything included</h2>
+  <p class="sec-sub">Nine modules working together.</p>
+  <div class="mods">
+    <div class="mod"><i>📊</i> Analytics dashboard</div>
+    <div class="mod"><i>🎯</i> Campaign manager</div>
+    <div class="mod"><i>🚀</i> Templates &amp; bulk deploy</div>
+    <div class="mod"><i>🖼️</i> Creative library</div>
+    <div class="mod"><i>📝</i> Instant forms &amp; lead CRM</div>
+    <div class="mod"><i>⚙️</i> Rules engine</div>
+    <div class="mod"><i>🌐</i> Landing pages</div>
+    <div class="mod"><i>👥</i> Teams &amp; RBAC</div>
+    <div class="mod"><i>🔔</i> Telegram &amp; in-app alerts</div>
+  </div>
+</div></section>
+
+<section id="faq" style="background:#fff"><div class="wrap">
+  <h2>Frequently asked</h2>
+  <p class="sec-sub"></p>
+  <div class="faq">
+    <details><summary>Is my ad account data safe?</summary><p>TovaAds only accesses accounts you explicitly authorize via official platform OAuth. Tokens are encrypted at rest with minimal permissions, and all data belongs to you — export or disconnect anytime.</p></details>
+    <details><summary>Which platforms are supported?</summary><p>Facebook (Marketing API) and TikTok (Business API), with more planned. Both platforms share the same interface, rules engine and reporting.</p></details>
+    <details><summary>Can the automation pause my ads by mistake?</summary><p>Every rule is explicit — you define thresholds, actions and learning-period protection. The engine verifies each pause against the platform and alerts you via Telegram or in-app notifications.</p></details>
+    <details><summary>Do landing pages have to use your domain?</summary><p>No. Landing pages publish to your own domains — TovaAds never appears in your campaign URLs.</p></details>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="cta-band">
+    <h2>Ready to take the busywork out of ad ops?</h2>
+    <p>Currently onboarding early teams by invitation.</p>
+    <a class="btn btn-primary" style="background:#fff;color:var(--brand)" href="mailto:dev@tovaads.com?subject=Access%20request%20—%20TovaAds">Request access</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap foot">
+  <div>© 2026 Xinghang Interactive Media · TovaAds</div>
+  <div style="display:flex;gap:18px">
+    <a href="/privacy/">Privacy Policy</a><a href="/terms/">Terms of Service</a><a href="/company.html">Company</a><a href="mailto:dev@tovaads.com">Contact</a>
+  </div>
+</div></footer>
+</body>
+</html>
