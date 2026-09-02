@@ -291,8 +291,13 @@ onMounted(async () => {
         </template>
         <template v-else>
           <div class="empty-title">{{ t('ads.emptyTitle') }}</div>
-          <div class="empty-step">{{ t('ads.emptyStep1') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLink') }}</router-link> {{ t('ads.emptyStep1b') }}</div>
-          <div class="empty-step">{{ t('ads.emptyStep2') }}</div>
+          <template v-if="platform === 'tt'">
+            <div class="empty-step">{{ t('ads.emptyStep1Tt') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLinkTt') }}</router-link></div>
+          </template>
+          <template v-else>
+            <div class="empty-step">{{ t('ads.emptyStep1') }} <router-link to="/tokens" class="empty-link">{{ t('ads.emptyLink') }}</router-link> {{ t('ads.emptyStep1b') }}</div>
+            <div class="empty-step">{{ t('ads.emptyStep2') }}</div>
+          </template>
         </template>
       </div>
     </div>

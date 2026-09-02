@@ -277,7 +277,7 @@ export default {
     syncStatusBalance: '同步状态/余额',
     removeManaged: '移除纳管',
     emptyTitle: '还没有纳管的广告账户',
-    emptyStep1: '① 先去',
+    emptyStep1: '① 先去', emptyStep1Tt: '① 先去', emptyLinkTt: '令牌页连接 TikTok 授权',
     emptyLink: 'Facebook 授权',
     emptyStep1b: '绑定令牌',
     emptyStep2: '② 回到本页点「载入账户」导入',

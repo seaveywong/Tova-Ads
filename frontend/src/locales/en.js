@@ -266,7 +266,7 @@ export default {
     syncStatusBalance: 'Sync status/balance',
     removeManaged: 'Remove from management',
     emptyTitle: 'No ad accounts managed yet',
-    emptyStep1: '① First go to',
+    emptyStep1: '① First go to', emptyStep1Tt: 'Go to', emptyLinkTt: 'Tokens page to connect TikTok',
     emptyLink: 'Facebook Auth',
     emptyStep1b: 'to bind a token',
     emptyStep2: '② Come back here and click "Load Accounts" to import',

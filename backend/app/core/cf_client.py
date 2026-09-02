@@ -23,11 +23,21 @@ class CfClient:
 
     def _get(self, path: str, **kwargs) -> dict:
         r = httpx.get(f"{CF_API_BASE}{path}", headers=self.headers, timeout=30, **kwargs)
-        return r.json()
+        try:
+            return r.json()
+        except Exception:
+            # CF 有些端点对不支持的 auth 方案返回纯文本（如 Email Routing 对账户级
+            # token 返回 404 "page not found"）——不炸，返回可判定的错误形状
+            return {"success": False, "errors": [{"code": r.status_code,
+                     "message": f"CF returned non-JSON (HTTP {r.status_code}): {r.text[:120]}"}]}
 
     def _post(self, path: str, **kwargs) -> dict:
         r = httpx.post(f"{CF_API_BASE}{path}", headers=self.headers, timeout=60, **kwargs)
-        return r.json()
+        try:
+            return r.json()
+        except Exception:
+            return {"success": False, "errors": [{"code": r.status_code,
+                     "message": f"CF returned non-JSON (HTTP {r.status_code}): {r.text[:120]}"}]}
 
     # ── Pages 项目 ──
     def list_projects(self) -> list:

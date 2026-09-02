@@ -566,8 +566,13 @@ def add_email_destination(body: EmailDestinationIn,
     if not _EMAIL_RE.match(email):
         raise HTTPException(400, "目的地邮箱格式不正确")
     cf, zid, _ = _em_ctx()
-    existing = [a for a in cf.list_email_addresses(zid)
-                if str(a.get("email", "")).lower() == email]
+    # 地址列表端点对账户级 token 返回非 JSON（404）——cf_client 已容错为 success=False，
+    # 此处给用户级 token 引导而非 500
+    try:
+        existing = [a for a in cf.list_email_addresses(zid)
+                    if str(a.get("email", "")).lower() == email]
+    except Exception as e:
+        existing = []
     if existing:
         a = existing[0]
         return {"id": a.get("id"), "email": a.get("email", email),
@@ -575,7 +580,16 @@ def add_email_destination(body: EmailDestinationIn,
     try:
         a = cf.create_email_address(zid, email)
     except RuntimeError as e:
-        raise HTTPException(502, str(e)[:300])
+        _msg = str(e)
+        if "10405" in _msg or "404" in _msg or "not found" in _msg.lower():
+            raise HTTPException(400, "当前 CF Token 不支持邮箱地址管理（账户级 token 的限制）。请到「域名服务配置 → 邮箱管理 Token」填入用户级 API Token 后重试")
+        raise HTTPException(502, _msg[:300])
+    # create 返回 success=False（如 405/404 = 账户级 token 不支持此端点）→ 引导配用户级
+    if not a.get("id") and not a.get("email"):
+        _errs = str(a.get("errors", ""))
+        if "404" in _errs or "405" in _errs or "10405" in _errs or "not found" in _errs.lower():
+            raise HTTPException(400, "当前 CF Token 不支持邮箱地址管理（账户级 token 的限制）。请到「域名服务配置 → 邮箱管理 Token」填入用户级 API Token 后重试")
+        raise HTTPException(502, f"CF 添加目的地邮箱失败：{_errs[:200]}")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="system_setting", target_id="email_routing",
               action_type="create", source="user", result="success",

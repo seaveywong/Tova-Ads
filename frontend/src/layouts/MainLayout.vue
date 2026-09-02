@@ -234,6 +234,10 @@ const closeNotifsOnOutside = (e) => {
 }
 
 const currentTitle = computed(() => route.meta.titleKey ? t(route.meta.titleKey) : '')
+
+// 平台上下文条只在数据相关页面显示（设置/成员/日志等无平台过滤语义，显示=假控件）
+const PLATFORM_PAGES = new Set(['dashboard', 'ads', 'ad-manager', 'landing-logs', 'launch-templates', 'form-templates'])
+const showPlatformBar = computed(() => PLATFORM_PAGES.has(String(route.name)))
 // 导航点击：先关所有弹窗再跳（防 el-dropdown click-outside 吞第一次点击）
 const navTo = (name) => {
   notifOpen.value = false
@@ -347,7 +351,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
       </header>
 
       <!-- 全局平台上下文条：全站唯一的平台切换入口（写 usePlatform 单例），右缘显当前范围说明 -->
-      <div class="platform-context-bar">
+      <div v-if="showPlatformBar" class="platform-context-bar">
         <PlatformSeg size="bar" :title="t('layout.platformFilter')" />
         <span class="pc-scope">{{ platformScope }}</span>
       </div>
