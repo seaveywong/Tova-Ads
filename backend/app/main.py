@@ -49,10 +49,11 @@ class TraceIdMiddleware(BaseHTTPMiddleware):
         response.headers["X-Trace-Id"] = trace_id
         return response
 
-# CORS —— 生产放 tovaads.com（主域 + www + pages.dev 默认域）；localhost 仅非生产环境放行
+# CORS —— 生产放 tovaads.com（官网期）+ app.tovaads.com（管理界面）；localhost 仅非生产环境放行
 _origins = [
-    "https://tovaads.com",           # 生产前端（主域）
-    "https://www.tovaads.com",       # 生产前端（带 www）
+    "https://tovaads.com",           # 前端主域（官网化过渡期仍直连管理界面）
+    "https://www.tovaads.com",       # www 别名
+    "https://app.tovaads.com",       # 管理界面正式域
     "https://tovaads.pages.dev",     # CF Pages 默认域（自定义域名生效前 / 冒烟测试）
 ]
 if settings.app_env != "production":
