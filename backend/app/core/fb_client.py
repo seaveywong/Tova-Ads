@@ -276,11 +276,14 @@ class FbClient:
         return self.get_paged(f"act_{act_id}/insights", params, limit=200)
 
     def get_ad_insights(self, act_id: str, date_preset: str = "today", limit: int = 200,
-                       only_active: bool = True, since: str = "", until: str = "") -> list[dict]:
+                       only_active: bool = True, since: str = "", until: str = "",
+                       increment: int = 0) -> list[dict]:
         """拉取广告级 insights（按广告拆解，全量分页）。
 
         优先用 time_range(since/until 账户本地日，精确) 避免 FB date_preset(today) 跨时区累积失真；
         不传 since/until 则 fallback date_preset。
+        increment=1 时加 time_increment=1：一次调用返回区间内【分天】行（date_start 字段）——
+        调用数与单日相同（配额按调用计），巡检借此一次拿近 7 天回填历史。
         ⚠️ Graph v25 起 insights 不支持 effective_status 字段（code100 整体报错）——
         ACTIVE 过滤改从 /ads 结构接口拿 id 集合再过滤 insights 行。
         """
@@ -292,6 +295,8 @@ class FbClient:
         }
         if since and until:
             params["time_range"] = '{"since":"%s","until":"%s"}' % (since, until)
+            if increment:
+                params["time_increment"] = increment
         else:
             params["date_preset"] = date_preset
         all_ads = self.get_paged(f"act_{act_id}/insights", params, limit=limit)

@@ -832,13 +832,20 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE")
             except Exception:
                 pass
+        hist_rows_7d: list[dict] = []   # 近7天历史分天行（FB；回填快照+trend_drop 复用）
         try:
             if platform == "tt":
                 # TT get_ad_insights 参数序与 FB 不同（advertiser_id, date_preset, since, until, ...）——
                 # 统一走 kwargs，行已摊平（dimensions.ad_id + metrics.* 提到顶层）
                 ads = fb.get_ad_insights(acc.act_id, since=acc_today, until=acc_today, limit=50)
             else:
-                ads = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False, since=acc_today, until=acc_today)
+                # 一次调用拉近7天分天（time_increment=1）：API 调用数与拉单日相同（配额按调用计），
+                # 收益=昨日终值每轮修正（FB 归因延迟）+ 新导入账户立即有近7天历史（不再从导入日才有数据）
+                _since7 = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
+                _rows7 = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False,
+                                            since=_since7, until=acc_today, increment=1)
+                ads = [r for r in _rows7 if (r.get("date_start") or acc_today) == acc_today]
+                hist_rows_7d = [r for r in _rows7 if r.get("date_start") and r["date_start"] != acc_today]
         except (FbApiError, TtApiError) as e:
             logger.warning(f"[Guard] 账户 {acc.act_id} 读 insights 失败: {e.friendly}")
             _cred = cred
@@ -916,17 +923,19 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                      if _ad_is_active(_a, platform)}
         except Exception:
             pass
-        # 昨日 insights（trend_drop 用；无 trend_drop 规则可跳过省 API 调用）
+        # 昨日 insights（trend_drop 用；FB 已随近7天拉取带回昨日行，无需单独调 API）
         yesterday_map: dict[str, dict] = {}
         if any(r.rule_type == "trend_drop" for r in all_rules):
             try:
                 yest = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
                 if platform == "tt":
                     _y_ads = fb.get_ad_insights(acc.act_id, since=yest, until=yest, limit=50)
+                    for yad in _y_ads:
+                        yesterday_map[yad.get("ad_id", "")] = yad
                 else:
-                    _y_ads = fb.get_ad_insights(acc.act_id, "yesterday", 50, since=yest, until=yest)
-                for yad in _y_ads:
-                    yesterday_map[yad.get("ad_id", "")] = yad
+                    for yad in hist_rows_7d:
+                        if yad.get("date_start") == yest:
+                            yesterday_map[yad.get("ad_id", "")] = yad
             except (FbApiError, TtApiError):
                 pass  # 昨日读取失败不阻断今日评估
         # snapshot_date 用账户本地日（和 FB insights time_range 一致，账户本地基准）
@@ -1352,6 +1361,66 @@ def _inspect_account_worker(ctx: dict) -> dict:
             db.commit()
         except Exception:
             pass
+
+        # ── 近7天历史回填（FB）：昨日行每轮修正终值（FB 归因延迟），更早天仅缺失时插入 ──
+        # 数据与当日同一次 insights 调用返回（time_increment=1），API 调用数不变。
+        if hist_rows_7d:
+            try:
+                _yest7 = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+                _since7b = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
+                _existing7 = {}
+                for _s7 in db.query(PerfSnapshot).filter(
+                    PerfSnapshot.tenant_id == tenant_id, PerfSnapshot.act_id == acc.act_id,
+                    PerfSnapshot.platform == platform,
+                    PerfSnapshot.snapshot_date >= _since7b, PerfSnapshot.snapshot_date < acc_today,
+                ).all():
+                    _existing7[(_s7.ad_id, _s7.snapshot_date)] = _s7
+                for r7 in hist_rows_7d:
+                    _d7 = r7.get("date_start")
+                    _aid7 = r7.get("ad_id", "")
+                    if not _d7 or not _aid7:
+                        continue
+                    try:
+                        _sp7 = float(r7.get("spend", 0) or 0)
+                        _sp7u = to_usd(_sp7, acc.currency)
+                        _obj7, _opt7 = obj_map.get(r7.get("campaign_id", ""), ("", ""))
+                        _kpi7 = resolve_kpi(db, tenant_id, r7.get("campaign_id", ""),
+                                             _obj7, _opt7, r7.get("actions", []))
+                        _cv7 = _kpi7["conversions"]
+                        _roas7 = float(r7.get("purchase_roas", 0) or 0)
+                        _e7 = _existing7.get((_aid7, _d7))
+                        if _e7:
+                            if _d7 >= _yest7:  # 仅昨日行随轮修正；更早的天历史终值稳定不覆盖
+                                _e7.spend = _sp7u; _e7.spend_native = _sp7
+                                _e7.conversions = _cv7
+                                _e7.cpa = (_sp7u / _cv7) if _cv7 > 0 else None
+                                _e7.roas = _roas7 if _roas7 > 0 else None
+                                _e7.impressions = int(r7.get("impressions", 0) or 0)
+                                _e7.clicks = int(r7.get("clicks", 0) or 0)
+                                _e7.actions_json = json.dumps(r7.get("actions", []))[:4000]
+                                _e7.resolved_kpi = _kpi7.get("kpi_field", "")
+                                _e7.kpi_source = _kpi7.get("source", "")
+                            continue
+                        db.add(PerfSnapshot(
+                            tenant_id=tenant_id, act_id=acc.act_id, ad_id=_aid7,
+                            platform=platform, snapshot_date=_d7,
+                            spend=_sp7u, spend_native=_sp7, currency=acc.currency,
+                            conversions=_cv7, cpa=(_sp7u / _cv7) if _cv7 > 0 else None,
+                            roas=_roas7 if _roas7 > 0 else None,
+                            impressions=int(r7.get("impressions", 0) or 0),
+                            clicks=int(r7.get("clicks", 0) or 0),
+                            frequency=float(r7.get("frequency", 0) or 0) or None,
+                            ctr=float(r7.get("ctr", 0) or 0) or None,
+                            cpc=float(r7.get("cpc", 0) or 0) or None,
+                            actions_json=json.dumps(r7.get("actions", []))[:4000],
+                            resolved_kpi=_kpi7.get("kpi_field", ""),
+                            kpi_source=_kpi7.get("source", ""),
+                        ))
+                    except Exception:
+                        continue
+                db.commit()
+            except Exception as e:
+                logger.warning(f"[Guard] 近7天回填异常 act={acc.act_id}: {e}")
         return res
     except Exception as e:
         logger.error(f"[Guard] 账户 {acc.act_id} 巡检任务异常: {e}", exc_info=True)
