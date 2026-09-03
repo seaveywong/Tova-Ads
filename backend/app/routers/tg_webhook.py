@@ -88,14 +88,19 @@ async def tg_webhook(secret: str, request: Request):
             tg_chat_id = str((msg.get("chat") or {}).get("id") or "")
             tg_username = (msg.get("from") or {}).get("username") or ""
             try:
-                from ..core.security import decode_token
                 # 注意：UserTgBinding 用模块级 import（顶部已有）——此处再 import 会把
-                # 它遮蔽成函数局部变量，第 65 行的 secret 遍历先于它执行 → UnboundLocalError
-                payload = decode_token(bind_token)
-                if payload.get("type") != "tg_bind":
-                    raise ValueError("invalid token type")  # 只认专用绑定 token（access JWT 不行）
-                user_id = int(payload.get("user_id") or 0)
-                tenant_id = payload.get("tenant_id")
+                # 它遮蔽成函数局部变量，第 65 行的 secret 遍历先于它执行 → UnboundLocalError。
+                # 短码（≤64 字符，TG deep-link 上限）优先；旧 JWT 兼容期同判
+                from ..core.security import decode_tg_bind_code, decode_token
+                decoded = decode_tg_bind_code(bind_token)
+                if decoded:
+                    user_id, tenant_id = decoded
+                else:
+                    payload = decode_token(bind_token)
+                    if payload.get("type") != "tg_bind":
+                        raise ValueError("invalid token type")
+                    user_id = int(payload.get("user_id") or 0)
+                    tenant_id = payload.get("tenant_id")
                 if not user_id or not tenant_id:
                     raise ValueError("invalid token")
                 # 用 SuperSessionLocal（BYPASSRLS）——原 get_db() 无租户上下文，
