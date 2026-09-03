@@ -26,8 +26,10 @@ const searchQ = ref('')
 const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
 const filteredAccounts = computed(() => {
   if (!searchQ.value.trim()) return platAccounts.value
+  // 搜索只过滤、保序（fuse.search 按相关度重排会打乱列表既有排序——同 Dashboard 修法）
   const fuseAcc = new Fuse(platAccounts.value, { keys: ['name', 'act_id'], threshold: 0.3 })
-  return fuseAcc.search(searchQ.value.trim()).map(r => r.item)
+  const hits = new Set(fuseAcc.search(searchQ.value.trim()).map(r => r.item.act_id))
+  return platAccounts.value.filter(a => hits.has(a.act_id))
 })
 // 展示行（platform=all 时按 FB/TT 分段：段头「Facebook (N)」+ 数据行；单平台时纯数据行）
 const displayRows = computed(() => {

@@ -101,6 +101,13 @@ NOTIFY = {
             "en": "Account: {name} (<code>{act_id}</code>)\nAd: {ad_name} (<code>{ad_id}</code>)\nAd set: <code>{adset_id}</code>\nCampaign: <code>{campaign_id}</code>\nRule: {rule_name}\nTrigger: <b>{detail}</b>\nAction: <b>{action}</b>\nSpend: <b>{spend}</b> | Conversions: <b>{conv}</b>\nKPI: {kpi_label} ({source_label})",
         },
     },
+    "spend_spike": {
+        "title": {"zh": "⚡ 花费骤变：{name}", "en": "⚡ Spend Spike: {name}"},
+        "body": {
+            "zh": "账户：{name}（{act_id}）\n今日已花费：<b>{today}</b>\n近7天日均：{avg}（阈值 = max(3×日均, $50)）\n今日消耗已达日均 {ratio} 倍——请检查是否爆量/预算设置错误。",
+            "en": "Account: {name} ({act_id})\nToday spend: <b>{today}</b>\n7-day daily avg: {avg} (threshold = max(3x avg, $50))\nToday is {ratio}x of average — check for runaway spend / budget misconfig.",
+        },
+    },
     "emergency_done": {
         "title": {"zh": "⛔ 全局紧急暂停完成", "en": "⛔ Global Emergency Pause Done"},
         "body": {

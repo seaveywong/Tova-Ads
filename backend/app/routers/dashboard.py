@@ -380,6 +380,20 @@ def dashboard(
         "next_inspection_in": "约5分钟（定时巡检）",
         "accounts": account_details,
     }
+    # 令牌健康红卡数据（FBInsider 对标：失效令牌=首页最高优先级卡）——
+    # expired/disabled 的令牌会让其覆盖账户全部失明（巡检/止损/看板），必须一眼可见
+    try:
+        from ..models.fb import FbCredential
+        _bad = db.query(FbCredential).filter(
+            FbCredential.tenant_id == user.tenant_id,
+            FbCredential.status.in_(["expired", "disabled"]),
+        ).all()
+        result["token_alerts"] = [{
+            "id": c.id, "alias": c.alias or c.fb_user_name or f"令牌#{c.id}",
+            "status": c.status, "platform": "fb",
+        } for c in _bad]
+    except Exception:
+        result["token_alerts"] = []
 
     _cache_put(cache_key, now, result)
     return result

@@ -1326,6 +1326,32 @@ def _inspect_account_worker(ctx: dict) -> dict:
         except Exception:
             pass
 
+        # ── 花费骤变检测（FBInsider 参数：7天日均×3 倍 + $50 差额下限防小额噪声）──
+        # 数据零成本：复用同一次 insights 调用的近7天行。只告警不动作（爆量原因需人判断）
+        if platform != "tt" and hist_rows_7d and acc_tick_spend > 0:
+            try:
+                _spike_days: dict = {}
+                for r7 in hist_rows_7d:
+                    _sd = r7.get("date_start")
+                    if _sd:
+                        _spike_days[_sd] = _spike_days.get(_sd, 0.0) + to_usd(
+                            float(r7.get("spend", 0) or 0), acc.currency)
+                if _spike_days:
+                    _avg7 = sum(_spike_days.values()) / max(1, len(_spike_days))
+                    if acc_tick_spend > _avg7 * 3 and (acc_tick_spend - _avg7) >= 50:
+                        if not dedup_recent(db, tenant_id, "spend_spike", acc.act_id, 1440):
+                            _loc = tenant_locale(db, tenant_id)
+                            _t_sk, _b_sk = notify_text(_loc, "spend_spike",
+                                name=_esc(acc.name), act_id=acc.act_id,
+                                today=f"${acc_tick_spend:.2f}", avg=f"${_avg7:.2f}",
+                                ratio=f"{acc_tick_spend / _avg7:.1f}" if _avg7 > 0 else "∞")
+                            emit_notification(db, tenant_id=tenant_id, level="warning",
+                                              event_type="spend_spike", trace_id=trace_id,
+                                              title=_t_sk, body=_b_sk, platform="fb")
+                            db.commit()
+            except Exception:
+                pass
+
         # ── 近7天历史回填（FB）：昨日行每轮修正终值（FB 归因延迟），更早天仅缺失时插入 ──
         # 数据与当日同一次 insights 调用返回（time_increment=1），API 调用数不变。
         if hist_rows_7d:

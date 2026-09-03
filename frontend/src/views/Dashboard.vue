@@ -353,6 +353,9 @@ const taskCards = computed(() => {
   const cards = []
   const accs = data.value.accounts
   const names = (arr) => arr.map(a => (a.name || '').slice(0, 15)).join(t('dashboard.nameSep'))
+  // 令牌失效=最高优先级红卡（其覆盖账户全部失明：巡检/止损/看板都停——FBInsider 对标）
+  const badTokens = data.value.token_alerts || []
+  if (badTokens.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskTokenDead', { n: badTokens.length }), desc: t('dashboard.taskTokenDeadDesc', { names: badTokens.map(x => x.alias).join(t('dashboard.nameSep')) }), toTokens: true, detailAccounts: [], detailColumns: [] })
   const _limited = (a) => a.balance_kind === 'limited' && !a.removed  // 已移除账户不进充值提醒（不可操作）
   const critical = accs.filter(a => _limited(a) && a.balance <= 0)
   if (critical.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskRechargeCritical', { n: critical.length }), desc: t('dashboard.taskRechargeCriticalDesc', { names: names(critical) }), detailAccounts: critical, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
@@ -375,6 +378,7 @@ const taskCards = computed(() => {
 })
 const toggleCard = (i) => {
   const card = taskCards.value[i]
+  if (card.toTokens) { router.push('/tokens'); return }   // 令牌失效卡 → 直达令牌页处理
   if (!card.detailAccounts?.length) return
   // 切换展开面板时清空勾选——selectedIds 是各面板共享的，残留会让"复制选中"带出旧选择
   if (expandedCard.value !== i) selectedIds.value = new Set()
@@ -426,7 +430,7 @@ const sparkPoints = (arr) => {
   return a.map((v, i) => `${((i / (a.length - 1)) * w).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`).join(' ')
 }
 const coreCards = computed(() => [
-  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : '' },
+  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : '') },
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions) },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
   { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas', spark: '' },  // 趋势接口无 ROAS 序列，不画
