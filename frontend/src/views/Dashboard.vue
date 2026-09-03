@@ -498,8 +498,11 @@ const filteredAccounts = computed(() => {
   // 已移除默认不显示（可开「含已移除」）；余额视图强制排除（不可操作）
   if (!showRemoved.value || accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
   if (detailSearch.value.trim()) {
+    // 搜索只做过滤、保持表的既有排序（消耗降序等）——
+    // 曾直接用 fuse.search().map，结果按匹配相关度重排，把消耗排序打乱
     const fuseAcc = new Fuse(accs, { keys: ['name', 'act_id'], threshold: 0.3 })
-    accs = fuseAcc.search(detailSearch.value).map(r => r.item)
+    const hits = new Set(fuseAcc.search(detailSearch.value).map(r => r.item.act_id))
+    accs = accs.filter(a => hits.has(a.act_id))
   }
   return accs
 })
@@ -590,8 +593,11 @@ const filteredCoverageAccs = computed(() => {
   if (kpiDetail.value?.type !== 'accounts') return []
   let accs = kpiDetail.value.accs
   if (detailSearch.value.trim()) {
+    // 搜索只做过滤、保持表的既有排序（消耗降序等）——
+    // 曾直接用 fuse.search().map，结果按匹配相关度重排，把消耗排序打乱
     const fuseAcc = new Fuse(accs, { keys: ['name', 'act_id'], threshold: 0.3 })
-    accs = fuseAcc.search(detailSearch.value).map(r => r.item)
+    const hits = new Set(fuseAcc.search(detailSearch.value).map(r => r.item.act_id))
+    accs = accs.filter(a => hits.has(a.act_id))
   }
   return accs
 })
