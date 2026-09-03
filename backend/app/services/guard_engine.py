@@ -962,6 +962,17 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 pass
             # 过滤：只评估 ACTIVE 广告（拉了 active_ids 就用它；None=不过滤）
             if active_ids is not None and ad_id not in active_ids:
+                # 已停/被拒广告的今日消耗仍进快照——看板口径=账户全量（对齐 FB account 级
+                # 与 1.0），曾在此 continue 掉 → 当日暂停的广告消耗丢失、看板低估
+                if float(ad.get("spend", 0) or 0) > 0:
+                    try:
+                        _obj_s, _opt_s = obj_map.get(ad.get("campaign_id", ""), ("", ""))
+                        _kpi_s = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
+                                             _obj_s, _opt_s, ad.get("actions", []))
+                        _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id,
+                                            _kpi_s, _kpi_s["conversions"], biz_today)
+                    except Exception:
+                        pass
                 # 有消耗却被过滤掉 = 覆盖丢失。但区分：
                 #   真盲区 = 广告在 ads_cache 里是 ACTIVE 但 active_ids 没拉到 → 告警
                 #   误报 = 广告已暂停/被拒（有历史消耗但不 ACTIVE）→ 不告警
@@ -1298,54 +1309,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
 
             # upsert 今日快照（consecutive_bad / budget_burn_fast 数据源 + 看板缓存层）
             try:
-                spend_usd_snap = to_usd(spend, acc.currency)
-                cpa = (spend_usd_snap / conv) if conv > 0 else None
-                impressions = int(ad.get("impressions", 0))
-                clicks = int(ad.get("clicks", 0))
-                reach = int(ad.get("reach", 0))
-                frequency = float(ad.get("frequency", 0) or 0)
-                ctr = float(ad.get("ctr", 0) or 0)
-                cpc = float(ad.get("cpc", 0) or 0)
-                roas_val = float(ad.get("purchase_roas", 0) or 0)
-                snap = db.query(PerfSnapshot).filter(
-                    PerfSnapshot.tenant_id == tenant_id,
-                    PerfSnapshot.ad_id == ad_id,
-                    PerfSnapshot.platform == platform,
-                    PerfSnapshot.snapshot_date == biz_today,
-                ).first()
-                if snap:
-                    snap.spend = spend_usd_snap
-                    snap.spend_native = spend
-                    snap.currency = acc.currency
-                    snap.conversions = conv
-                    snap.cpa = cpa
-                    snap.roas = roas_val if roas_val > 0 else None
-                    snap.impressions = impressions
-                    snap.clicks = clicks
-                    snap.reach = reach
-                    snap.frequency = frequency if frequency > 0 else None
-                    snap.ctr = ctr if ctr > 0 else None
-                    snap.cpc = cpc if cpc > 0 else None
-                    snap.actions_json = json.dumps(ad.get("actions", []))[:4000]
-                    snap.resolved_kpi = kpi.get("kpi_field", "")
-                    snap.kpi_source = kpi.get("source", "")
-                else:
-                    db.add(PerfSnapshot(
-                        tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
-                        platform=platform,
-                        snapshot_date=biz_today, spend=spend_usd_snap,
-                        spend_native=spend, currency=acc.currency,
-                        conversions=conv, cpa=cpa,
-                        roas=roas_val if roas_val > 0 else None,
-                        impressions=impressions, clicks=clicks, reach=reach,
-                        frequency=frequency if frequency > 0 else None,
-                        ctr=ctr if ctr > 0 else None, cpc=cpc if cpc > 0 else None,
-                        actions_json=json.dumps(ad.get("actions", []))[:4000],
-                        resolved_kpi=kpi.get("kpi_field", ""),
-                        kpi_source=kpi.get("source", ""),
-                    ))
-                # tick conv 已在循环开头累计所有广告（含暂停）
-                db.commit()
+                _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, biz_today)
             except Exception as e:
                 logger.warning(f"[Guard] 快照写入异常 ad={ad_id}: {e}")
 
@@ -1642,6 +1606,59 @@ CURRENCY_TO_USD = {
     "INR": 1 / 83, "BRL": 1 / 5.4, "MXN": 1 / 17, "EUR": 1.08, "GBP": 1.27,
     "JPY": 1 / 157, "KRW": 1 / 1380, "AUD": 1 / 1.52, "CAD": 1 / 1.36,
 }
+
+
+def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap_date):
+    """广告行 upsert 到 perf_snapshots（ACTIVE 与已停共用——看板消耗口径=账户全量，
+    对齐 FB account 级 insights；曾只写 ACTIVE，今日暂停的广告消耗丢失 → 看板低估）。"""
+    spend = float(ad.get("spend", 0))
+    spend_usd_snap = to_usd(spend, acc.currency)
+    cpa = (spend_usd_snap / conv) if conv > 0 else None
+    impressions = int(ad.get("impressions", 0) or 0)
+    clicks = int(ad.get("clicks", 0) or 0)
+    reach = int(ad.get("reach", 0) or 0)
+    frequency = float(ad.get("frequency", 0) or 0)
+    ctr = float(ad.get("ctr", 0) or 0)
+    cpc = float(ad.get("cpc", 0) or 0)
+    roas_val = float(ad.get("purchase_roas", 0) or 0)
+    snap = db.query(PerfSnapshot).filter(
+        PerfSnapshot.tenant_id == tenant_id,
+        PerfSnapshot.ad_id == ad_id,
+        PerfSnapshot.platform == platform,
+        PerfSnapshot.snapshot_date == snap_date,
+    ).first()
+    if snap:
+        snap.spend = spend_usd_snap
+        snap.spend_native = spend
+        snap.currency = acc.currency
+        snap.conversions = conv
+        snap.cpa = cpa
+        snap.roas = roas_val if roas_val > 0 else None
+        snap.impressions = impressions
+        snap.clicks = clicks
+        snap.reach = reach
+        snap.frequency = frequency if frequency > 0 else None
+        snap.ctr = ctr if ctr > 0 else None
+        snap.cpc = cpc if cpc > 0 else None
+        snap.actions_json = json.dumps(ad.get("actions", []))[:4000]
+        snap.resolved_kpi = kpi.get("kpi_field", "")
+        snap.kpi_source = kpi.get("source", "")
+    else:
+        db.add(PerfSnapshot(
+            tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,
+            platform=platform,
+            snapshot_date=snap_date, spend=spend_usd_snap,
+            spend_native=spend, currency=acc.currency,
+            conversions=conv, cpa=cpa,
+            roas=roas_val if roas_val > 0 else None,
+            impressions=impressions, clicks=clicks, reach=reach,
+            frequency=frequency if frequency > 0 else None,
+            ctr=ctr if ctr > 0 else None, cpc=cpc if cpc > 0 else None,
+            actions_json=json.dumps(ad.get("actions", []))[:4000],
+            resolved_kpi=kpi.get("kpi_field", ""),
+            kpi_source=kpi.get("source", ""),
+        ))
+    db.commit()
 
 
 def to_usd(amount: float, currency: str) -> float:
