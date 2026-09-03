@@ -363,7 +363,8 @@ def tg_bind_link(user: CurrentUser = Depends(require_permission("ads.read")),
     # 不能复用 7 天 access token——泄露即账号接管）
     # TG deep-link start 参数上限 64 字符——JWT 超长会被 TG 丢弃，必须用短码
     from ..core.security import encode_tg_bind_code
-    bind_code = encode_tg_bind_code(user_id=user.id, tenant_id=user.tenant_id, expire_min=15)
+    # 30 分钟：码只在复制/发送场景短存，过期由前端「复制命令时现拉新码」兜住
+    bind_code = encode_tg_bind_code(user_id=user.id, tenant_id=user.tenant_id, expire_min=30)
     # code/command：前端展示「手动发送 /start <code>」兜底——
     # 已存在的历史对话点 deep link 不会重发 /start（TG 行为），必须引导手动发
     return {"url": f"https://t.me/{bot_username}?start={bind_code}",

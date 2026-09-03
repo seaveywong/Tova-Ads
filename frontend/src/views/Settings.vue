@@ -256,6 +256,40 @@ const testTgLoading = ref(false)
 const tgManual = ref({ chat_id: '', saving: false })
 const tgBindLink = ref('')
 const tgBindCommand = ref('')
+// 现拉新绑定码（页面停留超有效期后旧码会过期——TG 回「令牌无效或已过期」）
+const refreshTgBindCode = async () => {
+  try {
+    const r = await GET('/notifications/tg/bind-link')
+    tgBindLink.value = r.url
+    tgBindCommand.value = r.command || ''
+  } catch {}
+  return tgBindCommand.value
+}
+// 复制命令 = 现拉新码再复制（永远复制未过期的码），并轮询绑定结果自动刷新 UI
+let _tgPoll = null
+const copyTgBindCommand = async () => {
+  const cmd = await refreshTgBindCode()
+  if (cmd) {
+    try { await navigator.clipboard.writeText(cmd); ElMessage.success(t('settings.cmdCopied')) } catch {}
+    startTgBindPoll()
+  }
+}
+const startTgBindPoll = () => {
+  if (_tgPoll) return
+  _tgPoll = setInterval(async () => {
+    try {
+      const r = await GET('/notifications/tg/user-binding')
+      if (r?.bound) {
+        clearInterval(_tgPoll); _tgPoll = null
+        userTg.value = r
+        tgBindLink.value = ''; tgBindCommand.value = ''
+        ElMessage.success(t('settings.tgBoundToast'))
+      }
+    } catch {}
+  }, 5000)
+  setTimeout(() => { if (_tgPoll) { clearInterval(_tgPoll); _tgPoll = null } }, 180000)
+}
+onUnmounted(() => { if (_tgPoll) clearInterval(_tgPoll) })
 const loadTg = async () => {
   try {
     const [botInfo, userBinding] = await Promise.all([
@@ -559,6 +593,8 @@ const applySectionFromUrl = () => {
   if (q !== 'sec-account') router.replace({ query: { ...route.query, sec: 'sec-account' } })
 }
 watch(() => route.query.sec, () => applySectionFromUrl())
+// 进入 TG 分区时刷新绑定码——旧码 30 分钟过期，页面停留久了需要现拉
+watch(activeSection, (v) => { if (v === 'sec-tg' && !userTg.value?.bound) refreshTgBindCode() })
 const kaResultOpen = ref(false)
 const kaResult = ref(null)
 const kaResMeta = (r) => ({
@@ -831,7 +867,7 @@ const runKeepaliveNow = async () => {
           <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
           <div class="tg-start-row">
             <code class="tg-start-code">{{ tgBindCommand }}</code>
-            <button class="btn" @click="copyText(tgBindCommand, t('settings.cmdCopied'))">{{ t('settings.copyCmd') }}</button>
+            <button class="btn" @click="copyTgBindCommand">{{ t('settings.copyCmd') }}</button>
           </div>
         </div>
       </div>
@@ -846,7 +882,7 @@ const runKeepaliveNow = async () => {
           <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
           <div class="tg-start-row">
             <code class="tg-start-code">{{ tgBindCommand }}</code>
-            <button class="btn" @click="copyText(tgBindCommand, t('settings.cmdCopied'))">{{ t('settings.copyCmd') }}</button>
+            <button class="btn" @click="copyTgBindCommand">{{ t('settings.copyCmd') }}</button>
           </div>
         </div>
         <!-- widget 打不开时的兜底：向 bot 发 /start 拿 chat_id 手动绑 -->

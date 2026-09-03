@@ -1,6 +1,7 @@
 """TG webhook：接收 inline keyboard 加白按钮回调 → 加白该广告（1.0 移植）。"""
 import hashlib
 import hmac
+import logging
 import httpx
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from ..models.guard import GuardAllowance
 from ..models.fb import Account
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+logger = logging.getLogger(__name__)
 
 
 def _webhook_secret(token: str) -> str:
@@ -140,8 +142,11 @@ async def tg_webhook(secret: str, request: Request):
                               + (f"\n（该用户共 {_n} 个 TG，告警将全部发送）" if _n > 1 else ""))
                 finally:
                     db_session.close()
-            except Exception:
-                _tg_reply(bot_token, tg_chat_id, "❌ 绑定失败：令牌无效或已过期，请在系统重新获取绑定链接。")
+            except Exception as e:
+                logger.warning(f"[TG] /start 绑定失败 code={bind_token[:10]}… chat={tg_chat_id}: {type(e).__name__}: {e}")
+                _tg_reply(bot_token, tg_chat_id,
+                          "❌ 绑定码无效或已过期（30 分钟有效）。\n"
+                          "请回到系统「设置 → Telegram」重新点击「复制命令」，发送新的 /start 命令。")
             return {"ok": True}
 
         # 裸 /start（无 deep-link 参数）或普通消息：不再静默——给引导（否则用户以为 bot 死了）
