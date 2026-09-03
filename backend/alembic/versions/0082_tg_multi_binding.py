@@ -16,11 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_unique_index("uq_user_tg_chat", "user_tg_bindings",
-                            ["tenant_id", "user_id", "chat_id"])
+    op.execute("CREATE UNIQUE INDEX uq_user_tg_chat ON user_tg_bindings (tenant_id, user_id, chat_id)")
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON user_tg_bindings TO toveads_app;")
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON user_tg_bindings TO toveads_super;")
 
 
 def downgrade() -> None:
-    op.drop_index("uq_user_tg_chat", table_name="user_tg_bindings")
+    op.execute("DROP INDEX IF EXISTS uq_user_tg_chat")
