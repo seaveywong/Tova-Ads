@@ -364,8 +364,12 @@ def tg_bind_link(user: CurrentUser = Depends(require_permission("ads.read")),
     # TG deep-link start 参数上限 64 字符——JWT 超长会被 TG 丢弃，必须用短码
     from ..core.security import encode_tg_bind_code
     bind_code = encode_tg_bind_code(user_id=user.id, tenant_id=user.tenant_id, expire_min=15)
+    # code/command：前端展示「手动发送 /start <code>」兜底——
+    # 已存在的历史对话点 deep link 不会重发 /start（TG 行为），必须引导手动发
     return {"url": f"https://t.me/{bot_username}?start={bind_code}",
-            "bot_username": bot_username}
+            "bot_username": bot_username,
+            "code": bind_code,
+            "command": f"/start {bind_code}"}
 
 
 @router.post("/tg/oauth-callback")

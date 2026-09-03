@@ -790,6 +790,8 @@ export default {
     tgBotNotConfigured: 'Admin has not configured a TG bot', verifyBotConfig: 'Verify bot config',
     tgManualHint: 'Button won\'t open? Send /start to the bot first, then paste the numeric ID from its reply to bind manually',
     tgManualPh: 'Telegram numeric ID (e.g. 123456789)', tgManualBind: 'Bind manually',
+    tgStartHint: 'Button did nothing? If the bot chat already exists, Telegram will not re-send /start — open the bot chat and send this command manually to bind:',
+    copyCmd: 'Copy command', cmdCopied: 'Command copied',
     verifyBotHint: 'Send a test message to the admin-configured bot to verify the bot works.',
     kaLockBusy: 'Keepalive scan is already running in the background (shared lock with the cron job). Try again shortly.', kaRunError: 'Keepalive failed: {msg}', keepaliveTitle: 'Keepalive protection (anti-sleep)',
     keepaliveDesc: 'Automatically create Page-like ads for accounts with no spend for N consecutive days to prevent FB bans. Keepalive ads are never stopped by stop-loss / sentinel.',

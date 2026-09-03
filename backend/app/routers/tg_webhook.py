@@ -83,10 +83,13 @@ async def tg_webhook(secret: str, request: Request):
         # ── /start deep link 绑定（用户点 https://t.me/bot?start=<token> → 自动绑定 chat_id）──
         msg = update.get("message") or {}
         text = str(msg.get("text") or "")
+        # chat_id/username 提前取：裸 /start（无参数）分支也要用——
+        # 曾只在带参分支定义，裸 /start 走到下方 _tg_reply(tg_chat_id) → NameError →
+        # webhook 500，TG 侧表现为「点了 START 毫无反应」并堆积重试 update
+        tg_chat_id = str((msg.get("chat") or {}).get("id") or "")
+        tg_username = (msg.get("from") or {}).get("username") or ""
         if text.startswith("/start "):
             bind_token = text[7:].strip()
-            tg_chat_id = str((msg.get("chat") or {}).get("id") or "")
-            tg_username = (msg.get("from") or {}).get("username") or ""
             try:
                 # 注意：UserTgBinding 用模块级 import（顶部已有）——此处再 import 会把
                 # 它遮蔽成函数局部变量，第 65 行的 secret 遍历先于它执行 → UnboundLocalError。

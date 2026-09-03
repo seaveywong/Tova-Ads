@@ -185,11 +185,36 @@ class FbClient:
         """当前 token 对应的用户身份。"""
         return self.get("me", {"fields": "id,name"})
 
-    def get_ad_accounts(self) -> list[dict]:
-        """拉取可管理的广告账户列表（全量分页，单 token >200 账户不漏）。"""
-        return self.get_paged("me/adaccounts", {
-            "fields": "account_id,account_status,name,currency,timezone_name,balance,spend_cap,amount_spent",
-        })
+    def get_ad_accounts(self, light: bool = False) -> list[dict]:
+        """拉取可管理的广告账户列表（全量分页，单 token >200 账户不漏）。
+
+        light=True 用轻字段（无 balance/spend_cap/amount_spent）——这些是服务端
+        计算字段，大代理 token（3k+ 账户）带上它们单次全量拉取从 ~30s 涨到超时；
+        载入列表/导入判定只需要存在性+名称，余额等由导入后的刷新补。
+        """
+        fields = ("account_id,account_status,name,currency" if light else
+                  "account_id,account_status,name,currency,timezone_name,balance,spend_cap,amount_spent")
+        return self.get_paged("me/adaccounts", {"fields": fields})
+
+    def batch_get(self, relative_urls: list[str]) -> list[dict | None]:
+        """FB batch API：一次 POST 打包 ≤50 个 GET，返回逐项解析的 body（失败项为 None）。
+
+        用于「每 BM 查一次」类聚合（如 business_users 角色）——串行 N 次会拖垮端点。
+        """
+        import json as _json
+        out: list[dict | None] = []
+        for i in range(0, len(relative_urls), 50):
+            chunk = relative_urls[i:i + 50]
+            batch = [{"method": "GET", "relative_url": u} for u in chunk]
+            resp = httpx.post(GRAPH_BASE, params={
+                "access_token": self.token, "batch": _json.dumps(batch),
+                "include_headers": "false"}, timeout=60)
+            for item in resp.json():
+                try:
+                    out.append(_json.loads(item.get("body") or "{}"))
+                except Exception:
+                    out.append(None)
+        return out
 
     def get_pages(self) -> list[dict]:
         """拉取可管理的主页列表（全量分页）。"""

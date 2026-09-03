@@ -255,6 +255,7 @@ const userTg = ref({ bound: false })
 const testTgLoading = ref(false)
 const tgManual = ref({ chat_id: '', saving: false })
 const tgBindLink = ref('')
+const tgBindCommand = ref('')
 const loadTg = async () => {
   try {
     const [botInfo, userBinding] = await Promise.all([
@@ -264,7 +265,11 @@ const loadTg = async () => {
     tgBot.value = botInfo
     userTg.value = userBinding
     if (botInfo.configured && !userBinding.bound) {
-      try { const r = await GET('/notifications/tg/bind-link'); tgBindLink.value = r.url } catch {}
+      try {
+        const r = await GET('/notifications/tg/bind-link')
+        tgBindLink.value = r.url
+        tgBindCommand.value = r.command || ''
+      } catch {}
       if (botInfo.bot_username) {
         nextTick(() => {
           const el = document.getElementById('tg-widget')
@@ -822,6 +827,13 @@ const runKeepaliveNow = async () => {
           <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? t('settings.sending') : t('settings.sendTestMsg') }}</button>
           <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn tg-add-btn">{{ t('settings.tgAddAnother') }}</a>
         </div>
+        <div v-if="tgBindCommand" class="tg-start-cmd">
+          <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
+          <div class="tg-start-row">
+            <code class="tg-start-code">{{ tgBindCommand }}</code>
+            <button class="btn" @click="copyText(tgBindCommand, t('settings.cmdCopied'))">{{ t('settings.copyCmd') }}</button>
+          </div>
+        </div>
       </div>
 
       <!-- 未绑定 -->
@@ -829,6 +841,14 @@ const runKeepaliveNow = async () => {
         <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">{{ t('settings.bindTelegram') }}</a>
         <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, t('settings.bindLinkCopied'))">{{ t('settings.cannotOpenCopy') }}</span>
         <span v-if="!tgBot.configured" class="tg-warn">{{ t('settings.tgBotNotConfigured') }}</span>
+        <!-- 点链接没反应的兜底：与 bot 的对话已存在时 TG 不会重发 /start，须手动发命令 -->
+        <div v-if="tgBindCommand" class="tg-start-cmd">
+          <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
+          <div class="tg-start-row">
+            <code class="tg-start-code">{{ tgBindCommand }}</code>
+            <button class="btn" @click="copyText(tgBindCommand, t('settings.cmdCopied'))">{{ t('settings.copyCmd') }}</button>
+          </div>
+        </div>
         <!-- widget 打不开时的兜底：向 bot 发 /start 拿 chat_id 手动绑 -->
         <div class="tg-manual">
           <span class="tg-manual-hint">{{ t('settings.tgManualHint') }}</span>
@@ -968,6 +988,10 @@ const runKeepaliveNow = async () => {
 .tg-unbind-btn{color:var(--error);border-color:var(--error)}
 .tg-warn{color:var(--warning);font-size:12px}
 .tg-manual{margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd);width:100%}
+.tg-start-cmd{margin-top:10px;width:100%}
+.tg-start-hint{display:block;font-size:12px;color:var(--tx-3,#888);margin-bottom:6px}
+.tg-start-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tg-start-code{flex:1;min-width:0;padding:6px 10px;background:var(--bg-2,#f5f5f5);border:1px solid var(--bd);border-radius:6px;font-size:12px;word-break:break-all;user-select:all}
 .tg-manual-hint{font-size:11px;color:var(--t3);display:block;margin-bottom:6px}
 .tg-manual-row{display:flex;gap:8px;align-items:center}
 .tg-manual-input{flex:1;min-width:0;max-width:240px}

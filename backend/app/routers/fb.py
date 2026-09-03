@@ -5,9 +5,9 @@
 import json
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from ..core.database import get_db, get_system_db
+from ..core.database import get_db, get_system_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
@@ -810,9 +810,23 @@ def get_credential_assets(
                           "category": pg.get("category", ""), "fan_count": pg.get("fan_count", 0),
                           "can_post": pg.get("can_post"), "tasks": pg.get("tasks", [])})
         for b in fb.get_businesses():
-            tasks = b.get("permitted_tasks", []) or []
-            role = "完全" if "MANAGE" in tasks else "基本"
-            businesses.append({"id": b.get("id", ""), "name": b.get("name", ""), "role": role})
+            businesses.append({"id": b.get("id", ""), "name": b.get("name", ""), "role": ""})
+        # /me/businesses 边缘不返回 permitted_tasks（实测恒空，曾因此全员显示"基本"）。
+        # 真实角色在 /{bm}/business_users：按 token 用户的 fb_user_id 匹配出 role（ADMIN 等）。
+        # 逐 BM 串行查太贵（大池 100+ BM），batch API 一次 50 个。
+        if businesses and cred.fb_user_id:
+            try:
+                urls = [f"{b['id']}/business_users?fields=id,role&limit=200" for b in businesses]
+                for b, users in zip(businesses, fb.batch_get(urls)):
+                    me_role = ""
+                    for u in (users or {}).get("data", []):
+                        if str(u.get("id") or "") == str(cred.fb_user_id):
+                            me_role = u.get("role") or ""
+                            break
+                    b["role"] = "完全" if me_role == "ADMIN" else "基本"
+            except FbApiError:
+                for b in businesses:
+                    b["role"] = b["role"] or "基本"
     except FbApiError as e:
         error = e.friendly
     return {"accounts": accounts, "pages": pages,
@@ -890,41 +904,106 @@ def loadable_accounts(
 
     供「载入账户」勾选用：一个账户可能被多个令牌覆盖（多 FB 用户都管它），
     tokens[] 列出所有覆盖令牌及其当前可用性，前端据此判断"全丢"风险。
+    大代理令牌可见 3k+ 账户（轻字段全量 ~30s）——进程内 5 分钟缓存，
+    /fb/import 复用同一缓存（勾选导入零 FB 调用，秒回）。
     """
-    from ..core.fb_tokens import _is_cred_available
-    creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == user.tenant_id, FbCredential.status == "active"
-    ).all()
+    rows = _get_loadable_rows(db, user.tenant_id)
     imported_ids = {a.act_id for a in db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
     ).all()}
-    merged: dict = {}
-    for c in creds:
+    out = []
+    for r in rows:
+        r["imported"] = r["account_id"] in imported_ids
+        out.append(r)
+    return out
+
+
+_LOADABLE_CACHE: dict = {}   # tenant_id -> (ts, rows)；rows 含 tokens[]（无 imported——每次现算）
+_LOADABLE_TTL = 300
+
+
+def _get_loadable_rows(db, tenant_id: int) -> list[dict]:
+    """载入列表原始行（FB 拉取 + 合并），带 5 分钟进程内缓存。"""
+    import time as _t
+    ent = _LOADABLE_CACHE.get(tenant_id)
+    if ent and _t.time() - ent[0] < _LOADABLE_TTL:
+        return ent[1]
+    from ..core.fb_tokens import _is_cred_available
+    from concurrent.futures import ThreadPoolExecutor
+    creds = db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+    ).all()
+
+    def _pull(c):
         fb = FbClient(decrypt(c.access_token_enc))
-        avail = _is_cred_available(c)
         try:
-            for a in fb.get_ad_accounts():
-                aid = a.get("account_id", "")
-                if not aid or not a.get("name"):
-                    continue  # 无 ID 或 FB 未返回 name（管不了/无意义）→ 不进载入列表
-                if aid not in merged:
-                    merged[aid] = {
-                        "account_id": aid, "name": a.get("name", aid),
-                        "currency": a.get("currency", "USD"),
-                        "account_status": a.get("account_status"),
-                        "imported": aid in imported_ids,
-                        "tokens": [],
-                    }
-                merged[aid]["tokens"].append(
-                    {"id": c.id, "alias": c.alias or c.fb_user_name, "available": avail})
-        except FbApiError:
-            continue
-    return list(merged.values())
+            return c, fb.get_ad_accounts(light=True)
+        except (FbApiError, TtApiError):
+            return c, None
+
+    merged: dict = {}
+    if creds:
+        with ThreadPoolExecutor(max_workers=min(4, len(creds))) as ex:
+            for c, accounts in ex.map(_pull, creds):
+                if not accounts:
+                    continue
+                avail = _is_cred_available(c)
+                for a in accounts:
+                    aid = a.get("account_id", "")
+                    if not aid or not a.get("name"):
+                        continue  # 无 ID 或 FB 未返回 name（管不了/无意义）→ 不进载入列表
+                    if aid not in merged:
+                        merged[aid] = {
+                            "account_id": aid, "name": a.get("name", aid),
+                            "currency": a.get("currency", "USD"),
+                            "timezone_name": a.get("timezone_name") or "UTC",
+                            "account_status": a.get("account_status"),
+                            "tokens": [],
+                        }
+                    merged[aid]["tokens"].append(
+                        {"id": c.id, "alias": c.alias or c.fb_user_name, "available": avail})
+    rows = list(merged.values())
+    _LOADABLE_CACHE[tenant_id] = (_t.time(), rows)
+    return rows
+
+
+def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
+    """导入后补全轻字段拉取时缺的余额/上限/已花费（后台跑，不阻塞响应）。
+
+    轻字段是为了让 3k+ 账户的载入/导入不超时；余额等重计算字段由这里补，
+    失败静默（account_sync cron 兜底）。
+    """
+    db = SuperSessionLocal()
+    try:
+        for cid in cred_ids:
+            cred = db.query(FbCredential).filter(
+                FbCredential.tenant_id == tenant_id, FbCredential.id == cid).first()
+            if not cred:
+                continue
+            try:
+                fb_map = {a.get("account_id"): a for a in FbClient(decrypt(cred.access_token_enc)).get_ad_accounts()}
+            except FbApiError:
+                continue
+            for acc in db.query(Account).filter(
+                Account.tenant_id == tenant_id, Account.fb_credential_id == cid,
+                Account.is_managed == True,  # noqa: E712
+            ).all():
+                live = fb_map.get(acc.act_id)
+                if not live:
+                    continue
+                acc.account_status = live.get("account_status") or acc.account_status
+                acc.balance = str(live.get("balance", "") or "")
+                acc.spend_cap = str(live.get("spend_cap", "") or "")
+                acc.amount_spent = str(live.get("amount_spent", "") or "")
+        db.commit()
+    finally:
+        db.close()
 
 
 @router.post("/import")
 def import_accounts(
     body: ImportAccountsIn,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(require_permission("ads.create")),
     db: Session = Depends(get_db),
 ):
@@ -934,8 +1013,12 @@ def import_accounts(
     - imported: 新导入的 act_id
     - skipped_existing: 已存在（含重绑到新 token）
     - not_found: 无任何 active token 覆盖的 ID
+
+    覆盖判定走 _get_loadable_rows（与载入列表同源、5 分钟缓存）——
+    勾选场景（先开载入弹窗再导入）缓存命中零 FB 调用；缓存 miss 时轻字段
+    并行拉取一次（曾串行全字段拉 3k+ 账户 → 请求超时）。余额等重字段由
+    后台任务补（_bg_complete_imported）。
     """
-    from ..core.fb_tokens import iter_tenant_clients
     raw = body.account_ids or []
     cleaned: list[str] = []
     seen = set()
@@ -949,64 +1032,65 @@ def import_accounts(
     if not cleaned:
         return {"imported": [], "count": 0, "skipped_existing": 0,
                 "not_found": [], "total": 0}
-    cleaned_set = set(cleaned)
-    pairs = iter_tenant_clients(db, user.tenant_id)
-    if not pairs:
-        raise HTTPException(400, "未绑定 FB 凭证")
+    rows = {r["account_id"]: r for r in _get_loadable_rows(db, user.tenant_id)}
+    if not rows:
+        raise HTTPException(400, "未绑定 FB 凭证或令牌全部不可用")
     imported: list[str] = []
     skipped_existing = 0
     covered: set = set()
-    for cred, fb in pairs:
-        try:
-            token_accounts = fb.get_ad_accounts()
-        except (FbApiError, TtApiError):
+    touched_creds: set = set()
+    for aid in cleaned:
+        row = rows.get(aid)
+        if not row:
+            continue  # 无任何 active token 覆盖
+        covered.add(aid)
+        tokens = row.get("tokens") or []
+        if not tokens:
             continue
-        for acc in token_accounts:
-            aid = acc.get("account_id", "")
-            if aid not in cleaned_set:
-                continue
-            covered.add(aid)
-            exists = db.query(Account).filter(
-                Account.tenant_id == user.tenant_id,
-                Account.act_id == aid,
-            ).first()
-            if exists:
-                if exists.fb_credential_id != cred.id:
-                    exists.fb_credential_id = cred.id
-                exists.is_managed = True  # 重新导入 = 恢复纳管（把软删的拉回活跃管理）
-                # 多令牌同账户：加 account_fb_credentials 关联（已有则跳过 → 多 token 共管）
-                if not db.query(AccountFbCredential).filter(
-                    AccountFbCredential.account_id == exists.id,
-                    AccountFbCredential.fb_credential_id == cred.id,
-                ).first():
-                    db.add(AccountFbCredential(
-                        tenant_id=user.tenant_id, account_id=exists.id,
-                        fb_credential_id=cred.id, priority=0, status="active",
-                    ))
-                skipped_existing += 1
-                continue
-            new_acc = Account(
-                tenant_id=user.tenant_id,
-                fb_credential_id=cred.id,
-                act_id=aid,
-                name=acc.get("name") or "",
-                currency=acc.get("currency", "USD"),
-                timezone_name=acc.get("timezone_name", "UTC"),
-                owner_user_id=user.id,
-                account_status=acc.get("account_status", 1),
-                balance=str(acc.get("balance", "") or ""),
-                spend_cap=str(acc.get("spend_cap", "") or ""),
-                amount_spent=str(acc.get("amount_spent", "") or ""),
-            )
-            db.add(new_acc)
-            db.flush()  # 拿 new_acc.id 用于关联
-            db.add(AccountFbCredential(
-                tenant_id=user.tenant_id, account_id=new_acc.id,
-                fb_credential_id=cred.id, priority=0, status="active",
-            ))
-            imported.append(aid)
+        cred_id = tokens[0]["id"]
+        touched_creds.add(cred_id)
+        exists = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id,
+            Account.act_id == aid,
+        ).first()
+        if exists:
+            if exists.fb_credential_id != cred_id:
+                exists.fb_credential_id = cred_id
+            exists.is_managed = True  # 重新导入 = 恢复纳管（把软删的拉回活跃管理）
+            # 多令牌同账户：加 account_fb_credentials 关联（已有则跳过 → 多 token 共管）
+            if not db.query(AccountFbCredential).filter(
+                AccountFbCredential.account_id == exists.id,
+                AccountFbCredential.fb_credential_id == cred_id,
+            ).first():
+                db.add(AccountFbCredential(
+                    tenant_id=user.tenant_id, account_id=exists.id,
+                    fb_credential_id=cred_id, priority=0, status="active",
+                ))
+            skipped_existing += 1
+            continue
+        new_acc = Account(
+            tenant_id=user.tenant_id,
+            fb_credential_id=cred_id,
+            act_id=aid,
+            name=row.get("name") or "",
+            currency=row.get("currency", "USD"),
+            timezone_name=row.get("timezone_name", "UTC"),
+            owner_user_id=user.id,
+            account_status=row.get("account_status", 1),
+        )
+        db.add(new_acc)
+        db.flush()  # 拿 new_acc.id 用于关联
+        db.add(AccountFbCredential(
+            tenant_id=user.tenant_id, account_id=new_acc.id,
+            fb_credential_id=cred_id, priority=0, status="active",
+        ))
+        imported.append(aid)
     db.commit()
-    not_found = sorted(cleaned_set - covered)
+    # 载入缓存行不含 imported 标记（每次现算），导入后无需作废——
+    # 勾选场景「开弹窗（慢一次）→ 导入（缓存命中秒回）」保持成立
+    if imported:
+        background_tasks.add_task(_bg_complete_imported, user.tenant_id, sorted(touched_creds))
+    not_found = sorted(set(cleaned) - covered)
     return {"imported": imported, "count": len(imported),
             "skipped_existing": skipped_existing,
             "not_found": not_found, "total": len(cleaned)}

@@ -82,6 +82,7 @@ export default {
     noTrendData: 'No data for the selected range',
     landingTrendTitle: 'Landing Trend', noLandingTrendData: 'No landing traffic in this range', unitUsd: 'USD', unitNative: 'Native', multiCurHint: 'Multi-currency sum, for reference only',
     pageTitle: 'Dashboard', dataUpTo: 'Data as of {ago}', filters: 'Filters', accountLabel: 'Account',
+    tgBannerText: 'Telegram not bound yet — stop-loss and anomaly alerts cannot reach you instantly. Binding is recommended.', tgBannerGo: 'Bind now',
     accountsTitle: 'Accounts', viewSpend: 'Spend', viewConv: 'Conv.', viewCpa: 'CPA', viewRoas: 'ROAS', viewBalance: 'Balance',
     kpiImpressions: 'Impressions', kpiClicks: 'Clicks', kpiCtr: 'CTR', balanceAlertCount: '{n} need recharge', guardTitle: 'Guard Overview',
     kpiTotalSpend: 'Total Spend (USD)', kpiTotalConv: 'Total Conv.', kpiAvgCpa: 'Avg CPA', kpiAvgRoas: 'Avg ROAS',

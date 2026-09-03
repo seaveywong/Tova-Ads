@@ -821,8 +821,21 @@ const removeAllowance = async (log) => {
   } catch (e) { ElMessage.error(t('dashboard.allowanceRemoveFail') + (e.message || '')) }
 }
 
+// TG 绑定提示：未绑 TG 的用户在仪表盘顶部给一条可关闭的引导（绑定收告警）
+const tgBanner = ref(false)
+const loadTgBanner = async () => {
+  if (localStorage.getItem('tova_tg_banner_off') === '1') return
+  try {
+    const r = await GET('/notifications/tg/user-binding')
+    tgBanner.value = !r?.bound
+  } catch {}
+}
+const dismissTgBanner = () => { tgBanner.value = false; localStorage.setItem('tova_tg_banner_off', '1') }
+const goTgBind = () => router.push({ path: '/settings', query: { sec: 'sec-tg' } })
+
 onMounted(() => {
   loadDashboard()
+  loadTgBanner()
   loadTrend()
   updateCountdown()
   _bindStickyObs()
@@ -861,6 +874,13 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         <button v-if="isSuper" class="head-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
       </div>
     </header>
+
+    <!-- TG 未绑定引导（可关闭）：告警第一时间到 TG -->
+    <div v-if="tgBanner" class="tg-banner">
+      <span class="tg-banner-txt">{{ t('dashboard.tgBannerText') }}</span>
+      <button class="head-btn primary" @click="goTgBind">{{ t('dashboard.tgBannerGo') }}</button>
+      <button class="tg-banner-x" @click="dismissTgBanner" :title="t('common.close')">×</button>
+    </div>
 
     <!-- 工具栏（sticky 两行）：① 平台分段 + 系统时间 ② 日期预设 + 转化分类 + 账户多选 -->
     <div class="sticky-sentinel" ref="stickySentinel"></div>
@@ -1277,6 +1297,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .main-tab { padding: 8px 20px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
 .main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 /* sticky 基准是 .content 滚动区顶缘（平台上下文条在其外常驻），top:0 即紧贴平台条 */
+.tg-banner { display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 10px; border: 1px solid var(--el-color-warning, #e6a23c); background: var(--el-color-warning-light-9, #fdf6ec); border-radius: 8px; font-size: 13px; }
+.tg-banner-txt { flex: 1; }
+.tg-banner-x { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--tx-3, #999); padding: 2px 6px; }
 .toolbar { position: sticky; top: 0; z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); transition: border-radius .2s, box-shadow .2s, border-color .2s; }
 /* 贴顶态：去上圆角+上边框与平台条平贴，投影只向下 */
 .toolbar.stuck { border-radius: 0 0 10px 10px; border-top-color: transparent; box-shadow: 0 5px 14px rgba(0,0,0,.14); }
