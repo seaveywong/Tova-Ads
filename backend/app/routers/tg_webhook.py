@@ -90,7 +90,8 @@ async def tg_webhook(secret: str, request: Request):
             try:
                 from ..core.security import decode_token
                 from ..core.database import get_db as _get_db
-                from ..models.notify import UserTgBinding
+                # 注意：UserTgBinding 用模块级 import（顶部已有）——此处再 import 会把
+                # 它遮蔽成函数局部变量，第 65 行的 secret 遍历先于它执行 → UnboundLocalError
                 payload = decode_token(bind_token)
                 if payload.get("type") != "tg_bind":
                     raise ValueError("invalid token type")  # 只认专用绑定 token（access JWT 不行）
