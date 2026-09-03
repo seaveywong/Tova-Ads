@@ -103,7 +103,7 @@ def _campaign_objectives(fb, campaign_ids) -> dict:
     for i in range(0, len(ids), 50):
         batch = ids[i:i + 50]
         try:
-            data = fb.get("", {"ids": ",".join(batch), "fields": "id,objective,optimization_goal"})
+            data = fb.get("", {"ids": ",".join(batch), "fields": "id,objective"})
             if isinstance(data, dict):
                 for cid, c in data.items():
                     if isinstance(c, dict):
@@ -115,7 +115,7 @@ def _campaign_objectives(fb, campaign_ids) -> dict:
                 if cid in out:
                     continue
                 try:
-                    c = fb.get(cid, {"fields": "id,objective,optimization_goal"})
+                    c = fb.get(cid, {"fields": "id,objective"})
                     out[cid] = ((c.get("objective") or "").upper(),
                                 ((c.get("optimization_goal") or c.get("effective_optimization_goal")) or "").upper())
                 except Exception:

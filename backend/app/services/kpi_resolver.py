@@ -82,7 +82,7 @@ def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[st
 5. 优先选数量最多的核心转化字段
 
 只返回 JSON：{{"field": "字段名", "reason": "简短理由"}}"""
-        data = client.chat_json([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=200)
+        data = client.chat_json([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=800)
         field = (data.get("field") or "").strip()
         if not field:
             return None
