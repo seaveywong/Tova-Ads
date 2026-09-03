@@ -249,6 +249,9 @@ ERROR_ZH_EN: dict[str, str] = {
     #      动态 f-string（"TikTok 返回错误（code …）"/"网络错误：…"）不收录，无法精确匹配；
     #      未知 code 走 friendly 原样透传 ----
     "请求参数错误": "Invalid request parameters",
+    "令牌缺少所需权限（如 business_management），请删除令牌后重新授权勾选": (
+        "The token lacks a required permission (e.g. business_management); delete it and re-authorize with the scope checked"
+    ),
     "请求参数缺失": "Missing request parameters",
     "请求格式错误": "Invalid request format",
     "授权码无效或已过期（10 分钟内有效），请重新授权": (

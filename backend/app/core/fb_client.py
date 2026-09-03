@@ -61,6 +61,10 @@ def classify_fb_error(error_data: dict) -> tuple[str, str]:
     if sub in FB_ERROR_MAP:
         return FB_ERROR_MAP[sub]
     if code in FB_ERROR_MAP:
+        # code 100 特例：Missing Permission = 令牌缺权限（如 /me/businesses 需
+        # business_management），不是参数问题——给可操作的重新授权指引
+        if code == 100 and "missing permission" in msg.lower():
+            return ("permissions", "令牌缺少所需权限（如 business_management），请删除令牌后重新授权勾选")
         return FB_ERROR_MAP[code]
     if "non-discrimination" in msg.lower():
         return FB_ERROR_MAP[2859002]
