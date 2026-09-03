@@ -279,8 +279,45 @@ def get_user_tg_binding(
             "chat_id_masked": _mask(binds[0].chat_id),
             "verified": binds[0].verified_at is not None,
             "bindings": [{"id": b.id, "chat_id_masked": _mask(b.chat_id),
-                          "chat_id": b.chat_id, "verified": b.verified_at is not None}
+                          "chat_id": b.chat_id, "verified": b.verified_at is not None,
+                          "verified_at": b.verified_at.isoformat() if b.verified_at else None,
+                          "created_at": b.created_at.isoformat() if b.created_at else None}
                          for b in binds]}
+
+
+@router.get("/tg/team-bindings")
+def tg_team_bindings(
+    user: CurrentUser = Depends(require_permission("members.manage")),
+    db: Session = Depends(get_db),
+):
+    """团队成员 TG 绑定清单（owner/超管）——谁绑了、绑了几个，告警覆盖一目了然。"""
+    from ..models.notify import UserTgBinding
+    from ..models.auth import User as _U, TenantMembership as _TM
+
+    def _mask(cid):
+        return (cid[:3] + "***" + cid[-3:]) if len(cid) > 8 else "***"
+
+    members = db.query(_TM).filter(_TM.tenant_id == user.tenant_id).all()
+    uids = [m.user_id for m in members]
+    users = {u.id: u for u in db.query(_U).filter(_U.id.in_(uids)).all()} if uids else {}
+    rows = []
+    for m in members:
+        u = users.get(m.user_id)
+        if not u:
+            continue
+        binds = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == user.tenant_id,
+            UserTgBinding.user_id == m.user_id).all()
+        rows.append({
+            "user_id": m.user_id,
+            "email": u.email,
+            "role": m.role,
+            "tg_count": len(binds),
+            "chat_ids_masked": [_mask(b.chat_id) for b in binds],
+            "is_me": m.user_id == user.id,
+        })
+    rows.sort(key=lambda r: (r["tg_count"] == 0, r.get("is_me") is False, r["email"]))
+    return {"members": rows}
 
 
 @router.post("/tg/user-test")

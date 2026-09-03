@@ -7,6 +7,7 @@ import { isSuperadminSync } from '../router'
 import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbErrorText } from '../composables/useFbError'
+import TgManager from '../components/TgManager.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -249,124 +250,18 @@ const saveCf = async () => {
   } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   cfSaving.value = false
 }
-// TG OAuth 通知绑定
+// TG 通知绑定：用户级绑定/解绑/清单 UI 已组件化（TgManager，与仪表盘共用），这里只留 bot-info（超管验证区用）
 const tgBot = ref({ configured: false, bot_username: '' })
-const userTg = ref({ bound: false })
 const testTgLoading = ref(false)
-const tgManual = ref({ chat_id: '', saving: false })
-const tgBindLink = ref('')
-const tgBindCommand = ref('')
-// 现拉新绑定码（页面停留超有效期后旧码会过期——TG 回「令牌无效或已过期」）
-const refreshTgBindCode = async () => {
-  try {
-    const r = await GET('/notifications/tg/bind-link')
-    tgBindLink.value = r.url
-    tgBindCommand.value = r.command || ''
-  } catch {}
-  return tgBindCommand.value
-}
-// 复制命令 = 现拉新码再复制（永远复制未过期的码），并轮询绑定结果自动刷新 UI
-let _tgPoll = null
-const copyTgBindCommand = async () => {
-  const cmd = await refreshTgBindCode()
-  if (cmd) {
-    try { await navigator.clipboard.writeText(cmd); ElMessage.success(t('settings.cmdCopied')) } catch {}
-    startTgBindPoll()
-  }
-}
-const startTgBindPoll = () => {
-  if (_tgPoll) return
-  _tgPoll = setInterval(async () => {
-    try {
-      const r = await GET('/notifications/tg/user-binding')
-      if (r?.bound) {
-        clearInterval(_tgPoll); _tgPoll = null
-        userTg.value = r
-        tgBindLink.value = ''; tgBindCommand.value = ''
-        ElMessage.success(t('settings.tgBoundToast'))
-      }
-    } catch {}
-  }, 5000)
-  setTimeout(() => { if (_tgPoll) { clearInterval(_tgPoll); _tgPoll = null } }, 180000)
-}
-onUnmounted(() => { if (_tgPoll) clearInterval(_tgPoll) })
+const tgMgr = ref(null)
 const loadTg = async () => {
-  try {
-    const [botInfo, userBinding] = await Promise.all([
-      GET('/notifications/tg/bot-info'),
-      GET('/notifications/tg/user-binding'),
-    ])
-    tgBot.value = botInfo
-    userTg.value = userBinding
-    if (botInfo.configured && !userBinding.bound) {
-      try {
-        const r = await GET('/notifications/tg/bind-link')
-        tgBindLink.value = r.url
-        tgBindCommand.value = r.command || ''
-      } catch {}
-      if (botInfo.bot_username) {
-        nextTick(() => {
-          const el = document.getElementById('tg-widget')
-          if (!el || el.firstChild) return
-          const s = document.createElement('script')
-          s.async = true
-          s.src = 'https://telegram.org/js/telegram-widget.js?22'
-          s.setAttribute('data-telegram-login', botInfo.bot_username)
-          s.setAttribute('data-size', 'large')
-          s.setAttribute('data-onauth', 'onTelegramAuth(user)')
-          s.setAttribute('data-request-access', 'write')
-          el.appendChild(s)
-          window.onTelegramAuth = async (u) => {
-            try {
-              await POST('/notifications/tg/oauth-callback', u)
-              ElMessage.success(t('settings.tgBindOk', { name: u.username || u.id }))
-              userTg.value = await GET('/notifications/tg/user-binding')
-            } catch (e) { ElMessage.error(e.message || t('settings.tgBindFail')) }
-          }
-        })
-      }
-    }
-  } catch {}
-}
-const testUserTg = async () => {
-  testTgLoading.value = true
-  try { await POST('/notifications/tg/user-test'); ElMessage.success(t('settings.tgTestSentUser')) }
-  catch (e) { ElMessage.error(e.message || t('settings.sendFail')) }
-  testTgLoading.value = false
+  try { tgBot.value = await GET('/notifications/tg/bot-info') } catch {}
 }
 const testTenantTg = async () => {
   testTgLoading.value = true
   try { await POST('/notifications/tg/test'); ElMessage.success(t('settings.tgTestSentTenant')) }
   catch (e) { ElMessage.error(e.message || t('settings.tgTestFailTenant')) }
   testTgLoading.value = false
-}
-const bindTgManual = async () => {
-  if (!tgManual.value.chat_id.trim()) return ElMessage.warning(t('settings.fillChatId'))
-  tgManual.value.saving = true
-  try {
-    await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: tgManual.value.chat_id.trim() })
-    ElMessage.success(t('settings.bound'))
-    tgManual.value.chat_id = ''
-    userTg.value = await GET('/notifications/tg/user-binding')
-  } catch (e) { ElMessage.error(e.message || t('settings.bindFail')) }
-  tgManual.value.saving = false
-}
-const unbindTg = async () => {
-  try {
-    await ElMessageBox.confirm(t('settings.tgUnbindConfirm'), t('common.confirm'), { type: 'warning' })
-    // 用空 chat_id 触发后端删除/解绑（或直接 DELETE，但后端没有 DELETE 端点，用空值覆盖）
-    await POST('/notifications/tg/user-binding', { bot_token: '__use_tenant_bot__', chat_id: '' })
-    ElMessage.success(t('settings.tgUnbound'))
-    userTg.value = await GET('/notifications/tg/user-binding')
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
-}
-const unbindTgOne = async (chatId) => {
-  try {
-    await ElMessageBox.confirm(t('settings.tgUnbindConfirm'), t('common.confirm'), { type: 'warning' })
-    await DELETE(`/notifications/tg/user-binding?chat_id=${encodeURIComponent(chatId)}`)
-    ElMessage.success(t('settings.tgUnbound'))
-    userTg.value = await GET('/notifications/tg/user-binding')
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
 }
 const whCfg = ref({ public_url: '', verify_token_masked: '', verify_token_set: false, verify_token_is_default: true, active_apps: 0, app_names: [] })
 const whForm = ref({ verify_token: '' })
@@ -593,8 +488,6 @@ const applySectionFromUrl = () => {
   if (q !== 'sec-account') router.replace({ query: { ...route.query, sec: 'sec-account' } })
 }
 watch(() => route.query.sec, () => applySectionFromUrl())
-// 进入 TG 分区时刷新绑定码——旧码 30 分钟过期，页面停留久了需要现拉
-watch(activeSection, (v) => { if (v === 'sec-tg' && !userTg.value?.bound) refreshTgBindCode() })
 const kaResultOpen = ref(false)
 const kaResult = ref(null)
 const kaResMeta = (r) => ({
@@ -853,47 +746,10 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.tgTitle') }}</div>
       <div class="d" style="margin-bottom:10px">{{ t('settings.tgDesc') }}</div>
 
-      <!-- 已绑定（多 TG 列表） -->
-      <div v-if="userTg.bound" class="tg-status tg-multi">
-        <div v-for="b in userTg.bindings || []" :key="b.id" class="tg-bind-row">
-          <span class="tg-bound-badge">{{ t('settings.tgBoundBadge', { id: b.chat_id_masked }) }}</span>
-          <button class="btn tg-unbind-btn" @click="unbindTgOne(b.chat_id)">{{ t('settings.unbind') }}</button>
-        </div>
-        <div class="tg-actions">
-          <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? t('settings.sending') : t('settings.sendTestMsg') }}</button>
-          <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn tg-add-btn">{{ t('settings.tgAddAnother') }}</a>
-        </div>
-        <div v-if="tgBindCommand" class="tg-start-cmd">
-          <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
-          <div class="tg-start-row">
-            <code class="tg-start-code">{{ tgBindCommand }}</code>
-            <button class="btn" @click="copyTgBindCommand">{{ t('settings.copyCmd') }}</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 未绑定 -->
-      <div v-else class="tg-bind-area">
-        <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn primary tg-bind-btn">{{ t('settings.bindTelegram') }}</a>
-        <span v-if="tgBindLink" class="tg-copy-link" @click="copyText(tgBindLink, t('settings.bindLinkCopied'))">{{ t('settings.cannotOpenCopy') }}</span>
-        <span v-if="!tgBot.configured" class="tg-warn">{{ t('settings.tgBotNotConfigured') }}</span>
-        <!-- 点链接没反应的兜底：与 bot 的对话已存在时 TG 不会重发 /start，须手动发命令 -->
-        <div v-if="tgBindCommand" class="tg-start-cmd">
-          <span class="tg-start-hint">{{ t('settings.tgStartHint') }}</span>
-          <div class="tg-start-row">
-            <code class="tg-start-code">{{ tgBindCommand }}</code>
-            <button class="btn" @click="copyTgBindCommand">{{ t('settings.copyCmd') }}</button>
-          </div>
-        </div>
-        <!-- widget 打不开时的兜底：向 bot 发 /start 拿 chat_id 手动绑 -->
-        <div class="tg-manual">
-          <span class="tg-manual-hint">{{ t('settings.tgManualHint') }}</span>
-          <div class="tg-manual-row">
-            <input v-model="tgManual.chat_id" class="input tg-manual-input" :placeholder="t('settings.tgManualPh')" @keyup.enter="bindTgManual" />
-            <button class="btn" :disabled="tgManual.saving" @click="bindTgManual">{{ tgManual.saving ? t('common.saving') : t('settings.tgManualBind') }}</button>
-          </div>
-        </div>
-      </div>
+      <!-- 绑定管理（组件化，与仪表盘共用）：绑定/解绑/多 TG 清单/团队清单 -->
+      <button class="btn primary" @click="tgMgr?.open()">{{ t('settings.tgManageBtn') }}</button>
+      <span v-if="!tgBot.configured" class="tg-warn" style="display:block;margin-top:10px">{{ t('settings.tgBotNotConfigured') }}</span>
+      <TgManager ref="tgMgr" />
 
       <!-- 验证 Bot 配置（owner/超管） -->
       <div v-if="(isSuper || (myPerms || []).includes('members.manage')) && tgBot.configured" class="tg-verify">

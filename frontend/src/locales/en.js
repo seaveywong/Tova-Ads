@@ -9,6 +9,30 @@ import lplogs from './views/lplogs'
 
 // English message dictionary. Mirrors zh.js key-for-key.
 export default {
+  tg: {
+    title: 'Telegram Notifications',
+    tabMine: 'My bindings', tabAdd: 'Add binding', tabTeam: 'Team',
+    loadFail: 'Failed to load Telegram binding info',
+    noneYet: 'Telegram not bound yet — stop-loss and anomaly alerts cannot reach you instantly.',
+    bindNow: 'Bind now',
+    verifiedAt: 'Last verified {ts}', unverified: 'Unverified (send a test message to verify)', boundAt: 'Bound at {ts}',
+    sendTest: 'Send test message', addAnother: '+ Add another', multiNote: 'Alerts are sent to ALL bound Telegrams.',
+    unbind: 'Unbind', unbindConfirm: 'Unbind Telegram {id}? It will no longer receive alerts.', unbound: 'Unbound',
+    testSent: 'Test message sent to {n} Telegram(s), please check',
+    step1: 'Open Telegram with the button (or copy the command and send it manually)',
+    openTg: 'Open Telegram to bind',
+    copyCmd: 'Copy command', cmdCopied: 'Command copied (valid 30 minutes)',
+    cmdHint: 'If the bot chat already exists, the button will not re-send /start — copy the command above and send it to the bot manually. Copy command always gives a fresh code.',
+    step2: 'Done when the bot replies "bound" — this page refreshes automatically',
+    waiting: 'Waiting for binding result… (auto-detected within seconds)',
+    manualFold: 'Alternative: enter numeric chat_id manually',
+    manualPh: 'Telegram numeric ID (e.g. 123456789)', manualBind: 'Bind manually',
+    manualHint: 'Send /start to the bot first, then paste the numeric ID from its reply.',
+    botNotConfigured: 'Admin has not configured a TG bot yet',
+    teamEmpty: 'No members', colUser: 'Member', colRole: 'Role', colTg: 'TG binding',
+    meTag: ' (me)', noBinding: 'Not bound', teamNote: 'Members without binding get no TG alerts (they can still see in-app notifications).',
+    boundToast: '✅ Telegram bound!', opFail: 'Operation failed',
+  },
   common: {
     save: 'Save',
     cancel: 'Cancel',
@@ -790,6 +814,7 @@ export default {
     tgBotNotConfigured: 'Admin has not configured a TG bot', verifyBotConfig: 'Verify bot config',
     tgManualHint: 'Button won\'t open? Send /start to the bot first, then paste the numeric ID from its reply to bind manually',
     tgManualPh: 'Telegram numeric ID (e.g. 123456789)', tgManualBind: 'Bind manually',
+    tgManageBtn: 'Manage Telegram bindings (bind/unbind/list)',
     tgStartHint: 'Button did nothing? If the bot chat already exists, Telegram will not re-send /start — open the bot chat and send this command manually to bind (valid for 30 minutes; click Copy command for a fresh one):',
     tgBoundToast: '✅ Telegram bound! Alerts will be sent to your Telegram',
     copyCmd: 'Copy command', cmdCopied: 'Command copied',

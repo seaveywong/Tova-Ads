@@ -13,6 +13,7 @@ import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
+import TgManager from '../components/TgManager.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -821,17 +822,19 @@ const removeAllowance = async (log) => {
   } catch (e) { ElMessage.error(t('dashboard.allowanceRemoveFail') + (e.message || '')) }
 }
 
-// TG 绑定提示：未绑 TG 的用户在仪表盘顶部给一条可关闭的引导（绑定收告警）
+// TG 绑定提示：未绑 TG 顶部引导横幅 + 工具栏铃铛红点；绑定管理弹窗（TgManager 组件）
 const tgBanner = ref(false)
+const tgUnbound = ref(false)
+const tgMgr = ref(null)
 const loadTgBanner = async () => {
-  if (localStorage.getItem('tova_tg_banner_off') === '1') return
   try {
     const r = await GET('/notifications/tg/user-binding')
-    tgBanner.value = !r?.bound
+    tgUnbound.value = !r?.bound
+    tgBanner.value = tgUnbound.value && localStorage.getItem('tova_tg_banner_off') !== '1'
   } catch {}
 }
 const dismissTgBanner = () => { tgBanner.value = false; localStorage.setItem('tova_tg_banner_off', '1') }
-const goTgBind = () => router.push({ path: '/settings', query: { sec: 'sec-tg' } })
+const openTgMgr = () => tgMgr.value?.open()
 
 onMounted(() => {
   loadDashboard()
@@ -862,6 +865,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
       <div class="ph-actions">
         <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
+        <button class="head-btn tg-mgr-btn" @click="openTgMgr" :title="t('dashboard.tgMgrTitle')">
+          <el-icon><Bell /></el-icon><span v-if="tgUnbound" class="tg-dot"></span>
+        </button>
         <button class="head-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">
           <el-icon><Document /></el-icon><span class="btn-txt">{{ t('dashboard.copySpendBtn') }}</span>
         </button>
@@ -878,7 +884,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <!-- TG 未绑定引导（可关闭）：告警第一时间到 TG -->
     <div v-if="tgBanner" class="tg-banner">
       <span class="tg-banner-txt">{{ t('dashboard.tgBannerText') }}</span>
-      <button class="head-btn primary" @click="goTgBind">{{ t('dashboard.tgBannerGo') }}</button>
+      <button class="head-btn primary" @click="openTgMgr">{{ t('dashboard.tgBannerGo') }}</button>
       <button class="tg-banner-x" @click="dismissTgBanner" :title="t('common.close')">×</button>
     </div>
 
@@ -1263,7 +1269,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
       </div>
     </section>
-  </div>
+    <TgManager ref="tgMgr" />
+</div>
 </template>
 
 <style scoped>
@@ -1297,6 +1304,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .main-tab { padding: 8px 20px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
 .main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 /* sticky 基准是 .content 滚动区顶缘（平台上下文条在其外常驻），top:0 即紧贴平台条 */
+.tg-mgr-btn { position: relative; }
+.tg-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-danger, #f56c6c); box-shadow: 0 0 0 2px var(--bg, #fff); }
 .tg-banner { display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 10px; border: 1px solid var(--el-color-warning, #e6a23c); background: var(--el-color-warning-light-9, #fdf6ec); border-radius: 8px; font-size: 13px; }
 .tg-banner-txt { flex: 1; }
 .tg-banner-x { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--tx-3, #999); padding: 2px 6px; }

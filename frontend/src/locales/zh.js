@@ -11,6 +11,30 @@ import lplogs from './views/lplogs'
 // status(状态术语，配合 useStatus.js) / layout(外壳) / login / 各业务页。
 // 新增 UI 文案：先在这里加 key（zh.js + en.js 同步），模板里用 t('ns.key')。
 export default {
+  tg: {
+    title: 'Telegram 通知绑定',
+    tabMine: '我的绑定', tabAdd: '添加绑定', tabTeam: '团队成员',
+    loadFail: '加载 TG 绑定信息失败',
+    noneYet: '尚未绑定 Telegram——止损/异常告警将无法第一时间送达。',
+    bindNow: '立即绑定',
+    verifiedAt: '最后验证 {ts}', unverified: '未验证（发一条测试消息即验证）', boundAt: '绑定于 {ts}',
+    sendTest: '发送测试消息', addAnother: '+ 添加绑定', multiNote: '告警将同时发送到以上全部 Telegram。',
+    unbind: '解绑', unbindConfirm: '解绑 Telegram {id}？解绑后该 TG 不再收到告警。', unbound: '已解绑',
+    testSent: '测试消息已发送到 {n} 个 TG，请查收',
+    step1: '点击按钮打开 Telegram 发送绑定命令（或复制命令手动发送）',
+    openTg: '打开 Telegram 绑定',
+    copyCmd: '复制命令', cmdCopied: '命令已复制（30 分钟内有效）',
+    cmdHint: '与 Bot 的对话已存在时点按钮不会自动重发 /start——请复制上面命令，粘贴到 Bot 对话框发送。点「复制命令」拿到的总是新码。',
+    step2: 'Bot 回复「绑定成功」即完成，本页会自动刷新',
+    waiting: '等待绑定结果…（发送命令后几秒内自动检测）',
+    manualFold: '其他方式：手动填写数字 chat_id',
+    manualPh: 'Telegram 数字 ID（如 123456789）', manualBind: '手动绑定',
+    manualHint: '先给 Bot 发送 /start，把回复里的数字 ID 填到上面。',
+    botNotConfigured: '管理员尚未配置 TG Bot，无法绑定',
+    teamEmpty: '暂无成员', colUser: '成员', colRole: '角色', colTg: 'TG 绑定',
+    meTag: '（我）', noBinding: '未绑定', teamNote: '未绑定的成员收不到 TG 告警（仍可通过站内通知查看）。',
+    boundToast: '✅ TG 绑定成功！', opFail: '操作失败',
+  },
   common: {
     save: '保存',
     cancel: '取消',
@@ -801,6 +825,7 @@ export default {
     tgBotNotConfigured: '管理员未配置 TG Bot', verifyBotConfig: '验证 Bot 配置',
     tgManualHint: '按钮打不开/被墙？先给 Bot 发送 /start，把回复里的数字 ID 填到这里手动绑定',
     tgManualPh: 'Telegram 数字 ID（如 123456789）', tgManualBind: '手动绑定',
+    tgManageBtn: '管理 Telegram 绑定（绑定/解绑/清单）',
     tgStartHint: '点按钮没反应？与 Bot 的对话已存在时不会自动重发——打开 Bot 对话，手动发送下面这条命令即可完成绑定（30 分钟内有效，过期点「复制命令」即得新码）：',
     tgBoundToast: '✅ TG 绑定成功！告警将发送到你的 Telegram',
     copyCmd: '复制命令', cmdCopied: '命令已复制',
