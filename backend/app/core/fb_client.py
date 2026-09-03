@@ -192,7 +192,7 @@ class FbClient:
         计算字段，大代理 token（3k+ 账户）带上它们单次全量拉取从 ~30s 涨到超时；
         载入列表/导入判定只需要存在性+名称，余额等由导入后的刷新补。
         """
-        fields = ("account_id,account_status,name,currency" if light else
+        fields = ("account_id,account_status,name,currency,timezone_name" if light else
                   "account_id,account_status,name,currency,timezone_name,balance,spend_cap,amount_spent")
         return self.get_paged("me/adaccounts", {"fields": fields})
 

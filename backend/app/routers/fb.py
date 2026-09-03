@@ -1000,6 +1000,8 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
                 if not live:
                     continue
                 acc.account_status = live.get("account_status") or acc.account_status
+                if live.get("timezone_name"):
+                    acc.timezone_name = live["timezone_name"]  # 时区是巡检/加白日期的基准，必须补准
                 acc.balance = str(live.get("balance", "") or "")
                 acc.spend_cap = str(live.get("spend_cap", "") or "")
                 acc.amount_spent = str(live.get("amount_spent", "") or "")
