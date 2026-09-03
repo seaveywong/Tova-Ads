@@ -66,7 +66,7 @@ def dashboard(
     fresh: bool = False,  # 手动刷新跳过 30s 内存缓存（只读库，不触发 FB 采集）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = None,
+    background_tasks: BackgroundTasks = None,  # noqa: B008 —— FastAPI 依类型注入；默认 None 时挂后台任务的分支自然跳过
 ):
     """汇总看板：读 perf_snapshots 缓存（秒开）。巡检 5min 刷新。
 
