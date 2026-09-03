@@ -256,11 +256,13 @@ class FbClient:
 
         优先用 time_range(since/until 账户本地日，精确) 避免 FB date_preset(today) 跨时区累积失真；
         不传 since/until 则 fallback date_preset。
+        ⚠️ Graph v25 起 insights 不支持 effective_status 字段（code100 整体报错）——
+        ACTIVE 过滤改从 /ads 结构接口拿 id 集合再过滤 insights 行。
         """
         params = {
             "fields": "ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,"
                       "spend,impressions,clicks,ctr,cpc,reach,frequency,"
-                      "actions,purchase_roas,effective_status",
+                      "actions,purchase_roas",
             "level": "ad",
         }
         if since and until:
@@ -269,8 +271,19 @@ class FbClient:
             params["date_preset"] = date_preset
         all_ads = self.get_paged(f"act_{act_id}/insights", params, limit=limit)
         if only_active:
-            # 只保留 ACTIVE（含学习中的——学习中但 ACTIVE = 在花钱，用户明确要纳入）
-            all_ads = [a for a in all_ads if a.get("effective_status") == "ACTIVE"]
+            # 只保留 ACTIVE（含学习中的——学习中但 ACTIVE = 在花钱，用户明确要纳入）。
+            # v25 insights 无 effective_status——从 /ads 结构拿状态映射：既做过滤，也
+            # 回填到行上（下游 _ad_is_active/快照/管理器兼容旧字段读取）
+            status_map = {str(a.get("id", "")).split(".")[-1]: a.get("effective_status", "")
+                          for a in self.get_ads(act_id)}
+            out = []
+            for a in all_ads:
+                _sid = str(a.get("ad_id", "")).split(".")[-1]
+                if _sid in status_map:
+                    a["effective_status"] = status_map[_sid]
+                    if status_map[_sid] == "ACTIVE":
+                        out.append(a)
+            return out
         return all_ads
 
     def get_adsets(self, act_id: str, effective_status: str | None = '["ACTIVE"]',
