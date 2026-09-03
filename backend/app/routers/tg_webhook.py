@@ -89,7 +89,6 @@ async def tg_webhook(secret: str, request: Request):
             tg_username = (msg.get("from") or {}).get("username") or ""
             try:
                 from ..core.security import decode_token
-                from ..core.database import get_db as _get_db
                 # 注意：UserTgBinding 用模块级 import（顶部已有）——此处再 import 会把
                 # 它遮蔽成函数局部变量，第 65 行的 secret 遍历先于它执行 → UnboundLocalError
                 payload = decode_token(bind_token)
@@ -99,7 +98,9 @@ async def tg_webhook(secret: str, request: Request):
                 tenant_id = payload.get("tenant_id")
                 if not user_id or not tenant_id:
                     raise ValueError("invalid token")
-                db_session = next(_get_db())
+                # 用 SuperSessionLocal（BYPASSRLS）——原 get_db() 无租户上下文，
+                # INSERT user_tg_bindings 违反 RLS 策略静默失败（绑定 0 行的真因）
+                db_session = SuperSessionLocal()
                 try:
                     from datetime import datetime, timezone
                     # 多 TG 语义：同 chat_id 幂等刷新，新 chat_id 追加一行（一人多 TG 全收）
