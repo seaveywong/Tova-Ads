@@ -784,6 +784,7 @@ export default {
     lastSync: 'Last sync: {ts} UTC', fetching: 'Fetching…', syncFxNow: 'Sync rates now',
     tgTitle: 'Telegram notifications',
     tgDesc: 'Bind your Telegram to receive real-time alerts (stop-loss / bans / anomalies). Click the button to open the Telegram bot and auto-bind.',
+    tgAddAnother: '+ Add another Telegram',
     tgBoundBadge: '✅ Bound {id}', sending: 'Sending…', sendTestMsg: 'Send test message', unbind: 'Unbind',
     bindTelegram: 'Bind Telegram', bindLinkCopied: 'Bind link copied', cannotOpenCopy: 'Can\'t open? Copy link',
     tgBotNotConfigured: 'Admin has not configured a TG bot', verifyBotConfig: 'Verify bot config',

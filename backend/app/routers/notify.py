@@ -170,12 +170,18 @@ def test_tg(
     ).first()
     if not binding:
         raise HTTPException(400, "未绑定 TG")
+    # 措辞：说清此 bot 当前关联的平台用户（不是"绑定成功"——绑定是否成功看用户级）
+    from ..models.notify import UserTgBinding as _UTB
+    from ..models.auth import User as _U2
+    _uids = [b.user_id for b in db.query(_UTB).filter(_UTB.tenant_id == user.tenant_id).all()]
+    _emails = [u.email for u in db.query(_U2).filter(_U2.id.in_(_uids)).all()] if _uids else []
+    _assoc = ("、".join(_emails) if _emails else "暂无用户级绑定（告警发到本 chat）")
     try:
         _tg_send(decrypt(binding.bot_token_enc), binding.chat_id,
-                 "[Tova Ads 🔵]\n租户级 TG 测试\n绑定成功！")
+                 f"[Tova Ads 🔵]\nTG 通道测试 ✅\n关联平台用户：{_assoc}")
         binding.verified_at = datetime.now(timezone.utc)
         db.commit()
-        return {"status": "sent"}
+        return {"status": "sent", "assoc": _assoc}
     except Exception as e:
         raise HTTPException(400, f"发送失败：{e}")
 
@@ -212,21 +218,43 @@ def set_user_tg_binding(
     existing = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
+        UserTgBinding.chat_id == body.chat_id,
     ).first()
-    # bot_token 留空 = 不换 bot（复用现有绑定的 token——TG 解绑/重绑 chat_id 场景）
+    # bot_token 留空 = 不换 bot（复用现有/任一绑定的 token——多 TG 场景复用第一个的）
     _tok_to_store = real_bot if real_bot else None
     if existing:
         if _tok_to_store:
             existing.bot_token_enc = encrypt(_tok_to_store)
-        existing.chat_id = body.chat_id
         existing.verified_at = None
     else:
         if not _tok_to_store:
-            raise HTTPException(400, "缺少 bot_token")
+            any_b = db.query(UserTgBinding).filter(
+                UserTgBinding.tenant_id == user.tenant_id,
+                UserTgBinding.user_id == user.id).first()
+            if not any_b:
+                raise HTTPException(400, "缺少 bot_token")
+            _tok_to_store = decrypt(any_b.bot_token_enc)
         db.add(UserTgBinding(tenant_id=user.tenant_id, user_id=user.id,
                              bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id))
     db.commit()
     return {"status": "saved", "user_id": user.id}
+
+
+@router.delete("/tg/user-binding")
+def delete_user_tg_binding(
+    chat_id: str,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """解绑单个 TG（按 chat_id；多绑定场景逐条解）。"""
+    from ..models.notify import UserTgBinding
+    n = db.query(UserTgBinding).filter(
+        UserTgBinding.tenant_id == user.tenant_id,
+        UserTgBinding.user_id == user.id,
+        UserTgBinding.chat_id == chat_id,
+    ).delete()
+    db.commit()
+    return {"deleted": n}
 
 
 @router.get("/tg/user-binding")
@@ -234,17 +262,25 @@ def get_user_tg_binding(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """查当前用户的 TG 绑定（chat_id 打码）。"""
+    """查当前用户的【全部】TG 绑定（chat_id 打码；一人可多 TG）。"""
     from ..models.notify import UserTgBinding
-    b = db.query(UserTgBinding).filter(
+
+    def _mask(cid):
+        return (cid[:3] + "***" + cid[-3:]) if len(cid) > 8 else "***"
+
+    binds = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
-    ).first()
-    if not b:
-        return {"bound": False}
-    cid = b.chat_id
-    masked = (cid[:3] + "***" + cid[-3:]) if len(cid) > 8 else "***"
-    return {"bound": True, "chat_id_masked": masked, "verified": b.verified_at is not None}
+    ).order_by(UserTgBinding.id).all()
+    if not binds:
+        return {"bound": False, "bindings": []}
+    # 顶层字段保留第一条（前端旧版兼容），bindings 数组供新版列表渲染
+    return {"bound": True,
+            "chat_id_masked": _mask(binds[0].chat_id),
+            "verified": binds[0].verified_at is not None,
+            "bindings": [{"id": b.id, "chat_id_masked": _mask(b.chat_id),
+                          "chat_id": b.chat_id, "verified": b.verified_at is not None}
+                         for b in binds]}
 
 
 @router.post("/tg/user-test")
@@ -252,23 +288,28 @@ def user_tg_test(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """给当前用户的 TG 绑定发测试消息。"""
+    """给当前用户的【全部】TG 绑定发测试消息（一人可多 TG，全收）。"""
     from ..models.notify import UserTgBinding
     from ..core.notify_utils import _tg_send
-    b = db.query(UserTgBinding).filter(
+    binds = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
-    ).first()
-    if not b:
+    ).all()
+    if not binds:
         raise HTTPException(400, "你未绑定 TG（POST /notifications/tg/user-binding）")
-    try:
-        _tg_send(decrypt(b.bot_token_enc), b.chat_id,
-                 "[Tova Ads 🔵]\n用户级 TG 测试\n绑定成功！")
-        b.verified_at = datetime.now(timezone.utc)
-        db.commit()
-        return {"status": "sent"}
-    except Exception as e:
-        raise HTTPException(400, f"发送失败：{e}")
+    sent, err = 0, ""
+    for b in binds:
+        try:
+            _tg_send(decrypt(b.bot_token_enc), b.chat_id,
+                     f"[Tova Ads 🔵]\nTG 通道测试 ✅\n已关联平台用户：{user.email}")
+            b.verified_at = datetime.now(timezone.utc)
+            sent += 1
+        except Exception as e:
+            err = str(e)[:120]
+    db.commit()
+    if sent:
+        return {"status": "sent" if not err else "partial", "sent_to": sent, "error": err}
+    raise HTTPException(400, f"发送失败：{err}")
 
 
 # ── TG OAuth（Telegram Login Widget，用户点击授权→自动绑定，不手填）──
@@ -357,14 +398,15 @@ def tg_oauth_callback(body: TgOAuthIn,
     if _time.time() - body.auth_date > 86400:
         raise HTTPException(400, "TG 登录已过期（超过 24h）")
     # 绑定 UserTgBinding（用租户 bot + Telegram user id 作 chat_id）
+    # 多 TG 语义：同 chat_id 幂等刷新，新 chat_id 追加（不再顶掉旧绑定）
     chat_id = str(body.id)
     from ..models.notify import UserTgBinding
     existing = db.query(UserTgBinding).filter(
         UserTgBinding.tenant_id == user.tenant_id,
         UserTgBinding.user_id == user.id,
+        UserTgBinding.chat_id == chat_id,
     ).first()
     if existing:
-        existing.chat_id = chat_id
         existing.bot_token_enc = tb.bot_token_enc
         existing.verified_at = datetime.now(timezone.utc)
     else:

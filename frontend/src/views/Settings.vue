@@ -321,6 +321,14 @@ const unbindTg = async () => {
     userTg.value = await GET('/notifications/tg/user-binding')
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
 }
+const unbindTgOne = async (chatId) => {
+  try {
+    await ElMessageBox.confirm(t('settings.tgUnbindConfirm'), t('common.confirm'), { type: 'warning' })
+    await DELETE(`/notifications/tg/user-binding?chat_id=${encodeURIComponent(chatId)}`)
+    ElMessage.success(t('settings.tgUnbound'))
+    userTg.value = await GET('/notifications/tg/user-binding')
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.fail')) }
+}
 const whCfg = ref({ public_url: '', verify_token_masked: '', verify_token_set: false, verify_token_is_default: true, active_apps: 0, app_names: [] })
 const whForm = ref({ verify_token: '' })
 const whSaving = ref(false)
@@ -804,11 +812,16 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.tgTitle') }}</div>
       <div class="d" style="margin-bottom:10px">{{ t('settings.tgDesc') }}</div>
 
-      <!-- 已绑定 -->
-      <div v-if="userTg.bound" class="tg-status">
-        <span class="tg-bound-badge">{{ t('settings.tgBoundBadge', { id: userTg.chat_id_masked }) }}</span>
-        <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? t('settings.sending') : t('settings.sendTestMsg') }}</button>
-        <button class="btn tg-unbind-btn" @click="unbindTg">{{ t('settings.unbind') }}</button>
+      <!-- 已绑定（多 TG 列表） -->
+      <div v-if="userTg.bound" class="tg-status tg-multi">
+        <div v-for="b in userTg.bindings || []" :key="b.id" class="tg-bind-row">
+          <span class="tg-bound-badge">{{ t('settings.tgBoundBadge', { id: b.chat_id_masked }) }}</span>
+          <button class="btn tg-unbind-btn" @click="unbindTgOne(b.chat_id)">{{ t('settings.unbind') }}</button>
+        </div>
+        <div class="tg-actions">
+          <button class="btn" :disabled="testTgLoading" @click="testUserTg">{{ testTgLoading ? t('settings.sending') : t('settings.sendTestMsg') }}</button>
+          <a v-if="tgBindLink" :href="tgBindLink" target="_blank" rel="noopener" class="btn tg-add-btn">{{ t('settings.tgAddAnother') }}</a>
+        </div>
       </div>
 
       <!-- 未绑定 -->
@@ -944,6 +957,9 @@ const runKeepaliveNow = async () => {
 
 /* Telegram 通知 */
 .tg-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.tg-multi{flex-direction:column;align-items:flex-start}
+.tg-bind-row{display:flex;align-items:center;gap:8px}
+.tg-actions{display:flex;gap:8px;margin-top:6px}
 .tg-bind-area{margin-top:4px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .tg-bind-btn{text-decoration:none;margin-top:0}
 .tg-copy-link{font-size:12px;color:var(--ac);cursor:pointer;text-decoration:underline}

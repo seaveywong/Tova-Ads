@@ -795,6 +795,7 @@ export default {
     lastSync: '上次同步：{ts} UTC', fetching: '拉取中…', syncFxNow: '立即同步汇率',
     tgTitle: 'Telegram 通知',
     tgDesc: '绑定你的 Telegram 接收实时告警（止损/封禁/异常）。点击按钮打开 Telegram 机器人自动绑定。',
+    tgAddAnother: '+ 绑定另一个 TG',
     tgBoundBadge: '✅ 已绑定 {id}', sending: '发送中…', sendTestMsg: '发送测试消息', unbind: '解绑',
     bindTelegram: '绑定 Telegram', bindLinkCopied: '绑定链接已复制', cannotOpenCopy: '打不开？复制链接',
     tgBotNotConfigured: '管理员未配置 TG Bot', verifyBotConfig: '验证 Bot 配置',

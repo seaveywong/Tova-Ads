@@ -100,25 +100,34 @@ async def tg_webhook(secret: str, request: Request):
                     raise ValueError("invalid token")
                 db_session = next(_get_db())
                 try:
+                    from datetime import datetime, timezone
+                    # 多 TG 语义：同 chat_id 幂等刷新，新 chat_id 追加一行（一人多 TG 全收）
                     existing = db_session.query(UserTgBinding).filter(
                         UserTgBinding.tenant_id == tenant_id,
                         UserTgBinding.user_id == user_id,
+                        UserTgBinding.chat_id == tg_chat_id,
                     ).first()
                     if existing:
-                        existing.chat_id = tg_chat_id
                         existing.bot_token_enc = b.bot_token_enc
-                        from datetime import datetime, timezone
                         existing.verified_at = datetime.now(timezone.utc)
                     else:
-                        from datetime import datetime, timezone
                         db_session.add(UserTgBinding(
                             tenant_id=tenant_id, user_id=user_id,
                             bot_token_enc=b.bot_token_enc, chat_id=tg_chat_id,
                             verified_at=datetime.now(timezone.utc),
                         ))
+                    # 回复说清绑到了哪个平台用户
+                    from ..models.auth import User as _U
+                    _plat = db_session.query(_U).filter(_U.id == user_id).first()
+                    _plat_label = (_plat.email if _plat and _plat.email else f"用户#{user_id}")
+                    _n = db_session.query(UserTgBinding).filter(
+                        UserTgBinding.tenant_id == tenant_id,
+                        UserTgBinding.user_id == user_id).count()
                     db_session.commit()
                     _tg_reply(bot_token, tg_chat_id,
-                              f"✅ 绑定成功！你将收到 Tova Ads 的实时告警通知。\nTG 用户：@{tg_username or tg_chat_id}")
+                              f"✅ 绑定成功！已关联平台用户：{_plat_label}\n"
+                              f"TG：@{tg_username or tg_chat_id}"
+                              + (f"\n（该用户共 {_n} 个 TG，告警将全部发送）" if _n > 1 else ""))
                 finally:
                     db_session.close()
             except Exception:
