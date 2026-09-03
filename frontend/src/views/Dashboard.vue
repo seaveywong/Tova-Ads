@@ -524,7 +524,7 @@ const forceRefresh = async () => {
   try {
     await POST('/guard/inspect?force=true')
     ElMessage.success(t('dashboard.forceSuccess'))
-    await loadDashboard()
+    await loadDashboard(true)
     loadTrend()
   } catch (e) {
     ElMessage.error(t('dashboard.forceFail') + e.message)

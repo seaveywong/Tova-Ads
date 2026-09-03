@@ -5,7 +5,7 @@
 """
 import time as _time
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
 from ..core.database import get_db, SuperSessionLocal
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 # 30s 内存缓存（照搬 1.0 _SUMMARY_CACHE）
 _CACHE = {}
-_CACHE_TTL = 30
+_BACKFILL_TRIED = {}   # (tenant_id, since, until) -> ts：区间历史回填防重（600s）
 _CACHE_MAX = 300  # 条目上限：key 含日期/账户组合，长期运行缓慢膨胀，超限淘汰最旧
 
 
@@ -66,6 +66,7 @@ def dashboard(
     fresh: bool = False,  # 手动刷新跳过 30s 内存缓存（只读库，不触发 FB 采集）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
 ):
     """汇总看板：读 perf_snapshots 缓存（秒开）。巡检 5min 刷新。
 
@@ -93,6 +94,25 @@ def dashboard(
 
     # 内存缓存（fresh=True 跳过：手动刷新只读库，绕 30s 缓存看最新快照）
     platform = _norm_platform(platform)
+
+    # 区间超出巡检回填范围（近 7 天）→ 后台按需补拉历史（每账户一次调用；
+    # 10 分钟标记防重复——看板每分钟自动刷新，无投放的天无法与"未回填"区分）。
+    # 本次响应先返回现有数据，回填完成后下一次刷新自然带上（最终一致）。
+    try:
+        _bf_min = (datetime.now(BUSINESS_TZ) - timedelta(days=6)).strftime("%Y-%m-%d")
+        _bf_floor = (datetime.now(BUSINESS_TZ) - timedelta(days=89)).strftime("%Y-%m-%d")
+        if since < _bf_min and since >= _bf_floor and background_tasks is not None:
+            _bf_key = (user.tenant_id, since, until)
+            _bf_now = _time.time()
+            if _bf_now - _BACKFILL_TRIED.get(_bf_key, 0) > 600:
+                _BACKFILL_TRIED[_bf_key] = _bf_now
+                from ..services.guard_engine import backfill_history_range
+                background_tasks.add_task(backfill_history_range, user.tenant_id, since, until)
+                if len(_BACKFILL_TRIED) > 200:
+                    _BACKFILL_TRIED.clear()
+    except Exception:
+        pass
+
     cache_key = f"{user.tenant_id}:{since}:{until}:{conversion_category}:{act_ids}:{platform}"
     now = _time.time()
     if not fresh and cache_key in _CACHE:

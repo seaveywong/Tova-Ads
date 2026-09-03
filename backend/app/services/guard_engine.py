@@ -1661,6 +1661,53 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
     db.commit()
 
 
+def backfill_history_range(tenant_id: int, since: str, until: str):
+    """看板区间缺历史时按需回填（>7 天区间——巡检只滚动回填近 7 天）。
+
+    每账户一次 insights 调用拉整个区间分天（time_increment=1），幂等 upsert 全量广告。
+    无投放的天 FB 不返回行，与"未回填"不可区分——由调用方用内存标记抑制重复触发。
+    """
+    from ..core.database import SuperSessionLocal
+    from ..core.fb_tokens import client_for_account
+    from ..services.kpi_resolver import resolve_kpi as _rk
+    db = SuperSessionLocal()
+    try:
+        accs = db.query(Account).filter(
+            Account.tenant_id == tenant_id,
+            Account.is_managed == True,  # noqa: E712
+            Account.platform == "fb",
+        ).all()
+        n_rows = 0
+        for acc in accs:
+            fb = None
+            try:
+                fb = client_for_account(db, tenant_id, acc.act_id, "read")
+            except Exception:
+                continue
+            if not fb:
+                continue
+            try:
+                rows = fb.get_ad_insights(acc.act_id, only_active=False,
+                                          since=since, until=until, increment=1, limit=200)
+            except Exception:
+                continue
+            for r in rows:
+                d = r.get("date_start")
+                aid = r.get("ad_id", "")
+                if not d or not aid:
+                    continue
+                try:
+                    kpi = _rk(db, tenant_id, r.get("campaign_id", ""), "", "", r.get("actions", []))
+                    _upsert_ad_snapshot(db, tenant_id, acc, "fb", r, aid, kpi,
+                                        kpi["conversions"], d)
+                    n_rows += 1
+                except Exception:
+                    continue
+        logger.info(f"[Backfill] tenant={tenant_id} {since}~{until}: {len(accs)} accs, {n_rows} rows upserted")
+    finally:
+        db.close()
+
+
 def to_usd(amount: float, currency: str) -> float:
     """账户本币 → USD（阈值比较用）。优先读 CurrencyRate 表（每日刷新），硬编码字典兜底。"""
     cur = (currency or "USD").upper()
