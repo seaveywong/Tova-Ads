@@ -812,18 +812,26 @@ def get_credential_assets(
         for b in fb.get_businesses():
             businesses.append({"id": b.get("id", ""), "name": b.get("name", ""), "role": ""})
         # /me/businesses 边缘不返回 permitted_tasks（实测恒空，曾因此全员显示"基本"）。
-        # 真实角色在 /{bm}/business_users：按 token 用户的 fb_user_id 匹配出 role（ADMIN 等）。
+        # 真实角色在 /{bm}/business_users——但其中 id 是 business 作用域 ID（buid），
+        # 不等于 token 用户的 FB profile id，不能直接比。正确做法：/me/business_users
+        # 返回本人在各 BM 的 buid+role 集合，拿 buid 去各 BM 用户列表里认领。
         # 逐 BM 串行查太贵（大池 100+ BM），batch API 一次 50 个。
-        if businesses and cred.fb_user_id:
+        if businesses:
             try:
-                urls = [f"{b['id']}/business_users?fields=id,role&limit=200" for b in businesses]
-                for b, users in zip(businesses, fb.batch_get(urls)):
-                    me_role = ""
-                    for u in (users or {}).get("data", []):
-                        if str(u.get("id") or "") == str(cred.fb_user_id):
-                            me_role = u.get("role") or ""
-                            break
-                    b["role"] = "完全" if me_role == "ADMIN" else "基本"
+                my_buids: dict = {}
+                for bu in fb.get_paged("me/business_users", {"fields": "id,role"}):
+                    if bu.get("id"):
+                        my_buids[str(bu["id"])] = bu.get("role") or ""
+                if my_buids:
+                    urls = [f"{b['id']}/business_users?fields=id,role&limit=200" for b in businesses]
+                    for b, users in zip(businesses, fb.batch_get(urls)):
+                        me_role = ""
+                        for u in (users or {}).get("data", []):
+                            uid = str(u.get("id") or "")
+                            if uid in my_buids:
+                                me_role = u.get("role") or my_buids[uid]
+                                break
+                        b["role"] = "完全" if me_role == "ADMIN" else "基本"
             except FbApiError:
                 for b in businesses:
                     b["role"] = b["role"] or "基本"
