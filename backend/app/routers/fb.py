@@ -68,6 +68,7 @@ def store_credential(
 
     # debug_token 拉权限快照
     perm_snapshot = None
+    debug = None
     try:
         debug = fb.debug_token()
         perm_snapshot = json.dumps({
@@ -79,6 +80,30 @@ def store_credential(
     except Exception:
         pass  # debug_token 失败不阻断存储
 
+    # 长效令牌交换（手动粘贴常是 ~1-2h 短效，导入即死）。对齐 OAuth 流程：
+    # 用 debug_token 的 app_id 找我们库里的 App secret 才能换；换失败存原值不阻断。
+    stored_token = body.access_token
+    try:
+        _app_id = str((debug or {}).get("data", {}).get("app_id") or "")
+        if _app_id:
+            from ..models.fb_app import FbApp
+            _app = db.query(FbApp).filter(
+                FbApp.app_id == _app_id, FbApp.status == "active").first()
+            if _app and _app.app_secret_enc:
+                import httpx
+                from ..core.fb_client import GRAPH_BASE
+                r = httpx.get(f"{GRAPH_BASE}/oauth/access_token", params={
+                    "grant_type": "fb_exchange_token",
+                    "client_id": _app_id,
+                    "client_secret": decrypt(_app.app_secret_enc),
+                    "fb_exchange_token": body.access_token,
+                }, timeout=30)
+                _nt = (r.json() or {}).get("access_token")
+                if _nt:
+                    stored_token = _nt
+    except Exception:
+        pass  # 交换失败（无 secret / 网络错）存原值
+
     # 去重：同 tenant + 同 fb_user_id + 同 source → 更新，不重复建
     existing = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
@@ -86,7 +111,7 @@ def store_credential(
     ).first()
 
     if existing:
-        existing.access_token_enc = encrypt(body.access_token)
+        existing.access_token_enc = encrypt(stored_token)
         existing.alias = body.alias or existing.alias
         existing.status = "active"
         # 请求显式带了 token_type 才覆盖；未传保留旧值（schema 默认 "user" 会把 manage 静默降级）
@@ -104,7 +129,7 @@ def store_credential(
             tenant_id=user.tenant_id,
             type=body.type,
             alias=body.alias or None,
-            access_token_enc=encrypt(body.access_token),
+            access_token_enc=encrypt(stored_token),
             fb_user_id=me.get("id"),
             fb_user_name=me.get("name"),
             status="active",
