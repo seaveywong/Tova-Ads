@@ -8,6 +8,20 @@ const isSuper = isSuperadminSync()
 
 const { t } = useI18n()
 
+// 视图切换：规则配置 / 暂停记录（哨兵+紧急暂停+止损动作流水）
+const viewTab = ref('rules')
+const pauseLog = ref([])
+const pauseLoading = ref(false)
+const loadPauseLog = async () => {
+  pauseLoading.value = true
+  try { pauseLog.value = await GET('/guard/pause-log?limit=150') } catch { pauseLog.value = [] }
+  pauseLoading.value = false
+}
+const srcLabel = (src) => ({
+  sentinel_patrol: t('guard.plSentinel'), emergency_pause: t('guard.plEmergency'), rule_engine: t('guard.plRule'),
+}[src] || src)
+const srcClass = (src) => ({ sentinel_patrol: 'pl-tag sent', emergency_pause: 'pl-tag emg', rule_engine: 'pl-tag rule' }[src] || 'pl-tag')
+
 // 规则类型元数据：label + 默认分类 + 参数 schema（key/label/默认/单位）
 const RULE_TYPES = computed(() => ({
   bleed_abs: { label: t('guard.rt.bleed_abs'), category: t('guard.cat.bleed'), params: [
@@ -251,17 +265,33 @@ const doInspect = async (force = false) => {
 <template>
   <div class="page">
     <div class="bar">
-      <div class="bar-l cat-chips">
+      <div class="bar-l view-tabs">
+        <button class="cat-chip" :class="{ on: viewTab === 'rules' }" @click="viewTab = 'rules'">{{ t('guard.tabRules') }}</button>
+        <button class="cat-chip" :class="{ on: viewTab === 'log' }" @click="viewTab = 'log'; loadPauseLog()">{{ t('guard.tabLog') }}</button>
+      </div>
+      <div v-if="viewTab === 'rules'" class="bar-l cat-chips">
         <button v-for="c in catChips" :key="c.v" class="cat-chip" :class="{ on: catFilter === c.v }" @click="catFilter = c.v">{{ c.label }}<b>{{ c.n }}</b></button>
       </div>
       <div class="bar-r">
         <button v-if="isSuper" class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
         <button v-if="isSuper" class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
-        <button class="btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
+        <button v-if="viewTab === 'rules'" class="btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
+        <button v-if="viewTab === 'log'" class="btn" :disabled="pauseLoading" @click="loadPauseLog">{{ t('common.refresh') }}</button>
       </div>
     </div>
 
-    <div class="list" v-loading="loading">
+    <div v-if="viewTab === 'log'" class="list" v-loading="pauseLoading">
+      <div v-if="!pauseLog.length && !pauseLoading" class="empty-title" style="padding:30px;text-align:center">{{ t('guard.plEmpty') }}</div>
+      <div v-for="e in pauseLog" :key="e.id" class="pl-row">
+        <span class="pl-time">{{ e.created_at ? new Date(e.created_at).toLocaleString() : '' }}</span>
+        <span :class="srcClass(e.source)">{{ srcLabel(e.source) }}</span>
+        <span class="pl-target">{{ e.target_type }}</span>
+        <span class="pl-detail">{{ e.detail }}</span>
+        <span class="pl-result" :class="{ fail: e.result !== 'success' }">{{ e.result }}</span>
+      </div>
+    </div>
+
+    <div v-else class="list" v-loading="loading">
       <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
@@ -420,4 +450,16 @@ const doInspect = async (force = false) => {
 .plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; }
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
+
+.view-tabs { display: flex; gap: 6px; }
+.pl-row { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--bd); border-radius: 10px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
+.pl-time { color: var(--tx-3, #999); font-size: 12px; white-space: nowrap; }
+.pl-tag { flex: none; padding: 2px 8px; border-radius: 6px; font-size: 12px; color: #fff; }
+.pl-tag.sent { background: #e6a23c; }
+.pl-tag.emg { background: #f56c6c; }
+.pl-tag.rule { background: #909399; }
+.pl-target { flex: none; color: var(--tx-3, #999); font-size: 12px; }
+.pl-detail { flex: 1; min-width: 200px; word-break: break-all; }
+.pl-result { flex: none; font-size: 12px; color: #67c23a; }
+.pl-result.fail { color: #f56c6c; }
 </style>

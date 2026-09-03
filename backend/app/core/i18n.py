@@ -101,6 +101,30 @@ NOTIFY = {
             "en": "Account: {name} (<code>{act_id}</code>)\nAd: {ad_name} (<code>{ad_id}</code>)\nAd set: <code>{adset_id}</code>\nCampaign: <code>{campaign_id}</code>\nRule: {rule_name}\nTrigger: <b>{detail}</b>\nAction: <b>{action}</b>\nSpend: <b>{spend}</b> | Conversions: <b>{conv}</b>\nKPI: {kpi_label} ({source_label})",
         },
     },
+    "emergency_done": {
+        "title": {"zh": "⛔ 全局紧急暂停完成", "en": "⛔ Global Emergency Pause Done"},
+        "body": {
+            "zh": "覆盖 {total} 个账户
+已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）
+核验失败：{failed}
+{errs}",
+            "en": "Covered {total} accounts
+Paused <b>{camps}</b> campaigns ({ads} ads under them)
+Verify failed: {failed}
+{errs}",
+        },
+    },
+    "sentinel_pause_batch": {
+        "title": {"zh": "🔴 哨兵暂停 {n} 个系列", "en": "🔴 Sentinel Paused {n} Campaigns"},
+        "body": {
+            "zh": "{detail}
+
+哨兵已 arm，ACTIVE 系列直接停。明细见守护页「暂停记录」。",
+            "en": "{detail}
+
+Sentinel armed, ACTIVE campaigns paused directly. Details in Guard → Pause Log.",
+        },
+    },
     "sentinel_pause": {
         "title": {"zh": "哨兵暂停系列", "en": "Sentinel Paused Campaign"},
         "body": {

@@ -2060,6 +2060,7 @@ def run_sentinel_patrol():
     db = SuperSessionLocal()
     trace_id = new_trace_id()
     total_paused = 0
+    _paused_by_tenant: dict = {}   # tenant_id -> [(acc_name, act_id, camp_name, camp_id)]
     try:
         # 所有 armed 账户（手动或自动 arm，含 TT）；排除已取消纳管的（is_managed=false）
         armed = db.query(Account).filter(
@@ -2117,17 +2118,28 @@ def run_sentinel_patrol():
                               target_type="campaign", target_id=camp_id,
                               action_type="pause", source="sentinel_patrol", result="success",
                               trigger_type="sentinel",
-                              trigger_detail=f"sentinel armed, campaign {camp.get('name','')} 直接停")
-                    _loc = tenant_locale(db, acc.tenant_id)
-                    _t_sp, _b_sp = notify_text(_loc, "sentinel_pause",
-                        name=acc.name, act_id=acc.act_id,
-                        camp_name=camp.get('name',''), camp_id=camp_id)
-                    emit_notification(db, tenant_id=acc.tenant_id, level="critical",
-                                      event_type="sentinel_pause", trace_id=trace_id,
-                                      title=_t_sp, body=_b_sp, platform="fb")
+                              trigger_detail=f"act={acc.act_id}({acc.name}) campaign={camp.get('name','')} 哨兵armed直接停")
+                    # 通知聚合到本轮结束按租户各发一条（逐系列一条曾刷屏 TG）
+                    _paused_by_tenant.setdefault(acc.tenant_id, []).append(
+                        (acc.name, acc.act_id, camp.get('name', ''), camp_id))
                     db.commit()
                 except FbApiError as e:
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
+        # 一轮巡逻按租户聚合通知（明细 ≤10 行，全量见守护页「暂停记录」）
+        for _tid, _items in (_paused_by_tenant or {}).items():
+            try:
+                _loc = tenant_locale(db, _tid)
+                _lines = [f"· {n}（{a}）：{c}（{cid}）" for n, a, c, cid in _items[:10]]
+                if len(_items) > 10:
+                    _lines.append(f"… 共 {len(_items)} 个")
+                _t_sb, _b_sb = notify_text(_loc, "sentinel_pause_batch",
+                                           n=len(_items), detail="\n".join(_lines))
+                emit_notification(db, tenant_id=_tid, level="critical",
+                                  event_type="sentinel_pause", trace_id=trace_id,
+                                  title=_t_sb, body=_b_sb, platform="fb")
+                db.commit()
+            except Exception as e:
+                logger.warning(f"[Sentinel] 聚合通知失败 tenant={_tid}: {e}")
         logger.info(f"[Sentinel] 巡逻完成: 停 {total_paused} 个系列 (armed={len(armed)})")
         return {"sentinel_paused": total_paused, "armed_accounts": len(armed)}
     except Exception as e:

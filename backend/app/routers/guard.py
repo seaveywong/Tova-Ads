@@ -368,7 +368,8 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             except Exception as e:
                 _st["errors"].append(f"{acc.name}: 同步失败({str(e)[:40]})，用旧缓存")
 
-            # ② 从最新缓存拿 ACTIVE 广告
+            # ② 从最新缓存拿 ACTIVE 广告 → 归并到系列（campaign 级暂停，与哨兵口径一致：
+            #    停系列=其下所有组/广告全停，一条 API 替代 N 条 ad 调用）
             # platform=fb：0081 唯一键含 platform 后同 act_id 双平台行可共存，
             # 漏过滤会拿到 TT 行→FB client 去停 TT 广告 id→真 FB 广告漏停
             cache = db.query(AdsCache).filter(
@@ -378,25 +379,33 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                 _st["errors"].append(f"{acc.name}: 无广告缓存")
                 continue
             ad_ids = []
+            camp_ids = set()
             try:
                 for ad in _json.loads(cache.ads_json or "[]"):
                     if ad.get("effective_status") == "ACTIVE":
                         ad_ids.append(str(ad.get("id")))
+                        cid = str(ad.get("campaign_id") or "")
+                        if cid:
+                            camp_ids.add(cid)
             except Exception:
                 pass
             if not ad_ids:
                 continue
 
-            # ③ 逐个暂停
-            for ad_id in ad_ids:
+            # ③ 逐系列暂停（campaign PAUSED 连带全链；无 campaign_id 的行降级停 ad）
+            paused_camps = 0
+            for cid in camp_ids:
                 try:
-                    r = set_status(db, tenant_id, acc.act_id, ad_id, "ad", "PAUSED", operator=user_email)
+                    r = set_status(db, tenant_id, acc.act_id, cid, "campaign", "PAUSED", operator=user_email)
                     if r.get("success"):
-                        _st["paused"] += 1
+                        paused_camps += 1
                     else:
-                        _st["errors"].append(f"{acc.name}/{ad_id[-8:]}: {r.get('error','')}")
+                        _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {r.get('error','')}")
                 except Exception as e:
-                    _st["errors"].append(f"{acc.name}/{ad_id[-8:]}: {str(e)[:50]}")
+                    _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {str(e)[:50]}")
+            _st["paused"] += paused_camps
+            _st["campaigns"] = _st.get("campaigns", 0) + paused_camps
+            _st["paused_ads"] = _st.get("paused_ads", 0) + len(ad_ids)
 
             # ④ 回读核验：等 FB 写生效，重新拉广告确认状态
             _time.sleep(2)
@@ -472,6 +481,30 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             _emergency_state_write(db, tenant_id, dict(_st))   # 终态落 DB（跨 worker）
         except Exception:
             pass
+        # 完成通知（TG + 站内）与汇总留痕（守护页「暂停记录」tab 数据源）——
+        # 曾只落 state kv：TG/通知中心无任何记录，除触发者外无人知晓
+        try:
+            from ..core.notify_utils import emit_notification, notify_text, tenant_locale
+            _loc = tenant_locale(db, tenant_id)
+            _n_camp = _st.get("campaigns") or _st.get("paused") or 0
+            _n_ads = _st.get("paused_ads", 0)
+            _t_ep, _b_ep = notify_text(_loc, "emergency_done",
+                                       total=_st.get("total_accounts", 0),
+                                       camps=_n_camp, ads=_n_ads,
+                                       failed=_st.get("verify_failed", 0),
+                                       errs="；".join((_st.get("errors") or [])[:5]))
+            emit_notification(db, tenant_id=tenant_id, level="critical",
+                              event_type="emergency_pause_done", trace_id=new_trace_id(),
+                              title=_t_ep, body=_b_ep)
+            write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="user",
+                      target_type="tenant", target_id=str(tenant_id),
+                      action_type="emergency_pause", source="emergency_pause",
+                      result="success" if not _st.get("verify_failed") else "partial",
+                      trigger_detail=f"全局紧急暂停完成({user_email}): {_st.get('total_accounts',0)} 账户 / "
+                                     f"{_n_camp} 系列(覆盖 {_n_ads} 条广告) / 核验失败 {_st.get('verify_failed',0)}")
+            db.commit()
+        except Exception:
+            pass
     except Exception as e:
         if _EMERGENCY_STATE.get(tenant_id):
             _errs = _EMERGENCY_STATE[tenant_id].get("errors") or []
@@ -522,6 +555,30 @@ def emergency_status(user: CurrentUser = Depends(require_permission("ads.pause")
     finally:
         _sdb.close()
     return {"running": False, "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
+
+
+@router.get("/pause-log")
+def pause_log(
+    limit: int = 100,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """暂停/止损动作记录（守护页「暂停记录」tab）：哨兵 + 全局紧急暂停 + 规则止损。"""
+    from ..models.log import ActionLog
+    rows = db.query(ActionLog).filter(
+        ActionLog.tenant_id == user.tenant_id,
+        ActionLog.action_type.in_(["pause", "emergency_pause"]),
+        ActionLog.source.in_(["sentinel_patrol", "emergency_pause", "rule_engine"]),
+    ).order_by(ActionLog.created_at.desc()).limit(min(max(limit, 1), 300)).all()
+    return [{
+        "id": r.id,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "source": r.source,                      # sentinel_patrol / emergency_pause / rule_engine
+        "target_type": r.target_type,            # campaign / ad / tenant
+        "target_id": r.target_id,
+        "result": r.result,
+        "detail": r.trigger_detail or "",
+    } for r in rows]
 
 
 # ── 预热（warmup）arm/disarm（doc 03 §6）──
