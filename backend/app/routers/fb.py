@@ -975,6 +975,47 @@ def _get_loadable_rows(db, tenant_id: int) -> list[dict]:
     return rows
 
 
+def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
+    """逐 ID 点查验证令牌覆盖（1.0 _fetch_single_account 思路 + FB batch 加速）。
+
+    ID 粘贴导入只有几十个目标——为此拉令牌全量账户列表（2000+ 账户 50s+，
+    载入弹窗才需要全量）纯属浪费且超时；点查 GET /act_{id} 即
+    「该令牌可读 = 可纳管」的权威判定（无权限 FB 返回 error）。
+    返回 {aid: row}，row 结构与 _get_loadable_rows 行一致。
+    """
+    from ..core.fb_tokens import _is_cred_available
+    creds = db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+    ).all()
+    out: dict = {}
+    for c in creds:
+        pending = [a for a in aids if a not in out]
+        if not pending:
+            break
+        fb = FbClient(decrypt(c.access_token_enc))
+        avail = _is_cred_available(c)
+        for i in range(0, len(pending), 50):
+            chunk = pending[i:i + 50]
+            urls = [f"act_{a}?fields=account_id,name,currency,timezone_name,account_status"
+                    for a in chunk]
+            try:
+                results = fb.batch_get(urls)
+            except FbApiError:
+                break  # 该令牌整批失败（失效/限流）→ 换下一个令牌
+            for aid, meta in zip(chunk, results):
+                if meta and "error" not in meta and meta.get("account_id"):
+                    out[aid] = {
+                        "account_id": aid,
+                        "name": meta.get("name") or aid,
+                        "currency": meta.get("currency", "USD"),
+                        "timezone_name": meta.get("timezone_name") or "UTC",
+                        "account_status": meta.get("account_status"),
+                        "tokens": [{"id": c.id, "alias": c.alias or c.fb_user_name,
+                                    "available": avail}],
+                    }
+    return out
+
+
 def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
     """导入后补全轻字段拉取时缺的余额/上限/已花费（后台跑，不阻塞响应）。
 
@@ -1024,10 +1065,10 @@ def import_accounts(
     - skipped_existing: 已存在（含重绑到新 token）
     - not_found: 无任何 active token 覆盖的 ID
 
-    覆盖判定走 _get_loadable_rows（与载入列表同源、5 分钟缓存）——
-    勾选场景（先开载入弹窗再导入）缓存命中零 FB 调用；缓存 miss 时轻字段
-    并行拉取一次（曾串行全字段拉 3k+ 账户 → 请求超时）。余额等重字段由
-    后台任务补（_bg_complete_imported）。
+    覆盖判定优先级：载入列表 5 分钟缓存命中（勾选场景零 FB 调用）→
+    未命中走 _verify_ids_pointwise 逐 ID 点查（ID 粘贴场景只查几十个，
+    不拉 2000+ 账户的全量列表——全量拉取曾致请求超时）。
+    余额等重字段由后台任务补（_bg_complete_imported）。
     """
     raw = body.account_ids or []
     cleaned: list[str] = []
@@ -1042,9 +1083,21 @@ def import_accounts(
     if not cleaned:
         return {"imported": [], "count": 0, "skipped_existing": 0,
                 "not_found": [], "total": 0}
-    rows = {r["account_id"]: r for r in _get_loadable_rows(db, user.tenant_id)}
+    import time as _t
+    ent = _LOADABLE_CACHE.get(user.tenant_id)
+    if ent and _t.time() - ent[0] < _LOADABLE_TTL:
+        rows = {r["account_id"]: r for r in ent[1]}
+    else:
+        rows = _verify_ids_pointwise(db, user.tenant_id, cleaned)
     if not rows:
-        raise HTTPException(400, "未绑定 FB 凭证或令牌全部不可用")
+        creds_exist = db.query(FbCredential.id).filter(
+            FbCredential.tenant_id == user.tenant_id,
+            FbCredential.status == "active").first()
+        if not creds_exist:
+            raise HTTPException(400, "未绑定 FB 凭证")
+        # 有令牌但点查全部不覆盖 → 明确返回 not_found（不是报错）
+        return {"imported": [], "count": 0, "skipped_existing": 0,
+                "not_found": sorted(set(cleaned)), "total": len(cleaned)}
     imported: list[str] = []
     skipped_existing = 0
     covered: set = set()
