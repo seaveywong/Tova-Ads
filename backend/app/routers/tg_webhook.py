@@ -136,6 +136,13 @@ async def tg_webhook(secret: str, request: Request):
                 _tg_reply(bot_token, tg_chat_id, "❌ 绑定失败：令牌无效或已过期，请在系统重新获取绑定链接。")
             return {"ok": True}
 
+        # 裸 /start（无 deep-link 参数）或普通消息：不再静默——给引导（否则用户以为 bot 死了）
+        if text.startswith("/start") or text == "/help":
+            _tg_reply(bot_token, tg_chat_id,
+                      "👋 我是 Tova Ads 告警 bot。\n"
+                      "绑定方法：到系统「设置 → Telegram」点「绑定 Telegram」按钮，"
+                      "再用此链接发送 /start 即可完成绑定。")
+
         callback = update.get("callback_query") or {}
         if not callback:
             return {"ok": True}
