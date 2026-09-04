@@ -203,13 +203,10 @@ TT_OPTGOAL_TO_FB = {
     "REACH": "REACH", "VIDEO_VIEW": "VIDEO_VIEWS", "LEAD": "LEAD_GENERATION",
 }
 
-# 零小数位币种（同 guard_engine._NO_DECIMAL_CURRENCIES，模块内自带避免反向依赖 services 层）
-from .ad_ops import ZERO_DECIMAL as _TT_ZERO_DECIMAL   # 与 FB 共用 core/ad_ops 真相源
-
-
 def tt_budget_to_fb_minor(budget, currency: str) -> str:
     """TT 预算（整本币，20=20 美元/20 日元）→ FB minor units 字符串（'2000'=$20）。
     存进 ads_cache 后展示层走 FB 同一 from_minor_units 逆换算路径；非法值返 ''。"""
+    from .ad_ops import ZERO_DECIMAL as _TT_ZERO_DECIMAL   # 延迟导入：core/ad_ops 反向 import 本模块（TtApiError），模块级会成环
     try:
         v = int(budget)
     except (TypeError, ValueError):
