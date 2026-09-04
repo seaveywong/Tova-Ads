@@ -41,7 +41,7 @@ class UpdateRuleIn(BaseModel):
 
 class AllowanceIn(BaseModel):
     act_id: str
-    ad_id: str
+    ad_id: str = ""   # 空 = 整账户加白（存 "*"）
 
 
 class SentinelArmIn(BaseModel):
@@ -148,7 +148,9 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
 
     日期基准=账户本地时区（和巡检查询 / snapshot_date / FB insights today 对齐）：
     北京6号、美东账户本地5号 → 加白写在5号，账户本地进入6号即失效恢复。
+    ad_id 空 = 整账户加白（存 "*"，engine 按 ad_id IN (ad,'*') 匹配）。
     """
+    ad_id = (body.ad_id or "").strip() or "*"
     acc = db.query(Account).filter(
         Account.act_id == body.act_id, Account.tenant_id == user.tenant_id
     ).first()
@@ -158,7 +160,7 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
     today = _account_local_today(acc)
     existing = db.query(GuardAllowance).filter(
         GuardAllowance.act_id == body.act_id,
-        GuardAllowance.ad_id == body.ad_id,
+        GuardAllowance.ad_id == ad_id,
         GuardAllowance.allowance_date == today,
         GuardAllowance.status == "active",
     ).first()
@@ -168,7 +170,7 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
     inactive = db.query(GuardAllowance).filter(
         GuardAllowance.tenant_id == user.tenant_id,
         GuardAllowance.act_id == body.act_id,
-        GuardAllowance.ad_id == body.ad_id,
+        GuardAllowance.ad_id == ad_id,
         GuardAllowance.allowance_date == today,
         GuardAllowance.status == "inactive",
     ).first()
@@ -177,11 +179,11 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
         db.commit()
         return {"status": "added", "date": today}
     allowance = GuardAllowance(tenant_id=user.tenant_id, act_id=body.act_id,
-                               ad_id=body.ad_id, allowance_date=today)
+                               ad_id=ad_id, allowance_date=today)
     db.add(allowance)
     db.flush()
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
-              actor_user_id=user.id, target_type="ad", target_id=body.ad_id,
+              actor_user_id=user.id, target_type="ad", target_id=ad_id,
               action_type="allowance", source="user", result="success",
               trigger_detail=f"act={body.act_id} date={today}")
     db.commit()

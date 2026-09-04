@@ -1138,10 +1138,11 @@ def _inspect_account_worker(ctx: dict) -> dict:
             # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）。
             # 加白只跳过规则评估（P2-4）：快照照写——曾在此 continue 掉，加白期间 burn_fast
             # 基线断档，解除加白后首轮 delta=整日消耗 → 虚高误杀。
+            # ad_id="*" = 整账户加白（守护概览一键加白账户用，2026-09-05）。
             whitelisted = db.query(GuardAllowance).filter(
                 GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
                 GuardAllowance.act_id == acc.act_id,
-                GuardAllowance.ad_id == ad_id,
+                GuardAllowance.ad_id.in_([ad_id, "*"]),
                 GuardAllowance.allowance_date == acc_today,
                 GuardAllowance.status == "active",
             ).first()

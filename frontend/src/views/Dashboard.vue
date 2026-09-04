@@ -476,6 +476,27 @@ const toggleKpiMode = (mode) => {
   if (kpiMode.value !== null) { selectedIds.value = new Set(); detailSearch.value = '' }  // 勾选/搜索各面板共享，切换时清空
 }
 
+// ── 今日加白（守护概览入口；账户本地日，次日自动失效）──
+const wlOpen = ref(false)
+const wlAct = ref('')
+const wlAd = ref('')
+const wlSubmitting = ref(false)
+const submitAllowance = async () => {
+  if (!wlAct.value || wlSubmitting.value) return
+  wlSubmitting.value = true
+  try {
+    const r = await POST('/guard/allowance', { act_id: wlAct.value, ad_id: wlAd.value.trim() })
+    ElMessage.success(t('dashboard.wlOk', { date: r.date }))
+    wlOpen.value = false
+    wlAd.value = ''
+    loadDashboard(false)   // 今日放行计数即时刷新
+  } catch (e) {
+    ElMessage.error(e.message || String(e))
+  } finally {
+    wlSubmitting.value = false
+  }
+}
+
 // ── 账户明细表（原 KPI accounts 明细分支常驻化，六视角：+潜客）──
 const VIEW_TABS = computed(() => [
   { mode: 'spend', label: t('dashboard.viewSpend') },
@@ -756,6 +777,11 @@ const NOTIF_EVENT_LABEL_KEY = {
   landing_blocked: 'dashboard.evLandingBlocked', landing_health: 'dashboard.evLandingBlocked', landing_worker_error: 'dashboard.evLandingBlocked',
   leads_new: 'dashboard.evLeadsNew', leads_sync_failed: 'dashboard.evLeadsFail',
   subcode_cleanup: 'dashboard.evSubcodeCleanup',
+  // 与后端 emit_notification event_type 全集对齐（曾漏 11 个 → 今日摘要 chip 裸显 sentinel_failure）
+  sentinel_failure: 'dashboard.evSentinelFail', sync_stalled: 'dashboard.evInspectStalled', unsupported_currency: 'dashboard.evUnsupportedCurrency',
+  spend_spike: 'dashboard.evSpendSpike', low_balance: 'dashboard.evLowBalance', rule_scale: 'dashboard.evScale',
+  emergency_pause_done: 'dashboard.evEmergency', tg_channel_down: 'dashboard.evTgDown', storm_suppressed: 'dashboard.evStorm',
+  unmanage_active_ads: 'dashboard.evUnmanage', tt_token_expiring: 'dashboard.evTokenExpiring',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
 const levelLabel = (lv) => ({ critical: t('dashboard.levelCritical'), warning: t('dashboard.levelWarning'), info: t('dashboard.levelInfo') }[lv] || t('dashboard.levelNotice'))
@@ -846,9 +872,15 @@ const goNotiAd = (n) => {
   const act = notiActId(n)
   if (act) router.push({ name: 'ad-manager', query: { act } })
 }
-// 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）
+// 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）；
+// 主文案剥 TG 侧的级别 emoji 前缀（🔴🟡🔵）——站内级别徽章已表达，重复且显乱
 const alertEntity = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(i + 1).trim() : '' }
-const alertMainTitle = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(0, i).trim() : n.title }
+const alertMainTitle = (n) => {
+  let s = (n.title || '')
+  const i = s.lastIndexOf('·')
+  if (i >= 0) s = s.slice(0, i)
+  return s.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]️?\s*/u, '').trim()
+}
 const alertTime = (n) => {
   const d = new Date(n.created_at)
   if (isNaN(d)) return ''
@@ -1148,7 +1180,12 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       <div class="side-stack">
         <div class="guard-col">
         <div class="card guard-card">
-          <div class="card-header"><span class="card-title">{{ t('dashboard.guardTitle') }}</span></div>
+          <div class="card-header">
+            <span class="card-title">{{ t('dashboard.guardTitle') }}</span>
+            <div class="table-tools">
+              <button class="nd-go" @click="wlOpen = true" :title="t('dashboard.wlHint')">{{ t('dashboard.wlBtn') }}</button>
+            </div>
+          </div>
           <div class="guard-grid">
             <div v-for="cell in guardCells" :key="cell.mode" class="guard-cell" :class="{ active: kpiMode === cell.mode, danger: cell.danger }" @click="toggleKpiMode(cell.mode)">
               <span class="gc-value" :class="{ 'text-danger': cell.danger }">{{ cell.value }}</span>
@@ -1338,6 +1375,27 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
       </div>
     </el-drawer>
+
+    <!-- 今日加白（守护概览入口）：账户必选；广告 ID 留空 = 整账户；按账户本地日，次日自动失效 -->
+    <el-dialog v-model="wlOpen" :title="t('dashboard.wlTitle')" width="420px" :close-on-click-modal="false">
+      <div class="form-l">
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('dashboard.wlAccount') }}</span>
+          <el-select v-model="wlAct" filterable size="large" style="width:100%" :placeholder="t('dashboard.wlAccountPh')">
+            <el-option v-for="a in (data.accounts || []).filter(x => !x.removed)" :key="a.act_id" :value="a.act_id" :label="a.name" />
+          </el-select>
+        </div>
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('dashboard.wlAd') }}</span>
+          <el-input v-model="wlAd" :placeholder="t('dashboard.wlAdPh')" clearable />
+        </div>
+        <div class="wl-note">{{ t('dashboard.wlNote') }}</div>
+      </div>
+      <template #footer>
+        <button class="nd-go" @click="wlOpen = false">{{ t('common.cancel') }}</button>
+        <button class="head-btn primary" :disabled="!wlAct || wlSubmitting" @click="submitAllowance">{{ wlSubmitting ? t('common.loading') : t('dashboard.wlSubmit') }}</button>
+      </template>
+    </el-dialog>
 
     <!-- 落地页 Tab：与数据 Tab 同语言——平级卡片，无大盒套小卡 -->
     <div v-show="mainTab === 'landing'" v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
