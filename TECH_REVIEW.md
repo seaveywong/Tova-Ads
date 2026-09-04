@@ -1113,3 +1113,11 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - batchGenerate 真部署（花钱）待用户：建议 1 账户×2 素材验证「成功2/2系列」+FB 后台系列名=素材名；partial 重试会重建已成功系列（UI 确认弹窗已警示）
 - 通知 target_type/target_id 前端尚未消费（后续告警中心可按账户过滤）
 - FBInsider 未做项保持不做清单（草稿树/列管理/BM归属/persona池/授权倒计时）
+
+### 批F补遗：⑥ 追踪参数通用插值（commit a573544）
+- 白名单 7 占位符（部署时已知静态值）：`{{campaign.name}}`（批量模式=素材名）`{{adset.name}}` `{{account.name}}` `{{account.id}}` `{{asset.name}}` `{{template.name}}` `{{platform}}`；值 URL 编码（名字含空格/中文/& 不打断 query）
+- **`{{ad.id}}` 显式拒绝**（400 带历史事故说明：FB 建广告前拿不到 ad id + 子码绑此占位符曾像素不 fire）；未知占位符同样 400 快失败——不留部署时静默产垃圾 URL
+- 六点接线：模板 create/update 校验；FB/TT preflight 插值（用户核对的就是解值后的真实 URL）；`_deploy_series_fb`（单/批共用）/TT 部署/retry 直连三处逐账户解值
+- 前端：模板编辑器落地 URL 输入框白名单提示（zh/en）
+- smoke 增 4 断言全过：ad.id 拒 400 / 未知占位符拒 400 / 预检 payload 无残留 `{{` / 含 account.id+p=fb
+- 附带生产实证：本轮心跳「评估0条广告…（哨兵armed-全部跳过）」——F1 心跳带原因 suffix 真实落地

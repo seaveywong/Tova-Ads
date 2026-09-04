@@ -83,3 +83,17 @@ FBInsider 是**重操作台、轻数据**的私域投放工具：操盘动效（
 ## 数据规模参考（该账号实测）
 
 同步对象 820 · 广告账户 20 · Campaign 43 / Ad Set 157 / Ad 155 · 操作日志 151 条 · BM 下 15 账户（全第三方共享）。
+
+---
+
+## 落地进度（2026-09-05 批F，commit 4d58233/a573544）
+
+| 对标项 | 状态 |
+|---|---|
+| P0① 按素材批量生成系列 | ✅ 已上线（DeployIn.asset_ids；模板=母版每素材一完整系列，系列名=素材名；FB+TT 双链；partial 一等状态+重试） |
+| P1⑦ 账户分组 | ✅ 已上线（accounts.group_label 迁移0084；Ads 分组列/筛选/批量设；Dashboard 分组 chip） |
+| P1⑨ 禁用原因副行 | ✅ 已上线（disable_reason 迁移0084+account_sync 落库；useStatus 全枚举；Ads 状态副行+Dashboard 可用明细） |
+| P1⑩ 追踪参数通用插值 | ✅ 已上线（7 静态白名单占位符逐账户解值+URL编码；{{ad.id}} 显式拒绝防像素不 fire 复发） |
+| TG④ 通知白名单矩阵 | ✅ 已上线（简化版：级别开关 warning/info，critical 恒推；user_tg_bindings.prefs 迁移0085；账户维度过滤预留 act_id→target 列） |
+| P0⑤ 花费骤变告警参数 | ✅ 批R已上线（7天均值×3倍+$50 下限） |
+| 未做（保持不做清单） | 草稿树/同步灯日常化/列管理/BM归属/persona池/授权倒计时——见上「明确不跟进」与 P1/P2 表 |
