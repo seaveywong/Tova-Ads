@@ -179,14 +179,17 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
                    target_cpa: float | None = None, yesterday_insight: dict | None = None,
                    prev_spend: float | None = None, history: list | None = None,
                    currency: str = "USD", landing_clicks: int = 0,
-                   landing_visits: int = 0) -> tuple[bool, str]:
+                   landing_visits: int = 0, leads_count: int = 0) -> tuple[bool, str]:
     """评估单条规则对单条广告。返回 (命中, 命中详情)。
 
     conversions：FB 转化数（KPI resolver，目标感知）。
     landing_clicks：落地通过量（click+redirect，按钮点击/跳转）。
     landing_visits：落地访问量（visit+redirect，到达量，含未点击）。
+    leads_count：该广告今日 Instant Form 潜客数（leads 表，轮询/webhook 入库）——
+        真转化非代理（潜客系列 insights 常无 lead action，FB 侧不报）。
     conversion_source（rule）：fb/landing/either。CPA 类规则（cpa_exceed/consecutive_bad）
-        恒用 FB conversions，不受 either/landing 稀释（虚增转化会拉低 CPA → 超标漏停）。
+        恒用 FB conversions，不受 either/landing 稀释（虚增转化会拉低 CPA → 超标漏停）；
+        leads 例外——真转化计入 CPA（无 leads 时潜客系列会被空耗误杀，2026-09-04 用户案例）。
     landing_metric（rule params）：pass（通过量，默认）/ visit（访问量）。
     """
     # 转化归因：按规则 conversion_source + landing_metric 取 effective conversions
@@ -199,15 +202,18 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     #   either 取 max 或 landing 顶替都会虚增转化 → CPA 被拉低 → 超标漏停。
     #   cs=landing 且 FB insights 无 actions（算不出真实 CPA）时规则不适用，不用落地数顶替。
     # 扩量规则同样强制 FB 转化（加预算花真钱，落地通过量当转化会误扩）。
+    #   leads（潜客）例外：真转化，CPA/扩量都计入——潜客系列 insights 不报 lead action，
+    #   不计入则 CPA 永远算不出、空耗规则误杀有潜客的广告。
     # 空耗类规则（bleed_abs/click_no_conv 等）保持 either/landing 兜底（落地有通过量
     #   说明不是纯空耗，防误杀）。
     if rule.rule_type in ("cpa_exceed", "consecutive_bad", "slow_scale", "roas_scale"):
         if cs == "landing" and not (ad_insights.get("actions") or []):
             return False, ""  # CPA 规则不适用：无 FB actions，宁可漏告不拿落地数顶替 CPA
+        conversions = max(conversions, leads_count)
     elif cs == "landing":
         conversions = landing_val
-    elif cs == "either" and landing_val > conversions:
-        conversions = landing_val
+    elif cs == "either":
+        conversions = max(conversions, landing_val, leads_count)
     raw_params = {k: v for k, v in raw_params.items() if v not in (None, "", [])}
     defaults = RULE_DEFAULTS.get(rule.rule_type, {})
     p = {**defaults, **raw_params}
@@ -999,6 +1005,21 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 pass  # 昨日读取失败不阻断今日评估
         # snapshot_date 用账户本地日（和 FB insights time_range 一致，账户本地基准）
         biz_today = acc_today
+        # 该广告的 Instant Form 潜客计数（leads 表，账户本地日起；潜客系列 insights 不报 lead
+        # action——leads 是真转化，进 either 兜底 + CPA 口径，防误杀有潜客的广告）
+        try:
+            from zoneinfo import ZoneInfo
+            _day_start_local = datetime.strptime(biz_today, "%Y-%m-%d").replace(
+                tzinfo=ZoneInfo(acc.timezone_name or "UTC")).astimezone(timezone.utc)
+            from ..models.lead import Lead
+            _leads_rows = db.query(Lead.ad_id, _f.count(Lead.id)).filter(
+                Lead.tenant_id == tenant_id,
+                Lead.created_time >= _day_start_local,
+                Lead.ad_id.in_([a.get("ad_id") for a in ads if a.get("ad_id")]),
+            ).group_by(Lead.ad_id).all()
+            leads_map = {r[0]: int(r[1]) for r in _leads_rows}
+        except Exception:
+            leads_map = {}
         # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
         obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
         # 该账户适用规则：全局(scope_act_id NULL) + 本账户(scope_act_id==acc.act_id)，并存各评估
@@ -1045,6 +1066,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             _ad_active = ad_id in _cache_active_set
                         if _ad_active:
                             res["skipped_spend"] += 1  # ACTIVE 但被漏掉 = 真盲区
+                            res.setdefault("skipped_ads", []).append(
+                                f"{ad.get('ad_name', ad_id)[:36]}（{ad_id}）")
                 except Exception:
                     pass
                 continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
@@ -1167,6 +1190,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     _h, _d = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
                                             landing_clicks=landing_clicks,
                                             landing_visits=landing_visits,
+                                            leads_count=leads_map.get(ad_id, 0),
                                             yesterday_insight=yesterday_map.get(ad_id),
                                             prev_spend=prev_spend, history=history,
                                             currency=acc.currency)
@@ -1552,6 +1576,7 @@ def run_inspection(force: bool = False):
     total_learning = 0
     total_skipped_spend = 0  # 有消耗但被 active_ids 过滤掉的广告数（覆盖丢失，止损盲区）
     _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
+    _tenant_skipped_names: dict = {}  # tenant_id -> [广告名（id）]——告警带名单（用户第一问"哪些"）
     paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
     scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
 
@@ -1641,6 +1666,7 @@ def run_inspection(force: bool = False):
             _sk = _res.get("skipped_spend", 0)
             if _sk > 0:
                 _tenant_skipped[_res["tenant_id"]] = _tenant_skipped.get(_res["tenant_id"], 0) + _sk
+                _tenant_skipped_names.setdefault(_res["tenant_id"], []).extend(_res.get("skipped_ads") or [])
             for _e in (_res.get("events") or []):
                 try:
                     if _e.get("kind") == "log":
@@ -1677,6 +1703,13 @@ def run_inspection(force: bool = False):
                       trigger_detail=f"skipped={_skipped}")
             _loc = tenant_locale(db, _tid)
             _t_cl, _b_cl = notify_text(_loc, "coverage_lost", n=_skipped)
+            # 带具体名单（≤5 条，全量见日志中心）：用户第一问就是"哪些"——数量不可行动
+            _names = _tenant_skipped_names.get(_tid) or []
+            if _names:
+                _lines = [f"· {x}" for x in _names[:5]]
+                if len(_names) > 5:
+                    _lines.append(f"… 共 {len(_names)} 条")
+                _b_cl = _b_cl + "\n" + "\n".join(_lines)
             emit_notification(
                 db, tenant_id=_tid, level="warning",
                 event_type="coverage_lost", trace_id=trace_id,

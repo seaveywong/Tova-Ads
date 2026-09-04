@@ -357,13 +357,28 @@ class FbClient:
         """改名。"""
         return self.post(node_id, {"name": name})
 
-    def get_leads(self, form_id: str, limit: int = 100) -> list[dict]:
-        """FB leadgen：取 Instant Form 潜客数据。GET /{form_id}/leads（leads_retrieval scope）。"""
-        return self.get_paged(
-            f"{form_id}/leads",
-            params={"fields": "id,created_time,field_data,ad_id,form_id"},
-            limit=limit,
-        )
+    def get_leads(self, form_id: str, limit: int = 100, since_ts=None) -> list[dict]:
+        """FB leadgen：取 Instant Form 潜客数据。GET /{form_id}/leads（leads_retrieval scope）。
+        node 通用：form_id 传广告 id 即拉 /{ad_id}/leads（轮询用，覆盖 FB 后台直建表单）。
+        since_ts（datetime, tz-aware）：只拉近于此时间的 lead（FB filtering time_created；
+        过滤不被支持时回退全量拉取——调用方另有 created_time 窗口兜底）。"""
+        params = {"fields": "id,created_time,field_data,ad_id,form_id"}
+        if since_ts is not None:
+            try:
+                params["filtering"] = json.dumps([{
+                    "field": "time_created", "operator": "GREATER_THAN",
+                    "value": int(since_ts.timestamp()),
+                }])
+            except Exception:
+                pass
+        try:
+            return self.get_paged(f"{form_id}/leads", params=params, limit=limit)
+        except FbApiError:
+            if "filtering" not in params:
+                raise
+            # FB 不认 filtering（版本差异）→ 去掉重试全量（created_time 窗口在调用方兜底）
+            params.pop("filtering", None)
+            return self.get_paged(f"{form_id}/leads", params=params, limit=limit)
 
     def subscribe_page_webhook(self, page_id: str, page_token: str, fields: list[str] = None) -> dict:
         """订阅主页 webhook（pages_manage_metadata scope）。POST /{page_id}/subscribed_apps + subscribed_fields。
