@@ -1085,3 +1085,31 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - 教训入库：裸 except + 新功能 = 生产静默归零；新功能必须带断言 smoke
 
 关联：[[sentinel-dedup-incident-2026-09]] [[no-protection-periods]] [[tech-review-format]]
+
+## 批F：FBInsider 对标四项 + 1.0 差异巡检五项（2026-09-05）
+
+### 概述
+/goal 全做：FBInsider ①按素材批量生成系列 ③账户分组 ⑤禁用原因副行 ④TG偏好矩阵 + 1.0 巡检差异 5 缺口修复。4 Agent 并行分片（文件严格分区）+ 集成收口，单次部署。
+
+### 变更表（commit 4d58233，22 文件 +1271/-118）
+| 分片 | 内容 | 关键落点 |
+|---|---|---|
+| F2 batchGenerate | DeployIn.asset_ids 批量模式：模板=母版，每素材克隆完整系列（campaign 名=素材名），FB+TT 双链 | launch_templates.py：抽 `_deploy_series_fb` 单/批共用；partial 汇总（成功X/Y+失败前3）；批量素材清单存 action_logs.metadata；每系列 touch created_at 即 commit（防 `_reap_stale_jobs` 误杀→双份广告资金事故）；retry=整 item 重跑（撞名误命中 `_find_existing_campaign`=假成功，故不走幂等）。前端抽屉 mode radio+素材多选+N×M 预览 |
+| F3 分组+禁用原因 | 迁移 0084：accounts.group_label(Text)+disable_reason(Integer) | PUT /fb/accounts/group（批量、空串=清除、>500 拒、FB/TT 混批按平台分行 write_log）；account_sync 4 处落库（**显式判 None——0=恢复正常，or 兜底会让旧原因永远清不掉**）；Ads.vue 分组列/列头聚合排序/筛选/单+批量编辑；useStatus FB_DISABLE_REASON 全枚举+disableReason()；状态徽标禁用原因副行；Dashboard 分组 chip+账户可用明细原因行 |
+| F4 TG偏好矩阵 | 迁移 0085：user_tg_bindings.prefs(JSON)；**critical 恒推不受限（用户确认），warning/info 可关；NULL=全推 fail-open（宁多推不漏推）** | GET/PUT /notifications/tg/prefs（未绑 400；一人多绑定全行同步写）；`_send_tg_by_role` 发送前门控——只挡 TG 层，站内信不受影响；TgManager「通知范围」节（critical 🔒 锁定行） |
+| F1 巡检可靠性 | 1.0 差异 5 缺口 | ①**暂停回写 ads_cache**：`_patch_cache_after_pause` 三层 JSON 置 PAUSED，campaign 级**级联旗下 adset/ad**（哨兵恒 campaign 级停而 coverage_lost 查广告行——只改 campaign 行照样误报，级联才是根治）；3 调用点（规则链/FB 哨兵/TT 哨兵）②watchdog per-account 停滞（managed+status=1 且 >30min 未巡→critical 聚合，6h dedup）③每轮跳过账户聚合告警（无令牌/insights 失败分类，warning 6h dedup）④心跳带原因（evaluated=0 时区分「哨兵armed全跳过」vs「live清单空」；跳过 N 账户(M无令牌,K失败)；兜底 N 账户）⑤live /ads 降级兜底 streak≥3→warning。i18n 3 键 zh+en |
+| 集成（主线） | act_id 通知关联 | emit_notification act_id→映射既有 target_type/target_id 列（零迁移）+ guard 4 处账户级调用接线（unsupported_currency/permission_error/spend_spike/TT sentinel_pause）——前端 notiActId 正则提取是脆弱路径，落库后可直接按列过滤；dashboard 账户行带 group_label/disable_reason；locale 收口（status.dr\*×20+tg.prefs×7+views/ads.js 片段注册进 zh/en） |
+
+### 生产变更
+- 迁移 0084/0085 已 upgrade head（列+GRANT 验证）；服务重启 health ok；前端 CF Pages 已部署
+
+### 断言 smoke（_smoke_batch_f.py，ALL_PASS）
+- F3：group 设→/fb/accounts 读回→dashboard 透传→清除 全链 ✓；两键暴露 ✓
+- F4：GET 默认全 true（bound）→ PUT info=false 落库 → 恢复 ✓
+- F2：临时模板（预算+假pixel）→ preflight asset_ids=[2素材] account_count=2 → **series_count=4 断言过** → 模板已删
+- F1：force inspect→心跳写入 ✓（本轮 evaluated=7 无 0 条条件=不加后缀，正确行为；机制 F1 已 7 用例单测）
+
+### 遗留
+- batchGenerate 真部署（花钱）待用户：建议 1 账户×2 素材验证「成功2/2系列」+FB 后台系列名=素材名；partial 重试会重建已成功系列（UI 确认弹窗已警示）
+- 通知 target_type/target_id 前端尚未消费（后续告警中心可按账户过滤）
+- FBInsider 未做项保持不做清单（草稿树/列管理/BM归属/persona池/授权倒计时）
