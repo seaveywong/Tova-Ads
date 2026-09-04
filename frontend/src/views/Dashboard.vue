@@ -727,6 +727,7 @@ const NOTIF_EVENT_LABEL_KEY = {
   subcode_cleanup: 'dashboard.evSubcodeCleanup',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
+const levelLabel = (lv) => ({ critical: t('dashboard.levelCritical'), warning: t('dashboard.levelWarning'), info: t('dashboard.levelInfo') }[lv] || t('dashboard.levelNotice'))
 
 // ── 告警中心：级别摘要 + 事件类型聚合 + 按天时间线（替代原半宽一坨列表）──
 const notifEventFilter = ref('')        // '' = 全部事件
@@ -743,23 +744,44 @@ const alertList = computed(() => (recentNotifs.value || []).filter(n =>
   && (!notifEventFilter.value || n.event_type === notifEventFilter.value)
   && (!notifUnreadOnly.value || !n.read)))
 const _dayKey = (d) => d.toLocaleDateString('sv')   // YYYY-MM-DD（浏览器本地时区=用户时区）
-const alertGroups = computed(() => {
-  const out = []
+const alertDays = computed(() => {
+  const days = []
   const today = _dayKey(new Date())
   const yest = _dayKey(new Date(Date.now() - 86400000))
   for (const n of alertList.value) {
     const d = new Date(n.created_at)
     if (isNaN(d)) continue
     const k = _dayKey(d)
-    let g = out.find(x => x.key === k)
-    if (!g) {
-      g = { key: k, label: k === today ? t('common.today') : k === yest ? t('common.yesterday') : k.slice(5).replace('-', '/'), items: [] }
-      out.push(g)
+    let day = days.find(x => x.key === k)
+    if (!day) {
+      day = { key: k, label: k === today ? t('common.today') : k === yest ? t('common.yesterday') : k.slice(5).replace('-', '/'), groups: [] }
+      days.push(day)
     }
-    g.items.push(n)
+    // 天内按事件类型分块（1.0 typeMap 分类思路）：同类聚集，看一类处理一类
+    const et = n.event_type || 'other'
+    let grp = day.groups.find(x => x.type === et)
+    if (!grp) { grp = { type: et, items: [] }; day.groups.push(grp) }
+    grp.items.push(n)
   }
-  return out   // API 按 created_at desc 返回，组序天然新→旧
+  // 每组：默认只展开前 FOLD_AT 条（同类刷屏是一坨的根源），其余折叠
+  for (const day of days) {
+    day.groups.sort((a, b) => b.items.length - a.items.length)
+    for (const grp of day.groups) {
+      grp.label = notifEventLabel(grp.type) || grp.type
+      grp.open = notifFoldOpen.value.has(day.key + ':' + grp.type)
+      grp.shown = grp.open ? grp.items : grp.items.slice(0, _FOLD_AT)
+      grp.hidden = grp.items.length - grp.shown.length
+    }
+  }
+  return days   // API 按 created_at desc 返回，天序新→旧、组内时间倒序
 })
+const _FOLD_AT = 3
+const notifFoldOpen = ref(new Set())
+const toggleNotifFold = (k) => {
+  const s = new Set(notifFoldOpen.value)
+  s.has(k) ? s.delete(k) : s.add(k)
+  notifFoldOpen.value = s
+}
 // 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）
 const alertEntity = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(i + 1).trim() : '' }
 const alertMainTitle = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(0, i).trim() : n.title }
@@ -1136,39 +1158,58 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
         </div>
 
-        <!-- 告警中心（整行）：级别摘要 + 事件聚合 + 按天时间线（替代原半宽列表）-->
+        <!-- 告警中心（整行，1.0 记录卡范式）：每条=徽章行+人话消息+元信息 的呼吸卡，筛选收敛表头一行 -->
         <div class="card notif-card alert-center">
-          <div class="card-header ac-head">
+          <div class="card-header">
             <span class="card-title">{{ t('dashboard.alertCenter') }}<span v-if="platform !== 'all'" class="scope-chip" style="margin-left:8px">{{ platform === 'tt' ? 'TikTok' : 'Facebook' }}</span><span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
-            <div class="ac-levels">
-              <button class="ac-lv" :class="{ on: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }} {{ (recentNotifs || []).length }}</button>
-              <button class="ac-lv critical" :class="{ on: notifFilter === 'critical' }" @click="notifFilter = notifFilter === 'critical' ? 'all' : 'critical'">{{ t('dashboard.levelCritical') }} {{ notifLevelCount('critical') }}</button>
-              <button class="ac-lv warning" :class="{ on: notifFilter === 'warning' }" @click="notifFilter = notifFilter === 'warning' ? 'all' : 'warning'">{{ t('dashboard.levelWarning') }} {{ notifLevelCount('warning') }}</button>
-              <button class="ac-lv info" :class="{ on: notifFilter === 'info' }" @click="notifFilter = notifFilter === 'info' ? 'all' : 'info'">{{ t('dashboard.levelInfo') }} {{ notifLevelCount('info') }}</button>
-              <button class="ac-lv" :class="{ on: notifUnreadOnly }" @click="notifUnreadOnly = !notifUnreadOnly">{{ t('dashboard.unreadOnly') }}</button>
-              <button v-if="unreadNotifCount" class="ac-lv ack-all" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
+            <div class="table-tools">
+              <div class="status-tabs">
+                <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }} {{ (recentNotifs || []).length }}</button>
+                <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }} {{ notifLevelCount('critical') }}</button>
+                <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }} {{ notifLevelCount('warning') }}</button>
+                <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }} {{ notifLevelCount('info') }}</button>
+              </div>
+              <el-select :model-value="notifEventFilter" size="small" class="filter-select" style="width: 150px"
+                         @update:model-value="v => notifEventFilter = v" :placeholder="t('dashboard.evTypeAll')">
+                <el-option value="" :label="t('dashboard.evTypeAll')" />
+                <el-option v-for="g in notifEventGroups" :key="g.type" :value="g.type" :label="`${g.label} (${g.count})`" />
+              </el-select>
+              <button class="ac-lv" :class="{ on: notifUnreadOnly }" @click="notifUnreadOnly = !notifUnreadOnly" :title="t('dashboard.unreadOnly')">
+                <el-icon><component :is="notifUnreadOnly ? 'View' : 'Hide'" /></el-icon>
+              </button>
+              <button v-if="unreadNotifCount" class="copy-ids-btn" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
             </div>
           </div>
-          <div v-if="notifEventGroups.length" class="ac-events">
-            <button class="ac-evt" :class="{ on: !notifEventFilter }" @click="notifEventFilter = ''">{{ t('common.all') }}</button>
-            <button v-for="g in notifEventGroups" :key="g.type" class="ac-evt" :class="{ on: notifEventFilter === g.type }" @click="notifEventFilter = notifEventFilter === g.type ? '' : g.type">{{ g.label }}<b>{{ g.count }}</b></button>
-          </div>
           <div class="ac-body">
-            <div v-for="g in alertGroups" :key="g.key" class="ac-day">
-              <div class="ac-day-label">{{ g.label }}<span class="ac-day-count">{{ g.items.length }}</span></div>
-              <div class="ac-rows">
-                <div v-for="n in g.items" :key="n.id" class="ac-row" :class="{ acked: n.read }" @click="openNotifDrawer(n)">
-                  <span class="ac-dot" :class="n.level"></span>
-                  <span v-if="notifEventLabel(n.event_type)" class="notif-etype" :class="n.level">{{ notifEventLabel(n.event_type) }}</span>
-                  <span class="ac-title">{{ alertMainTitle(n) }}</span>
-                  <span v-if="alertEntity(n)" class="ac-entity" :title="alertEntity(n)">{{ alertEntity(n) }}</span>
-                  <span class="ac-time">{{ alertTime(n) }}</span>
-                  <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
-                  <span v-else class="acked-tag">{{ t('dashboard.ackedTag') }}</span>
+            <div v-for="d in alertDays" :key="d.key" class="ac-day">
+              <div class="ac-day-label">{{ d.label }}<span class="ac-day-count">{{ d.groups.reduce((s, g) => s + g.items.length, 0) }}</span></div>
+              <div v-for="grp in d.groups" :key="grp.type" class="ac-grp">
+                <div class="ac-grp-head">
+                  <span class="ac-grp-name">{{ grp.label }}</span>
+                  <span class="ac-grp-count">{{ grp.items.length }}</span>
+                  <span v-if="grp.items.some(n => !n.read)" class="ac-grp-dot"></span>
+                </div>
+                <div class="ac-items">
+                  <div v-for="n in grp.shown" :key="n.id" class="ac-item" :class="[n.level, { unread: !n.read }]" @click="openNotifDrawer(n)">
+                    <div class="ac-item-top">
+                      <span class="badge-lv" :class="n.level">{{ levelLabel(n.level) }}</span>
+                      <span class="ac-time">{{ alertTime(n) }}</span>
+                    </div>
+                    <div class="ac-msg">{{ alertMainTitle(n) }}</div>
+                    <div class="ac-item-meta">
+                      <span v-if="alertEntity(n)" class="ac-entity" :title="alertEntity(n)">{{ alertEntity(n) }}</span>
+                      <button v-if="!n.read" class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
+                      <span v-else class="acked-tag">{{ t('dashboard.ackedTag') }}</span>
+                    </div>
+                  </div>
+                  <button v-if="grp.hidden > 0" class="ac-fold" @click="toggleNotifFold(d.key + ':' + grp.type)">
+                    {{ t('dashboard.foldMore', { n: grp.hidden, type: grp.label }) }} ↓
+                  </button>
+                  <button v-else-if="grp.items.length > _FOLD_AT" class="ac-fold" @click="toggleNotifFold(d.key + ':' + grp.type)">{{ t('dashboard.foldLess') }} ↑</button>
                 </div>
               </div>
             </div>
-            <div v-if="!alertGroups.length" class="empty">{{ notifFilter !== 'all' || notifEventFilter || notifUnreadOnly ? t('dashboard.noNotifsLevel') : t('dashboard.noNotifs') }}</div>
+            <div v-if="!alertDays.length" class="empty">{{ notifFilter !== 'all' || notifEventFilter || notifUnreadOnly ? t('dashboard.noNotifsLevel') : t('dashboard.noNotifs') }}</div>
           </div>
         </div>
       </div>
@@ -1655,39 +1696,38 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .allow-btn.remove:hover { color: var(--error); border-color: var(--error); }
 .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; white-space: nowrap; }
 
-/* ── 告警中心（整行）：级别摘要 chips + 事件聚合 chips + 按天时间线，替代原半宽一坨列表 ── */
-.ac-head { flex-wrap: wrap; gap: 10px; }
-.ac-levels { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
-.ac-lv { padding: 4px 12px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-.ac-lv:hover { border-color: var(--bd2); }
+/* ── 告警中心（整行，1.0 记录卡范式）：徽章行 + 人话消息 + 元信息，呼吸卡流 ── */
+.ac-lv { display: inline-flex; align-items: center; padding: 5px 9px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 6px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.ac-lv:hover { border-color: var(--bd2); color: var(--t2); }
 .ac-lv.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
-.ac-lv.critical.on { color: var(--error); border-color: var(--error); background: rgba(255,69,58,.08); }
-.ac-lv.warning.on { color: var(--warning); border-color: var(--warning); background: rgba(255,159,10,.08); }
-.ac-lv.info.on { color: var(--ac); border-color: var(--ac); background: rgba(10,132,255,.08); }
-.ac-lv.ack-all { color: var(--t3); }
-.ac-events { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px 0; }
-.ac-evt { padding: 3px 10px; border: 1px solid var(--bd); background: transparent; color: var(--t3); border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-.ac-evt b { color: var(--t2); font-weight: 600; margin-left: 5px; font-variant-numeric: tabular-nums; }
-.ac-evt:hover { border-color: var(--bd2); }
-.ac-evt.on { border-color: var(--ac); color: var(--ac); background: var(--acg); }
-.ac-evt.on b { color: var(--ac); }
-.ac-body { padding: 10px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
-.ac-day-label { font-size: 11px; font-weight: 600; color: var(--t3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+.ac-body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+.ac-day-label { font-size: 11px; font-weight: 600; color: var(--t3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
 .ac-day-count { margin-left: 8px; padding: 0 6px; background: var(--bg3); border-radius: 8px; font-weight: 500; }
-.ac-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 2px 28px; }   /* 宽屏双列消化整行宽度 */
-.ac-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; min-width: 0; }
-.ac-row:hover { background: var(--bg3); }
-.ac-row.acked { opacity: 0.55; }
-.ac-row.acked .ac-title { color: var(--t3); }
-.ac-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.ac-dot.critical { background: var(--error); box-shadow: 0 0 0 3px rgba(255,69,58,.14); }
-.ac-dot.warning { background: var(--warning); box-shadow: 0 0 0 3px rgba(255,159,10,.14); }
-.ac-dot.info { background: var(--ac); box-shadow: 0 0 0 3px rgba(10,132,255,.12); }
-.ac-row.acked .ac-dot { box-shadow: none; opacity: 0.4; }
-.ac-title { font-size: 13px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-.ac-entity { font-size: 11px; color: var(--t3); background: var(--bg3); padding: 1px 8px; border-radius: 4px; white-space: nowrap; max-width: 170px; overflow: hidden; text-overflow: ellipsis; flex: none; }
-.ac-time { margin-left: auto; font-size: 11px; color: var(--t3); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
-.ac-row .ack-btn, .ac-row .acked-tag { margin-top: 0; }   /* 复用旧 ack 样式，对齐行内 */
+.ac-grp { margin-bottom: 10px; }
+.ac-grp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ac-grp-name { font-size: 13px; font-weight: 600; color: var(--t2); }
+.ac-grp-count { font-size: 11px; padding: 0 7px; background: var(--bg3); color: var(--t3); border-radius: 8px; }
+.ac-grp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--error); }
+.ac-fold { grid-column: 1 / -1; border: 1px dashed var(--bd); background: transparent; color: var(--t3); border-radius: 8px; font-size: 12px; padding: 6px 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.ac-fold:hover { color: var(--ac); border-color: var(--ac); }
+.ac-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 10px; }   /* 宽屏多列呼吸卡 */
+.ac-item { position: relative; border: 1px solid var(--bd); border-radius: 10px; padding: 12px 14px; background: var(--bg2); cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-width: 0; transition: border-color 0.15s, background 0.15s; }
+.ac-item:hover { border-color: var(--bd2); background: var(--bg3); }
+.ac-item.unread::before { content: ''; position: absolute; left: -1px; top: 12px; bottom: 12px; width: 3px; border-radius: 2px; background: var(--t3); }
+.ac-item.unread.critical::before { background: var(--error); }
+.ac-item.unread.warning::before { background: var(--warning); }
+.ac-item.unread.info::before { background: var(--ac); }
+.ac-item:not(.unread) .ac-msg { color: var(--t2); }
+.ac-item-top { display: flex; align-items: center; gap: 6px; }
+.badge-lv { font-size: 10px; font-weight: 600; padding: 1px 8px; border-radius: 4px; white-space: nowrap; }
+.badge-lv.critical { background: rgba(255,69,58,.15); color: var(--error); }
+.badge-lv.warning { background: rgba(255,159,10,.15); color: var(--warning); }
+.badge-lv.info { background: rgba(10,132,255,.12); color: var(--ac); }
+.ac-time { margin-left: auto; font-size: 11px; color: var(--t3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ac-msg { font-size: 13.5px; color: var(--t1); line-height: 1.5; word-break: break-word; }
+.ac-item-meta { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.ac-item-meta .ack-btn, .ac-item-meta .acked-tag { margin-left: auto; margin-top: 0; }
+.ac-entity { font-size: 11px; color: var(--t3); background: var(--bg3); padding: 1px 8px; border-radius: 4px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .notif-drawer { padding: 0; }   /* el-drawer body 自带 padding，详情容器不额外加，避免空白 */
 .nd-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .nd-level { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 10px; }
@@ -1728,8 +1768,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
   .dashboard { display: flex; flex-direction: column; gap: 16px; }
   .dashboard > * + * { margin-top: 0; }
   .main-split, .side-stack, .guard-col { display: contents; }   /* guard-col 桌面捆右列，移动拆开参与排序 */
-  .ac-rows { grid-template-columns: 1fr; }   /* 告警行移动端单列 */
-  .ac-levels { margin-left: 0; }
+  .ac-items { grid-template-columns: 1fr; }   /* 告警卡移动端单列 */
+  .alert-center .table-tools { flex-wrap: wrap; }
   .kpi-zone { order: 1; }
   .todo-card { order: 2; }
   .trend-main { order: 3; }
