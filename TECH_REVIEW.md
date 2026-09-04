@@ -1053,3 +1053,35 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - lock 115 全局锁跨租户假 409（低频毫秒窗）/ patch_account_cache_status 死代码清理 / budget_alerts date_preset→time_range 对齐 / AdManager 实时核验仅广告 Tab 生效 / 看板 7 卡 4 列残行 / TG 阻塞重试拖慢同步请求（请求路径不重试或后台线程化）
 
 关联：[[sentinel-dedup-incident-2026-09]] [[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[notify-dedup-mandatory]]
+
+---
+
+## 可靠性体检（2026-09-04 下午）
+
+### 概述
+/goal 系统可靠性全维度体检：运行时 + 未复审新码对抗审查 + 数据面 + 修复验证。
+
+### 体检结论
+- ✅ 服务 active、journal 零错误、巡检心跳 1min 前、16 个 cron 全注册（journal Added job 实证，含新 leads_poll/reaper）、锁号 101-117 无冲突、近 1h 无 fail 日志、哨兵 0 armed
+- ✅ 巡检覆盖稳定：评估 25-32 条 / 跳过 0（10:40 的 7 条跳过 = 与 ads_cache 同步竞态，下轮自愈；告警已带名单）
+
+### 抓出并热修（审查 Agent + 体检双轨，commit dda160c/0459ab6）
+| 级别 | 问题 | 后果 |
+|---|---|---|
+| P0 | guard leads_map `_f` UnboundLocalError 被 except 吞 | leads 口径死代码 |
+| P1 | dashboard 潜客 COUNT 子查询裸列+聚合 PG 42803 | 潜客 KPI 恒 0 |
+| P1 | leads_poll 北京日 vs 账户本地日 | GMT-8 账户每天 16h 不轮询 |
+| P1 | 轮询 join 无租户 + lead_id 全局唯一 | 跨租户同 act_id 撞唯一键炸整轮 |
+| P1 | 待处理直跳 regex 对 rule_pause body 永不命中 | 功能对主场景无效 |
+| P2×4 | 轮询截断无序/status NULL/coverage 名单未 _esc/CPL 口径 | 详见 commit |
+| 可观测性 | root logger=WARNING 吞所有 cron INFO | 排障靠猜 → basicConfig INFO |
+
+### 端到端验证（插测试 lead → 三链 → 清理）
+- dashboard KPI total_leads 显示 ✅；guard leads_map={ad:1} ✅；轮询全局去重不炸 ✅
+- **生产实证：leads 表已积累 20 条真实潜客**（轮询管道下午拉到）——潜客闭环全通
+
+### 遗留（用户决策项）
+- TopProperty.eco（act 853297941506126）：纳管+活跃但零令牌关联，8-14 起未巡检——需配令牌或取消纳管（数据卫生）
+- 教训入库：裸 except + 新功能 = 生产静默归零；新功能必须带断言 smoke
+
+关联：[[sentinel-dedup-incident-2026-09]] [[no-protection-periods]] [[tech-review-format]]
