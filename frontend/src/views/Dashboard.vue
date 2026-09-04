@@ -29,7 +29,7 @@ const data = ref({
 })
 const recentNotifs = ref([])
 const trendData = ref({ labels: [], spend: [], conversions: [], cpa: [], granularity: 'day' })
-const trendGran = ref('day')  // 颗粒度：5min / 30min / hour / day
+const trendGran = ref(datePreset.value === 'today' || datePreset.value === 'yesterday' ? '30min' : 'day')  // 颗粒度：5min / 30min / hour / day；初始跟随日期预设（今日/昨日按天=单点，曾一图一孤点）
 const trendCanvas = ref(null)
 // 主趋势图（全宽单图 + 指标切换）：后端趋势只有 spend/conversions/cpa 三条序列
 const trendMetric = ref('spend')
@@ -100,8 +100,8 @@ const renderTrendCharts = () => {
         fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }] },
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
-                  x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 45 } } },
+        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 12 } } },
+                  x: { grid: { display: false }, ticks: { color: textColor, font: { size: 12 }, maxRotation: 45 } } },
         plugins: { legend: { display: false } } },
     }))
   }
@@ -325,8 +325,8 @@ const renderLandingTrend = () => {
         fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }] },
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
-                  x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 45 } } },
+        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 12 } } },
+                  x: { grid: { display: false }, ticks: { color: textColor, font: { size: 12 }, maxRotation: 45 } } },
         plugins: { legend: { display: false } } },
     }))
   }
@@ -858,7 +858,11 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
     <!-- 页头（不 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 复制/导出/刷新 -->
     <header class="page-head">
       <div class="ph-left">
-        <h1 class="ph-title">{{ t('dashboard.pageTitle') }}</h1>
+        <!-- 主内容双 Tab 融入页头（曾独立成行太稀疏）：数据看板 / 链接数据 -->
+        <div class="main-tabs">
+          <button class="main-tab" :class="{ on: mainTab === 'data' }" @click="mainTab = 'data'">{{ t('dashboard.tabData') }}</button>
+          <button class="main-tab" :class="{ on: mainTab === 'landing' }" @click="mainTab = 'landing'">{{ t('dashboard.tabLanding') }}</button>
+        </div>
         <span v-if="lastUpdated || lastInspectedDisplay" class="ph-fresh" :title="phTimesTitle">
           <template v-if="lastUpdated">{{ t('dashboard.dataUpTo', { ago: fmtAgo(lastUpdated) }) }}</template>
           <template v-if="lastUpdated && lastInspectedDisplay"> · </template>
@@ -925,13 +929,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
     </div>
 
-    <!-- 主内容双 Tab：数据看板 / 落地页数据（用户点名分离） -->
-    <div class="main-tabs">
-      <button class="main-tab" :class="{ on: mainTab === 'data' }" @click="mainTab = 'data'">{{ t('dashboard.tabData') }}</button>
-      <button class="main-tab" :class="{ on: mainTab === 'landing' }" @click="mainTab = 'landing'">{{ t('dashboard.tabLanding') }}</button>
-    </div>
-
-    <!-- KPI 层：4 核心大卡（大数字 + 迷你趋势线；点击=账户明细表切到该指标视角）+ 4 次要小卡 -->
+    <!-- KPI 层：8 张统一规格卡（2 行 × 4 列；核心卡带迷你趋势线，全部同视觉语言，点击=账户明细表切到该指标视角）-->
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
       <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
@@ -951,8 +949,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
       <div class="kpi-strip">
         <div v-for="card in subCards" :key="card.label" class="strip-metric" :class="{ clickable: !!card.mode, active: !!card.mode && accountView === card.mode, alert: card.alert > 0 }" @click="card.mode && setAccountView(card.mode)">
-          <span class="km-value">{{ card.value }}</span>
           <span class="km-label">{{ card.label }}</span>
+          <span class="km-value">{{ card.value }}</span>
           <span v-if="card.alert > 0" class="km-badge">{{ t('dashboard.balanceAlertCount', { n: card.alert }) }}</span>
         </div>
       </div>
@@ -1275,7 +1273,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 </template>
 
 <style scoped>
-.dashboard { display: block; max-width: 1680px; margin: 0 auto; }
+.dashboard { display: block; }
 .dashboard > * + * { margin-top: 16px; }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
@@ -1301,8 +1299,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .head-btn.force:disabled { opacity: .6; }
 
 /* ── 工具栏（sticky 单行）：日期预设 + 转化分类 + 账户多选 ── */
-.main-tabs { display: flex; gap: 4px; margin: 14px 0 2px; }
-.main-tab { padding: 8px 20px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
+/* 双 Tab 融入页头（替代静态页标题；曾独立成行太稀疏） */
+.main-tabs { display: inline-flex; gap: 6px; }
+.main-tab { padding: 7px 22px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 /* sticky 基准是 .content 滚动区顶缘（平台上下文条在其外常驻），top:0 即紧贴平台条 */
 .tg-mgr-btn { position: relative; }
@@ -1333,8 +1332,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .trend-presets { display: flex; gap: 4px; }
 .tp-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
 .tp-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
-.trend-main-canvas { height: 320px; padding: 12px 16px 16px; }
-.trend-main-canvas.lt { height: 240px; }   /* 落地页趋势：矮一档，与指标 chip 同卡 */
+.trend-main-canvas { height: 420px; padding: 8px 20px 20px; }
+.trend-main-canvas.lt { height: 300px; }   /* 落地页趋势：矮一档，与指标 chip 同卡 */
 .trend-empty { text-align: center; color: var(--t3); padding: 48px; font-size: 13px; }
 
 /* 任务列表（右列卡片内，单列堆叠；水平内边距与其他卡统一 16px） */
@@ -1381,8 +1380,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-search::placeholder { color: var(--t3); }
 
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
-.kpi-zone { display: flex; flex-direction: column; gap: 10px; }
-.kpi-core-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+/* KPI 统一规格：8 卡 2 行 × 4 列（曾 4 大卡+细条两行割裂，截图复审后统一） */
+.kpi-zone { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi-core-grid { display: contents; }
 .kpi-card {
   position: relative; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--rs);
   padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 2px;
@@ -1399,17 +1399,16 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .kpi-sub { font-size: 10px; color: var(--t3); }
 .kpi-spark { width: 100%; height: 26px; color: var(--ac); opacity: 0.55; margin-top: 4px; display: block; }
 /* 次要 4 指标：一张细条卡内 4 个 inline 指标（无卡套卡），竖分隔线分列 */
-.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--rs); box-shadow: var(--shadow-card); }
-.strip-metric { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; row-gap: 2px; padding: 11px 16px; border-left: 1px solid var(--bd); min-width: 0; }
-.strip-metric:nth-child(4n+1) { border-left: none; }
+.kpi-strip { display: contents; }
+.strip-metric { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 14px 16px; min-width: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--rs); box-shadow: var(--shadow-card); position: relative; }
 .strip-metric.clickable { cursor: pointer; transition: background 0.15s; }
 .strip-metric.clickable:hover { background: var(--bg3); }
 .strip-metric.active { background: var(--acg); box-shadow: inset 0 0 0 1px var(--ac); }
 .strip-metric.active .km-value { color: var(--ac); }
 .strip-metric.alert .km-value { color: var(--warning); }
-.km-value { font-size: 16px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
-.km-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
-.km-badge { margin-left: auto; font-size: 10px; padding: 1px 7px; border-radius: 8px; background: rgba(255,159,10,.15); color: var(--warning); white-space: nowrap; }
+.km-value { font-size: 22px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.25; }
+.km-label { font-size: 12px; color: var(--t3); white-space: nowrap; }
+.km-badge { margin-top: 2px; font-size: 11px; padding: 1px 8px; border-radius: 8px; background: rgba(255,159,10,.15); color: var(--warning); white-space: nowrap; }
 
 /* ── 主区两列：账户明细（左 62%）+ 守护/任务/告警（右 38%）── */
 .main-split { display: grid; grid-template-columns: 62fr 38fr; gap: 16px; align-items: start; }
@@ -1428,10 +1427,10 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .accounts-table tbody tr.removed-row { opacity: .55; cursor: default; }
 .accounts-table tbody tr.removed-row:hover { background: transparent; }
 /* 左列表格不裁剪：内容不足保持基线高度（与右列平衡），超出随内容自然长高 */
-.acc-scroll { min-height: 560px; }
+.acc-scroll { min-height: 320px; }   /* 曾 560：行少时大片空白（截图复审）；320 保形不撑空 */
 
 /* 守护概览 3 格（自动止损/今日放行/巡检覆盖）；水平内边距与其他卡统一 16px */
-.guard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px; }
+.guard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; }
 .guard-cell {
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px;
   background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px;
@@ -1439,9 +1438,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 }
 .guard-cell:hover { border-color: var(--bd2); }
 .guard-cell.active { border-color: var(--ac); background: var(--acg); }
-.gc-value { font-size: 20px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
+.gc-value { font-size: 24px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
 .guard-cell.danger .gc-value { color: var(--error); }
-.gc-label { font-size: 11px; color: var(--t3); white-space: nowrap; }
+.gc-label { font-size: 12px; color: var(--t3); white-space: nowrap; }
 .gc-sub { font-size: 10px; color: var(--t3); margin-top: 2px; }
 .guard-detail { margin: 0 16px 16px; }
 .task-detail { margin: 0 16px 16px; }
@@ -1632,11 +1631,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .block-detail .block-grid { grid-template-columns: 1fr; }
-  .kpi-core-grid { grid-template-columns: repeat(2, 1fr); }   /* 核心 KPI 2×2 */
-  .kpi-strip { grid-template-columns: repeat(2, 1fr); }       /* 细条卡 2×2，分隔线随行重排 */
-  .strip-metric:nth-child(odd) { border-left: none; }
-  .strip-metric:nth-child(n+3) { border-top: 1px solid var(--bd); }
-  .trend-main-canvas { height: 240px; }
+  .kpi-zone { grid-template-columns: repeat(2, 1fr); }   /* 8 卡统一网格 → 2×4 */
+  .trend-main-canvas { height: 260px; }
+  .main-tabs { width: 100%; }   /* 页头 tab 挤不下时换行 */
   /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 待处理事项 → 趋势 → 账户明细 → 守护 → 告警；
      落地页 Tab 指标 → 明细 → 趋势 → 子码 → 屏蔽明细（trend-main 两个 Tab 都排 3，互不干扰）。
      间距用 gap：margin-top 只命中 .dashboard 直接子级，main-split/side-stack 变 contents 后

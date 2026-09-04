@@ -2173,8 +2173,9 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
         # （FB 侧同根因已修）。重复停对已停广告幂等；通知侧用 1h 去重防刷屏。
         try:
             # 通知去重要在 write_log 之前查（autoflush 会让自己刚写的日志立刻可见，
-            # 放后面=永命中=永不通知）；去重键=1h 内同 ad 的 pause 日志（上一轮已写过）
-            _notify_ok = not dedup_recent(db, acc.tenant_id, "pause", ad_id, 60)
+            # 放后面=永命中=永不通知）；键带 act_id——TT ad_id 是每广告主小整数，
+            # 裸用会跨广告主撞号吞通知（R2-1 P2）
+            _notify_ok = not dedup_recent(db, acc.tenant_id, "pause", f"{acc.act_id}:{ad_id}", 60)
             tt.update_status(ad_id, "PAUSED", "ad", acc.act_id)  # opt_status=DISABLE
             paused += 1
             write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",

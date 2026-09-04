@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+await page.goto('https://app.tovaads.com/login', { waitUntil: 'domcontentloaded' });
+await page.evaluate((t) => { localStorage.setItem('tova_token', t); localStorage.setItem('tova_locale', 'zh'); }, process.env.TOK);
+await page.goto('https://app.tovaads.com/dashboard', { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
+await page.waitForTimeout(4000);
+const zone = page.locator('.kpi-zone');
+await zone.screenshot({ path: '../_shots/kpi-zone.png' });
+const strip = page.locator('.kpi-strip');
+const cs = await strip.evaluate(el => getComputedStyle(el).display);
+const cs2 = await page.locator('.strip-metric').first().evaluate(el => { const s = getComputedStyle(el); return `${s.display}|border:${s.borderWidth}|fs:${s.fontSize}` });
+console.log('kpi-strip display:', cs, '| strip-metric:', cs2);
+await browser.close();
