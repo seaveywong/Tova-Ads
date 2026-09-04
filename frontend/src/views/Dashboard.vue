@@ -642,16 +642,22 @@ const openNotifDrawer = (n) => {
   activeNotif.value = n
   notifDrawerOpen.value = true
 }
-// 抽屉标题：动作 + 具体账户 + 广告（让用户一眼看到哪个账户哪个广告出问题、采取了什么动作）
-const notifTitle = computed(() => activeNotif.value?.title || t('dashboard.notifDetail'))
-// body 结构化：解析 "key：value" 行，key 突出 label，value 正文（无 key 行整行做 value）
-const parseBody = (body) => {
+// body 结构化：解析 "key：value" 行；与标题重复的首行过滤；值内长 ID 分段（模板里渲染成 code 块）
+const parseBody = (body, title = '') => {
   if (!body) return []
   const clean = body.replace(/<[^>]+>/g, '')  // 剥 HTML 标签（TG 的 <code> 等）
   return clean.split('\n').filter(l => l.trim()).map(line => {
     const m = line.match(/^([^：:]+)[：:]\s*(.+)$/)
     return m ? { key: m[1].trim(), val: m[2].trim() } : { key: '', val: line.trim() }
+  }).filter(row => !(row.key === '' && row.val === title.trim()))   // 首行 title 与抽屉标题重复（曾显示两遍）
+}
+// 值分段：长数字 ID（≥10 位）单独成段 → 模板渲染 code 块（等宽+可点复制）
+const splitIdSegs = (val) => {
+  const out = []
+  String(val || '').split(/(\d{10,})/g).forEach(seg => {
+    if (seg) out.push(/^\d{10,}$/.test(seg) ? { id: true, v: seg } : { id: false, v: seg })
   })
+  return out
 }
 const copyText = (text) => {
   if (!text) return
@@ -825,15 +831,20 @@ const todaySummary = computed(() => {
   return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => ({ type, count, label: notifEventLabel(type) || type }))
 })
 const focusNotifType = (type) => { notifEventFilter.value = type; notifFilter.value = 'all'; notifMode.value = 'all' }
-// 待处理条目 → 直跳广告管理器（从通知 body 提取账户 act_id；提取不到仍开详情抽屉）。
-// 通知 body 实际格式「账户：{name}（<code>{act_id}</code>）… 广告：…（<code>{ad_id}</code>）」——
-// act_id 是裸数字无 act_ 前缀；锚定「账户/Account」行首段的第一个长数字串（=act_id，避开后面的 ad_id）
-const pendingGoAd = (n) => {
-  const m = String(n.body || '') + '\n' + String(n.title || '')
-  const seg = m.split('\n').find(l => /^(账户|Account)/.test(l)) || ''
-  const act = seg.match(/(\d{12,})/)
-  if (act) router.push({ name: 'ad-manager', query: { act: act[1] } })
-  else openNotifDrawer(n)
+// 通知 body 提取账户 act_id：通知格式「账户：{name}（act_id）… 广告：…（ad_id）」——
+// 锚定「账户/Account」行的第一个长数字串（=act_id，避开后面的 ad_id）
+const notiActId = (n) => {
+  const lines = String(n?.body || '').split('\n')
+  const seg = lines.find(l => /^(账户|Account)/.test(l)) || ''
+  const m = seg.match(/(\d{12,})/)
+  return m ? m[1] : ''
+}
+// 待处理条目点击 = 开详情抽屉（正文 ID 可复制、底部可跳转）——曾直接跳走导致详情看不到
+const pendingGoAd = (n) => openNotifDrawer(n)
+// 抽屉底部「跳转广告管理器」
+const goNotiAd = (n) => {
+  const act = notiActId(n)
+  if (act) router.push({ name: 'ad-manager', query: { act } })
 }
 // 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）
 const alertEntity = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(i + 1).trim() : '' }
@@ -1298,19 +1309,32 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       </div>
     </div>
 
-    <el-drawer v-model="notifDrawerOpen" :title="notifTitle" direction="rtl" size="480px" :destroy-on-close="true">
+    <el-drawer v-model="notifDrawerOpen" :title="t('dashboard.notifDetail')" direction="rtl" size="480px" :destroy-on-close="true">
       <div v-if="activeNotif" class="notif-drawer">
         <div class="nd-head">
-          <span class="nd-level" :class="activeNotif.level">{{ ({critical:t('dashboard.levelCritical'),warning:t('dashboard.levelWarning'),info:t('dashboard.levelInfo')})[activeNotif.level] || t('dashboard.levelNotice') }}</span>
-          <span v-if="activeNotif.event_type" class="nd-event">{{ notifEventLabel(activeNotif.event_type) || activeNotif.event_type }}</span>
-          <span class="nd-time">{{ fmtTime(activeNotif.created_at) }}</span>
+          <div class="nd-head-row">
+            <span class="nd-level" :class="activeNotif.level">{{ ({critical:t('dashboard.levelCritical'),warning:t('dashboard.levelWarning'),info:t('dashboard.levelInfo')})[activeNotif.level] || t('dashboard.levelNotice') }}</span>
+            <span v-if="notifEventLabel(activeNotif.event_type)" class="nd-event">{{ notifEventLabel(activeNotif.event_type) }}</span>
+            <span class="nd-time">{{ fmtTime(activeNotif.created_at) }}</span>
+          </div>
+          <div class="nd-title">{{ activeNotif.title }}</div>
         </div>
         <div class="nd-body">
-          <div v-for="(row, i) in parseBody(activeNotif.body)" :key="i" class="nd-body-row">
+          <div v-for="(row, i) in parseBody(activeNotif.body, activeNotif.title)" :key="i"
+               :class="row.key ? 'nd-body-row' : 'nd-body-text'">
             <span v-if="row.key" class="nd-body-key">{{ row.key }}</span>
-            <span class="nd-body-val" @click="copyText(row.val)" :title="t('dashboard.clickToCopy')">{{ row.val }}</span>
+            <span class="nd-body-val">
+              <template v-for="(seg, j) in splitIdSegs(row.val)" :key="j">
+                <code v-if="seg.id" class="nd-id" @click="copyText(seg.v)" :title="t('dashboard.clickToCopy')">{{ seg.v }}</code>
+                <template v-else>{{ seg.v }}</template>
+              </template>
+            </span>
           </div>
           <div v-if="!activeNotif.body" class="nd-body-empty">（{{ t('dashboard.noDetailContent') }}）</div>
+        </div>
+        <div class="nd-footer">
+          <button v-if="notiActId(activeNotif)" class="nd-go" @click="goNotiAd(activeNotif)">{{ t('dashboard.ndGoAds') }} →</button>
+          <button v-if="!activeNotif.read" class="ack-btn" @click="ackNotif(activeNotif.id); activeNotif.read = true">{{ t('common.confirm') }}</button>
         </div>
       </div>
     </el-drawer>
@@ -1823,20 +1847,29 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .ac-item-meta { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .ac-item-meta .ack-btn, .ac-item-meta .acked-tag { margin-left: auto; margin-top: 0; }
 .ac-entity { font-size: 11px; color: var(--t3); background: var(--bg3); padding: 1px 8px; border-radius: 4px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-.notif-drawer { padding: 0; }   /* el-drawer body 自带 padding，详情容器不额外加，避免空白 */
-.nd-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.notif-drawer { padding: 0; display: flex; flex-direction: column; min-height: 100%; }   /* el-drawer body 自带 padding；flex 让 footer 沉底 */
+.nd-head { padding-bottom: 12px; border-bottom: 1px solid var(--bd); }
+.nd-head-row { display: flex; align-items: center; gap: 8px; }
 .nd-level { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 10px; }
 .nd-level.critical { background: rgba(255,69,58,0.15); color: var(--error); }
 .nd-level.warning { background: rgba(255,214,10,0.15); color: var(--warning); }
 .nd-level.info { background: rgba(10,132,255,0.15); color: var(--ac); }
-.nd-event { font-size: 12px; color: var(--t2); font-family: 'SF Mono', monospace; }
-.nd-time { font-size: 11px; color: var(--t3); margin-left: auto; }
-.nd-body { margin: 4px 0 16px; }   /* 去方框，行式分列 */
-.nd-body-row { display: flex; gap: 12px; padding: 10px 4px; font-size: 13px; line-height: 1.5; border-bottom: 1px solid var(--bd); align-items: flex-start; }
-.nd-body-key { color: var(--t3); flex-shrink: 0; min-width: 52px; font-weight: 500; }
-.nd-body-val { color: var(--t1); word-break: break-word; cursor: pointer; transition: color 0.15s; }
-.nd-body-val:hover { color: var(--ac); }
+.nd-event { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: var(--bg3); color: var(--t2); }
+.nd-time { font-size: 11px; color: var(--t3); margin-left: auto; font-variant-numeric: tabular-nums; }
+.nd-title { margin-top: 10px; font-size: 15px; font-weight: 600; color: var(--t1); line-height: 1.5; }
+.nd-body { margin: 4px 0 16px; flex: 1; }
+.nd-body-row { display: flex; gap: 12px; padding: 9px 2px; font-size: 13px; line-height: 1.6; align-items: flex-start; }
+.nd-body-row + .nd-body-row { border-top: 1px dashed var(--bd); }   /* 虚线分隔：轻于实线，行多不压抑 */
+.nd-body-key { color: var(--t3); flex-shrink: 0; width: 76px; font-weight: 500; padding-top: 1px; }
+.nd-body-val { color: var(--t1); word-break: break-word; min-width: 0; flex: 1; }
+.nd-body-text { padding: 10px 2px; font-size: 13px; color: var(--t2); line-height: 1.7; }   /* 叙述行（无 key）：整行正文 */
+.nd-id { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; background: var(--bg3); color: var(--ac); padding: 1px 6px; border-radius: 4px; cursor: pointer; margin: 0 2px; word-break: break-all; transition: all 0.15s; }
+.nd-id:hover { background: var(--acg); }
 .nd-body-empty { padding: 8px; color: var(--t3); }
+.nd-footer { display: flex; gap: 10px; padding-top: 12px; border-top: 1px solid var(--bd); margin-top: auto; }
+.nd-footer .ack-btn { margin-top: 0; }
+.nd-go { padding: 5px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: var(--rs); font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.nd-go:hover { color: var(--ac); border-color: var(--ac); background: var(--acg); }
 .ack-btn { padding: 3px 12px; background: var(--acg); color: var(--ac); border: 1px solid var(--ac); border-radius: var(--rs); font-size: 11px; cursor: pointer; flex-shrink: 0; margin-top: 2px; transition: all 0.15s; }
 .ack-btn:hover { background: var(--ac); color: #fff; }
 .acked-tag { font-size: 11px; color: var(--t3); flex-shrink: 0; margin-top: 4px; }
