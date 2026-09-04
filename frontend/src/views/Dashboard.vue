@@ -1182,7 +1182,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         </div>
         <div v-if="!landingKpiDetail.rows.length" class="empty">{{ t('dashboard.noSubcodeData') }}</div>
       </div>
-    <div v-show="mainTab === 'landing'" class="card trend-main">
+    <div v-show="mainTab === 'landing'" class="card trend-main landing-trend">
       <div class="card-header">
         <div class="tm-title-wrap">
           <span class="card-title">{{ t('dashboard.landingTrendTitle') }}</span>
@@ -1273,10 +1273,21 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 </template>
 
 <style scoped>
-/* 限宽 1600 居中：全宽版曾把 KPI 卡拉到 440px（空置 60%）+ 趋势图成横幅（截图比例诊断）；
-   1440 窄版又被抱怨缩——1600 是两头之间的协调点 */
-.dashboard { display: block; max-width: 1600px; margin: 0 auto; }
-.dashboard > * + * { margin-top: 16px; }
+/* ── 复合网格布局（结构不是像素）：宽屏靠"多块并排"消化宽度，块不被横向拉满、两侧不空。
+   行结构：页头/筛选/KPI 整行 → 趋势(62%)+守护(38%) 同行 → 账户明细整行 → 待处理+告警 各半。
+   dense 回填让 DOM 顺序不变也能把守护卡填进趋势旁边的空格 */
+.dashboard {
+  display: grid;
+  grid-template-columns: 62fr 38fr;
+  gap: 16px;
+  grid-auto-flow: dense;
+}
+.dashboard > * { grid-column: 1 / -1; min-width: 0; }
+.trend-main:not(.landing-trend) { grid-column: 1; }   /* 数据 Tab 趋势占左列；落地页趋势整行 */
+.guard-card { grid-column: 2; }
+.todo-card { grid-column: 1; }
+.notif-card { grid-column: 2; }
+@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .trend-main:not(.landing-trend), .guard-card, .todo-card, .notif-card { grid-column: 1 / -1; } }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
@@ -1382,10 +1393,20 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-search::placeholder { color: var(--t3); }
 
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
-/* KPI 统一规格 2 行 × 4 列（元素级实拍验证过"饱满专业"的形态；8 卡一行试过——
-   185px 窄卡把副文案挤成 3 行，弃）。1600 容器下单卡 ~388px，副文案单行不折 */
+/* KPI 记分卡：≥1400 宽屏 8 卡一行（GA4 scorecard 式紧凑：标签/数值/副文案单行省略），
+   <1400 回 2×4，≤768 2 列。副文案 nowrap+ellipsis 是 8 卡一行的前提（曾折 3 行挤爆） */
 .kpi-zone { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (min-width: 1400px) { .kpi-zone { grid-template-columns: repeat(8, 1fr); gap: 10px; } }
 .kpi-core-grid { display: contents; }
+.kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (min-width: 1400px) {
+  .kpi-card { padding: 12px 12px 10px; }
+  .kpi-value { font-size: 21px; }
+  .kpi-spark { height: 18px; }
+  .strip-metric { padding: 12px 12px 10px; }
+  .km-value { font-size: 21px; }
+  .km-label { font-size: 11px; }
+}
 .kpi-card {
   position: relative; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--rs);
   padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 2px;
@@ -1413,9 +1434,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .km-label { font-size: 12px; color: var(--t3); white-space: nowrap; }
 .km-badge { margin-top: 2px; font-size: 11px; padding: 1px 8px; border-radius: 8px; background: rgba(255,159,10,.15); color: var(--warning); white-space: nowrap; }
 
-/* ── 主区两列：账户明细（左 62%）+ 守护/任务/告警（右 38%）── */
-.main-split { display: grid; grid-template-columns: 62fr 38fr; gap: 16px; align-items: start; }
-.main-split.no-accs { grid-template-columns: 1fr; }
+/* ── 主区（复合网格化后 main-split/side-stack 只做透明容器，卡片直挂 .dashboard 参与排布）── */
+.main-split { display: contents; }
 .accounts-empty { padding: 0; }
 .acc-empty-banner { display: flex; align-items: center; gap: 14px; padding: 20px 24px; }
 .acc-empty-icon { font-size: 28px; }
@@ -1423,7 +1443,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .acc-empty-title { font-size: 14px; font-weight: 600; color: var(--t1); }
 .acc-empty-sub { font-size: 12px; color: var(--t3); margin-top: 2px; }
 .acc-empty-btn { color: var(--ac); font-size: 13px; text-decoration: none; border: 1px solid var(--ac); padding: 6px 18px; border-radius: 6px; white-space: nowrap; }
-.side-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.side-stack { display: contents; }
 .accounts-card { min-width: 0; }
 .accounts-table tbody tr { cursor: pointer; }
 .accounts-table tbody tr:hover { background: var(--bg3); }
