@@ -1008,3 +1008,48 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - `3e3c2b7` refactor(reuse): 复审优化——返字段统一+去 _json+删死CSS+docstring
 
 关联：[[tech-review-format]] [[toveads-dev-sop]] [[i18n-system]] [[page-post-follow-mode]] [[fb-business-policy-restriction]] [[ux-clarity-bar]] [[review-standard]]
+
+---
+
+## 批R（2026-09-04）：资金安全五维审计全量修复 + 哨兵漏网根因 + 看板/链接/管理器重构 + 两轮对抗复审
+
+### 概述
+用户哨兵实测漏网（09:05 arm 20 账户 + 故意开广告，3 分钟巡逻未停）触发全面资金安全审计（5 Agent，P0×13/P1×19）→ 批R 全量修复（6 Agent 并行 + 集成收尾）→ 部署 + **哨兵生产实测 PASS** → **第一轮对抗复审（4 Agent，新发现 P0×1+P1×8+P2×10）→ 全修 → 部署** → **第二轮复审（2 Agent：验证一轮修复 + 全局回归）**。
+
+### 哨兵漏网根因与生产实证
+根因：dedup 键 = 1h 内 ActionLog 有 pause 日志即跳过，**不看 FB 实际状态**（pause 虚报成功/停后被重启 → 日志在 → 整小时不再停）。
+修复：dedup 命中 → 回读 effective_status → 仍 ACTIVE（或回读失败）→ 重停。
+生产实测（用户测试案例完整复现）：arm 测试账户 1816188396040295 → 巡逻一轮 `{"sentinel_paused": 1}` → FB 回读 **PAUSED ✅** → 二轮巡逻 dedup 正确跳过（实际已停）✅ → critical TG 送达 → 恢复 disarm。
+
+### 变更表（批R 主体 95191a0 + 8621251）
+| 层 | 变更 |
+|---|---|
+| 数据口径 | burn_fast 双重换算修复（spend 已 USD）/ to_usd 未知币返 None / ZERO_DECIMAL 23→25 币统一 core/ad_ops 真相源（PYG/XPF 回补） |
+| 哨兵/巡检 | dedup 回读实况 / armed 不跳快照 / status 黑名单 (2,8,100,101) 宽限9受限7未结清3 继续管 / 假停核验三级 / sentinel_failure critical / TT 分支删日志去重（get_active_ads 即地面真相）+ 通知 1h 去重 / FB 批停通知 30min 去重 |
+| 部署器 | 重试同名 campaign 幂等（须非死状态+挂 adset 才认）/ 预算 $5000 上限+5x 步进 FB+TT 共用 _budget_guard_check / legacy daily_budget 同口径 USD 等值上限 / advisory lock 115/116 |
+| 告警 | TG 3 次重试+通道故障 critical（streak 键 (bot,chat)）/ critical join 在职 membership（防离职泄漏）/ NO_CAP 补 rule_pause+budget98 / storm 压制计数可见 / sync_stalled critical + dedup 24h（曾 60 天） |
+| 广告管理 | /ads/live-status 10s 缓存+写后失效（LIVE_STALE_MARKS）/ 4 端点 is_managed 门 / unmanage 在投告警+留痕 platform |
+| 前端 | 看板方案B重构（stuck 体系全删=抖动根治/平级卡片/1680 收口/移动端 gap+order）/ 投放链接模式 tab / 管理器缓存龄+⚡实时核验+预算确认 / zh tabLanding 英文泄漏修复 |
+
+### 迁移
+无（零迁移批，纯代码）。
+
+### 生产变更
+- 后端 3 次部署（16+1 文件 → tt_client 循环引用修复 → 11 文件一轮复审修复），全门（py_compile/IMPORT_OK/restart/health v1.3.5）
+- 前端 3 次 CF Pages 部署（master 分支）
+- 事故发现途中修复：core/ad_ops ↔ core/tt_client 循环引用（tt_client 改函数内延迟导入）
+
+### 两轮复审结论
+**第一轮（4 Agent 对抗）**：P0×1（to_usd float×None=TypeError 非 None，全部 None 防护是死代码）+ P1×8 + P2×10 —— 全修（320d812）。亮点发现：emergency_done 通知自 b1cc565 起因 ImportError 静默死亡、离职成员 TG 绑定持续收 critical、ZERO_DECIMAL 丢 PYG、sync_stalled dedup 写成 60 天。
+**第二轮（2 Agent）**：验证一轮修复本身 + 全局回归（import 环/i18n 键/锁号/dedup 配对/to_usd 全调用点/locale parity/DB 兼容）。
+生产冒烟：to_usd(100,COP)=None ✅（P0 实证）/ 哨兵巡逻回归正常 / journalctl 零错误。
+
+### commit 列表
+- `95191a0` feat: 批R——五维审计P0全量修复+哨兵根因+看板/链接/管理器重构
+- `8621251` fix: tt_client 延迟导入防循环引用
+- `320d812` fix: 第一轮复审修复——P0×1+P1×8+P2×10
+
+### 遗留（已知不改，下批复核）
+- lock 115 全局锁跨租户假 409（低频毫秒窗）/ patch_account_cache_status 死代码清理 / budget_alerts date_preset→time_range 对齐 / AdManager 实时核验仅广告 Tab 生效 / 看板 7 卡 4 列残行 / TG 阻塞重试拖慢同步请求（请求路径不重试或后台线程化）
+
+关联：[[sentinel-dedup-incident-2026-09]] [[tech-review-format]] [[toveads-dev-sop]] [[review-standard]] [[notify-dedup-mandatory]]
