@@ -1348,6 +1348,13 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             emit_notification(db, tenant_id=tenant_id, level="warning",
                                               event_type="spend_spike", trace_id=trace_id,
                                               title=_t_sk, body=_b_sk, platform="fb")
+                            # dedup_recent 查 action_logs——emit 后必须写同名 log，
+                            # 否则下轮查无记录每 5 分钟重发（曾因此刷屏）
+                            write_log(db, tenant_id=tenant_id, trace_id=trace_id,
+                                      actor_type="system", target_type="account",
+                                      target_id=acc.act_id, action_type="spend_spike",
+                                      source="guard", result="success",
+                                      trigger_detail=f"今日${acc_tick_spend:.2f} vs 7天日均${_avg7:.2f}")
                             db.commit()
             except Exception:
                 pass

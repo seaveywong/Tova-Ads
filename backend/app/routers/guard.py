@@ -400,7 +400,17 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                     if r.get("success"):
                         paused_camps += 1
                     else:
-                        _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {r.get('error','')}")
+                        # FB pause 会虚报权限错误（实测 code200 "Permissions error" 但实际已停）
+                        # ——回读实际状态定成败，不轻信错误码
+                        try:
+                            _time.sleep(2)
+                            _st2 = fb.get(cid, {"fields": "effective_status"}).get("effective_status")
+                            if _st2 != "ACTIVE":
+                                paused_camps += 1
+                            else:
+                                _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {r.get('error','')}")
+                        except Exception:
+                            _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {r.get('error','')}")
                 except Exception as e:
                     _st["errors"].append(f"{acc.name}/系列{cid[-6:]}: {str(e)[:50]}")
             _st["paused"] += paused_camps
@@ -481,6 +491,36 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             _emergency_state_write(db, tenant_id, dict(_st))   # 终态落 DB（跨 worker）
         except Exception:
             pass
+        # ── 终验报告：全量扫纳管账户 ACTIVE campaign（地面真相，不靠逐条 pause 的即时返回）──
+        # 曾缺此步：FB pause 虚报权限错误 + 即时核验太早 → 用户以为全停实际漏网亏损
+        try:
+            _fin_active = []
+            _fin_accs = db.query(Account).filter(
+                Account.tenant_id == tenant_id,
+                Account.is_managed.is_(True),
+                Account.account_status == 1,
+            ).all()
+            for _fa in _fin_accs:
+                if (_fa.platform or "fb") == "tt":
+                    continue
+                try:
+                    _fc = cred_for_account_op(db, tenant_id, _fa.act_id, "read")
+                    if not _fc:
+                        continue
+                    _fbc = FbClient(decrypt(_fc.access_token_enc))
+                    _cs = _fbc.get(f"act_{_fa.act_id}/campaigns", {
+                        "fields": "id,name,effective_status", "limit": 200})
+                    for _c0 in (_cs.get("data") or []):
+                        if _c0.get("effective_status") == "ACTIVE" and "[Tova-保活]" not in (_c0.get("name") or ""):
+                            _fin_active.append(f"{_fa.name}:{(_c0.get('name') or '')[:20]}")
+                except Exception:
+                    pass
+                _time.sleep(0.4)
+            _st["final_active_count"] = len(_fin_active)
+            _st["final_active_sample"] = _fin_active[:10]
+        except Exception:
+            pass
+
         # 完成通知（TG + 站内）与汇总留痕（守护页「暂停记录」tab 数据源）——
         # 曾只落 state kv：TG/通知中心无任何记录，除触发者外无人知晓
         try:
@@ -492,6 +532,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                                        total=_st.get("total_accounts", 0),
                                        camps=_n_camp, ads=_n_ads,
                                        failed=_st.get("verify_failed", 0),
+                                       final_active=_st.get("final_active_count", "?"),
                                        errs="；".join((_st.get("errors") or [])[:5]))
             emit_notification(db, tenant_id=tenant_id, level="critical",
                               event_type="emergency_pause_done", trace_id=new_trace_id(),

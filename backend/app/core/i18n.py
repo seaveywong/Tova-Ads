@@ -111,8 +111,8 @@ NOTIFY = {
     "emergency_done": {
         "title": {"zh": "全局紧急暂停完成", "en": "Global Emergency Pause Done"},
         "body": {
-            "zh": "覆盖 {total} 个账户\n已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）\n核验失败：{failed}\n{errs}",
-            "en": "Covered {total} accounts\nPaused <b>{camps}</b> campaigns ({ads} ads under them)\nVerify failed: {failed}\n{errs}",
+            "zh": "覆盖 {total} 个账户\n已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）\n【终验】全量扫描后仍有 <b>{final_active}</b> 个系列在投放\n核验失败：{failed}\n{errs}",
+            "en": "Covered {total} accounts\nPaused <b>{camps}</b> campaigns ({ads} ads under them)\n[FINAL AUDIT] {final_active} campaigns STILL ACTIVE after full scan\nVerify failed: {failed}\n{errs}",
         },
     },
     "sentinel_pause_batch": {
