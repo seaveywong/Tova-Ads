@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { GET, POST, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
+import { accountStatus } from '../composables/useStatus'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { usePlatform, platformQuery } from '../composables/usePlatform'
@@ -466,7 +467,10 @@ const subCards = computed(() => [
 // ── 守护概览 3 格（自动止损/今日放行/巡检覆盖；点击展开对应明细面板）──
 const kpiMode = ref(null)  // pause / allowance / coverage
 const coverageText = computed(() => { const m = (data.value.accounts || []).filter(a => a.is_managed !== false); return `${m.filter(a => !a.error || a.error === 'cross_tz').length}/${m.length}` })
+const accStatusActive = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status === 1).length)
+const accStatusBad = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status !== 1).length)
 const guardCells = computed(() => [
+  { mode: 'accstatus', label: t('dashboard.kpiAccStatus'), value: `${accStatusActive.value}/${accStatusActive.value + accStatusBad.value}`, danger: accStatusBad.value > 0 },
   { mode: 'pause', label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), danger: data.value.pause_count > 0 },
   { mode: 'allowance', label: t('dashboard.kpiAllowance'), value: fmt(data.value.allowance_count) },
   { mode: 'coverage', label: t('dashboard.kpiCoverage'), value: coverageText.value, sub: t('dashboard.kpiCoverageSub', { active: activeTokens.value, stopped: totalTokens.value - activeTokens.value }) },
@@ -591,7 +595,23 @@ const forceRefresh = async () => {
 const kpiDetail = computed(() => {
   const mode = kpiMode.value
   if (!mode) return null
-  const label = { pause: t('dashboard.kpiAutoPause'), allowance: t('dashboard.kpiAllowance'), coverage: t('dashboard.kpiCoverage') }[mode]
+  const label = { pause: t('dashboard.kpiAutoPause'), allowance: t('dashboard.kpiAllowance'), coverage: t('dashboard.kpiCoverage'), accstatus: t('dashboard.kpiAccStatus') }[mode]
+
+  // 账户可用明细：不可用排前（紧急），正常在后折叠为计数行——一眼看哪些账户不能投
+  if (mode === 'accstatus') {
+    const STATUS_ORDER = { 7: 0, 2: 1, 101: 2, 100: 3, 8: 4, 9: 5, 3: 6 }
+    const bad = (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status !== 1)
+      .sort((a, b) => (STATUS_ORDER[a.account_status] ?? 9) - (STATUS_ORDER[b.account_status] ?? 9))
+    return {
+      mode, title: t('dashboard.kpiAccStatus') + ' · ' + t('dashboard.detailTitle') + `（${t('dashboard.accActiveN', { n: accStatusActive.value })} / ${t('dashboard.accInactiveN', { n: bad.length })}）`,
+      type: 'accounts', accs: bad,
+      cols: [
+        { key: 'name', label: t('dashboard.colAccount'), left: true },
+        { key: 'act', label: t('dashboard.colAccountId'), fmt: (v, a) => a.act_id },
+        { key: 'st', label: t('common.status'), fmt: (v, a) => accountStatus(a.account_status).label },
+      ],
+    }
+  }
 
   // 止损明细：从 pause_details 构建（不是 accounts）
   if (mode === 'pause') {
@@ -845,6 +865,8 @@ const notifMode = ref('attention')   // attention=摘要（默认）/ all=全量
 const pendingAlerts = computed(() => (recentNotifs.value || [])
   .filter(n => !n.read && (n.level === 'critical' || n.level === 'warning'))
   .sort((a, b) => (a.level === 'critical' ? 0 : 1) - (b.level === 'critical' ? 0 : 1)))   // 严重在前
+const pendExpand = ref(false)        // 待处理默认收 6 条（长列表曾刷成一面墙），点开看全量
+const pendingShown = computed(() => pendExpand.value ? pendingAlerts.value : pendingAlerts.value.slice(0, 6))
 const todaySummary = computed(() => {
   const tk = _dayKey(new Date())
   const m = new Map()
@@ -1291,14 +1313,18 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <template v-if="notifMode === 'attention'">
               <div class="ac-strip" :class="{ calm: !pendingAlerts.length }">
                 <span class="ac-strip-label">{{ t('dashboard.acPending') }}</span>
-                <div v-if="pendingAlerts.length" class="ac-strip-items">
-                  <div v-for="n in pendingAlerts" :key="n.id" class="ac-pend" :class="n.level" @click="pendingGoAd(n)">
-                    <span class="badge-lv" :class="n.level">{{ levelLabel(n.level) }}</span>
+                <div v-if="pendingAlerts.length" class="ac-strip-items ac-pend-list">
+                  <div v-for="n in pendingShown" :key="n.id" class="ac-pend" :class="n.level" @click="pendingGoAd(n)">
+                    <span class="ac-pend-dot"></span>
                     <span class="ac-pend-msg">{{ alertMainTitle(n) }}</span>
                     <span v-if="alertEntity(n)" class="ac-entity">{{ alertEntity(n) }}</span>
                     <span class="ac-time">{{ alertTime(n) }}</span>
                     <button class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
                   </div>
+                  <button v-if="pendingAlerts.length > pendingShown.length" class="ac-fold" @click="pendExpand = true">
+                    {{ t('dashboard.foldMore', { n: pendingAlerts.length - pendingShown.length, type: t('dashboard.acPending') }) }} ↓
+                  </button>
+                  <button v-else-if="pendExpand && pendingAlerts.length > 6" class="ac-fold" @click="pendExpand = false">{{ t('dashboard.foldLess') }} ↑</button>
                 </div>
                 <div v-else class="ac-calm">{{ t('dashboard.acAllClear') }}</div>
               </div>
@@ -1699,7 +1725,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .acc-scroll { min-height: 400px; }   /* 信息密集块给足高度；上方 KPI 单行+图降高后表格上移首屏 */
 
 /* 守护概览 3 格（自动止损/今日放行/巡检覆盖）；水平内边距与其他卡统一 16px */
-.guard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; }
+.guard-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 16px; }
 .guard-cell {
   display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px;
   background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px;
@@ -1862,11 +1888,16 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .ac-strip.calm { background: transparent; }
 .ac-strip-label { font-size: 12px; font-weight: 600; color: var(--t3); white-space: nowrap; padding-top: 7px; }
 .ac-strip-items { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-.ac-pend { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg3); cursor: pointer; min-width: 0; max-width: 100%; transition: background 0.15s; }
-.ac-pend:hover { background: var(--bd); }
-.ac-pend.critical { box-shadow: inset 2px 0 0 var(--error); }
-.ac-pend.warning { box-shadow: inset 2px 0 0 var(--warning); }
-.ac-pend-msg { font-size: 12.5px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+/* 待处理=整行式列表（曾徽章+胶囊堆成一面墙）：级别用色点+标题色表达，一行一条，默认收 6 条 */
+.ac-pend-list { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 2px; }
+.ac-pend { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border-radius: 8px; cursor: pointer; min-width: 0; max-width: 100%; border-bottom: 1px solid var(--bd); transition: background 0.15s; }
+.ac-pend:last-of-type { border-bottom: none; }
+.ac-pend:hover { background: var(--bg3); }
+.ac-pend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ac-pend.critical .ac-pend-dot { background: var(--error); box-shadow: 0 0 0 3px rgba(255,69,58,.14); }
+.ac-pend.warning .ac-pend-dot { background: var(--warning); box-shadow: 0 0 0 3px rgba(255,159,10,.14); }
+.ac-pend.critical .ac-pend-msg { color: var(--error); font-weight: 600; }
+.ac-pend-msg { font-size: 13px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
 .ac-pend .ac-time { margin-left: 0; }
 .ac-pend .ack-btn { margin-top: 0; }
 .ac-calm { font-size: 13px; color: var(--t2); padding: 6px 0; }
