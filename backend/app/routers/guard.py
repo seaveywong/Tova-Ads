@@ -318,6 +318,7 @@ def _emergency_state_write(db, tenant_id: int, st: dict):
 def _bg_emergency_pause(tenant_id: int, user_email: str):
     """后台执行全局紧急暂停：同步 ads_cache → 逐个 PAUSE → 回读核验（advisory lock 113 单实例互斥）。"""
     from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+    from sqlalchemy import or_ as _or   # P0-5：仅排除死状态账户，NULL 状态视为可管
     from ..core.fb_tokens import cred_for_account_op
     from ..core.fb_client import FbClient
     from ..core.encryption import decrypt
@@ -345,10 +346,12 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         _emergency_state_write(db, tenant_id, dict(_st))
         # 按平台分组：FB 组走原 set_status 链（零改动）；TT 组走 TtClient 批量 DISABLE（下方 TT 段）。
         # 不再整段排除 TT（P0-2）——紧急暂停覆盖全平台。
+        # 账户过滤（P0-5）：仅排除死状态（DISABLED=2/CLOSED=8）——未结清3/受限7/宽限期9 的账户
+        # 仍可能投放花钱，紧急暂停必须覆盖（曾 ==1 全排除：受限账户漏停继续烧钱）。
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
-            Account.account_status == 1,
+            _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8])),
         ).all()
         fb_accounts = [a for a in accounts if (a.platform or "fb") != "tt"]
         tt_accounts = [a for a in accounts if (a.platform or "fb") == "tt"]
@@ -495,10 +498,11 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         # 曾缺此步：FB pause 虚报权限错误 + 即时核验太早 → 用户以为全停实际漏网亏损
         try:
             _fin_active = []
+            # 终验同主过滤（P0-5）：仅排除死状态（2/8），受限/宽限账户仍在投放必须计入终验
             _fin_accs = db.query(Account).filter(
                 Account.tenant_id == tenant_id,
                 Account.is_managed.is_(True),
-                Account.account_status == 1,
+                _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8])),
             ).all()
             for _fa in _fin_accs:
                 if (_fa.platform or "fb") == "tt":

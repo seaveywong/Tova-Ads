@@ -155,6 +155,8 @@ const viewCurs = computed(() => {
 })
 const mixedCur = computed(() => viewCurs.value.size > 1)
 const viewCur = computed(() => (mixedCur.value || !viewCurs.value.size) ? 'USD' : [...viewCurs.value][0])
+// 预算列头币种标注：单一币种时显示 (XXX)；多币种混选不标（各行已带本币代码）
+const budgetCurTag = computed(() => (viewCurs.value.size && !mixedCur.value) ? ' (' + viewCur.value + ')' : '')
 const fmtSpendCol = (a) => mixedCur.value ? fmtMoney(a.spend_usd) : fmtAmount(a.spend, viewCur.value)
 const fmtCpaCol = (a) => mixedCur.value ? (a.cpa_usd ? fmtMoney(a.cpa_usd) : '-') : (a.cpa ? fmtAmount(a.cpa, viewCur.value) : '-')
 
@@ -163,6 +165,55 @@ const cacheStale = computed(() => {
   const ts = data.value.cached_at ? new Date(data.value.cached_at).getTime() : NaN
   return !isNaN(ts) && (Date.now() - ts > 3600e3)
 })
+
+// 缓存新鲜度标签：/ads 顶层 last_sync（后端字段上线前显示「—」）；30s 心跳让「X 分钟前」自动走字
+const nowTick = ref(Date.now())
+let _ageTimer = null
+const cacheAgeMin = computed(() => {
+  void nowTick.value
+  const ls = data.value.last_sync
+  if (!ls) return null
+  const ts = new Date(ls).getTime()
+  if (isNaN(ts)) return null
+  return Math.floor((Date.now() - ts) / 60000)
+})
+const cacheAgeText = computed(() => {
+  const m = cacheAgeMin.value
+  if (m == null) return t('adm.cacheAgeNone')
+  return m < 1 ? t('adm.cacheAgeLt1') : t('adm.cacheAge', { n: m })
+})
+const cacheAgeStale = computed(() => cacheAgeMin.value != null && cacheAgeMin.value >= 60)
+
+// 实时核验：对选中账户逐个调 GET /ads/live-status?act_id=，用返回 {ads:[{id,effective_status}]} 逐条 patch 本地行
+// 端点未上线（404 Not Found）时静默；其他失败 toast。同账户 10s 防抖（后端另有缓存，双保险）
+const liveVerifying = ref(false)
+const liveVerifiedAt = ref('')
+const _liveLastCall = {}
+const verifyLive = async () => {
+  const targets = [...new Set(selectedActs.value)]
+  if (!targets.length) return ElMessage.warning(t('adm.liveVerifyPickAccount'))
+  const now = Date.now()
+  const todo = targets.filter(id => (now - (_liveLastCall[id] || 0)) >= 10000)
+  if (!todo.length) return ElMessage.warning(t('adm.liveVerifyTooOften'))
+  liveVerifying.value = true
+  let patched = 0
+  let firstErr = null
+  for (const actId of todo) {
+    _liveLastCall[actId] = Date.now()
+    try {
+      const r = await GET('/ads/live-status?act_id=' + encodeURIComponent(actId))
+      const m = new Map((r.ads || []).map(x => [String(x.id), x.effective_status]))
+      for (const ad of (data.value.ads || [])) {
+        const st = m.get(String(ad.id))
+        if (st != null) { ad.effective_status = st; patched++ }
+      }
+    } catch (e) { if (!/not found/i.test(e.message || '')) firstErr = firstErr || e }
+  }
+  liveVerifying.value = false
+  if (firstErr) { ElMessage.error(t('adm.liveVerifyFail') + '：' + (firstErr.message || '')); return }
+  liveVerifiedAt.value = new Date().toLocaleTimeString(locale.value === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  ElMessage.success(t('adm.liveVerifyOk', { n: patched }))
+}
 
 const curList = computed(() => {
   let arr
@@ -203,8 +254,8 @@ const drillName = computed(() => {
 const drillToAdset = (c) => { drillCampaign.value = c.id; tab.value = 'adset'; if (c.act_id && !selectedActs.value.includes(c.act_id)) selectedActs.value = [c.act_id] }
 const drillToAd = (s) => { drillAdset.value = s.id; tab.value = 'ad'; if (s.act_id && !selectedActs.value.includes(s.act_id)) selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
-onMounted(loadAccounts)
-onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null } })
+onMounted(() => { loadAccounts(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
+onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null }; if (_ageTimer) { clearInterval(_ageTimer); _ageTimer = null } })
 
 const selected = ref(new Set())
 const opLoading = ref(false)
@@ -223,17 +274,40 @@ const curLevel = () => tab.value === 'campaign' ? 'campaign' : (tab.value === 'a
 const toggleStatus = async (item) => {
   const ns = item.effective_status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
   opLoading.value = true
-  try { const r = await POST('/ads/status', { act_id: item.act_id, node_id: item.id, level: curLevel(), status: ns }); if (r.success) { item.effective_status = r.effective_status || ns; item.status = ns; ElMessage.success(ns === 'ACTIVE' ? t('adm.activated') : t('adm.paused')) } else ElMessage.error(r.error || t('common.opFail')) } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  try {
+    const r = await POST('/ads/status', { act_id: item.act_id, node_id: item.id, level: curLevel(), status: ns })
+    if (r.success) {
+      item.effective_status = r.effective_status || ns; item.status = ns
+      // 假停/未生效：后端回读核验 verified=false 或带 warning → 警示而非成功提示
+      if (r.verified === false || r.warning) ElMessage.warning(r.warning || t('adm.fakePauseWarn'))
+      else ElMessage.success(ns === 'ACTIVE' ? t('adm.activated') : t('adm.paused'))
+    } else ElMessage.error(r.error || t('common.opFail'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   opLoading.value = false
 }
 const openBudget = (item) => {
   const isLifetime = item.lifetime_budget_amount != null
-  budgetTarget.value = { act_id: item.act_id, node_id: item.id, level: curLevel(), name: item.name, budget_type: isLifetime ? 'lifetime' : 'daily' }
+  budgetTarget.value = {
+    act_id: item.act_id, node_id: item.id, level: curLevel(), name: item.name,
+    budget_type: isLifetime ? 'lifetime' : 'daily',
+    old_value: Number(item.lifetime_budget_amount ?? (item.daily_budget_amount || 0)) || 0,
+    currency: item.currency || 'USD',
+  }
   budgetInput.value = Number(item.lifetime_budget_amount ?? (item.daily_budget_amount || 0))
   budgetDialog.value = true
 }
+// 预算大幅上调防护：新值 > 旧值×3 且差额 > 500（本币）→ 二次确认（防手滑多打一个 0；×2 快捷键叠加后同判）
+const _fmtBudgetVal = (v, cur) => cur === 'USD' ? '$' + Number(v).toLocaleString() : Number(v).toLocaleString()
 const saveBudget = async () => {
   if (!budgetInput.value || budgetInput.value <= 0) return ElMessage.warning(t('adm.budgetGtZero'))
+  const nv = Number(budgetInput.value)
+  const ov = Number(budgetTarget.value.old_value || 0)
+  const cur = budgetTarget.value.currency || 'USD'
+  if (ov > 0 && nv > ov * 3 && nv - ov > 500) {
+    const change = _fmtBudgetVal(ov, cur) + ' → ' + _fmtBudgetVal(nv, cur) + ' (' + cur + ')'
+    try { await ElMessageBox.confirm(t('adm.budgetBigJumpConfirm', { change }), t('adm.budgetBigJumpTitle'), { type: 'warning', confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel') }) }
+    catch { return }   // 用户取消：留在对话框可改回
+  }
   const bt = budgetTarget.value.budget_type
   const payload = { act_id: budgetTarget.value.act_id, node_id: budgetTarget.value.node_id, level: budgetTarget.value.level, budget_type: bt }
   payload[bt === 'lifetime' ? 'lifetime_budget' : 'daily_budget'] = budgetInput.value
@@ -268,10 +342,20 @@ const batchStatus = async (status) => {
   if (status === 'PAUSED') {
     try { await ElMessageBox.confirm(t('adm.batchPauseConfirm', { n: selected.value.size }), t('adm.batchPauseTitle'), { type: 'warning', confirmButtonText: t('adm.paused'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' }) }
     catch { return }
+  } else if (status === 'ACTIVE') {
+    try { await ElMessageBox.confirm(t('adm.batchActivateConfirm', { n: selected.value.size }), t('adm.batchActivateTitle'), { type: 'warning', confirmButtonText: t('adm.batchActivate'), cancelButtonText: t('common.cancel') }) }
+    catch { return }
   }
   const items = []; for (const id of selected.value) { const it = curList.value.find(x => x.id === id); if (it) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
   opLoading.value = true
-  try { const r = await POST('/ads/batch-status', { items }); ElMessage.success(t('adm.batchResult', { ok: r.success_count, n: items.length })); await load(); selected.value = new Set() } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
+  try {
+    const r = await POST('/ads/batch-status', { items })
+    // 任一条假停/未生效（verified=false 或 warning）→ warning 而非 success
+    const warnItem = (r.results || []).find(x => x.warning || x.verified === false)
+    if (warnItem) ElMessage.warning(t('adm.batchResult', { ok: r.success_count, n: items.length }) + ' · ' + (warnItem.warning || t('adm.fakePauseWarn')))
+    else ElMessage.success(t('adm.batchResult', { ok: r.success_count, n: items.length }))
+    await load(); selected.value = new Set()
+  } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
 // 创意缩略图 + 拒审原因（/ads/list 透传 FB creative.thumbnail_url / review_feedback，纯前端展示）
@@ -481,6 +565,9 @@ const subscribeLeads = async () => {
           <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}
         </el-option>
       </el-select>
+      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : ''">{{ cacheAgeText }}</span>
+      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')">⚡ {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
+      <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
@@ -504,7 +591,7 @@ const subscribeLeads = async () => {
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <template v-if="tab === 'campaign'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid"><span v-if="platChipByAct(c.act_id)" :class="['plat-chip', platChipByAct(c.act_id)]">{{ platChipByAct(c.act_id).toUpperCase() }}</span>{{ c.account_name }} · {{ c.id }}</div></div>
@@ -520,7 +607,7 @@ const subscribeLeads = async () => {
         </div>
       </template>
       <template v-else-if="tab === 'adset'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid"><span v-if="platChipByAct(s.act_id)" :class="['plat-chip', platChipByAct(s.act_id)]">{{ platChipByAct(s.act_id).toUpperCase() }}</span>{{ s.account_name }} · {{ s.id }}</div></div>
@@ -772,6 +859,7 @@ const subscribeLeads = async () => {
 .rf-flag:hover { opacity: .8 }
 .cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
 .cache-at.stale { color: var(--warning) }
+.cache-at.live-ok { color: var(--success) }
 .rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--ac); color: #fff; border-radius: 8px }
 .rd-form { display: flex; flex-direction: column; gap: 8px }
 .rd-form label { font-size: 12px; color: var(--t3) }

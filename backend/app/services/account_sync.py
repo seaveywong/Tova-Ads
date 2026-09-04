@@ -66,7 +66,8 @@ def _maybe_low_balance_alert(db, tenant_id: int, acc, threshold_usd: float) -> b
 
     口径与看板一致（guard_engine.calc_available_balance）：
     - 有花费上限：可用 = spend_cap − amount_spent（USD）
-    - 无上限：退回 FB balance（>0 视为预付费余额；≤0 是后付费账单/欠款，不判）
+    - 无上限：退回 FB balance（>0 视为预付费余额；≤0 时若有已消耗按"预付费耗尽"告警
+      avail=0（P1-6 修复：原口径一律不判，预付费账户烧干后静默停投无人知），纯零消耗不判）
     """
     from .guard_engine import calc_available_balance, from_minor_units, to_usd
     from ..core.notify_utils import emit_low_balance_alert_if_due
@@ -75,6 +76,15 @@ def _maybe_low_balance_alert(db, tenant_id: int, acc, threshold_usd: float) -> b
     if kind != "limited":
         bal = from_minor_units(acc.balance, acc.currency)
         if bal is None or bal <= 0:
+            # P1-6 预付费耗尽静默：balance≤0 无法区分"后付费账单/欠款"与"预付费烧干"，
+            # 保守口径=无花费上限（kind=unlimited，即 spend_cap 空）且已有消耗（amount_spent>0）
+            # → 按预付费耗尽告警（avail=0，复用 low_balance_prepaid 文案）。
+            # very_high_limit（spend_cap≥$1M）仍不判——它有上限，不属预付费形态。
+            # 后付费账户零余额也会撞进来：宁可多告不静默，6h dedup 控频。
+            if kind == "unlimited" and (from_minor_units(acc.amount_spent, acc.currency) or 0) > 0:
+                return emit_low_balance_alert_if_due(
+                    db, tenant_id, act_id=acc.act_id, name=acc.name,
+                    avail_usd=0.0, threshold_usd=threshold_usd, basis="prepaid_balance")
             return False
         avail_usd, basis = round(to_usd(bal, acc.currency), 2), "prepaid_balance"
     if avail_usd is not None and avail_usd < threshold_usd:

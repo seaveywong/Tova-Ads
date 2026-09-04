@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from ..core.database import get_db, SessionLocal, SuperSessionLocal
+from ..core.database import get_db, SessionLocal, SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account, client_for_account_page
@@ -30,6 +30,10 @@ import os
 router = APIRouter(prefix="/launch-templates", tags=["launch-templates"])
 
 ASSET_DIR = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
+
+# 部署预算安全上限（美元/日）：模板保存（TemplateIn 校验）与部署端点共用；
+# 超限拒绝——大额预算走分步调整（services/ad_ops.set_budget 另有旧值×5 步进上限）
+_BUDGET_MAX_USD = 5000.0
 
 
 def _tpl_dict(t: LaunchTemplate) -> dict:
@@ -102,6 +106,14 @@ class TemplateIn(BaseModel):
         """平台白名单：只接受 fb/tt（脏值回落 fb——存量 FB 部署链路是默认安全侧）。"""
         v = (v or "fb").strip().lower()
         return v if v in ("fb", "tt") else "fb"
+
+    @field_validator("budget_usd")
+    @classmethod
+    def _cap_budget_usd(cls, v: Optional[float]) -> Optional[float]:
+        """日预算安全上限：模板保存时即拦（部署端点/预算换算再兜底，口径同一常量）。"""
+        if v is not None and v > _BUDGET_MAX_USD:
+            raise ValueError(f"日预算超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低（大额预算分步上调）")
+        return v
 
 
 @router.get("")
@@ -214,12 +226,7 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
         raise HTTPException(400, "至少选一个账户")
     if t.status == "archived":
         raise HTTPException(400, "模板已归档")
-    running = db.query(LaunchJob).filter(
-        LaunchJob.tenant_id == user.tenant_id, LaunchJob.template_id == tid,
-        LaunchJob.status.in_(("pending", "running")),
-    ).first()
-    if running:
-        raise HTTPException(409, f"该模板已有进行中的部署任务(#{running.id})，等它完成再发（防重复建广告）")
+    _budget_guard_400(t)
     # 账户归属 + managed 校验 + 去重（保序）
     seen, clean_items = set(), []
     for it in body.items:
@@ -238,20 +245,41 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
             acc_side = "TikTok" if (acc.platform or "fb") == "tt" else "FB"
             tpl_side = "TikTok" if (t.platform or "fb") == "tt" else "FB"
             raise HTTPException(400, f"账户 {it.act_id} 是 {acc_side} 账户，与 {tpl_side} 模板平台不匹配")
+        # 跟帖页一致性（P2-3）：reuse_post_ref={page}_{post}，帖子不能跨主页引用——
+        # item/模板解析出的主页与 ref 前缀不一致 → 400（部署中 FB 会拒或归因到错误主页）
+        if (t.post_source or "new") == "reuse" and t.reuse_post_ref:
+            _ref_page = (t.reuse_post_ref or "").split("_", 1)[0]
+            _item_page = it.page_id or t.page_id or ""
+            if _ref_page and _item_page and _ref_page != _item_page:
+                raise HTTPException(400, f"账户 {it.act_id} 的部署主页 {_item_page} 与跟帖帖子主页 {_ref_page} 不一致（帖子不能跨主页引用）")
         clean_items.append(it)
     body.items = clean_items
-    job = LaunchJob(tenant_id=user.tenant_id, template_id=t.id, template_name=t.name,
-                    status="pending", total=len(body.items), created_by=user.id)
-    db.add(job)
-    db.flush()
-    for it in body.items:
-        db.add(LaunchJobItem(job_id=job.id, tenant_id=user.tenant_id, act_id=it.act_id,
-                             page_id=it.page_id, pixel_id=it.pixel_id, status="pending"))
-    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
-              actor_user_id=user.id, target_type="launch_job", target_id=str(job.id),
-              action_type="deploy", source="user", result="success",
-              metadata={"template_id": t.id, "accounts": len(body.items)})
-    db.commit()
+    # 防重竞态（P1-1）：原「查 running → 建 job」两步在并发提交下都查空 → 双 job 双份广告。
+    # advisory lock 115 把 查重→建 job→commit 串成原子段；拿不到锁=另一请求正在提交，409 快失败。
+    _dlock = acquire_run_lock(115)
+    if not _dlock:
+        raise HTTPException(409, "部署正在提交中，请稍候重试")
+    try:
+        running = db.query(LaunchJob).filter(
+            LaunchJob.tenant_id == user.tenant_id, LaunchJob.template_id == tid,
+            LaunchJob.status.in_(("pending", "running")),
+        ).first()
+        if running:
+            raise HTTPException(409, f"该模板已有进行中的部署任务(#{running.id})，等它完成再发（防重复建广告）")
+        job = LaunchJob(tenant_id=user.tenant_id, template_id=t.id, template_name=t.name,
+                        status="pending", total=len(body.items), created_by=user.id)
+        db.add(job)
+        db.flush()
+        for it in body.items:
+            db.add(LaunchJobItem(job_id=job.id, tenant_id=user.tenant_id, act_id=it.act_id,
+                                 page_id=it.page_id, pixel_id=it.pixel_id, status="pending"))
+        write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+                  actor_user_id=user.id, target_type="launch_job", target_id=str(job.id),
+                  action_type="deploy", source="user", result="success",
+                  metadata={"template_id": t.id, "accounts": len(body.items)})
+        db.commit()
+    finally:
+        release_run_lock(_dlock, 115)
     bg.add_task(_run_deploy_job, job.id, user.tenant_id, t.id)
     return {"job_id": job.id, "total": len(body.items)}
 
@@ -298,6 +326,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _budget_guard_400(t)
     # TikTok 模板走 TT 预检（TK P3）：payload 构建器/预算单位/像素解析全不同
     if (t.platform or "fb") == "tt":
         return _preflight_tt(db, t, body, user.tenant_id)
@@ -425,9 +454,24 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
     )
 
 
+def _budget_guard_400(t: LaunchTemplate) -> None:
+    """预算守卫（端点层，P0-10/P1-3）：未配置预算 / budget_usd 超安全上限 → 400。
+    与 _resolve_budget_fb/_resolve_budget_tt 的 ValueError 同口径（那是后台 runner 兜底，
+    这里给部署/预检端点即时 400，避免整 job 建出来全 item fail）。"""
+    if not ((t.budget_usd or 0) > 0 or (t.daily_budget or 0) > 0):
+        raise HTTPException(400, "模板未配置预算，请先在模板编辑器填写日预算再部署")
+    if (t.budget_usd or 0) > _BUDGET_MAX_USD:
+        raise HTTPException(400, f"模板日预算 ${t.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
+
+
 def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0) -> int:
     """模板预算 → 该账户本币最小单位（FB daily_budget）。
-    优先 budget_usd（美元，按账户 currency + 汇率转）；无则回退 legacy daily_budget。"""
+    优先 budget_usd（美元，按账户 currency + 汇率转）；无则用 legacy daily_budget。
+    空预算不再回退 $2000——静默兜底=钱上瞎猜，直接 ValueError（端点层 _budget_guard_400 先行 400）。"""
+    if not ((tpl.budget_usd or 0) > 0 or (tpl.daily_budget or 0) > 0):
+        raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
+    if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
+        raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
     if tpl.budget_usd and tpl.budget_usd > 0:
         q = sdb.query(Account).filter(Account.act_id == act_id)
         if tenant_id:
@@ -439,7 +483,7 @@ def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
             raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
         rate = cr.rate if cr else 1.0
         return usd_to_fb_amount(tpl.budget_usd, currency, rate)
-    return tpl.daily_budget if tpl.daily_budget and tpl.daily_budget > 0 else 200000
+    return tpl.daily_budget
 
 
 # ── TikTok 分支 helper（TK P3；platform='tt' 才会走到，FB 路径零改动）──
@@ -448,6 +492,10 @@ def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
     """模板预算 → 该账户本币**整数**（TT 预算无 FB 的 minor units ×100）。
     优先 budget_usd（按账户 currency + 汇率转）；legacy daily_budget 是 FB 最小单位 → /100 回整本币。"""
     from ..core.tt_ad_builder import usd_to_tt_amount
+    if not ((tpl.budget_usd or 0) > 0 or (tpl.daily_budget or 0) > 0):
+        raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
+    if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
+        raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
     if tpl.budget_usd and tpl.budget_usd > 0:
         q = sdb.query(Account).filter(Account.act_id == act_id)
         if tenant_id:
@@ -458,7 +506,7 @@ def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
         if not cr and currency.upper() != "USD":
             raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
         return usd_to_tt_amount(tpl.budget_usd, currency, cr.rate if cr else 1.0)
-    return max(1, int(round((tpl.daily_budget or 200000) / 100)))
+    return max(1, int(round(tpl.daily_budget / 100)))
 
 
 def _resolve_tt_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0) -> dict:
@@ -875,6 +923,10 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
     - 新建帖(dev app only)：建主页帖拿 post_id；standard App 建 new post 撞 code3 → 返空走 object_story_spec。"""
     # 1) 跟帖复用：引用已存在帖（object_story_id），前置——不依赖 dev 模式
     if (tpl.post_source or "new") == "reuse" and tpl.reuse_post_ref and page_id:
+        ref_page = tpl.reuse_post_ref.split("_", 1)[0]
+        if ref_page and ref_page != page_id:
+            raise FbApiError("invalid_param",
+                             f"跟帖帖子属主页 {ref_page}，与部署目标主页 {page_id} 不一致（帖子不能跨主页引用）")
         return tpl.reuse_post_ref
     # 2) 新建帖路径仅 dev 模式（standard 建 new post 撞 code3）
     from ..routers.fb_apps import FbApp
@@ -890,10 +942,14 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
 
 
 def _reap_stale_jobs():
-    """启动时回收孤儿 job：重启/崩溃后 BackgroundTask 全死，pending/running 是孤儿
+    """回收孤儿 job：重启/崩溃后 BackgroundTask 全死，pending/running 是孤儿
     （FB 侧广告可能已建在花钱）→ 标 failed 提示重试。
     判据 = 心跳超时（runner 每 item touch created_at）：超 10 分钟无心跳才算死——
-    单 worker 崩溃重启不会误杀其他 worker 正在跑的长任务（误杀 → 用户重试 = 双份广告）。"""
+    单 worker 崩溃重启不会误杀其他 worker 正在跑的长任务（误杀 → 用户重试 = 双份广告）。
+    startup 即跑一次 + 每 5min 由 scheduler 巡检（main.py）；advisory lock 116 多 worker 单飞。"""
+    _lock = acquire_run_lock(116)
+    if not _lock:
+        return  # 其他 worker 正在回收
     sdb = SuperSessionLocal()
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -915,6 +971,7 @@ def _reap_stale_jobs():
                 f"[Launch] 回收 {len(stale)} 个中断 job: {[j.id for j in stale]}")
     finally:
         sdb.close()
+        release_run_lock(_lock, 116)
 
 
 def _refresh_ads_cache_after_deploy(tenant_id: int, act_ids: list[str]):
@@ -1234,6 +1291,12 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         raise HTTPException(404, "job 不存在")
     if j.status in ("pending", "running"):
         raise HTTPException(409, f"任务进行中(#{j.id})，不能重试（防并发重复建广告）")
+    # 模板归档守卫（P2-2）：deploy 端点已拒归档模板，retry 补齐口径——
+    # 归档模板的重试=让已废弃的结构再建半程广告（花钱且不在任何管理预期内）
+    _tpl = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == j.template_id, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not _tpl or _tpl.status == "archived":
+        raise HTTPException(400, "模板已归档，不能重试（恢复模板或复制新模板后再部署）")
     it = db.query(LaunchJobItem).filter(LaunchJobItem.id == item_id, LaunchJobItem.job_id == job_id).first()
     if not it:
         raise HTTPException(404, "item 不存在")
@@ -1268,6 +1331,22 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     db.commit()
     bg.add_task(_retry_one, job_id, user.tenant_id, j.template_id, item_id)
     return {"job_id": job_id, "item_id": item_id, "retrying": True}
+
+
+def _find_existing_campaign(fb, act_id: str, name_prefix: str) -> str:
+    """查账户下同名 campaign（部署链 campaign 名=name_prefix 原样透传，见 deploy_one_account）。
+    命中返回 campaign_id，未命中返空串。campaigns edge 不支持 name 等值 filtering →
+    拉 id+name 本地比对（get_paged 自动翻页）。查询失败返空串（不阻断重试，保持原行为）。"""
+    if not (name_prefix or "").strip():
+        return ""
+    try:
+        camps = fb.get_paged(f"act_{act_id}/campaigns", {"fields": "id,name"})
+    except Exception:
+        return ""
+    for c in camps:
+        if (c.get("name") or "") == name_prefix:
+            return str(c.get("id") or "")
+    return ""
 
 
 def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
@@ -1337,6 +1416,27 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 fb = client_for_account(sdb, tenant_id, it.act_id, "write")
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
+            # 幂等防重（P0-9）：上次 attempt 可能已把广告建进 FB（超时/读响应失败误标 fail），
+            # 盲重试=同账户再建一份双份预算。先查同名 campaign（名=name_prefix），命中→
+            # 复用已存在 id 标 success 跳过重建；未命中→正常重建。
+            _dup_camp = _find_existing_campaign(fb, it.act_id, tpl.name_prefix)
+            if _dup_camp:
+                it.campaign_id = _dup_camp
+                it.status = "success"; it.error = None; it.error_code = None
+                if job:
+                    job.succeeded = (job.succeeded or 0) + 1
+                    if (job.failed or 0) > 0:
+                        job.failed -= 1
+                    if job.succeeded + (job.failed or 0) >= (job.total or 0):
+                        job.status = "partial_failed" if job.failed else "completed"
+                        job.finished_at = datetime.now(timezone.utc)
+                write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                          target_type="ad", target_id="", action_type="deploy", source="launch",
+                          result="success",
+                          metadata={"act_id": it.act_id, "campaign_id": _dup_camp,
+                                    "template_id": template_id, "reused_existing": True})
+                sdb.commit()
+                return
             image_hash = ""
             video_id = ""
             if asset and asset.type in ("image", "video"):

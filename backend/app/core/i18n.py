@@ -75,8 +75,8 @@ NOTIFY = {
     "sync_stalled": {
         "title": {"zh": "数据同步已停 · 无可用令牌", "en": "Data Sync Stalled · No Usable Token"},
         "body": {
-            "zh": "{n} 个纳管账户无可用广告令牌，报表/广告缓存已停止更新。\n请到「令牌管理」重新授权，恢复后数据自动补齐。",
-            "en": "{n} managed ad accounts have no usable ad token; reports and ad cache have stopped updating.\nPlease re-authorize in Token Management. Data will resume automatically afterwards.",
+            "zh": "{n} 个纳管账户无可用广告令牌，报表/广告缓存已停止更新。\n⚠️ 止损已失效：巡检读不到广告数据，止损规则/哨兵不会执行，广告将持续消耗。\n请到「令牌管理」重新授权，恢复后数据自动补齐。",
+            "en": "{n} managed ad accounts have no usable ad token; reports and ad cache have stopped updating.\n WARNING: stop-loss is inactive — the inspector cannot read ad data, so stop-loss rules/sentinel will not run and ads will keep spending.\nPlease re-authorize in Token Management. Data will resume automatically afterwards.",
         },
     },
     "account_permission_error": {
@@ -84,6 +84,13 @@ NOTIFY = {
         "body": {
             "zh": "账户：{name}（<code>{act_id}</code>）\n令牌：{alias}\n读取失败：<b>{friendly}</b>\n该令牌可能缺少广告读取权限，请重新授权。",
             "en": "Account: {name} (<code>{act_id}</code>)\nToken: {alias}\nRead failed: <b>{friendly}</b>\nThe token may lack ad-read permission, please re-authorize.",
+        },
+    },
+    "unsupported_currency": {
+        "title": {"zh": "🔴 未知币种，金额类止损已跳过", "en": "🔴 Unknown Currency, Money Rules Skipped"},
+        "body": {
+            "zh": "账户：{name}（<code>{act_id}</code>）\n币种：<b>{currency}</b> 在汇率表与兜底字典中均无汇率。\n影响：金额类止损/扩量规则已对该账户跳过（避免按错误汇率误停/误扩），非金额规则照常。\n处理：请为该币种补充汇率后再恢复全额守护。",
+            "en": "Account: {name} (<code>{act_id}</code>)\nCurrency <b>{currency}</b> has no rate in the FX table or the fallback dictionary.\nImpact: money-based stop-loss/scale rules are skipped for this account (to avoid wrong-rate pauses/scaling); non-money rules still run.\nAction: add a rate for this currency to restore full protection.",
         },
     },
     "inspection_stalled": {
@@ -106,6 +113,27 @@ NOTIFY = {
         "body": {
             "zh": "账户：{name}（{act_id}）\n今日已花费：<b>{today}</b>\n近7天日均：{avg}（阈值 = max(3×日均, $50)）\n今日消耗已达日均 {ratio} 倍——请检查是否爆量/预算设置错误。",
             "en": "Account: {name} ({act_id})\nToday spend: <b>{today}</b>\n7-day daily avg: {avg} (threshold = max(3x avg, $50))\nToday is {ratio}x of average — check for runaway spend / budget misconfig.",
+        },
+    },
+    "unmanage_active_ads": {
+        "title": {"zh": "取消纳管时有广告在投 · {name}", "en": "Ads Still Active on Unmanage · {name}"},
+        "body": {
+            "zh": "账户：<b>{name}</b>（act_{act_id}）\n取消纳管时有 <b>{n}</b> 条广告仍在投放。\n注意：广告不会自动停止，止损/哨兵已不再覆盖该账户。\n如需停投，请到平台广告管理后台手动暂停。",
+            "en": "Account: <b>{name}</b> (act_{act_id})\n<b>{n}</b> ads were still delivering when the account was unmanaged.\nNote: ads will NOT stop automatically; stop-loss/sentinel no longer cover this account.\nPause them manually in the Ads Manager if needed.",
+        },
+    },
+    "tg_channel_down": {
+        "title": {"zh": "TG 通道连续发送失败", "en": "TG Channel Delivery Failure"},
+        "body": {
+            "zh": "Telegram 通道连续 {streak} 次发送失败（chat {chat_id}），告警可能未送达，请检查 bot/网络。\n处理：确认 bot token 有效、服务器能访问 api.telegram.org、用户未停用 bot",
+            "en": "Telegram delivery has failed {streak} times in a row (chat {chat_id}); alerts may not have been delivered. Check the bot/network.\nAction: verify the bot token, that the server can reach api.telegram.org, and that the user has not blocked the bot",
+        },
+    },
+    "storm_suppressed": {
+        "title": {"zh": "告警被上限压制", "en": "Alerts Suppressed by Daily Cap"},
+        "body": {
+            "zh": "今日已有 {n} 条告警被风暴上限压制（最近被压事件：{event_type}）。若需全量可见，可在系统设置调大 notify_storm_cap 或设 0（不封顶）",
+            "en": "{n} alerts were suppressed by the daily storm cap today (latest suppressed: {event_type}). Raise notify_storm_cap or set it to 0 (no cap) in system settings if full visibility is needed",
         },
     },
     "emergency_done": {
@@ -135,6 +163,14 @@ NOTIFY = {
         "body": {
             "zh": "账户：{name}（TikTok {act_id}）\n广告：{ad_name}（{ad_id}）\n哨兵已 arm，投放中广告直接停。",
             "en": "Account: {name} (TikTok {act_id})\nAd: {ad_name} ({ad_id})\nSentinel armed, active ads paused directly.",
+        },
+    },
+    # 哨兵执行失败（无令牌/拉取失败/停失败——曾全部静默；哨兵会每轮重试，此处告知人工介入）
+    "sentinel_failure": {
+        "title": {"zh": "🔴 哨兵未能停止 {n} 项", "en": "🔴 Sentinel Failed to Stop {n} Item(s)"},
+        "body": {
+            "zh": "哨兵已 arm，但以下目标本轮未能停止（哨兵会持续重试，请尽快人工处理）：\n{detail}",
+            "en": "Sentinel is armed, but the following could NOT be stopped this round (sentinel keeps retrying; please intervene):\n{detail}",
         },
     },
     "rule_scale": {

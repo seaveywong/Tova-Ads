@@ -204,7 +204,7 @@ TT_OPTGOAL_TO_FB = {
 }
 
 # 零小数位币种（同 guard_engine._NO_DECIMAL_CURRENCIES，模块内自带避免反向依赖 services 层）
-_TT_ZERO_DECIMAL = {"JPY", "KRW", "IDR", "VND", "CLP", "COP", "HUF", "PYG", "UGX", "TZS"}
+from .ad_ops import ZERO_DECIMAL as _TT_ZERO_DECIMAL   # 与 FB 共用 core/ad_ops 真相源
 
 
 def tt_budget_to_fb_minor(budget, currency: str) -> str:

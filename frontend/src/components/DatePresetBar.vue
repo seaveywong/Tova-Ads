@@ -51,7 +51,8 @@ const queryLabel = () => props.customLabel || t('common.search')
 .date-bar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap }
 .date-btn { padding: 6px 14px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; cursor: pointer; transition: all 0.15s; font-family: inherit }
 .date-btn:hover { color: var(--t1); border-color: var(--bd2) }
-.date-btn.active { background: var(--ac); color: #fff; border-color: var(--ac) }
+/* 激活态与 status-tab 同语言：tinted 底 + 强调色描边（非实心） */
+.date-btn.active { background: var(--acg); color: var(--ac); border-color: var(--ac) }
 .date-btn.apply { background: var(--ac); color: #fff; border-color: var(--ac); margin-left: 4px }
 .custom-range { display: flex; align-items: center; gap: 6px; margin-left: 8px }
 .date-input { background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); padding: 5px 10px; font-size: 13px; color-scheme: dark; font-family: inherit }

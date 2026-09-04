@@ -1227,7 +1227,7 @@ def list_accounts(
             "timezone": a.timezone_name, "account_status": a.account_status,
             "is_managed": a.is_managed if a.is_managed is not None else True,
             "warmup_state": a.warmup_state or "none",
-            "balance": bal, "balance_usd": round(to_usd(bal, cur), 2) if bal is not None else None,
+            "balance": bal, "balance_usd": (round(_tu, 2) if (bal is not None and (_tu := to_usd(bal, cur)) is not None) else None),   # 未知币种 None 不崩
             "spend_cap": from_minor_units(a.spend_cap, cur),
             "amount_spent": from_minor_units(a.amount_spent, cur),
             "available_usd": avail_usd, "balance_kind": bal_kind,
@@ -1342,6 +1342,29 @@ def unmanage_account(
                     _dirty = True
     except Exception:
         pass  # 清缓存失败不阻断取消纳管主流程
+    # 留痕 + 告警（P0-7）：unmanage 必写 action_logs（审计）；有 ACTIVE 广告时告警——
+    # 广告不会自动停、止损/哨兵即刻脱管，必须让 owner/operator 知晓（一次性操作，不 dedup）。
+    from ..core.log_utils import write_log, new_trace_id
+    _tid = new_trace_id()
+    if active_ads > 0:
+        try:
+            from ..core.notify_utils import emit_notification
+            from ..core.i18n import tenant_locale, notify_text
+            from html import escape as _esc
+            _loc = tenant_locale(db, user.tenant_id)
+            _title, _body = notify_text(_loc, "unmanage_active_ads",
+                                        name=_esc(acc.name or aid), act_id=aid, n=active_ads)
+            emit_notification(db, tenant_id=user.tenant_id, level="warning",
+                              event_type="unmanage_active_ads", trace_id=_tid,
+                              title=_title, body=_body,
+                              target_type="account", target_id=aid, platform=_plat)
+        except Exception:
+            pass  # 告警失败不阻断取消纳管主流程（log 兜底）
+    write_log(db, tenant_id=user.tenant_id, trace_id=_tid, actor_type="user",
+              actor_user_id=user.id, target_type="account", target_id=aid,
+              action_type="unmanage", source="user", result="success",
+              trigger_detail=f"active_ads={active_ads} platform={_plat}",
+              metadata={"active_ads": active_ads, "platform": _plat})
     db.commit()
     return {"unmanaged": True, "act_id": aid, "active_ads_at_removal": active_ads}
 

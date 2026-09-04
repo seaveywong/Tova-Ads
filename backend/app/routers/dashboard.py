@@ -255,7 +255,8 @@ def dashboard(
         return round(v, 2) if v is not None else 0.0
     def _money_usd(val, cur):
         v = from_minor_units(val, cur)
-        return round(to_usd(v, cur), 2) if v is not None else 0.0
+        _u = to_usd(v, cur)
+        return round(_u, 2) if _u is not None else 0.0   # 未知币种按 0 展示（to_usd 可返 None）
     avail_map = {acc.act_id: calc_available_balance(acc.spend_cap, acc.amount_spent, acc.currency or "USD")
                  for acc in managed_accounts}
     total_balance = sum(avail for avail, _k in avail_map.values() if avail is not None)

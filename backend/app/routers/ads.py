@@ -14,6 +14,7 @@ from ..core.deps import CurrentUser, require_permission
 from ..core.i18n import req_locale, L
 from ..core.fb_tokens import client_for_account
 from ..core.fb_client import FbApiError
+from ..core.tt_client import TtApiError
 from ..models.perf import PerfSnapshot
 from ..models.fb import Account
 from ..models.ads_cache import AdsCache
@@ -248,6 +249,44 @@ def _acc_platform(acc) -> str:
     return "tt" if (getattr(acc, "platform", None) or "fb") == "tt" else "fb"
 
 
+def patch_account_cache_status(db: Session, tenant_id: int, act_id: str, ad_id: str,
+                               status: str, platform: str | None = None) -> bool:
+    """单条广告状态写回 ads_cache（实时性消费侧，供 guard_engine/哨兵/规则暂停广告后调用，
+    管理器立即可见新状态，不等 15min 全量同步）。
+
+    - 只 patch ads_json 的 ad 行三键 status/effective_status/configured_status
+      （语义与 services/ad_ops._patch_cache_status 一致，不跨文件依赖它）。
+    - 不动 updated_at：它表示"上次全量同步时间"，状态 patch 是部分刷新，
+      不伪造整行新鲜度（/ads/list 的 cache_age/last_sync 仍按全量同步计）。
+    - platform 空=patch 该 act_id 全部平台行（FB/TT 的 ad_id 空间独立，按 ad_id 匹配天然消歧）。
+    - 不 commit（调用方控制事务）。返回是否有行被实际改动。
+    """
+    rows = db.query(AdsCache).filter(
+        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id)
+    if platform:
+        rows = rows.filter(AdsCache.platform == platform)
+    changed = False
+    for row in rows.all():
+        raw = row.ads_json
+        if not raw:
+            continue
+        try:
+            items = json.loads(raw)
+        except Exception:
+            continue
+        row_changed = False
+        for it in items:
+            if isinstance(it, dict) and str(it.get("id") or "") == str(ad_id):
+                it["status"] = status
+                it["effective_status"] = status
+                it["configured_status"] = status
+                row_changed = True
+        if row_changed:
+            row.ads_json = json.dumps(items, ensure_ascii=False)
+            changed = True
+    return changed
+
+
 @router.get("/list")
 def list_ads(
     act_id: str = "",
@@ -339,13 +378,27 @@ def list_ads(
         ad["object_story_id"] = _sid
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
 
-    # cached_at 取全部账户的最旧值（语义=最迟也是这个时间的数据）
+    # cached_at 取全部账户的最旧值（语义=最迟也是这个时间的数据）。
+    # last_sync/cache_ages 是实时性戳：last_sync=最新一行的全量同步时间（前端显示
+    # "数据 X 分钟前"）；cache_ages=每账户缓存龄秒数（前端据此提示哪些账户该 live-status 核对）。
     _cached_ats = [c.updated_at for c in caches if c.updated_at]
+    _cache_ages: dict[str, int] = {}
+    _now_utc = datetime.now(timezone.utc)
+    for c in caches:
+        if not c.updated_at:
+            continue
+        _u = c.updated_at if c.updated_at.tzinfo else c.updated_at.replace(tzinfo=timezone.utc)
+        _age = max(0, int((_now_utc - _u).total_seconds()))
+        # 同 act_id 双平台行并存时取较新一行（最新数据口径）
+        if c.act_id not in _cache_ages or _age < _cache_ages[c.act_id]:
+            _cache_ages[c.act_id] = _age
     _curs = {cur_map.get(c.act_id, "USD") for c in caches}
     mixed_currency = len(_curs) > 1
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",
+        "last_sync": max(_cached_ats).isoformat() if _cached_ats else "",
+        "cache_ages": _cache_ages,
         "refreshing": refreshing,
         "mixed_currency": mixed_currency,
         "currency": "USD" if mixed_currency else (next(iter(_curs)) if _curs else "USD"),
@@ -388,6 +441,62 @@ def refresh_ads(
     return {"refreshed": ok, "total": len(accs)}
 
 
+# live-status 同账户 10s 内存缓存（防连点/列表抖动重复打 FB；多 worker 各自一份，可接受）
+_LIVE_STATUS_CACHE: dict = {}  # {f"{tenant_id}:{act_id}": (fetched_ts, resp)}
+_LIVE_STATUS_TTL = 10
+
+
+@router.get("/live-status")
+def ads_live_status(
+    act_id: str = "",
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """单账户实时广告状态（轻量：id+name+effective_status，只读直连平台 API）。
+
+    /ads/list 主体读 ads_cache（15min 全量同步）；本端点给前端"立即核对"单账户——
+    哨兵/规则暂停后 cache 未回写时（审计 P1-2 消费侧兜底），前端可在此拉真状态。
+    平台分发：FB get_ads 轻字段；TT get_ads 归一成 FB 形状（tt_to_fb_ad）。
+    同账户 10s 内存缓存防连点。"""
+    aid = (act_id or "").replace("act_", "").replace("ACT_", "").strip()
+    if not aid:
+        raise HTTPException(400, "缺 act_id")
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == aid,
+        Account.is_managed == True,  # noqa: E712
+    ).first()
+    if not acc:
+        raise HTTPException(404, "账户未纳管")
+    _plat = _acc_platform(acc)
+    _key = f"{user.tenant_id}:{aid}"
+    _now_ts = time.time()
+    _ent = _LIVE_STATUS_CACHE.get(_key)
+    if _ent and _now_ts - _ent[0] < _LIVE_STATUS_TTL:
+        return {**_ent[1], "cached": True}
+    client = client_for_account(db, user.tenant_id, aid, "read")
+    if client is None:
+        raise HTTPException(400, "该账户无可用读令牌")
+    try:
+        if _plat == "tt":
+            from ..core.tt_client import tt_to_fb_ad
+            rows = [tt_to_fb_ad(r, acc.currency or "USD") for r in client.get_ads(
+                aid, effective_status=None,
+                fields=["ad_id", "ad_name", "status", "opt_status", "show_status"])]
+        else:
+            rows = client.get_ads(aid, effective_status=None, fields="id,name,effective_status")
+    except (FbApiError, TtApiError) as e:
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+    ads_out = [{"id": str(_id_of(r.get("id")) or ""), "name": r.get("name") or "",
+                "effective_status": r.get("effective_status") or ""} for r in rows]
+    resp = {"act_id": aid, "platform": _plat,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "count": len(ads_out), "ads": ads_out, "cached": False}
+    if len(_LIVE_STATUS_CACHE) > 500:
+        _LIVE_STATUS_CACHE.clear()
+    _LIVE_STATUS_CACHE[_key] = (_now_ts, resp)
+    return resp
+
+
 # ── 写操作（Phase D2）──
 
 class StatusIn(BaseModel):
@@ -424,6 +533,11 @@ def set_ad_status(
     """改广告/组/系列状态（ACTIVE/PAUSED/ARCHIVED）。回读验证 + 缓存 patch。
     平台分发：TT 账户走 tt_set_status（opt_status 语义），FB 走原 set_status。"""
     from ..services.ad_ops import set_status_any
+    # 只允许操作已纳管账户（P2-1：未纳管/已软删账户不应再被改状态）
+    if not db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
+            Account.is_managed == True).first():  # noqa: E712
+        raise HTTPException(404, "账户未纳管")
     r = set_status_any(db, user.tenant_id, body.act_id, body.node_id, body.level, body.status, operator=user.email)
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "操作失败"))
@@ -456,9 +570,13 @@ def set_ad_budget(
     """改预算（本币金额→minor units，回读验证）。日预算/总预算二选一，对象类型必须匹配。
     平台分发：TT 账户走 tt_set_budget（整本币 int + 仅 adgroup 层），FB 走原 set_budget。"""
     from ..services.ad_ops import set_budget_any
+    # 只允许操作已纳管账户（P2-1；原实现未纳管也能改预算）
     acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id).first()
-    cur = (acc.currency or "USD") if acc else "USD"
+        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
+        Account.is_managed == True).first()  # noqa: E712
+    if not acc:
+        raise HTTPException(404, "账户未纳管")
+    cur = acc.currency or "USD"
     r = set_budget_any(db, user.tenant_id, body.act_id, body.node_id, body.level,
                        daily_budget=body.daily_budget, lifetime_budget=body.lifetime_budget,
                        currency=cur, budget_type=body.budget_type, operator=user.email)
@@ -475,6 +593,11 @@ def delete_ad(
 ):
     """硬删广告（FB：DELETE /{id}；TT：opt_status=DELETE 软删——TT 无硬删端点）。"""
     from ..services.ad_ops import delete_node_any
+    # 只允许操作已纳管账户（P2-1：未纳管/已软删账户不应再被删广告）
+    if not db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
+            Account.is_managed == True).first():  # noqa: E712
+        raise HTTPException(404, "账户未纳管")
     r = delete_node_any(db, user.tenant_id, body.act_id, body.node_id, operator=user.email)
     if not r.get("success"):
         raise HTTPException(400, r.get("error", "删除失败"))
@@ -507,9 +630,13 @@ def rename_ad_node(
         raise HTTPException(400, "level 必须是 ad/adset/campaign")
     # 平台分发：TT 账户走 services.ad_ops.tt_rename_node（各层端点与 name 字段名不同，
     # 广告主维度必带；锁/回读/cache patch/审计与下方 FB 内联版同构）。FB 路径原样保留。
+    # is_managed 门（P2-1）：未纳管/已软删账户不可再操作。
     _acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id).first()
-    if _acc and (_acc.platform or "fb") == "tt":
+        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
+        Account.is_managed == True).first()  # noqa: E712
+    if not _acc:
+        raise HTTPException(404, "账户未纳管")
+    if (_acc.platform or "fb") == "tt":
         from ..services.ad_ops import tt_rename_node
         r = tt_rename_node(db, user.tenant_id, body.act_id, body.node_id, body.level, name,
                            operator=user.email)
@@ -755,7 +882,7 @@ def diagnose_ad(
                         result["fb_status"] = _a.get("effective_status") or result["fb_status"]
                         break
         result["spend"] = spend
-        result["spend_usd"] = round(to_usd(spend, acc.currency or "USD"), 2)
+        result["spend_usd"] = (lambda u: round(u, 2) if u is not None else None)(to_usd(spend, acc.currency or "USD"))   # to_usd 未知币种返 None（guard_engine P0-2），None 安全传递
         result["impressions"] = int(ad_insights.get("impressions", 0) or 0)
         result["clicks"] = int(ad_insights.get("clicks", 0) or 0)
         result["reach"] = int(ad_insights.get("reach", 0) or 0)

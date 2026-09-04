@@ -44,7 +44,8 @@ def run_ads_cache_sync():
         db.commit()
         logger.info(f"[AdsCache] 同步完成: {updated} 个账户")
         # 停更告警：纳管账户全都没有可用令牌 → 数据静默停更（2026-09 发现停 19 天无人知）。
-        # 每租户 24h 去重一条 warning；有可用令牌正常更新的租户不收。
+        # 每租户 24h 去重一条 critical（P0-8：warning→critical——无令牌期间巡检读不到广告数据，
+        # 止损规则/哨兵不会执行=止损失效，是最需要立即处理的信号）；有令牌正常更新的租户不收。
         if _no_token:
             from ..core.notify_utils import emit_notification, dedup_recent
             from ..core.i18n import notify_text, tenant_locale
@@ -53,7 +54,7 @@ def run_ads_cache_sync():
                     continue
                 _loc = tenant_locale(db, tid)
                 _title, _body = notify_text(_loc, "sync_stalled", n=n)
-                emit_notification(db, tenant_id=tid, level="warning",
+                emit_notification(db, tenant_id=tid, level="critical",
                                   event_type="sync_stalled",
                                   title=_title, body=_body)
                 # dedup_recent 查 action_logs——emit 后必须写 log，下次才会命中去重

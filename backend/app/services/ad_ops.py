@@ -19,8 +19,13 @@ from ..services.guard_engine import from_minor_units, to_usd
 
 logger = logging.getLogger("toveads.ad_ops")
 
-# 零小数货币（同 guard_engine，FB 存整数）
-_NO_DECIMAL = {"JPY", "KRW", "IDR", "VND", "CLP", "COP", "HUF", "PYG", "UGX", "TZS"}
+# 零小数货币：Meta 官方表，全仓唯一真相源在 core/ad_ops.ZERO_DECIMAL
+# （guard_engine._NO_DECIMAL_CURRENCIES / core/tt_client._TT_ZERO_DECIMAL 仍旧表，BE-1 待统一）
+from ..core.ad_ops import ZERO_DECIMAL as _NO_DECIMAL
+
+# 资金安全上限（set_budget）：日预算绝对上限（USD 等值）+ 单次调整步进上限（旧值倍数）
+_BUDGET_MAX_USD = 5000.0
+_BUDGET_MAX_STEP = 5.0
 
 # 状态字段（ad/adset/campaign 通用）
 _LEVEL_FIELDS = {
@@ -205,6 +210,20 @@ def set_budget(db: Session, tenant_id: int, act_id: str, node_id: str,
             return {"success": False, "error": "该对象使用日预算，不支持改总预算"}
         if btype == "daily" and has_lifetime and not has_daily:
             return {"success": False, "error": "该对象使用总预算(lifetime)，不支持改日预算"}
+
+        # 资金安全上限：绝对上限（>$5000/日 USD 等值）+ 步进上限（>旧值×5）。
+        # 防手滑/单位错（如本币金额当 USD 填）；超限一律拒绝（无 force 通道），指引分步调整。
+        usd_eq = to_usd(amount, currency)
+        if usd_eq is None:
+            return {"success": False, "error": "该账户币种汇率未知，无法校验预算上限，已拒绝修改（防误放大）", "reason": "unsupported_currency"}
+        if btype == "daily" and usd_eq > _BUDGET_MAX_USD:
+            return {"success": False, "error": "预算超安全上限，需分步调整",
+                    "reason": f"日预算上限 ${_BUDGET_MAX_USD:.0f} 等值，本次约 ${usd_eq:.0f}"}
+        old_local = from_minor_units(
+            before.get("daily_budget" if btype == "daily" else "lifetime_budget"), currency)
+        if old_local and amount > old_local * _BUDGET_MAX_STEP:
+            return {"success": False, "error": "预算超安全上限，需分步调整",
+                    "reason": f"单次不能超过旧值 {_BUDGET_MAX_STEP:.0f} 倍（旧值 {old_local:.2f} {currency}）"}
 
         minor = _to_minor(amount, currency)
         if btype == "lifetime":

@@ -24,6 +24,14 @@ NO_CAP_EVENTS = {
     "emergency_pause", "landing_health", "coverage_lost", "inspection_stalled",
     "token_expired", "token_invalid", "orphan_account", "sentinel_pause",
     "account_status_change",
+    # budget_progress_98：预算几乎烧完的最后一道 critical——档位越高越不能吞
+    "budget_progress_98",
+    # rule_pause：止损动作通知（含"暂停失败"）宁可多发不可吞。guard_engine 对
+    # 成功/失败/observe 共用同一 event_type（区别只在 body 文案），本层拿不到
+    # result 做条件豁免，故整类豁免；该事件另有 60min/广告 dedup 防真 spam。
+    "rule_pause",
+    # tg_channel_down：通道故障告警自身（per-chat 6h dedup，最多 ~4 条/日/chat，不会真风暴）
+    "tg_channel_down",
 }
 DEFAULT_STORM_CAP = 30
 
@@ -85,7 +93,9 @@ def _storm_allows(db: Session, tenant_id: int, event_type: str) -> bool:
     return int(sent) < cap
 
 
-def _record_storm_suppression(tenant_id: int, event_type: str) -> None:
+def _record_storm_suppression(tenant_id: int, event_type: str) -> int:
+    """记一条压制（进程内计数）→ 返回该 (tenant, event_type) 当日累计被压制条数。
+    调用方用返回值==1 判定"当日首条被压制"。"""
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     with _storm_lock:
         # 防 dict 无界增长：超 4096 键时清掉非当日的
@@ -97,6 +107,36 @@ def _record_storm_suppression(tenant_id: int, event_type: str) -> None:
         n = _storm_suppressed[key]
     logger.warning(f"[Notify] 风暴上限：租户{tenant_id} 事件[{event_type}] 当日已满，"
                    f"累计抑制 {n} 条（notify_storm_cap 可调，0=不封顶）")
+    return n
+
+
+def _emit_storm_suppressed(db: Session, tenant_id: int, event_type: str) -> None:
+    """压制可见性：发一条站内 warning——「今日已有 N 条告警被上限压制」。
+
+    只在"当日首次压制"时被调用；再叠一层 per-tenant 24h dedup
+    （action_logs.action_type=storm_suppressed_alert）防多事件类型连环 summary。
+    N = 该租户当日累计被压制条数（_storm_suppressed 计数器，进程内口径）。
+    只进站内不发 TG：TG 本身正在风暴里，别火上浇油。"""
+    if dedup_recent(db, tenant_id, "storm_suppressed_alert", cooldown_min=24 * 60):
+        return
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    with _storm_lock:
+        n = sum(v for (tid, _et, d), v in _storm_suppressed.items()
+                if tid == tenant_id and d == today)
+    from .i18n import tenant_locale, notify_text
+    _loc = tenant_locale(db, tenant_id)
+    _title, _body = notify_text(_loc, "storm_suppressed", n=n, event_type=event_type)
+    emit_notification(db, tenant_id=tenant_id, level="warning",
+                      event_type="storm_suppressed", title=_title, body=_body,
+                      target_type="notification", target_id=event_type,
+                      send_tg=False)
+    from .log_utils import write_log, new_trace_id
+    write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+              target_type="notification", target_id=event_type,
+              action_type="storm_suppressed_alert", source="notify",
+              result="success",
+              trigger_detail=f"event_type={event_type} suppressed_today={n}")
+    db.commit()
 
 
 def _roles_for_event(event_type: str) -> list[str]:
@@ -108,7 +148,11 @@ def _roles_for_event(event_type: str) -> list[str]:
         return ["owner", "operator"]  # 广告级
     if et in ("token_expired", "token_invalid", "token_expiring_soon",
               "inspection_stalled", "token_health_warn", "orphan_account"):
-        return ["owner"]  # 系统级（+ 超管平台 TG，v2）
+        # 系统级（+ 超管平台 TG，v2）。roles 只管站内信订阅；TG 路由见 _send_tg_by_role——
+        # critical 级放宽为发该租户全部已绑 TG 用户（owner+operator 都能收到）。
+        # TODO v2：inspection_stalled 由 guard_engine 发出时硬编码 tenant 1，
+        # 多租户下应按各租户实际巡检状态发送——属 guard_engine 行为，本文件不动。
+        return ["owner"]
     return ["owner", "operator"]  # 默认
 
 
@@ -157,7 +201,14 @@ def emit_notification(
     """
     roles = roles or _roles_for_event(event_type)
     if not _storm_allows(db, tenant_id, event_type):
-        _record_storm_suppression(tenant_id, event_type)
+        n = _record_storm_suppression(tenant_id, event_type)
+        # 当日该事件首条被压制 → 补一条站内 summary（per-tenant 24h dedup），
+        # 让"有告警被吞"可见。豁免 summary 自身防理论递归。
+        if n == 1 and (event_type or "").lower() != "storm_suppressed":
+            try:
+                _emit_storm_suppressed(db, tenant_id, event_type)
+            except Exception as e:
+                logger.warning(f"[Notify] 压制 summary 发送失败: {e}")
         return False
     notif = Notification(
         tenant_id=tenant_id, user_id=user_id, level=level, event_type=event_type,
@@ -178,25 +229,34 @@ def emit_notification(
 
 def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
                      level: str, title: str, body: str, reply_markup=None):
-    """按角色路由 TG：用户级绑定优先，无则 fallback 租户级。chat_id 去重防重复。"""
+    """按角色路由 TG：用户级绑定优先，无则 fallback 租户级。chat_id 去重防重复。
+    critical 放宽（统一规则）：level=="critical" → 发给该租户所有已绑 TG 的用户
+    （operator 也能收到 token_expired/orphan_account 等系统级 critical）；
+    非 critical 维持 roles 分工（广告级 owner+operator / 系统级 owner）。"""
     icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(level, "🔵")
     text = f"{icon} <b>{title}</b>\n{body}"[:1000]
     sent_keys: set[tuple] = set()  # (bot_token, chat_id) 去重
 
-    # 用户级：role∈roles 的用户的绑定
-    user_ids = [m.user_id for m in db.query(TenantMembership).filter(
-        TenantMembership.tenant_id == tenant_id,
-        TenantMembership.role.in_(roles),
-    ).all()] if roles else []
-    ubindings = db.query(UserTgBinding).filter(
-        UserTgBinding.tenant_id == tenant_id,
-        UserTgBinding.user_id.in_(user_ids),
-    ).all() if user_ids else []
+    # 用户级：critical → 全租户已绑用户；其余 → role∈roles 的用户
+    if level == "critical":
+        ubindings = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == tenant_id,
+        ).all()
+    else:
+        user_ids = [m.user_id for m in db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == tenant_id,
+            TenantMembership.role.in_(roles),
+        ).all()] if roles else []
+        ubindings = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == tenant_id,
+            UserTgBinding.user_id.in_(user_ids),
+        ).all() if user_ids else []
     for b in ubindings:
         key = (b.bot_token_enc, b.chat_id)
         if key in sent_keys:
             continue
-        _tg_send(decrypt(b.bot_token_enc), b.chat_id, text, reply_markup)
+        _tg_send_tracked(db, tenant_id, decrypt(b.bot_token_enc), b.chat_id,
+                         text, reply_markup)
         sent_keys.add(key)
 
     # fallback：租户内无任何用户级绑定 → 用租户级绑定（不断现网）
@@ -205,21 +265,87 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
             TenantTgBinding.tenant_id == tenant_id,
         ).first()
         if tb:
-            _tg_send(decrypt(tb.bot_token_enc), tb.chat_id, text, reply_markup)
+            _tg_send_tracked(db, tenant_id, decrypt(tb.bot_token_enc), tb.chat_id,
+                             text, reply_markup)
 
 
-def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None):
-    """实际发 TG（失败不阻断）。reply_markup: inline_keyboard（加白按钮等）。"""
+# ── TG 发送可靠性：重试 + 通道健康追踪 ──
+TG_SEND_ATTEMPTS = 3           # 1 次首发 + 2 次重试
+TG_RETRY_DELAYS = (1.0, 3.0)   # 重试退避（秒），仅对网络异常/5xx
+TG_FAIL_ALERT_THRESHOLD = 3    # 同 chat 连续失败 N 次 → 通道故障告警
+_tg_fail_lock = threading.Lock()
+# {chat_id: 连续失败次数}（进程内计数，成功即清零；跨 worker 各自一份，
+# 任一 worker 撞满阈值即告警——通道故障是全局性的，误报代价低于漏报）
+_tg_fail_streak: dict[str, int] = {}
+
+
+def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None) -> bool:
+    """实际发 TG（失败不阻断）。reply_markup: inline_keyboard（加白按钮等）。
+    重试：网络异常（连接/超时）与 5xx 重试 2 次（退避 1s/3s）；
+    4xx 是确定性失败（chat 不存在/token 被拒/被拉黑）重试无意义，直接放弃。
+    返回 True=送达（HTTP 200）；False=最终失败。"""
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    resp = httpx.post(
-        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-        json=payload,
-        timeout=10,
-    )
-    if resp.status_code != 200:
-        logger.warning(f"[TG] API 返 {resp.status_code}: {resp.text[:200]}")
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    last_err = "unknown"
+    for attempt in range(TG_SEND_ATTEMPTS):
+        if attempt:
+            _t.sleep(TG_RETRY_DELAYS[min(attempt, len(TG_RETRY_DELAYS)) - 1])
+        try:
+            resp = httpx.post(url, json=payload, timeout=10)
+        except httpx.HTTPError as e:  # 网络层（DNS/连接/超时）→ 大概率瞬时，可重试
+            last_err = f"network: {e}"
+            continue
+        if resp.status_code == 200:
+            return True
+        last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        if resp.status_code >= 500:  # TG 侧临时故障 → 可重试
+            continue
+        break  # 4xx 确定性失败 → 不重试
+    logger.warning(f"[TG] 发送失败 chat={chat_id}: {last_err}")
+    return False
+
+
+def _tg_send_tracked(db: Session, tenant_id: int, bot_token: str, chat_id: str,
+                     text: str, reply_markup=None) -> bool:
+    """_tg_send + 通道健康追踪：成功清零该 chat 连续失败计数；
+    失败 +1，撞满 TG_FAIL_ALERT_THRESHOLD → 站内 critical（tg_channel_down）。"""
+    if _tg_send(bot_token, chat_id, text, reply_markup):
+        with _tg_fail_lock:
+            _tg_fail_streak.pop(chat_id, None)
+        return True
+    _emit_tg_channel_down_if_due(db, tenant_id, chat_id)
+    return False
+
+
+def _emit_tg_channel_down_if_due(db: Session, tenant_id: int, chat_id: str) -> None:
+    """同 chat 连续 TG_FAIL_ALERT_THRESHOLD 次发送失败 → 站内 critical
+    「TG 通道连续发送失败」（emit 到 owner 角色，send_tg=False——通道本身在故障）。
+    dedup 6h：action_logs(action_type=tg_channel_down_alert, target_id=chat_id)，
+    窗口过后若仍失败会再告（持续故障持续可见）。"""
+    with _tg_fail_lock:
+        _tg_fail_streak[chat_id] = _tg_fail_streak.get(chat_id, 0) + 1
+        n = _tg_fail_streak[chat_id]
+    if n < TG_FAIL_ALERT_THRESHOLD:
+        return
+    if dedup_recent(db, tenant_id, "tg_channel_down_alert", target_id=chat_id,
+                    cooldown_min=6 * 60):
+        return
+    from .i18n import tenant_locale, notify_text
+    _loc = tenant_locale(db, tenant_id)
+    _title, _body = notify_text(_loc, "tg_channel_down",
+                                chat_id=_esc(chat_id), streak=n)
+    emit_notification(db, tenant_id=tenant_id, level="critical",
+                      event_type="tg_channel_down", title=_title, body=_body,
+                      roles=["owner"], send_tg=False,
+                      target_type="tg_chat", target_id=chat_id)
+    from .log_utils import write_log, new_trace_id
+    write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+              target_type="tg_chat", target_id=chat_id,
+              action_type="tg_channel_down_alert", source="notify",
+              result="fail", trigger_detail=f"chat_id={chat_id} streak={n}")
+    db.commit()
 
 
 def emit_token_expired_if_due(db: Session, tenant_id: int, alias: str = "",

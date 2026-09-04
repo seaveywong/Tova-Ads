@@ -206,6 +206,13 @@ def _start_scheduler():
     # TikTok 令牌自动续期：access_token 24h 过期，每 6h 刷剩 <12h 的凭证（refresh 即轮换，原子写回）
     from .services.tt_token_refresh import run_tt_token_refresh
     _scheduler.add_job(run_tt_token_refresh, "interval", hours=6, id="tt_token_refresh")
+    # 中断部署 job 回收：startup 已跑一次（上方），再加每 5min 巡检——原仅启动跑一次，
+    # 长跑进程中的孤儿 job（worker 崩溃遗留）要等下次重启才被回收。内部 advisory lock 116 多 worker 单飞。
+    try:
+        from .routers.launch_templates import _reap_stale_jobs as _reap_launch_stale
+        _scheduler.add_job(_reap_launch_stale, "interval", minutes=5, id="reap_stale_jobs")
+    except Exception as _e:
+        print(f"[Scheduler] reap_stale_jobs 注册失败(非致命): {_e}")
     _scheduler.start()
     print(f"[Scheduler] 已启动，间隔(分钟)={_eff}")
 

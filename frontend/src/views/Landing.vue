@@ -29,6 +29,20 @@ const sortedPages = computed(() => {
     return (b.block_count||0) - (a.block_count||0)
   })
 })
+// 模式筛选（链接管理内二级 tab：全部 / 落地页 / 短链）。display 含历史缺省值
+const modeFilter = ref('all')
+const isLp = (p) => p.redirect_mode !== 'redirect'
+const cntAll = computed(() => pages.value.length)
+const cntLp = computed(() => pages.value.filter(isLp).length)
+const cntShort = computed(() => cntAll.value - cntLp.value)
+const visiblePages = computed(() => {
+  if (modeFilter.value === 'lp') return sortedPages.value.filter(isLp)
+  if (modeFilter.value === 'short') return sortedPages.value.filter(p => !isLp(p))
+  return sortedPages.value
+})
+const emptyText = computed(() => modeFilter.value === 'lp' ? t('landing.emptyNoLp')
+  : (modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyCreate')))
+
 const loadPages = async () => {
   loading.value = true
   try { pages.value = await GET('/landing/pages') }
@@ -636,8 +650,14 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </header>
 
+    <div class="mode-filter">
+      <div :class="['mf-chip', { on: modeFilter === 'all' }]" @click="modeFilter = 'all'">{{ t('landing.tabAll') }} <i>{{ cntAll }}</i></div>
+      <div :class="['mf-chip', { on: modeFilter === 'lp' }]" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
+      <div :class="['mf-chip', { on: modeFilter === 'short' }]" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
+    </div>
+
     <div class="list" v-loading="loading">
-      <div v-for="p in sortedPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
+      <div v-for="p in visiblePages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
           <span class="mode-chip" :class="p.redirect_mode" :title="p.redirect_mode === 'redirect' ? t('landing.modeHintRedirect') : t('landing.modeHintDisplay')">{{ p.redirect_mode === 'redirect' ? '🔗 ' + t('landing.chipRedirect') : '📄 ' + t('landing.chipDisplay') }}</span>
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
@@ -683,8 +703,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
         </div>
       </div>
-      <div v-if="!pages.length && !loading" class="empty">
-        <div>{{ t('landing.emptyCreate') }}</div>
+      <div v-if="!visiblePages.length && !loading" class="empty">
+        <div>{{ emptyText }}</div>
         <button class="btn primary empty-cta-btn" @click="openCreate">+ {{ t('landing.newLink') }}</button>
       </div>
     </div>
@@ -1080,6 +1100,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .lp-tab{padding:7px 16px;font-size:13px;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent}
 .lp-tab.on{color:var(--t1);border-bottom-color:var(--ac);font-weight:600}
 .lp-tab:hover{color:var(--t1)}
+/* 链接管理内模式筛选 chips（全部/落地页/短链，带计数） */
+.mode-filter{display:flex;gap:6px;margin-bottom:10px}
+.mf-chip{padding:4px 12px;font-size:12px;color:var(--t3);background:var(--bg3);border:1px solid var(--bd);border-radius:14px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.mf-chip:hover{color:var(--t1)}
+.mf-chip.on{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600}
+.mf-chip i{font-style:normal;margin-left:4px;font-size:10px;opacity:.85}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
 .bar-l{font-size:13px;color:var(--t2)}
 .bar-r{display:flex;gap:8px}

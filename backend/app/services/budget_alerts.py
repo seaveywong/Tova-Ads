@@ -18,6 +18,7 @@ from ..core.encryption import decrypt
 from ..core.fb_tokens import client_for_account, cred_for_account_op
 from ..models.fb import FbCredential, Account
 from ..models.log import ActionLog
+from .guard_engine import from_minor_units
 
 logger = logging.getLogger("toveads.budget")
 
@@ -25,22 +26,26 @@ logger = logging.getLogger("toveads.budget")
 BUDGET_TIERS = [98, 90, 75, 50]
 
 
-def _account_local_today(acc: Account) -> str:
-    """账户本地今日（YYYY-MM-DD）。timezone_name 如 Asia/Ho_Chi_Minh。"""
+def _local_day_start_utc(acc: Account) -> datetime:
+    """账户本地今日 00:00 对应的 UTC 时刻（dedup 窗口用，与"今日消耗"同口径）。
+    timezone_name 如 Asia/Ho_Chi_Minh；异常退 UTC 当日零点。"""
     try:
         from zoneinfo import ZoneInfo
         tz = ZoneInfo(acc.timezone_name or "UTC")
-        return datetime.now(tz).strftime("%Y-%m-%d")
+        return datetime.now(tz).replace(
+            hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     except Exception:
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0)
 
 
 def check_account_budget_progress(
     db: Session, tenant_id: int, fb: FbClient, acc: Account, trace_id: str
 ) -> list[dict]:
     """单账户预算进度告警。返回触发的告警列表。"""
-    today = _account_local_today(acc)
-    today_start_utc = datetime.now(timezone.utc) - timedelta(hours=24)  # dedup 窗口（粗粒度，覆盖时区差）
+    # dedup 窗口 = 账户本地今日 00:00（转 UTC）：与"今日消耗"同口径——
+    # 本地日一过各 tier 重新可告；不再用滚动 24h（旧口径会把昨日已告的 tier 拖进今日压制）
+    today_start_utc = _local_day_start_utc(acc)
 
     try:
         adsets = fb.get_adsets(acc.act_id)
@@ -62,11 +67,10 @@ def check_account_budget_progress(
         daily = ad.get("daily_budget")
         if not daily:
             continue  # 非日预算（lifetime/无预算）跳过
-        try:
-            budget = float(daily)
-        except (ValueError, TypeError):
-            continue
-        if budget <= 0:
+        # FB API 金额字段是 minor units（多数币种=分；JPY/KRW/VND 等零小数位
+        # 币种=本币整数），与 insights spend（主币）对比前必须换算，否则 progress 虚高
+        budget = from_minor_units(daily, acc.currency)
+        if not budget or budget <= 0:
             continue
 
         adset_id = ad["id"]

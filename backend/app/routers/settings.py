@@ -1,6 +1,7 @@
 """系统设置路由：调度配置 + AI 配置。平台级，超管才能改。"""
 import json
 import os
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -79,16 +80,23 @@ def _setting_num(db: Session, key: str, default: float) -> float:
 
 @router.get("/guard-tuning")
 def get_guard_tuning(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
-    """三键当前生效值 + 默认值。生效值按读方口径钳制（并发 1-8、风暴上限 ≥0）。"""
+    """三键当前生效值 + 默认值 + 今日风暴压制计数。生效值按读方口径钳制（并发 1-8、风暴上限 ≥0）。"""
     from ..services.guard_engine import DEFAULT_CONCURRENCY, DEFAULT_LEARNING_HOURS
-    from ..core.notify_utils import DEFAULT_STORM_CAP
+    from ..core.notify_utils import DEFAULT_STORM_CAP, storm_suppressed_counts
     conc = max(1, min(int(_setting_num(db, "guard_concurrency", DEFAULT_CONCURRENCY)), 8))
     learn = _setting_num(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
     storm = max(0, int(_setting_num(db, "notify_storm_cap", DEFAULT_STORM_CAP)))
+    # 今日被风暴上限压制的告警计数（进程内观测值）：判断 cap 是否设太紧的依据
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    suppressed = [
+        {"tenant_id": tid, "event_type": etype, "count": n}
+        for (tid, etype, day), n in storm_suppressed_counts().items() if day == today
+    ]
     return {
         "guard_concurrency": conc,
         "guard_learning_hours": int(learn) if learn == int(learn) else learn,
         "notify_storm_cap": storm,
+        "storm_suppressed_today": suppressed,
         "defaults": {
             "guard_concurrency": int(DEFAULT_CONCURRENCY),
             "guard_learning_hours": int(DEFAULT_LEARNING_HOURS),

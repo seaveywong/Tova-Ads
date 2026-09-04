@@ -10,7 +10,7 @@ import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
@@ -215,6 +215,12 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     impressions = int(ad_insights.get("impressions", 0))
     reach = int(ad_insights.get("reach", 0))
     rt = rule.rule_type
+    # 未知币种（to_usd=None：汇率表+兜底字典均无）：金额类规则不可判——本币数字直接当 USD 比
+    # 阈值会误杀，1:1 兜底换算对小面额币种放大数千倍同样误杀。仅跳过金额类规则；click_no_conv/
+    # trend_drop/consecutive_bad 等非金额规则照常评估。账户级已另发 unsupported_currency 告警。
+    if spend_usd is None and rt in ("bleed_abs", "cpa_exceed", "low_ctr_no_conv", "reach_no_conv",
+                                    "budget_burn_fast", *SCALE_RULE_TYPES):
+        return False, ""
 
     if rt == "bleed_abs":
         threshold = float(p.get("spend_threshold", 20))
@@ -271,7 +277,9 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     if rt == "budget_burn_fast":
         threshold = float(p.get("threshold_abs", 20))
         if prev_spend is not None:
-            delta_usd = spend_usd - to_usd(prev_spend, currency)
+            # 快照列 spend 已是 USD（_upsert_ad_snapshot 写入前已 to_usd），勿再换算——
+            # 曾 to_usd(prev_spend) 二次换算，非 USD 账户 delta 虚高 → 全被"瞬烧"规则误停（P0-1）
+            delta_usd = spend_usd - (prev_spend or 0.0)
             if delta_usd >= threshold:
                 return True, f"瞬烧 ≈${delta_usd:.2f}（上轮→今 {fmt_spend(spend, currency)}，阈值 ${threshold}）"
         return False, ""
@@ -301,6 +309,8 @@ def _evaluate_scale_rule(rt: str, p: dict, ad_insights: dict, conversions: float
     只判"该不该扩"；执行（24h 冷却/上限保护/set_budget）在巡检命中分支。"""
     spend = float(ad_insights.get("spend", 0) or 0)
     spend_usd = to_usd(spend, currency)
+    if spend_usd is None:
+        return False, ""  # 未知币种：USD 口径判不了（_evaluate_rule 已拦，此处双保险）
     min_conv = max(0, int(float(p.get("min_conversions", 3) or 0)))
     if float(conversions or 0) < min_conv:
         return False, ""
@@ -384,14 +394,20 @@ def _max_workers(db, count: int) -> int:
 
 
 def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now_utc,
-                       platform: str | None = None) -> bool:
+                       platform: str | None = None, campaign_id: str = "") -> bool:
     """扩量防重复（1.0 语义）：同目标 cooldown_hours（默认 24h）内已扩过/已跳过（到顶/lifetime）
     → 不再扩；刚失败 5min 内不 hammer（与暂停失败重试同节奏）；本轮内同组已扩过（内存 set）也不再。
     冷却只挡扩量——同广告的止损规则仍照常评估（该停还得停）。
     platform：None=不加过滤（FB 路径，查询零改动）；'tt'=按 platform 列过滤——TT 的
-    adset_id 是每广告主小整数（≠FB 全局唯一），不过滤会与 FB 行（或另一 TT 广告主）撞 target。"""
-    tgt = adset_id or ad_id
-    if tgt in scaled_targets:
+    adset_id 是每广告主小整数（≠FB 全局唯一），不过滤会与 FB 行（或另一 TT 广告主）撞 target。
+    冷却键=预算载体 id（P0-4）：_apply_scale 定位载体（adset 自有日预算 / CBO campaign）后以
+    载体 id 记日志、进 scaled_targets；此处调用时尚未读 FB、无法预知载体 → 对
+    [adset_id, campaign_id] 双键判定（载体 id 必在候选内）。曾一律用 adset_id：CBO 时日志记的
+    是 campaign id，按 adset 键查不到 → 同一 campaign 被旗下多个 adset 反复扩量。"""
+    cands = {adset_id or ad_id}
+    if campaign_id:
+        cands.add(campaign_id)
+    if cands & scaled_targets:
         return False
     try:
         _p = {**RULE_DEFAULTS.get(rule.rule_type, {}),
@@ -403,7 +419,7 @@ def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now
     _pf = [ActionLog.platform == platform] if platform else []
     recent = db.query(ActionLog).filter(
         ActionLog.tenant_id == tenant_id,
-        ActionLog.target_id == tgt,
+        ActionLog.target_id.in_(cands),
         *_pf,
         ActionLog.action_type.in_(["increase_budget", "increase_budget_skipped"]),
         ActionLog.result == "success",
@@ -413,7 +429,7 @@ def _scale_cooldown_ok(db, tenant_id, rule, ad_id, adset_id, scaled_targets, now
         return False
     fail_recent = db.query(ActionLog).filter(
         ActionLog.tenant_id == tenant_id,
-        ActionLog.target_id == tgt,
+        ActionLog.target_id.in_(cands),
         *_pf,
         ActionLog.action_type == "increase_budget",
         ActionLog.result == "fail",
@@ -508,7 +524,18 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
 
     cur_native = from_minor_units(cur_minor, acc.currency) or 0.0
     cur_usd = to_usd(cur_native, acc.currency)
+    if cur_usd is None:
+        # 未知币种（P0-2）：USD 口径算不出步长/上限，跳过本轮扩量（账户级 unsupported_currency
+        # 告警已由巡检主循环发出）；绝不按 1:1 盲加——那等于把预算按错误汇率放大
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | 币种 {acc.currency} 无汇率，跳过扩量",
+                 target_id=tgt_id, target_type=scale_level)
+        return
     new_usd = cur_usd * (1.0 + pct)
+    if cap_usd <= 0:
+        # cap 未配置（0）=无绝对上限，但强制 10×当前预算的硬顶防无界（P0-4）：正常步长（≤+100%）
+        # 永远不会触顶，只在参数异常时兜底
+        cap_usd = cur_usd * 10.0
     capped = False
     if cap_usd > 0:
         if cur_usd >= cap_usd:
@@ -549,7 +576,7 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
     _sr = _set_budget(db, tenant_id, acc.act_id, tgt_id, scale_level,
                       daily_budget=new_native, currency=(acc.currency or "USD"), operator="guard")
     if _sr.get("success"):
-        scaled_targets.add(adset_id or ad_id)
+        scaled_targets.add(tgt_id)  # 载体 id（P0-4）：CBO 时=campaign id，与冷却查询键/日志 target_id 一致
         res["scaled"] += 1
         res["scale_details"].append({"act_id": acc.act_id, "ad_id": ad_id, "ad_name": ad_name,
                                      "level": scale_level, "target": tgt_id,
@@ -670,7 +697,17 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
         return
 
     cur_usd = to_usd(float(cur_amount), cur_code)
+    if cur_usd is None:
+        # 未知币种（P0-2）：USD 口径算不出步长/上限，跳过本轮扩量（账户级 unsupported_currency
+        # 告警已由巡检主循环发出），不按 1:1 盲加
+        _log_evt("increase_budget_skipped", "success",
+                 f"{detail} | 币种 {cur_code} 无汇率，跳过扩量",
+                 target_id=adset_id, target_type="adset")
+        return
     new_usd = cur_usd * (1.0 + pct)
+    if cap_usd <= 0:
+        # cap 未配置（0）=无绝对上限，但强制 10×当前预算的硬顶防无界（P0-4，同 FB _apply_scale）
+        cap_usd = cur_usd * 10.0
     capped = False
     if cap_usd > 0:
         if cur_usd >= cap_usd:
@@ -723,7 +760,7 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
                     str(e)[:300], False)
         return
     if _ok:
-        scaled_targets.add(adset_id or ad_id)
+        scaled_targets.add(adset_id)  # TT 载体恒为 adgroup（P0-4：与冷却键/日志 target_id 一致）
         res["scaled"] += 1
         res["scale_details"].append({"act_id": acc.act_id, "ad_id": ad_id, "ad_name": ad_name,
                                      "level": "adset", "target": adset_id, "platform": "tt",
@@ -775,6 +812,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
     trace_id = ctx["trace_id"]
     force = ctx["force"]
     learning_hours = ctx["learning_hours"]
+    armed = bool(ctx.get("armed", False))  # 哨兵armed：跳规则评估，快照/上报照跑（主循环注释）
     res = {"tenant_id": tenant_id, "act_id": acc.act_id, "evaluated": 0, "hits": 0,
            "paused": 0, "scaled": 0, "skipped_spend": 0, "learning_skipped": 0,
            "paused_details": [], "scale_details": [], "events": [], "error": None}
@@ -798,6 +836,25 @@ def _inspect_account_worker(ctx: dict) -> dict:
         _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
         _alias = cred.alias or ""
         acc_today = _account_local_today(acc)  # 账户本地日（time_range 拉 insights + 写 snapshot_date，统一账户本地基准，避免跨时区累积）
+        # 未知币种探测（P0-2）：汇率表+兜底字典都没有 → to_usd 全程 None。金额类规则本轮全账户
+        # 跳过（_evaluate_rule/_apply_scale 各点判 None），并发一次 critical 告警（24h/账户）。
+        # 曾以 1.0 兜底换算：CLP/COP 等未收录币种被当 1:1 → 金额阈值全错（误杀/漏杀皆有可能）。
+        # 同 account_permission_error 模式：线程私有 session 自带 dedup+commit，不经 events 队列。
+        if to_usd(1.0, acc.currency or "USD") is None:
+            if not dedup_recent(db, tenant_id, "unsupported_currency_alert", acc.act_id, 1440):
+                _loc = tenant_locale(db, tenant_id)
+                _t_uc, _b_uc = notify_text(_loc, "unsupported_currency",
+                                           name=_esc(acc.name), act_id=acc.act_id,
+                                           currency=(acc.currency or "?"))
+                emit_notification(db, tenant_id=tenant_id, level="critical",
+                                  event_type="unsupported_currency", trace_id=trace_id,
+                                  title=_t_uc, body=_b_uc, platform=platform)
+                write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                          target_type="account", target_id=acc.act_id,
+                          action_type="unsupported_currency_alert", source="guard",
+                          result="fail",
+                          trigger_detail=f"act_id={acc.act_id} currency={acc.currency}")
+                db.commit()
         # 拿 ACTIVE 广告 ID 集 + 创建时间（学习期保护用）；含学习中的——学习中但 ACTIVE = 在花钱
         active_ids = None
         created_map: dict = {}
@@ -957,7 +1014,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
             ad_id = ad.get("ad_id", "")
             # tick spend + conv 累计所有广告（含已暂停——累计值不因暂停下降）
             try:
-                acc_tick_spend += to_usd(float(ad.get("spend", 0)), acc.currency)
+                _tick_usd = to_usd(float(ad.get("spend", 0)), acc.currency)
+                if _tick_usd is not None:
+                    acc_tick_spend += _tick_usd  # 未知币种(None)不计入（账户已另发 unsupported_currency 告警）
             except Exception:
                 pass
             # 过滤：只评估 ACTIVE 广告（拉了 active_ids 就用它；None=不过滤）
@@ -1049,7 +1108,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 except Exception:
                     pass
 
-            # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）
+            # 查加白（账户本地当日跳过，和 snapshot_date / FB insights today 对齐）。
+            # 加白只跳过规则评估（P2-4）：快照照写——曾在此 continue 掉，加白期间 burn_fast
+            # 基线断档，解除加白后首轮 delta=整日消耗 → 虚高误杀。
             whitelisted = db.query(GuardAllowance).filter(
                 GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
                 GuardAllowance.act_id == acc.act_id,
@@ -1057,8 +1118,6 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 GuardAllowance.allowance_date == acc_today,
                 GuardAllowance.status == "active",
             ).first()
-            if whitelisted:
-                continue
 
             # 历史快照：上一轮的今日累计 spend（budget_burn_fast）+ 近 N 天（consecutive_bad/扩量）
             prev_spend = None
@@ -1095,18 +1154,25 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 except Exception:
                     pass
 
-            # 评估每条规则（全局 + 本账户级，并存）；学习期广告跳过动作但仍写快照
-            if not learning_skip:
+            # 评估规则（全局 + 本账户级，并存）。三种"只跳评估、快照照写"（基线不断档）：
+            # 学习期 / 当日加白 / 哨兵armed（armed=哨兵已全停，规则评估多余，但快照+错误上报保留，
+            # disarm 后 burn_fast 基线不虚高）
+            if not learning_skip and not whitelisted and not armed:
+                # P2-7：先全量收集命中，动作类（非 observe）优先执行；仅 observe 命中时取第一条告警。
+                # 曾"首条命中即 break"：observe 规则排前会把后面的真止损规则挡掉（只告警不停，钱继续烧）。
+                _hits_all: list = []
                 for rule in acc_rules:
-                    hit, detail = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
-                                                 landing_clicks=landing_clicks,
-                                                 landing_visits=landing_visits,
-                                                 yesterday_insight=yesterday_map.get(ad_id),
-                                                 prev_spend=prev_spend, history=history,
-                                                 currency=acc.currency)
-                    if not hit:
-                        continue
-
+                    _h, _d = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
+                                            landing_clicks=landing_clicks,
+                                            landing_visits=landing_visits,
+                                            yesterday_insight=yesterday_map.get(ad_id),
+                                            prev_spend=prev_spend, history=history,
+                                            currency=acc.currency)
+                    if _h:
+                        _hits_all.append((rule, _d))
+                _cand = ([x for x in _hits_all if (x[0].action or "default").lower() != "observe"]
+                         + [x for x in _hits_all if (x[0].action or "default").lower() == "observe"])
+                for rule, detail in _cand:
                     # 冷却 dedup（22：成功 60min 阻断；失败仅 5min 重试冷却，下轮重试）
                     # force=True（手动触发）跳过成功冷却
                     now_utc = datetime.now(timezone.utc)
@@ -1116,7 +1182,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         # adset_id 防撞 FB 行），FB 不传 → 查询与原逻辑零差异
                         if not _scale_cooldown_ok(db, tenant_id, rule, ad_id,
                                                   ad.get("adset_id", ""), scaled_targets, now_utc,
-                                                  platform=("tt" if platform == "tt" else None)):
+                                                  platform=("tt" if platform == "tt" else None),
+                                                  campaign_id=ad.get("campaign_id", "")):
                             continue
                     else:
                         succ = None
@@ -1201,6 +1268,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     ra = (rule.action or "default").lower()
                     action_text = "仅告警（规则设为观察）"
                     pause_result = "success"
+                    pause_verified = True   # observe 无暂停动作，视为不需核验（保持 success 冷却）
                     if ra != "observe":
                         if ra in ("pause", "default"):
                             chain = [(ad_id, "广告"), (adset_id, "组"), (campaign_id, "系列")]
@@ -1217,29 +1285,35 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                     fb.pause_ad(acc.act_id, pid)  # TT pause_ad(advertiser_id, ad_id)=opt_status DISABLE
                                 else:
                                     fb.pause_ad(pid)  # pause_ad 对 ad/adset/campaign 通用
-                                # A2 核验（ad 级）：停后单查状态，仍投放中=假停→升级下一级
-                                # 单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等平台写延迟
-                                if pid == ad_id:
-                                    time.sleep(2.5)
-                                    try:
-                                        if platform == "tt":
-                                            _node = fb.get_node(pid, "ad", acc.act_id) or {}
-                                            _still = str(_node.get("opt_status")
-                                                         or _node.get("status") or "").upper()
-                                            if _still in ("ENABLE", "STATUS_ENABLE"):
-                                                continue  # 假停，升级下一级
-                                        else:
-                                            _node = fb.get_node(pid, "effective_status")
-                                            if str(_node.get("effective_status", "")).upper() == "ACTIVE":
-                                                continue  # 假停，升级下一级
-                                    except Exception:
-                                        pass  # 核验查询失败，信任平台（视为成功，不升级）——宁可少停不误停整组
+                                # A2 核验（P1-1 升级到组/系列级）：停后单查状态，仍投放中=假停→升级
+                                # 下一级；单查比 get_active_ads(拉全账户+缓存) 快且准；sleep 2.5s 等写延迟。
+                                # 核验查询异常=unverified：不轻信平台返回（pause 虚报成功曾漏停），
+                                # 本级继续升级下一级双保险，且最终按 fail 记（5min 重试冷却而非 60min）。
+                                time.sleep(2.5)
+                                verified = False
+                                still_live = False
+                                try:
+                                    if platform == "tt":
+                                        _nt = {"广告": "ad", "组": "adgroup", "系列": "campaign"}[label]
+                                        _node = fb.get_node(pid, _nt, acc.act_id) or {}
+                                        _still = str(_node.get("opt_status")
+                                                     or _node.get("status") or "").upper()
+                                        still_live = _still in ("ENABLE", "STATUS_ENABLE")
+                                    else:
+                                        _node = fb.get_node(pid, "effective_status") or {}
+                                        still_live = str(_node.get("effective_status", "")).upper() == "ACTIVE"
+                                    verified = True
+                                except Exception:
+                                    pass  # 核验查询失败=unverified：不记 success 冷却，下轮 5min 重进链重核
+                                if still_live:
+                                    continue  # 假停（查实仍投放中）→ 升级下一级
                                 res["paused"] += 1
                                 res["paused_details"].append({"act_id": acc.act_id, "ad_id": ad_id,
                                                               "ad_name": ad_name, "level": label,
                                                               "target": pid, "reason": detail})
-                                action_text = f"已暂停{label} PAUSED" + ("（已核验）" if pid == ad_id else "")
+                                action_text = f"已暂停{label} PAUSED" + ("（已核验）" if verified else "（未核验）")
                                 paused_ok = True
+                                pause_verified = verified
                                 break
                             except (FbApiError, TtApiError) as _pause_err:
                                 # 记录平台 code/错误原文供排障（交接包 pitfall#7：不丢弃错误码）
@@ -1247,6 +1321,10 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 continue  # 该级暂停失败，升级下一级
                         if not paused_ok:
                             action_text = "暂停失败（ad→组→系列均未生效）"
+                            pause_result = "fail"
+                        elif not pause_verified:
+                            # 停了但没核验上 → 不给 60min 成功冷却，按 fail 记走 5min 重试：
+                            # 下轮重进暂停链（对已停对象重发 pause 幂等）直到核验通过
                             pause_result = "fail"
 
                     # 记日志（账户/系列/组/广告 ID + 本币花销 + 动作 + trace_id）——events 队列，主线程回放
@@ -1334,8 +1412,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 for r7 in hist_rows_7d:
                     _sd = r7.get("date_start")
                     if _sd:
-                        _spike_days[_sd] = _spike_days.get(_sd, 0.0) + to_usd(
-                            float(r7.get("spend", 0) or 0), acc.currency)
+                        _u7 = to_usd(float(r7.get("spend", 0) or 0), acc.currency)
+                        if _u7 is not None:
+                            _spike_days[_sd] = _spike_days.get(_sd, 0.0) + _u7  # None(未知币种)不计入
                 if _spike_days:
                     _avg7 = sum(_spike_days.values()) / max(1, len(_spike_days))
                     if acc_tick_spend > _avg7 * 3 and (acc_tick_spend - _avg7) >= 50:
@@ -1380,6 +1459,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     try:
                         _sp7 = float(r7.get("spend", 0) or 0)
                         _sp7u = to_usd(_sp7, acc.currency)
+                        if _sp7u is None:
+                            continue  # 未知币种：不写假 USD（NULL/本币冒充都会污染看板与 burn_fast 基线），账户已告警
                         _obj7, _opt7 = obj_map.get(r7.get("campaign_id", ""), ("", ""))
                         _kpi7 = resolve_kpi(db, tenant_id, r7.get("campaign_id", ""),
                                              _obj7, _opt7, r7.get("actions", []))
@@ -1418,6 +1499,20 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 db.commit()
             except Exception as e:
                 logger.warning(f"[Guard] 近7天回填异常 act={acc.act_id}: {e}")
+
+        # last_inspected_at 打点（P0 批修正）：实际处理完成后才写——曾主循环建任务时预写，
+        # armed/拉取失败的账户也刷新 → 时间戳失真。按 tenant+act_id+platform 定位行
+        # （0070 后 platform 非空，同 act_id 双平台行可共存）。
+        try:
+            _acc_row = db.query(Account).filter(
+                Account.tenant_id == tenant_id, Account.act_id == acc.act_id,
+                Account.platform == platform,
+            ).first()
+            if _acc_row:
+                _acc_row.last_inspected_at = datetime.now(timezone.utc)
+                db.commit()
+        except Exception:
+            pass
         return res
     except Exception as e:
         logger.error(f"[Guard] 账户 {acc.act_id} 巡检任务异常: {e}", exc_info=True)
@@ -1490,11 +1585,13 @@ def run_inspection(force: bool = False):
             if not cred_n and tenant_id not in _tt_tids:
                 logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证且无 TT 账户，跳过")
                 continue
-            # 取已纳管账户（is_managed=true 且 ACTIVE=1，跳过被 FB 禁用/宽限/违规的，省 Token 配额；
-            # 也跳过已取消纳管的软删账户——它们保留历史但不再巡检）
+            # 取已纳管账户：仅排除死状态（DISABLED=2/CLOSED=8，P0-5）——未结清3/受限7/宽限期9 的
+            # 账户仍可能投放花钱，必须继续巡检（曾 ==1 全排除：账户一受限就漏管漏止损）；
+            # NULL 视为可管（未知≠死）；已取消纳管的软删账户照旧跳过（保留历史不巡检）
             accounts = db.query(Account).filter(
                 Account.tenant_id == tenant_id,
-                Account.account_status == 1,
+                or_(Account.account_status.is_(None),
+                    Account.account_status.notin_([2, 8])),
                 Account.is_managed.is_(True),
             ).all()
 
@@ -1502,14 +1599,14 @@ def run_inspection(force: bool = False):
             rule_ctxs = [_rule_ctx(r) for r in all_rules]
 
             for acc in accounts:
-                acc.last_inspected_at = datetime.now(timezone.utc)
-                # 哨兵 armed → 巡检跳过（哨兵全停，巡检再跑多余 → 省 FB API）
-                if acc.sentinel_armed or acc.sentinel_auto_armed:
-                    continue
+                # 哨兵 armed 不再整账户跳过：worker 只跳规则评估（哨兵已全停，评估多余），
+                # 快照/趋势 tick/错误上报照跑——否则 burn_fast 基线断档，disarm 后首轮
+                # delta 虚高误杀（P0 批修正）。last_inspected_at 改由 worker 实际处理完成后打点。
                 tasks.append({
                     "tenant_id": tenant_id, "trace_id": trace_id, "force": force,
                     "learning_hours": learning_hours, "hist_days": hist_days,
                     "all_rules": rule_ctxs, "default_rule": _DEFAULT_BLEED_RULE_CTX,
+                    "armed": bool(acc.sentinel_armed or acc.sentinel_auto_armed),
                     "acc": SimpleNamespace(act_id=acc.act_id, name=acc.name,
                                            currency=acc.currency, timezone_name=acc.timezone_name,
                                            platform=_acc_platform(acc)),
@@ -1645,8 +1742,10 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
     """广告行 upsert 到 perf_snapshots（ACTIVE 与已停共用——看板消耗口径=账户全量，
     对齐 FB account 级 insights；曾只写 ACTIVE，今日暂停的广告消耗丢失 → 看板低估）。"""
     spend = float(ad.get("spend", 0))
+    # 未知币种 → spend 记 None（列可空）：不拿本币数字冒充 USD 污染看板/burn_fast 基线，
+    # 本币原值仍完整保留在 spend_native；该账户本轮已发 unsupported_currency 告警
     spend_usd_snap = to_usd(spend, acc.currency)
-    cpa = (spend_usd_snap / conv) if conv > 0 else None
+    cpa = (spend_usd_snap / conv) if (spend_usd_snap is not None and conv > 0) else None
     impressions = int(ad.get("impressions", 0) or 0)
     clicks = int(ad.get("clicks", 0) or 0)
     reach = int(ad.get("reach", 0) or 0)
@@ -1741,15 +1840,19 @@ def backfill_history_range(tenant_id: int, since: str, until: str):
         db.close()
 
 
-def to_usd(amount: float, currency: str) -> float:
-    """账户本币 → USD（阈值比较用）。优先读 CurrencyRate 表（每日刷新），硬编码字典兜底。"""
+def to_usd(amount: float, currency: str) -> float | None:
+    """账户本币 → USD（阈值比较用）。优先读 CurrencyRate 表（每日刷新），硬编码字典兜底。
+    未知币种（表和字典都没有）→ 返回 None，绝不按 1.0 兜底（P0-2）：VND 类小面额币种被
+    1:1 兑换会放大数千倍，金额阈值全部误判（曾致非 USD 账户被瞬烧规则整账户误停）。
+    资金判定调用方须显式处理 None（跳过评估 + unsupported_currency 告警）；
+    展示路径降级为本币原值（见 fmt_spend）。"""
     cur = (currency or "USD").upper()
     if cur == "USD" or not amount:
         return amount
     fx = _fx_map()
     if cur in fx and fx[cur] > 0:
         return amount / fx[cur]  # CurrencyRate: 1 USD = rate × 本币 → USD = amount / rate
-    return amount * CURRENCY_TO_USD.get(cur, 1.0)  # 表里没有 → 硬编码兜底
+    return amount * CURRENCY_TO_USD.get(cur)  # 表里没有 → 硬编码兜底；也没有 → None（未知币种）
 
 
 # 汇率缓存（1h TTL；首次调用从 CurrencyRate 表懒加载，止损热路径不每条广告查 DB）
@@ -1786,18 +1889,20 @@ def reset_fx_cache():
 
 
 def fmt_spend(spend: float, currency: str) -> str:
-    """花销展示：本币 + USD 等值（避歧义）。"""
+    """花销展示：本币 + USD 等值（避歧义）。未知币种（to_usd=None）只展示本币，不算假等值。"""
     cur = (currency or "USD").upper()
-    usd = to_usd(spend, cur)
     if cur == "USD":
         return f"${spend:.2f}"
+    usd = to_usd(spend, cur)
+    if usd is None:
+        return f"{cur} {spend:.0f}"
     return f"{cur} {spend:.0f} (≈${usd:.2f})"
 
 
 # ── 账户可用投放额度（照搬 1.0 _calc_available_balance）──
 # FB balance 在后付费账户里是账单余额/欠款，≠ 还能花多少钱；故可用额度只由
 # spend_cap 与 amount_spent 推导，balance 不参与。
-_NO_DECIMAL_CURRENCIES = {"JPY", "KRW", "IDR", "VND", "CLP", "COP", "HUF", "PYG", "UGX", "TZS"}
+from ..core.ad_ops import ZERO_DECIMAL as _NO_DECIMAL_CURRENCIES   # 全仓唯一真相源（core/ad_ops，Meta 官方表）——曾三处冲突表致 100x 预算放大
 _UNLIMITED_SPEND_CAP_USD = 1_000_000.0
 
 
@@ -1819,7 +1924,8 @@ def calc_available_balance(spend_cap, amount_spent, currency) -> tuple[float | N
     """账户可用投放额度（USD）。
 
     返 (avail_usd, kind)：
-      - kind='limited'：avail = round((spend_cap - amount_spent) 的 USD, 2)
+      - kind='limited'：avail = round((spend_cap - amount_spent) 的 USD, 2)；
+        未知币种时 avail=None（换算不可用，调用方对 None 跳过判断）
       - kind='unlimited'：avail=None（无 spend_cap 或 =0）
       - kind='very_high_limit'：avail=None（spend_cap ≥ $1M 视为不限）
     balance 不参与（FB balance 是账单/欠款，≠ 还能花的钱）。2.0 未存 spending_limit，
@@ -1829,10 +1935,16 @@ def calc_available_balance(spend_cap, amount_spent, currency) -> tuple[float | N
     spent = from_minor_units(amount_spent, currency)
     if cap is None or cap <= 0:
         return (None, "unlimited")
-    if to_usd(cap, currency) >= _UNLIMITED_SPEND_CAP_USD:
+    cap_usd = to_usd(cap, currency)
+    if cap_usd is None:
+        # 未知币种（P0-2）：USD 口径算不出。kind 仍报 limited（确有花费上限，只是换算不可用），
+        # avail=None——调用方（account_sync 低额告警/看板）对 None 一律跳过判断，不误报也不炸
+        return (None, "limited")
+    if cap_usd >= _UNLIMITED_SPEND_CAP_USD:
         return (None, "very_high_limit")
     avail = max(0.0, cap - (spent or 0))
-    return (round(to_usd(avail, currency), 2), "limited")
+    avail_usd = to_usd(avail, currency)
+    return ((round(avail_usd, 2) if avail_usd is not None else None), "limited")
 
 
 def run_watchdog():
@@ -2028,17 +2140,22 @@ def run_landing_block_scan():
         release_run_lock(lock, 107)
 
 
-def _sentinel_pause_tt(db, tt, acc, trace_id: str) -> int:
+def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None) -> int:
     """哨兵 TT 分支：投放中广告逐条 ad 级 DISABLE（kill-switch，同义 FB 的 campaign 全停——
     get_active_ads 只返投放中，全停等价）。
     级别选择：campaign/status/update 的批量形状未在 sandbox 验证，先 ad 级（验证后可升 campaign 级）。
     dedup：每广告 1h 内已停过跳过（ActionLog platform='tt'——TT ad_id 每广告主小整数，
-    不过滤会与 FB 行/另一广告主撞 target）。返回停掉的条数。"""
+    不过滤会与 FB 行/另一广告主撞 target）。返回停掉的条数。
+    failures（P0-6）：非 None 时回填 [(tenant_id, act_id, acc_name, 原因)]——拉取/停失败不再
+    只 warning 静默，由 run_sentinel_patrol 聚合发 critical。"""
     paused = 0
     try:
         active_ads = tt.get_active_ads(acc.act_id)
     except Exception as e:
         logger.warning(f"[Sentinel][TT] 账户 {acc.act_id} 拉广告失败: {getattr(e, 'friendly', e)}")
+        if failures is not None:
+            failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                             f"[TT] 拉投放中广告失败: {getattr(e, 'friendly', e)}"))
         return 0
     for a in active_ads:
         ad_id = str(a.get("ad_id") or a.get("id") or "")
@@ -2077,6 +2194,9 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str) -> int:
             db.commit()
         except Exception as e:
             logger.warning(f"[Sentinel][TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}")
+            if failures is not None:
+                failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                                 f"[TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}"))
     return paused
 
 
@@ -2085,7 +2205,9 @@ def run_sentinel_patrol():
 
     哨兵是 kill-switch（不走规则评估）：手动 arm 或自动 arm 后，发现 ACTIVE 系列直接停。
     FB 走 campaign 级全停；TT（P4）走 ad 级 DISABLE（_sentinel_pause_tt）。
-    与规则巡检独立。dedup：每 campaign（FB）/每广告（TT）1h 内不重复停。
+    与规则巡检独立。dedup：每 campaign（FB）/每广告（TT）1h 内不重复停——
+    但键=日志 AND 实际已停（P1-4：日志命中仍回读 effective_status，仍 ACTIVE 则重停）；
+    无令牌/拉取/停失败不再静默（P0-6：聚合发 sentinel_failure critical）。
     """
     lock = acquire_run_lock(106)
     if not lock:
@@ -2094,6 +2216,7 @@ def run_sentinel_patrol():
     trace_id = new_trace_id()
     total_paused = 0
     _paused_by_tenant: dict = {}   # tenant_id -> [(acc_name, act_id, camp_name, camp_id)]
+    _failures: list = []           # [(tenant_id, act_id, acc_name, 原因)] 哨兵静默失败清单（P0-6）
     try:
         # 所有 armed 账户（手动或自动 arm，含 TT）；排除已取消纳管的（is_managed=false）
         armed = db.query(Account).filter(
@@ -2101,20 +2224,25 @@ def run_sentinel_patrol():
             (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)  # noqa: E712
         ).all()
         for acc in armed:
-            # 死账户（禁用/封号/支付失败等，account_status!=1）花不了钱，停系列是马后炮→跳过。
-            # 恢复正常(status→1)后哨兵自然恢复生效：armed 仍在，account_sync 把状态刷回 1 后下轮就停。
-            if acc.account_status is not None and acc.account_status != 1:
+            # 仅死状态跳过（P0-5）：DISABLED(2)/CLOSED(8) 花不了钱，停是马后炮；
+            # 宽限期9/受限7/未结清3 仍可能投放，继续管（曾 !=1 全跳过：账户一受限哨兵就漏管）。
+            # 恢复到非死状态后哨兵自然恢复生效（armed 仍在，account_sync 刷状态后下轮就停）。
+            if acc.account_status in (2, 8):
                 continue
             # 预热账户哨兵也跑（只跳过保活系列）
             if (acc.platform or "fb") == "tt":
                 from ..core.fb_tokens import tt_client_for_account
                 tt, _cred = tt_client_for_account(db, acc.tenant_id, acc.act_id, "pause")
                 if not tt:
+                    _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                                      "[TT] 无可用写令牌（pause）"))
                     continue
-                total_paused += _sentinel_pause_tt(db, tt, acc, trace_id)
+                total_paused += _sentinel_pause_tt(db, tt, acc, trace_id, _failures)
                 continue
             fb = client_for_account(db, acc.tenant_id, acc.act_id, "pause")
             if not fb:
+                _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                                  "无可用写令牌（pause）"))
                 continue
             try:
                 # 拉 ACTIVE 系列（campaign）直接停
@@ -2125,6 +2253,8 @@ def run_sentinel_patrol():
                 })
             except FbApiError as e:
                 logger.warning(f"[Sentinel] 账户 {acc.act_id} 拉系列失败: {e.friendly}")
+                _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                                  f"拉 ACTIVE 系列失败: {e.friendly}"))
                 continue
             for camp in (camps.get("data") or []):
                 camp_id = camp.get("id")
@@ -2133,7 +2263,10 @@ def run_sentinel_patrol():
                 # 保活系列永不停（哨兵跳过 [Tova-保活]）
                 if "[Tova-保活]" in (camp.get("name") or ""):
                     continue
-                # dedup：1h 内已停过跳过
+                # dedup（P1-4）：1h 内已停过 → 仍须回读实际状态——日志≠地面真相（pause 虚报成功/
+                # 停后被人为重启时，日志在 1h 内 → 哨兵整小时不再停 → 漏停真金白银）。
+                # 去重键 = 日志 AND 实际已停；回读异常也视为需重停（不能确认已停就不赌）。
+                # 只对 dedup 命中的做回读（每轮最多几十个，控 API 量）。
                 since = datetime.now(timezone.utc) - timedelta(hours=1)
                 already = db.query(ActionLog).filter(
                     ActionLog.tenant_id == acc.tenant_id,
@@ -2143,7 +2276,13 @@ def run_sentinel_patrol():
                     ActionLog.created_at >= since,
                 ).first()
                 if already:
-                    continue
+                    try:
+                        _st = fb.get(camp_id, {"fields": "effective_status"}).get("effective_status")
+                    except Exception:
+                        _st = "ACTIVE"  # 回读失败：不能确认已停 → 按需重停走下方
+                    if str(_st or "").upper() != "ACTIVE":
+                        continue  # 日志命中且实际已停 → 真跳过
+                    # 仍 ACTIVE（或回读失败）→ 不跳过，重停
                 try:
                     fb.pause_ad(camp_id)  # pause_ad 对 campaign 通用
                     total_paused += 1
@@ -2158,6 +2297,8 @@ def run_sentinel_patrol():
                     db.commit()
                 except FbApiError as e:
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
+                    _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
+                                      f"停系列 {camp_id} 失败: {e.friendly}"))
         # 一轮巡逻按租户聚合通知（明细 ≤10 行，全量见守护页「暂停记录」）
         for _tid, _items in (_paused_by_tenant or {}).items():
             try:
@@ -2173,7 +2314,36 @@ def run_sentinel_patrol():
                 db.commit()
             except Exception as e:
                 logger.warning(f"[Sentinel] 聚合通知失败 tenant={_tid}: {e}")
-        logger.info(f"[Sentinel] 巡逻完成: 停 {total_paused} 个系列 (armed={len(armed)})")
+        # ── 哨兵失败告警（P0-6）：armed 却没停成（无令牌/拉取失败/停失败）曾全部静默——
+        # 生产事故根因之一（用户以为哨兵在守，实际一个没停）。按租户聚合发 critical，
+        # 1h/租户去重（target_id="*"），明细 ≤5 条，全量见守护页「暂停记录」/服务日志。──
+        if _failures:
+            _fail_by_tenant: dict = {}
+            for _tid, _aid, _aname, _reason in _failures:
+                _fail_by_tenant.setdefault(_tid, []).append((_aid, _aname, _reason))
+            for _tid, _items in _fail_by_tenant.items():
+                try:
+                    if dedup_recent(db, _tid, "sentinel_failure_alert", "*", 60):
+                        continue
+                    _loc = tenant_locale(db, _tid)
+                    _lines = [f"· {n}（{a}）：{r}" for a, n, r in _items[:5]]
+                    if len(_items) > 5:
+                        _lines.append(f"… 共 {len(_items)} 项")
+                    _t_sf, _b_sf = notify_text(_loc, "sentinel_failure",
+                                               n=len(_items), detail="\n".join(_lines))
+                    emit_notification(db, tenant_id=_tid, level="critical",
+                                      event_type="sentinel_failure", trace_id=trace_id,
+                                      title=_t_sf, body=_b_sf, platform="fb")
+                    write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="sentinel",
+                              target_type="tenant", target_id="*",
+                              action_type="sentinel_failure_alert", source="sentinel_patrol",
+                              result="fail",
+                              trigger_detail=f"failed={len(_items)}")
+                    db.commit()
+                except Exception as e:
+                    logger.warning(f"[Sentinel] 失败告警发出异常 tenant={_tid}: {e}")
+        _fail_note = f"，失败 {len(_failures)} 项" if _failures else ""
+        logger.info(f"[Sentinel] 巡逻完成: 停 {total_paused} 个系列 (armed={len(armed)}{_fail_note})")
         return {"sentinel_paused": total_paused, "armed_accounts": len(armed)}
     except Exception as e:
         logger.error(f"[Sentinel] 异常: {e}", exc_info=True)
