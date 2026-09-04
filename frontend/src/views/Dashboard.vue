@@ -70,7 +70,7 @@ const renderTrendCharts = () => {
   const dark = document.documentElement.dataset.theme !== 'light'
   const gridColor = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)'
   const textColor = dark ? '#8e8e93' : '#6c6c70'
-  const mk = (canvas, label, data, color) => {
+  const mk = (canvas, label, data, color, s_key = '') => {
     if (!canvas) return
     // X 轴标签：后端返 UTC ISO 时间戳 → 前端用 fmtTime 按用户显示时区转
     const fmtTrendLabel = (iso) => {
@@ -93,11 +93,18 @@ const renderTrendCharts = () => {
       return hm  // 5min/30min → HH:MM
     }
     const labels = d.labels.map(fmtTrendLabel)
+    // 昨日同期叠加（虚线灰；后端返回 {series}_yesterday 且长度一致时画——一眼看出今天比昨天好坏）
+    const yKey = s_key + '_yesterday'
+    const yData = (d[yKey] && d[yKey].length === data.length) ? d[yKey] : null
+    const datasets = [{ label, data, borderColor: color,
+      backgroundColor: color.replace(')', ',.08)').replace('rgb', 'rgba'),
+      fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }]
+    if (yData) datasets.push({ label: t('dashboard.trendYesterday'), data: yData,
+      borderColor: textColor, borderDash: [5, 4], borderWidth: 1.5,
+      pointRadius: 0, fill: false, tension: 0.4 })
     _charts.push(new Chart(canvas, {
       type: 'line',
-      data: { labels, datasets: [{ label, data, borderColor: color,
-        backgroundColor: color.replace(')', ',.08)').replace('rgb', 'rgba'),
-        fill: true, tension: 0.4, pointRadius: 3, borderWidth: 2 }] },
+      data: { labels, datasets },
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 12 } } },
@@ -106,7 +113,7 @@ const renderTrendCharts = () => {
     }))
   }
   const s = TREND_SERIES.value.find(x => x.key === trendMetric.value)
-  if (s) mk(trendCanvas.value, s.label, d[s.key] || [], s.color)
+  if (s) mk(trendCanvas.value, s.label, d[s.key] || [], s.color, s.key)
 }
 watch(trendData, () => nextTick(renderTrendCharts))
 // 主题切换：图表初始化时读主题色，切主题后需重建才能更新网格/文字颜色
@@ -433,11 +440,19 @@ const sparkPoints = (arr) => {
   const span = (max - min) || 1
   return a.map((v, i) => `${((i / (a.length - 1)) * w).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`).join(' ')
 }
+// 较昨日 ±%（今日 vs 昨日全天；昨日 0 时不显示箭头——除法无意义）
+const dodPct = (cur, yst) => {
+  const c = Number(cur) || 0, y = Number(yst) || 0
+  if (!y || y <= 0) return ''
+  const pct = ((c - y) / y) * 100
+  return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%'
+}
 const coreCards = computed(() => [
-  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : '') },
-  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions) },
+  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : ''), dod: dodPct(data.value.total_spend, data.value.yesterday_spend), dodGoodDown: true },
+  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dodPct(data.value.total_conversions, data.value.yesterday_conversions) },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
   { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas', spark: '' },  // 趋势接口无 ROAS 序列，不画
+  { label: t('dashboard.kpiLeads'), value: fmt(data.value.total_leads), mode: 'leads', sub: data.value.total_leads > 0 ? t('dashboard.kpiCpl') + ' ' + fmtUsd(data.value.total_cpl) : '' },
 ])
 const ctrDisplay = computed(() => data.value.total_impressions > 0 ? ((data.value.total_clicks / data.value.total_impressions) * 100).toFixed(2) + '%' : '—')
 const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
@@ -461,11 +476,12 @@ const toggleKpiMode = (mode) => {
   if (kpiMode.value !== null) { selectedIds.value = new Set(); detailSearch.value = '' }  // 勾选/搜索各面板共享，切换时清空
 }
 
-// ── 账户明细表（原 KPI accounts 明细分支常驻化，五视角）──
+// ── 账户明细表（原 KPI accounts 明细分支常驻化，六视角：+潜客）──
 const VIEW_TABS = computed(() => [
   { mode: 'spend', label: t('dashboard.viewSpend') },
   { mode: 'conv', label: t('dashboard.viewConv') },
   { mode: 'cpa', label: t('dashboard.viewCpa') },
+  { mode: 'leads', label: t('dashboard.viewLeads') },
   { mode: 'roas', label: t('dashboard.viewRoas') },
   { mode: 'balance', label: t('dashboard.viewBalance') },
 ])
@@ -476,6 +492,7 @@ const accountsTable = computed(() => {
   if (mode === 'spend') accs.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))
   else if (mode === 'conv') accs.sort((a, b) => (a.conversions || 0) - (b.conversions || 0))  // 低在上（无转化需关注）
   else if (mode === 'cpa') accs.sort((a, b) => (b.cpa || 0) - (a.cpa || 0))  // 高在上（成本高需关注）
+  else if (mode === 'leads') accs.sort((a, b) => (b.leads || 0) - (a.leads || 0))  // 高在上（出潜客的账户一眼可见）
   else if (mode === 'roas') accs.sort((a, b) => (a.roas || 0) - (b.roas || 0))  // 低在上（ROAS差需关注）
   else if (mode === 'balance') accs.sort((a, b) => {
     // unlimited/very_high_limit 排最后（不紧急）；limited 内 0 优先 → 低到高（越低越紧急）
@@ -489,6 +506,14 @@ const accountsTable = computed(() => {
   })
   const cols = mode === 'balance'
     ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }]
+    : mode === 'leads'
+    ? [
+        { key: 'name', label: t('dashboard.colAccount'), left: true, bold: true },
+        { key: 'leads', label: t('dashboard.colLeads'), fmt: (v) => fmt(v) || '0', bold: true },
+        { key: 'cpl', label: t('dashboard.colCpl'), fmt: (v) => v ? fmtUsd(v) : '—' },
+        { key: 'spend_usd', label: t('dashboard.colUsd'), fmt: fmtUsd },
+        { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt },
+      ]
     : [
         { key: 'name', label: t('dashboard.colAccount'), left: true, bold: mode === 'spend' },
         { key: 'spend_dual', label: t('dashboard.colSpend'), fmt: (v, a) => fmtSpendDual(a.spend, a.spend_usd, a.currency).native, bold: mode === 'spend' },
@@ -800,6 +825,13 @@ const todaySummary = computed(() => {
   return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => ({ type, count, label: notifEventLabel(type) || type }))
 })
 const focusNotifType = (type) => { notifEventFilter.value = type; notifFilter.value = 'all'; notifMode.value = 'all' }
+// 待处理条目 → 直跳广告管理器（从通知 body/title 提取账户 act_id；提取不到仍开详情抽屉）
+const pendingGoAd = (n) => {
+  const m = String(n.body || '') + ' ' + String(n.title || '')
+  const act = m.match(/act_(\d{6,})/) || m.match(/账户.{0,6}(\d{12,})/)
+  if (act) router.push({ name: 'ad-manager', query: { act: act[1] } })
+  else openNotifDrawer(n)
+}
 // 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）
 const alertEntity = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(i + 1).trim() : '' }
 const alertMainTitle = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(0, i).trim() : n.title }
@@ -1017,7 +1049,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
               <button class="um-btn" :class="{ on: spendUnit === 'native' }" @click.stop="spendUnit = 'native'">{{ t('dashboard.unitNative') }}</button>
             </span>
           </div>
-          <span class="kpi-value">{{ card.value }}</span>
+          <span class="kpi-value">{{ card.value }}<span v-if="card.dod" class="kpi-dod" :class="{ good: card.dodGoodDown ? card.dod.startsWith('-') : !card.dod.startsWith('-'), bad: card.dodGoodDown ? !card.dod.startsWith('-') : card.dod.startsWith('-') }">{{ card.dod }}</span></span>
           <span v-if="card.sub" class="kpi-sub">{{ card.sub }}</span>
           <svg v-if="card.spark" class="kpi-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">
             <polyline :points="card.spark" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
@@ -1209,7 +1241,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
               <div class="ac-strip" :class="{ calm: !pendingAlerts.length }">
                 <span class="ac-strip-label">{{ t('dashboard.acPending') }}</span>
                 <div v-if="pendingAlerts.length" class="ac-strip-items">
-                  <div v-for="n in pendingAlerts" :key="n.id" class="ac-pend" :class="n.level" @click="openNotifDrawer(n)">
+                  <div v-for="n in pendingAlerts" :key="n.id" class="ac-pend" :class="n.level" @click="pendingGoAd(n)">
                     <span class="badge-lv" :class="n.level">{{ levelLabel(n.level) }}</span>
                     <span class="ac-pend-msg">{{ alertMainTitle(n) }}</span>
                     <span v-if="alertEntity(n)" class="ac-entity">{{ alertEntity(n) }}</span>
@@ -1528,20 +1560,14 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-search::placeholder { color: var(--t3); }
 
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
-/* KPI 记分卡：≥1400 宽屏 8 卡一行（GA4 scorecard 式紧凑：标签/数值/副文案单行省略），
-   <1400 回 2×4，≤768 2 列。副文案 nowrap+ellipsis 是 8 卡一行的前提（曾折 3 行挤爆） */
-.kpi-zone { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-@media (min-width: 1400px) { .kpi-zone { grid-template-columns: repeat(8, 1fr); gap: 10px; } }
+/* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
+.kpi-zone { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (min-width: 1400px) { .kpi-zone { grid-template-columns: repeat(5, 1fr); gap: 10px; } }
 .kpi-core-grid { display: contents; }
 .kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-@media (min-width: 1400px) {
-  .kpi-card { padding: 12px 12px 10px; }
-  .kpi-value { font-size: 21px; }
-  .kpi-spark { height: 18px; }
-  .strip-metric { padding: 12px 12px 10px; }
-  .km-value { font-size: 21px; }
-  .km-label { font-size: 11px; }
-}
+.kpi-dod { font-size: 11px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+.kpi-dod.good { color: var(--success, #34c759); }
+.kpi-dod.bad { color: var(--error); }
 .kpi-card {
   position: relative; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--rs);
   padding: 14px 16px 8px; display: flex; flex-direction: column; gap: 2px;

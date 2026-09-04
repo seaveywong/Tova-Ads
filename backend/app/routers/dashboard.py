@@ -7,7 +7,7 @@ import time as _time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import text, bindparam
+from sqlalchemy import text, bindparam, func
 from ..core.database import get_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission
 from ..models.fb import Account
@@ -362,6 +362,66 @@ def dashboard(
     finally:
         _hb_db.close()
 
+    # ── 潜客维度（轮询/webhook 入库的 Instant Form 潜客，按账户本地日聚合）──
+    # 潜客系列 insights 不报 lead action，FB 转化口径看不到——潜客数/CPL 必须从 leads 表来
+    leads_by_act: dict = {}
+    try:
+        from ..models.lead import Lead
+        from zoneinfo import ZoneInfo as _ZI
+        for acc in accounts:
+            try:
+                _ls = datetime.strptime(_account_local_today(acc), "%Y-%m-%d").replace(tzinfo=_ZI(acc.timezone_name or "UTC")).astimezone(timezone.utc)
+            except Exception:
+                continue
+            _le = datetime.strptime(_account_local_today(acc), "%Y-%m-%d").replace(tzinfo=_ZI(acc.timezone_name or "UTC")).astimezone(timezone.utc) + timedelta(days=1)
+            _rows_l = _hb_db2 = None
+        # 简化：一次查询按 act 分组（窗口用各账户本地日交集的最早/最晚近似——leads 表带 act 维度）
+        # 直接对每个账户单独查（账户数 ~20-30，一次轻查询可接受）
+        _ldb = SuperSessionLocal()
+        try:
+            for acc in accounts:
+                try:
+                    _tz = _ZI(acc.timezone_name or "UTC")
+                    _loc = _account_local_today(acc)
+                    _ls = datetime.strptime(_loc, "%Y-%m-%d").replace(tzinfo=_tz).astimezone(timezone.utc)
+                    _le = _ls + timedelta(days=1)
+                except Exception:
+                    continue
+                _q = _ldb.query(Lead.ad_id, func.count(Lead.id)).filter(
+                    Lead.tenant_id == user.tenant_id,
+                    Lead.created_time >= _ls, Lead.created_time < _le,
+                )
+                leads_by_act[acc.act_id] = int((_q.count() or 0))
+        finally:
+            _ldb.close()
+    except Exception:
+        leads_by_act = {}
+    total_leads = sum(leads_by_act.values())
+    total_cpl = round(total_spend / total_leads, 2) if total_leads > 0 else 0.0
+    # 账户行挂潜客数 + CPL（该账户消耗/该账户潜客）
+    for d in account_details:
+        _n = leads_by_act.get(d.get("act_id"), 0)
+        d["leads"] = _n
+        d["cpl"] = round((d.get("spend_usd") or 0) / _n, 2) if _n > 0 else 0.0
+
+    # ── 较昨日对比（同窗口长度：今日 vs 昨日全天口径近似——用快照昨日总量）──
+    y_spend = y_conv = 0.0
+    try:
+        _ydb = SuperSessionLocal()
+        try:
+            _yesterday = (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=1)).strftime("%Y-%m-%d")
+            _yr = _ydb.execute(text(
+                "SELECT SUM(spend) AS s, SUM(conversions) AS c FROM perf_snapshots "
+                "WHERE tenant_id = :t AND snapshot_date = :d"
+            ), {"t": user.tenant_id, "d": _yesterday}).fetchone()
+            if _yr:
+                y_spend = float(_yr[0] or 0)
+                y_conv = int(_yr[1] or 0)
+        finally:
+            _ydb.close()
+    except Exception:
+        pass
+
     result = {
         "date_preset": date_preset or "custom",
         "total_spend": round(total_spend, 2),
@@ -371,6 +431,10 @@ def dashboard(
         "total_impressions": total_imp,
         "total_clicks": total_clicks,
         "total_reach": total_reach,
+        "total_leads": total_leads,
+        "total_cpl": total_cpl,
+        "yesterday_spend": round(y_spend, 2),
+        "yesterday_conversions": y_conv,
         "pause_count": pause_count,
         "pause_details": pause_details,
         "allowance_count": allowance_count,
@@ -494,6 +558,18 @@ def trend_data(
             spend.append(s); conv.append(c)
             cpa.append(round(s / c, 2) if c > 0 else None)
         result = {"labels": labels, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": "day"}
+        # ── 昨日同期叠加（today 预设才有意义；tick 粒度下 = 昨日全天同窗聚合曲线）──
+        try:
+            if date_preset == "today":
+                _ys = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+                _yparams = dict(params); _yparams["since"] = _ys; _yparams["until"] = _ys
+                _ystmt = text(sql + " GROUP BY snapshot_date ORDER BY snapshot_date").bindparams(*binds) if binds else text(sql + " GROUP BY snapshot_date ORDER BY snapshot_date")
+                _yrows = db.execute(_ystmt, _yparams).fetchall()
+                if len(_yrows) == 1:
+                    result["spend_yesterday"] = [round(float(_yrows[0].spend or 0), 2)] * len(spend)
+                    result["conversions_yesterday"] = [int(_yrows[0].conversions or 0)] * len(conv)
+        except Exception:
+            pass
         _CACHE[_tkey] = (_tnow, result)
         if len(_CACHE) > 500:
             _CACHE.clear()
@@ -537,6 +613,31 @@ def trend_data(
         spend.append(s); conv.append(c)
         cpa.append(round(s / c, 2) if c > 0 else None)
     result = {"labels": raw_times, "spend": spend, "conversions": conv, "cpa": cpa, "granularity": granularity}
+    # ── 昨日同期叠加（today：昨日同 tick 粒度曲线，同 bucket 对齐——一眼看出今天 vs 昨天节奏）──
+    try:
+        if date_preset == "today":
+            _ys = (datetime.now(BUSINESS_TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
+            _ysql = sql.replace(":since", ":ysince").replace(":until", ":yuntil")
+            _yparams = dict(params); _yparams["ysince"] = _ys; _yparams["yuntil"] = _ys
+            if sel_ids:
+                _ystmt = text(_ysql).bindparams(bindparam("act_ids", expanding=True))
+            else:
+                _ystmt = text(_ysql)
+            _yrows = db.execute(_ystmt, _yparams).fetchall()
+            _ymap = {r.bucket.isoformat(): (round(float(r.spend or 0), 2), int(r.conversions or 0)) for r in _yrows if r.bucket}
+            _ys_arr, _yc_arr = [], []
+            for _rt in raw_times:
+                if not _rt:
+                    _ys_arr.append(None); _yc_arr.append(None); continue
+                _ykey = (datetime.fromisoformat(_rt) + timedelta(days=1)).isoformat()
+                _v = _ymap.get(_ykey)
+                _ys_arr.append(_v[0] if _v else None)
+                _yc_arr.append(_v[1] if _v else None)
+            if any(v is not None for v in _ys_arr):
+                result["spend_yesterday"] = _ys_arr
+                result["conversions_yesterday"] = _yc_arr
+    except Exception:
+        pass
     _CACHE[_tkey] = (_tnow, result)
     if len(_CACHE) > 500:
         _CACHE.clear()
