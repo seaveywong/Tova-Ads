@@ -19,6 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 # 30s 内存缓存（照搬 1.0 _SUMMARY_CACHE）
 _CACHE = {}
+_CACHE_TTL = 30
 _BACKFILL_TRIED = {}   # (tenant_id, since, until) -> ts：区间历史回填防重（600s）
 _CACHE_MAX = 300  # 条目上限：key 含日期/账户组合，长期运行缓慢膨胀，超限淘汰最旧
 
