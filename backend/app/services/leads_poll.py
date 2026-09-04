@@ -63,23 +63,29 @@ def run_leads_poll():
     ads_polled = 0
     skipped_over_cap = 0
     try:
-        # 今日有消耗广告（按 账户业务日快照；spend>0 才可能产生 lead）
+        # 今日有消耗广告（spend>0 才可能产生 lead）。
+        # snapshot_date 是账户本地日（非北京日）——西时区账户的"今日"是北京日-1，
+        # 只查北京今日会漏 GMT-8 账户每天 16h → 宽一天（今日+昨日），窗口重叠兜底（可靠性审查 P1）
         from ..models.fb import Account
-        biz_like_today = datetime.now(timezone.utc).astimezone(
-            timezone(timedelta(hours=8))).strftime("%Y-%m-%d")   # 北京业务日（快照口径）
+        from sqlalchemy import or_
+        _bj = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        _days = [ _bj.strftime("%Y-%m-%d"), (_bj - timedelta(days=1)).strftime("%Y-%m-%d") ]
         rows = db.query(
-            PerfSnapshot.tenant_id, PerfSnapshot.act_id, PerfSnapshot.ad_id
-        ).join(Account, Account.act_id == PerfSnapshot.act_id).filter(
-            PerfSnapshot.snapshot_date == biz_like_today,
+            PerfSnapshot.tenant_id, PerfSnapshot.act_id, PerfSnapshot.ad_id, PerfSnapshot.spend
+        ).join(Account, (Account.act_id == PerfSnapshot.act_id) &
+                       (Account.tenant_id == PerfSnapshot.tenant_id)   # 租户关联：两租户同 act_id 曾会串（可靠性审查 P1）
+        ).filter(
+            PerfSnapshot.snapshot_date.in_(_days),
             PerfSnapshot.spend > 0,
             PerfSnapshot.platform == "fb",
             Account.is_managed.is_(True),
-            Account.account_status.notin_([2, 8, 100, 101]),
-        ).distinct().all()
+            or_(Account.account_status.is_(None),          # NULL 视为可管（guard 同口径）
+                Account.account_status.notin_([2, 8, 100, 101])),
+        ).distinct().order_by(PerfSnapshot.spend.desc()).all()   # 高消耗优先：超限时截断的是低消耗长尾而非固定一批
         if len(rows) > MAX_ADS_PER_TICK:
             skipped_over_cap = len(rows) - MAX_ADS_PER_TICK
             rows = rows[:MAX_ADS_PER_TICK]
-        # 按租户+账户分组取 token
+        # 按租户+账户分组取 token（rows 现为 4 元组，取 0/1/2）
         by_tenant: dict = {}
         for r in rows:
             by_tenant.setdefault((r[0], r[1]), []).append(r[2])
@@ -104,8 +110,9 @@ def run_leads_poll():
                         _ct = None
                     if _ct and _ct < since:
                         continue   # 窗口外（FB 过滤失效兜底）
-                    exists = db.query(Lead.id).filter(
-                        Lead.tenant_id == tenant_id, Lead.lead_id == lid).first()
+                    # lead_id 是全局唯一约束（非租户内唯一）——按全局查重：另一租户已收该 lead
+                    # 时跳过，否则插入撞唯一键 IntegrityError 炸整轮轮询（可靠性审查 P1）
+                    exists = db.query(Lead.id).filter(Lead.lead_id == lid).first()
                     if exists:
                         continue
                     db.add(Lead(

@@ -825,10 +825,13 @@ const todaySummary = computed(() => {
   return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => ({ type, count, label: notifEventLabel(type) || type }))
 })
 const focusNotifType = (type) => { notifEventFilter.value = type; notifFilter.value = 'all'; notifMode.value = 'all' }
-// 待处理条目 → 直跳广告管理器（从通知 body/title 提取账户 act_id；提取不到仍开详情抽屉）
+// 待处理条目 → 直跳广告管理器（从通知 body 提取账户 act_id；提取不到仍开详情抽屉）。
+// 通知 body 实际格式「账户：{name}（<code>{act_id}</code>）… 广告：…（<code>{ad_id}</code>）」——
+// act_id 是裸数字无 act_ 前缀；锚定「账户/Account」行首段的第一个长数字串（=act_id，避开后面的 ad_id）
 const pendingGoAd = (n) => {
-  const m = String(n.body || '') + ' ' + String(n.title || '')
-  const act = m.match(/act_(\d{6,})/) || m.match(/账户.{0,6}(\d{12,})/)
+  const m = String(n.body || '') + '\n' + String(n.title || '')
+  const seg = m.split('\n').find(l => /^(账户|Account)/.test(l)) || ''
+  const act = seg.match(/(\d{12,})/)
   if (act) router.push({ name: 'ad-manager', query: { act: act[1] } })
   else openNotifDrawer(n)
 }

@@ -368,18 +368,12 @@ def dashboard(
     try:
         from ..models.lead import Lead
         from zoneinfo import ZoneInfo as _ZI
-        for acc in accounts:
-            try:
-                _ls = datetime.strptime(_account_local_today(acc), "%Y-%m-%d").replace(tzinfo=_ZI(acc.timezone_name or "UTC")).astimezone(timezone.utc)
-            except Exception:
-                continue
-            _le = datetime.strptime(_account_local_today(acc), "%Y-%m-%d").replace(tzinfo=_ZI(acc.timezone_name or "UTC")).astimezone(timezone.utc) + timedelta(days=1)
-            _rows_l = _hb_db2 = None
-        # 简化：一次查询按 act 分组（窗口用各账户本地日交集的最早/最晚近似——leads 表带 act 维度）
-        # 直接对每个账户单独查（账户数 ~20-30，一次轻查询可接受）
+        # CPL 口径对齐消耗侧：只算勾选账户（sel_ids 过滤，与 total_spend 同集）——
+        # 曾算全租户潜客 → 勾选子集时 CPL 虚低（可靠性审查 P2）
+        _lead_accounts = [a for a in accounts if not sel_ids or a.act_id in sel_ids]
         _ldb = SuperSessionLocal()
         try:
-            for acc in accounts:
+            for acc in _lead_accounts:
                 try:
                     _tz = _ZI(acc.timezone_name or "UTC")
                     _loc = _account_local_today(acc)
@@ -387,11 +381,13 @@ def dashboard(
                     _le = _ls + timedelta(days=1)
                 except Exception:
                     continue
-                _q = _ldb.query(Lead.ad_id, func.count(Lead.id)).filter(
-                    Lead.tenant_id == user.tenant_id,
-                    Lead.created_time >= _ls, Lead.created_time < _le,
-                )
-                leads_by_act[acc.act_id] = int((_q.count() or 0))
+                # 单值 COUNT——曾用 query(bare_col, count()).count()：Query.count() 包子查询后
+                # 裸列+聚合无 GROUP BY 在 PG 必 42803，被 except 吞 → 潜客 KPI 恒 0（可靠性审查 P1）
+                leads_by_act[acc.act_id] = int(
+                    _ldb.query(func.count(Lead.id)).filter(
+                        Lead.tenant_id == user.tenant_id,
+                        Lead.created_time >= _ls, Lead.created_time < _le,
+                    ).scalar() or 0)
         finally:
             _ldb.close()
     except Exception:

@@ -1009,10 +1009,12 @@ def _inspect_account_worker(ctx: dict) -> dict:
         # action——leads 是真转化，进 either 兜底 + CPA 口径，防误杀有潜客的广告）
         try:
             from zoneinfo import ZoneInfo
+            from sqlalchemy import func as _lfunc   # 局部导入：函数后文的 `_f` 是循环内局部名，
+            # 此处直接引用会 UnboundLocalError 被吞 → leads_map 恒空 → leads 口径变死代码（可靠性审查 P0）
             _day_start_local = datetime.strptime(biz_today, "%Y-%m-%d").replace(
                 tzinfo=ZoneInfo(acc.timezone_name or "UTC")).astimezone(timezone.utc)
             from ..models.lead import Lead
-            _leads_rows = db.query(Lead.ad_id, _f.count(Lead.id)).filter(
+            _leads_rows = db.query(Lead.ad_id, _lfunc.count(Lead.id)).filter(
                 Lead.tenant_id == tenant_id,
                 Lead.created_time >= _day_start_local,
                 Lead.ad_id.in_([a.get("ad_id") for a in ads if a.get("ad_id")]),
@@ -1067,7 +1069,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         if _ad_active:
                             res["skipped_spend"] += 1  # ACTIVE 但被漏掉 = 真盲区
                             res.setdefault("skipped_ads", []).append(
-                                f"{ad.get('ad_name', ad_id)[:36]}（{ad_id}）")
+                                f"{_esc(str(ad.get('ad_name') or ad_id))[:40]}（{ad_id}）")   # _esc：TG parse_mode=HTML，未转义名会 400 静默丢送达
                 except Exception:
                     pass
                 continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
