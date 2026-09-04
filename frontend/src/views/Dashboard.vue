@@ -782,6 +782,24 @@ const toggleNotifFold = (k) => {
   s.has(k) ? s.delete(k) : s.add(k)
   notifFoldOpen.value = s
 }
+
+// ── 轻重缓急（默认视图）：模块=横板。待处理(未读严重/警告) + 今日动态摘要，全量收进「查看全部」──
+const notifMode = ref('attention')   // attention=摘要（默认）/ all=全量分组浏览
+const pendingAlerts = computed(() => (recentNotifs.value || [])
+  .filter(n => !n.read && (n.level === 'critical' || n.level === 'warning'))
+  .sort((a, b) => (a.level === 'critical' ? 0 : 1) - (b.level === 'critical' ? 0 : 1)))   // 严重在前
+const todaySummary = computed(() => {
+  const tk = _dayKey(new Date())
+  const m = new Map()
+  for (const n of recentNotifs.value || []) {
+    const d = new Date(n.created_at)
+    if (isNaN(d) || _dayKey(d) !== tk) continue
+    const k = n.event_type || 'other'
+    m.set(k, (m.get(k) || 0) + 1)
+  }
+  return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => ({ type, count, label: notifEventLabel(type) || type }))
+})
+const focusNotifType = (type) => { notifEventFilter.value = type; notifFilter.value = 'all'; notifMode.value = 'all' }
 // 标题「主文案 · 实体名」拆分（实体=账户名/系列名，chip 化展示）
 const alertEntity = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(i + 1).trim() : '' }
 const alertMainTitle = (n) => { const i = (n.title || '').lastIndexOf('·'); return i >= 0 ? n.title.slice(0, i).trim() : n.title }
@@ -1163,24 +1181,53 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <div class="card-header">
             <span class="card-title">{{ t('dashboard.alertCenter') }}<span v-if="platform !== 'all'" class="scope-chip" style="margin-left:8px">{{ platform === 'tt' ? 'TikTok' : 'Facebook' }}</span><span v-if="unreadNotifCount" class="notif-unread-badge">{{ unreadNotifCount }}</span></span>
             <div class="table-tools">
-              <div class="status-tabs">
-                <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }} {{ (recentNotifs || []).length }}</button>
-                <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }} {{ notifLevelCount('critical') }}</button>
-                <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }} {{ notifLevelCount('warning') }}</button>
-                <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }} {{ notifLevelCount('info') }}</button>
-              </div>
-              <el-select :model-value="notifEventFilter" size="small" class="filter-select" style="width: 150px"
-                         @update:model-value="v => notifEventFilter = v" :placeholder="t('dashboard.evTypeAll')">
-                <el-option value="" :label="t('dashboard.evTypeAll')" />
-                <el-option v-for="g in notifEventGroups" :key="g.type" :value="g.type" :label="`${g.label} (${g.count})`" />
-              </el-select>
-              <button class="ac-lv" :class="{ on: notifUnreadOnly }" @click="notifUnreadOnly = !notifUnreadOnly" :title="t('dashboard.unreadOnly')">
-                <el-icon><component :is="notifUnreadOnly ? 'View' : 'Hide'" /></el-icon>
+              <template v-if="notifMode === 'all'">
+                <div class="status-tabs">
+                  <button class="status-tab" :class="{ active: notifFilter === 'all' }" @click="notifFilter = 'all'">{{ t('common.all') }} {{ (recentNotifs || []).length }}</button>
+                  <button class="status-tab" :class="{ active: notifFilter === 'critical' }" @click="notifFilter = 'critical'">{{ t('dashboard.levelCritical') }} {{ notifLevelCount('critical') }}</button>
+                  <button class="status-tab" :class="{ active: notifFilter === 'warning' }" @click="notifFilter = 'warning'">{{ t('dashboard.levelWarning') }} {{ notifLevelCount('warning') }}</button>
+                  <button class="status-tab" :class="{ active: notifFilter === 'info' }" @click="notifFilter = 'info'">{{ t('dashboard.levelInfo') }} {{ notifLevelCount('info') }}</button>
+                </div>
+                <el-select :model-value="notifEventFilter" size="small" class="filter-select" style="width: 150px"
+                           @update:model-value="v => notifEventFilter = v" :placeholder="t('dashboard.evTypeAll')">
+                  <el-option value="" :label="t('dashboard.evTypeAll')" />
+                  <el-option v-for="g in notifEventGroups" :key="g.type" :value="g.type" :label="`${g.label} (${g.count})`" />
+                </el-select>
+                <button class="ac-lv" :class="{ on: notifUnreadOnly }" @click="notifUnreadOnly = !notifUnreadOnly" :title="t('dashboard.unreadOnly')">
+                  <el-icon><component :is="notifUnreadOnly ? 'View' : 'Hide'" /></el-icon>
+                </button>
+              </template>
+              <button class="copy-ids-btn" @click="notifMode = notifMode === 'attention' ? 'all' : 'attention'">
+                {{ notifMode === 'attention' ? t('dashboard.viewAll', { n: (recentNotifs || []).length }) : t('dashboard.backSummary') }}
               </button>
               <button v-if="unreadNotifCount" class="copy-ids-btn" @click="ackAllNotifs">{{ t('dashboard.markAllRead') }}</button>
             </div>
           </div>
           <div class="ac-body">
+            <!-- 默认：轻重缓急摘要（模块=横板）——待处理 + 今日动态，全量收进「查看全部」 -->
+            <template v-if="notifMode === 'attention'">
+              <div class="ac-strip" :class="{ calm: !pendingAlerts.length }">
+                <span class="ac-strip-label">{{ t('dashboard.acPending') }}</span>
+                <div v-if="pendingAlerts.length" class="ac-strip-items">
+                  <div v-for="n in pendingAlerts" :key="n.id" class="ac-pend" :class="n.level" @click="openNotifDrawer(n)">
+                    <span class="badge-lv" :class="n.level">{{ levelLabel(n.level) }}</span>
+                    <span class="ac-pend-msg">{{ alertMainTitle(n) }}</span>
+                    <span v-if="alertEntity(n)" class="ac-entity">{{ alertEntity(n) }}</span>
+                    <span class="ac-time">{{ alertTime(n) }}</span>
+                    <button class="ack-btn" @click.stop="ackNotif(n.id)">{{ t('common.confirm') }}</button>
+                  </div>
+                </div>
+                <div v-else class="ac-calm">{{ t('dashboard.acAllClear') }}</div>
+              </div>
+              <div v-if="todaySummary.length" class="ac-strip">
+                <span class="ac-strip-label">{{ t('dashboard.acToday') }}</span>
+                <div class="ac-strip-items">
+                  <button v-for="g in todaySummary" :key="g.type" class="ac-sum" @click="focusNotifType(g.type)">{{ g.label }}<b>{{ g.count }}</b></button>
+                </div>
+              </div>
+            </template>
+            <!-- 全量：按天 × 类型分块的呼吸卡流（v3）-->
+            <template v-else>
             <div v-for="d in alertDays" :key="d.key" class="ac-day">
               <div class="ac-day-label">{{ d.label }}<span class="ac-day-count">{{ d.groups.reduce((s, g) => s + g.items.length, 0) }}</span></div>
               <div v-for="grp in d.groups" :key="grp.type" class="ac-grp">
@@ -1210,6 +1257,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
               </div>
             </div>
             <div v-if="!alertDays.length" class="empty">{{ notifFilter !== 'all' || notifEventFilter || notifUnreadOnly ? t('dashboard.noNotifsLevel') : t('dashboard.noNotifs') }}</div>
+            </template>
           </div>
         </div>
       </div>
@@ -1696,7 +1744,25 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .allow-btn.remove:hover { color: var(--error); border-color: var(--error); }
 .pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; white-space: nowrap; }
 
-/* ── 告警中心（整行，1.0 记录卡范式）：徽章行 + 人话消息 + 元信息，呼吸卡流 ── */
+/* ── 告警中心 ──
+   默认=轻重缓急摘要（模块=横板）：待处理(未读严重/警告横排条目) + 今日动态(类型计数 chips)
+   查看全部=按天×类型分块的 1.0 记录卡流（徽章行+人话消息+元信息） */
+.ac-strip { display: flex; align-items: flex-start; gap: 14px; border: 1px solid var(--bd); border-radius: 10px; padding: 12px 14px; background: var(--bg2); }
+.ac-strip.calm { background: transparent; }
+.ac-strip-label { font-size: 12px; font-weight: 600; color: var(--t3); white-space: nowrap; padding-top: 7px; }
+.ac-strip-items { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.ac-pend { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg3); cursor: pointer; min-width: 0; max-width: 100%; transition: background 0.15s; }
+.ac-pend:hover { background: var(--bd); }
+.ac-pend.critical { box-shadow: inset 2px 0 0 var(--error); }
+.ac-pend.warning { box-shadow: inset 2px 0 0 var(--warning); }
+.ac-pend-msg { font-size: 12.5px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.ac-pend .ac-time { margin-left: 0; }
+.ac-pend .ack-btn { margin-top: 0; }
+.ac-calm { font-size: 13px; color: var(--t2); padding: 6px 0; }
+.ac-sum { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px solid var(--bd); border-radius: 14px; background: transparent; color: var(--t3); font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.ac-sum b { color: var(--t2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ac-sum:hover { color: var(--ac); border-color: var(--ac); }
+/* 全量视图：记录卡流 */
 .ac-lv { display: inline-flex; align-items: center; padding: 5px 9px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 6px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
 .ac-lv:hover { border-color: var(--bd2); color: var(--t2); }
 .ac-lv.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
