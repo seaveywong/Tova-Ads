@@ -1,5 +1,12 @@
 """Tove Ads API 入口。"""
 import json
+import logging
+# 可观测性底座：默认 WARNING 会吞掉所有 cron 的 INFO 痕迹（[LeadsPoll]/巡检覆盖/APScheduler
+# 注册），生产排障只能靠猜（2026-09-04 可靠性体检发现）。INFO 起步；高噪第三方库压回 WARNING。
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+for _noisy in ("httpx", "apscheduler.executors.default", "uvicorn.access"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
