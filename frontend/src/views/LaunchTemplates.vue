@@ -1459,7 +1459,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <option v-for="p in landingPages" :key="p.id" :value="p.id">{{ p.title }}（{{ p.public_url || t('launch.noUrl') }}）</option>
           </select>
         </div>
-        <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
+        <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="form.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
+        <div class="row"><label></label><span class="hint">{{ t('launch.urlPhHint') }}</span></div>
         <div class="row"><label>{{ t('launch.subcode') }}</label>
           <el-select v-model="form.subcode_slug" filterable clearable :placeholder="t('launch.subcodePlaceholder')" style="width:100%" size="small">
             <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + ' (' + subcodeStatus(s.status).label + ')'" />

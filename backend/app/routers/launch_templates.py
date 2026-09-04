@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -130,6 +131,10 @@ def list_templates(user: CurrentUser = Depends(require_permission("ads.create"))
 def create_template(body: TemplateIn,
                     user: CurrentUser = Depends(require_permission("ads.create")),
                     db: Session = Depends(get_db)):
+    try:
+        _check_url_placeholders(body.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     t = LaunchTemplate(tenant_id=user.tenant_id, created_by=user.id, status="draft", **body.model_dump())
     db.add(t)
     db.flush()
@@ -147,6 +152,10 @@ def update_template(tid: int, body: TemplateIn,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    try:
+        _check_url_placeholders(body.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     for k, v in body.model_dump().items():
         setattr(t, k, v)
     db.commit()
@@ -333,6 +342,47 @@ def _series_name(tpl: LaunchTemplate, asset, idx: int) -> str:
     return (n or f"{tpl.name_prefix}-{idx + 1}")[:100]
 
 
+# ── 追踪参数通用插值（FBInsider 对标 #10）：落地 URL 静态白名单占位符，部署时逐账户取值 ──
+# 白名单只收「部署时已知」的静态值；{{ad.id}} 明确拒绝（FB 建广告前拿不到 ad id，
+# 且子码绑 {{ad.id}} 占位符曾有像素不 fire 的事故——见 subcode-placeholder-binding-bug）
+_URL_PLACEHOLDERS = {"campaign.name", "adset.name", "account.name", "account.id",
+                     "asset.name", "template.name", "platform"}
+_URL_PH_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
+
+
+def _check_url_placeholders(url: str):
+    """校验 landing_url 占位符：白名单外一律拒绝（快失败，不留部署时静默产垃圾 URL）。"""
+    if not url or "{{" not in url:
+        return
+    for m in _URL_PH_RE.finditer(url):
+        key = m.group(1)
+        if key == "ad.id":
+            raise ValueError(
+                "落地页 URL 不支持 {{ad.id}}：FB 建广告前拿不到广告 ID（子码绑此占位符曾导致像素不 fire）。"
+                "请改用 {{campaign.name}} / {{account.id}} 等静态值")
+        if key not in _URL_PLACEHOLDERS:
+            raise ValueError(f"未知占位符 {{{{{key}}}}}，支持：{', '.join(sorted(_URL_PLACEHOLDERS))}")
+
+
+def _interp_landing_url(url: str, *, campaign_name: str = "", account_name: str = "",
+                        account_id: str = "", asset_name: str = "",
+                        template_name: str = "", platform: str = "fb") -> str:
+    """把白名单占位符替换为部署时实值（URL 编码——名字含空格/中文/& 不会打断 query）。
+    adset 名与 campaign 同源（部署链恒为 `{系列名} 组`）；无占位符原样返回（旧模板零开销）。"""
+    if not url or "{{" not in url:
+        return url
+    from urllib.parse import quote
+    adset_name = f"{campaign_name} 组" if campaign_name else ""
+    vals = {"campaign.name": campaign_name, "adset.name": adset_name,
+            "account.name": account_name, "account.id": account_id,
+            "asset.name": asset_name, "template.name": template_name, "platform": platform}
+
+    def _sub(m):
+        v = str(vals.get(m.group(1)) or "")
+        return quote(v, safe="") if v else ""
+    return _URL_PH_RE.sub(_sub, url)
+
+
 @router.get("/{tid}/reuse-eligible")
 def reuse_eligible_accounts(tid: int,
                             user: CurrentUser = Depends(require_permission("ads.create")),
@@ -415,6 +465,17 @@ def preflight_deploy(tid: int, body: PreflightIn,
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    # 追踪参数插值：预检就按示例系列/账户解出真实 URL（用户核对的就是这个）；
+    # 占位符非法在这里快失败，不等到部署
+    try:
+        _check_url_placeholders(t.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _lp_url = _interp_landing_url(
+        t.landing_url, campaign_name=_prefix,
+        account_name=(acc.name if acc else ""), account_id=body.act_id,
+        asset_name=((asset.name or asset.filename or "") if asset else ""),
+        template_name=t.name, platform="fb")
     try:
         campaign_payload = build_campaign(
             name=_prefix, objective=t.objective,
@@ -425,7 +486,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
             name=f"{_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
             daily_budget=daily_budget_fb, objective=t.objective,
             conversion_goal=t.conversion_goal, page_id=page_id, pixel_id=pixel_id,
-            landing_url=t.landing_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
+            landing_url=_lp_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
             targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
             destination_type_override=t.destination_type or "", extra=advanced,
@@ -433,13 +494,13 @@ def preflight_deploy(tid: int, body: PreflightIn,
         if asset and asset.type == "video":
             creative_payload = build_creative(
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-                landing_url=t.landing_url, headline=t.headline, body=t.body,
+                landing_url=_lp_url, headline=t.headline, body=t.body,
                 cta_type=t.cta_type, video_id="<部署时按账户上传缓存>",
             )
         else:
             creative_payload = build_creative(
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-                landing_url=t.landing_url, headline=t.headline, body=t.body,
+                landing_url=_lp_url, headline=t.headline, body=t.body,
                 cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
             )
     except ValueError as e:
@@ -688,10 +749,17 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
         # 随机组合素材 AI 文案（与 FB 链一致，增多样性；TT 创意只有 ad_text 无独立标题）
         _rh, _rb = pick_random_copy(asset)
         _body = _rb or (tpl.body or "")
+        # 追踪参数插值（与 FB 链同口径）：{{campaign.name}}=系列名（批量=素材名）
+        _tt_sn = name_prefix_override or tpl.name_prefix
+        _lp_url = _interp_landing_url(
+            tpl.landing_url, campaign_name=_tt_sn,
+            account_name=(_acc.name if _acc else ""), account_id=item.act_id,
+            asset_name=((asset.name or asset.filename or "") if asset else ""),
+            template_name=tpl.name, platform="tt")
         r = deploy_one_account_tt(
             tt, advertiser_id=item.act_id, objective=tpl.objective,
             conversion_goal=tpl.conversion_goal, pixel_code=pixel_code,
-            landing_url=tpl.landing_url, daily_budget=daily_budget_tt,
+            landing_url=_lp_url, daily_budget=daily_budget_tt,
             budget_mode=tpl.budget_mode, name_prefix=name_prefix_override or tpl.name_prefix,
             headline=_rh or (tpl.headline or ""), body=_body, cta_type=tpl.cta_type,
             image_file_id=image_file_id, video_file_id=video_file_id,
@@ -747,6 +815,16 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int, batc
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    # 追踪参数插值（与 FB 预检同口径）：非法占位符快失败 + 示例解值
+    try:
+        _check_url_placeholders(t.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _lp_url = _interp_landing_url(
+        t.landing_url, campaign_name=_prefix,
+        account_name=(acc.name if acc else ""), account_id=body.act_id,
+        asset_name=((asset.name or asset.filename or "") if asset else ""),
+        template_name=t.name, platform="tt")
     try:
         campaign_payload = build_tt_campaign(
             name=_prefix, objective=t.objective,
@@ -759,7 +837,7 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int, batc
             pixel_code=pixel_code or "<部署时从 TT 像素库解析>",
             budget_mode=t.budget_mode, targeting=targeting)
         creative_payload = build_tt_creative(
-            ad_text=t.body or "", cta_type=t.cta_type, landing_url=t.landing_url,
+            ad_text=t.body or "", cta_type=t.cta_type, landing_url=_lp_url,
             video_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "video") else "",
             image_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "image") else "")
     except ValueError as e:
@@ -1183,9 +1261,17 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
     if page_post_id:
         sdb.commit()  # 持久化 page_posts 缓存
+    # 追踪参数插值：逐系列/逐账户解出真实 URL（{{campaign.name}}=系列名，批量模式=素材名）
+    _sn = series_name or tpl.name_prefix
+    _acc = sdb.query(Account).filter(Account.act_id == item.act_id).first()
+    _lp_url = _interp_landing_url(
+        tpl.landing_url, campaign_name=_sn,
+        account_name=(_acc.name if _acc else ""), account_id=item.act_id,
+        asset_name=((asset.name or asset.filename or "") if asset else ""),
+        template_name=tpl.name, platform="fb")
     return deploy_one_account(
         fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-        page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
+        page_id=page_id, pixel_id=pixel_id, landing_url=_lp_url,
         daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
         name_prefix=series_name or tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
         image_hash=image_hash, video_id=video_id,
@@ -1751,10 +1837,17 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, _page_id, body=_body)
             if page_post_id:
                 sdb.commit()
+            # 追踪参数插值（retry 单模板路径；批量 retry 走 _deploy_item_fb_batch→_deploy_series_fb 已接）
+            _rt_acc = sdb.query(Account).filter(Account.act_id == it.act_id).first()
+            _lp_url = _interp_landing_url(
+                tpl.landing_url, campaign_name=tpl.name_prefix,
+                account_name=(_rt_acc.name if _rt_acc else ""), account_id=it.act_id,
+                asset_name=((asset.name or asset.filename or "") if asset else ""),
+                template_name=tpl.name, platform="fb")
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
-                landing_url=tpl.landing_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
+                landing_url=_lp_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
                 video_id=video_id,

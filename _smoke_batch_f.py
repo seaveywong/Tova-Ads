@@ -69,6 +69,18 @@ else:
     r = httpx.put(f"{BASE}/notifications/tg/prefs", headers=H, json={"warning": True, "info": False}, timeout=30)
     check("PUT prefs unbound rejected 400", r.status_code == 400, str(r.status_code))
 
+# ---- F6: tracking-param interpolation (static whitelist; {{ad.id}} rejected) ----
+r = httpx.post(f"{BASE}/launch-templates", headers=H,
+               json={"name": "smoke-adid-tmp", "name_prefix": "SmokeTmp", "daily_budget": 5,
+                     "pixel_id": "111111111111111",
+                     "landing_url": "https://x.test/lp?u={{ad.id}}"}, timeout=30)
+check("{{ad.id}} rejected at template save", r.status_code == 400 and "ad.id" in r.text, f"{r.status_code} {r.text[:100]}")
+r = httpx.post(f"{BASE}/launch-templates", headers=H,
+               json={"name": "smoke-adid-tmp2", "name_prefix": "SmokeTmp", "daily_budget": 5,
+                     "pixel_id": "111111111111111",
+                     "landing_url": "https://x.test/lp?u={{bogus.key}}"}, timeout=30)
+check("unknown placeholder rejected", r.status_code == 400, f"{r.status_code} {r.text[:100]}")
+
 # ---- F2: batch preflight series_count (create temp template; preflight is read-only, no FB calls) ----
 r = httpx.get(f"{BASE}/assets", headers=H, timeout=60)
 assets = r.json() if isinstance(r.json(), list) else (r.json() or {}).get("items") or []
@@ -78,7 +90,8 @@ if media:
     ids = [m["id"] for m in media[:3]]
     r = httpx.post(f"{BASE}/launch-templates", headers=H,
                    json={"name": "smoke-batch-tmp", "name_prefix": "SmokeTmp", "asset_id": ids[0], "daily_budget": 5,
-                         "pixel_id": "111111111111111"}, timeout=30)
+                         "pixel_id": "111111111111111",
+                         "landing_url": "https://x.test/lp?c={{campaign.name}}&a={{account.name}}&i={{account.id}}&p={{platform}}"}, timeout=30)
     if r.status_code in (200, 201):
         tpl_id = r.json().get("id")
     r = httpx.post(f"{BASE}/launch-templates/{tpl_id}/preflight", headers=H,
@@ -88,6 +101,10 @@ if media:
         check("batch preflight series_count = assets x accounts", j.get("series_count") == len(ids) * 2,
               f"sc={j.get('series_count')} want={len(ids) * 2}")
         check("batch preflight batch_assets echo", isinstance(j.get("batch_assets"), list) and len(j["batch_assets"]) == len(ids))
+        # F6: 追踪参数插值断言——预检 payload 里的 URL 已解值（无残留 {{，含 account.id/platform）
+        _all = json.dumps(j.get("adset") or {}) + json.dumps(j.get("creative") or {})
+        check("URL placeholders interpolated (no {{ left)", "{{" not in _all, _all[:160])
+        check("URL carries account.id + platform", act in _all and "p=fb" in _all, _all[:160])
     else:
         check("batch preflight (env-limited, endpoint reached)", r.status_code < 500, f"{r.status_code} {r.text[:120]}")
     if tpl_id:
