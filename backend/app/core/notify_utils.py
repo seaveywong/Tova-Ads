@@ -237,11 +237,17 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
     text = f"{icon} <b>{title}</b>\n{body}"[:1000]
     sent_keys: set[tuple] = set()  # (bot_token, chat_id) 去重
 
-    # 用户级：critical → 全租户已绑用户；其余 → role∈roles 的用户
+    # 用户级：critical → 全租户在职成员中已绑用户；其余 → role∈roles 的用户。
+    # 在职判定 join TenantMembership（复审B P1）：remove_member 只删 membership 不删 TG 绑定，
+    # 不过滤则离职成员的残留绑定会持续收到含账户名/金额的 critical 告警。
     if level == "critical":
+        active_uids = [m.user_id for m in db.query(TenantMembership).filter(
+            TenantMembership.tenant_id == tenant_id,
+        ).all()]
         ubindings = db.query(UserTgBinding).filter(
             UserTgBinding.tenant_id == tenant_id,
-        ).all()
+            UserTgBinding.user_id.in_(active_uids),
+        ).all() if active_uids else []
     else:
         user_ids = [m.user_id for m in db.query(TenantMembership).filter(
             TenantMembership.tenant_id == tenant_id,
@@ -274,13 +280,17 @@ TG_SEND_ATTEMPTS = 3           # 1 次首发 + 2 次重试
 TG_RETRY_DELAYS = (1.0, 3.0)   # 重试退避（秒），仅对网络异常/5xx
 TG_FAIL_ALERT_THRESHOLD = 3    # 同 chat 连续失败 N 次 → 通道故障告警
 _tg_fail_lock = threading.Lock()
-# {chat_id: 连续失败次数}（进程内计数，成功即清零；跨 worker 各自一份，
-# 任一 worker 撞满阈值即告警——通道故障是全局性的，误报代价低于漏报）
-_tg_fail_streak: dict[str, int] = {}
+# {(bot_token, chat_id): 连续失败次数}（进程内计数，成功即清零；跨 worker 各自一份，
+# 任一 worker 撞满阈值即告警——通道故障是全局性的，误报代价低于漏报。
+# 键含 bot_token：同一 chat 绑在多租户（bot 各异）时，A 租户 bot 挂不该被 B 租户的成功清零（复审B P2））
+_tg_fail_streak: dict[tuple, int] = {}
 
 
-def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None) -> bool:
+def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None,
+             track_key: tuple | None = None) -> bool:
     """实际发 TG（失败不阻断）。reply_markup: inline_keyboard（加白按钮等）。
+    track_key: (bot_token, chat_id)——成功时清零该键的失败计数（None 则只按 chat_id 清，
+    兼容手动测试等无 bot 维度调用点）。
     重试：网络异常（连接/超时）与 5xx 重试 2 次（退避 1s/3s）；
     4xx 是确定性失败（chat 不存在/token 被拒/被拉黑）重试无意义，直接放弃。
     返回 True=送达（HTTP 200）；False=最终失败。"""
@@ -298,6 +308,9 @@ def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None) -> bool
             last_err = f"network: {e}"
             continue
         if resp.status_code == 200:
+            if track_key is not None:
+                with _tg_fail_lock:
+                    _tg_fail_streak.pop(track_key, None)
             return True
         last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
         if resp.status_code >= 500:  # TG 侧临时故障 → 可重试
@@ -309,24 +322,25 @@ def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None) -> bool
 
 def _tg_send_tracked(db: Session, tenant_id: int, bot_token: str, chat_id: str,
                      text: str, reply_markup=None) -> bool:
-    """_tg_send + 通道健康追踪：成功清零该 chat 连续失败计数；
+    """_tg_send + 通道健康追踪：成功清零该 (bot, chat) 连续失败计数；
     失败 +1，撞满 TG_FAIL_ALERT_THRESHOLD → 站内 critical（tg_channel_down）。"""
-    if _tg_send(bot_token, chat_id, text, reply_markup):
-        with _tg_fail_lock:
-            _tg_fail_streak.pop(chat_id, None)
+    key = (bot_token, chat_id)
+    if _tg_send(bot_token, chat_id, text, reply_markup, track_key=key):
         return True
-    _emit_tg_channel_down_if_due(db, tenant_id, chat_id)
+    _emit_tg_channel_down_if_due(db, tenant_id, chat_id, fail_key=key)
     return False
 
 
-def _emit_tg_channel_down_if_due(db: Session, tenant_id: int, chat_id: str) -> None:
-    """同 chat 连续 TG_FAIL_ALERT_THRESHOLD 次发送失败 → 站内 critical
+def _emit_tg_channel_down_if_due(db: Session, tenant_id: int, chat_id: str,
+                                 fail_key: tuple | None = None) -> None:
+    """同 (bot, chat) 连续 TG_FAIL_ALERT_THRESHOLD 次发送失败 → 站内 critical
     「TG 通道连续发送失败」（emit 到 owner 角色，send_tg=False——通道本身在故障）。
     dedup 6h：action_logs(action_type=tg_channel_down_alert, target_id=chat_id)，
     窗口过后若仍失败会再告（持续故障持续可见）。"""
+    _k = fail_key or chat_id
     with _tg_fail_lock:
-        _tg_fail_streak[chat_id] = _tg_fail_streak.get(chat_id, 0) + 1
-        n = _tg_fail_streak[chat_id]
+        _tg_fail_streak[_k] = _tg_fail_streak.get(_k, 0) + 1
+        n = _tg_fail_streak[_k]
     if n < TG_FAIL_ALERT_THRESHOLD:
         return
     if dedup_recent(db, tenant_id, "tg_channel_down_alert", target_id=chat_id,

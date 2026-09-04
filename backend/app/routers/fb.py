@@ -1364,7 +1364,8 @@ def unmanage_account(
               actor_user_id=user.id, target_type="account", target_id=aid,
               action_type="unmanage", source="user", result="success",
               trigger_detail=f"active_ads={active_ads} platform={_plat}",
-              metadata={"active_ads": active_ads, "platform": _plat})
+              metadata={"active_ads": active_ads, "platform": _plat},
+              platform=_plat)   # 复审C P2：漏传时 TT 账户取消纳管被记成 fb，审计平台列失真
     db.commit()
     return {"unmanaged": True, "act_id": aid, "active_ads_at_removal": active_ads}
 

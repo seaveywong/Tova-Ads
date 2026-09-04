@@ -27,6 +27,23 @@ from ..core.ad_ops import ZERO_DECIMAL as _NO_DECIMAL
 _BUDGET_MAX_USD = 5000.0
 _BUDGET_MAX_STEP = 5.0
 
+
+def _budget_guard_check(amount, currency, btype, old_local):
+    """预算写入的资金护栏（FB set_budget / TT tt_set_budget 共用，复审C P1：
+    TT 曾整条绕过）。绝对上限（>$5000/日 USD 等值）+ 步进上限（>旧值×5）+ 未知币种拒绝。
+    返回 None=放行；dict=拒绝（调用方直接 return）。old_local 为旧预算本币值（可为 None=未设）。"""
+    usd_eq = to_usd(amount, currency)
+    if usd_eq is None:
+        return {"success": False, "error": "该账户币种汇率未知，无法校验预算上限，已拒绝修改（防误放大）",
+                "reason": "unsupported_currency"}
+    if btype == "daily" and usd_eq > _BUDGET_MAX_USD:
+        return {"success": False, "error": "预算超安全上限，需分步调整",
+                "reason": f"日预算上限 ${_BUDGET_MAX_USD:.0f} 等值，本次约 ${usd_eq:.0f}"}
+    if old_local and amount > old_local * _BUDGET_MAX_STEP:
+        return {"success": False, "error": "预算超安全上限，需分步调整",
+                "reason": f"单次不能超过旧值 {_BUDGET_MAX_STEP:.0f} 倍（旧值 {old_local:.2f} {currency}）"}
+    return None
+
 # 状态字段（ad/adset/campaign 通用）
 _LEVEL_FIELDS = {
     "ad": "id,name,status,effective_status,configured_status",
@@ -58,9 +75,16 @@ def _classify_write_error(e: FbApiError) -> str:
     return e.friendly
 
 
+# live-status 10s 缓存的失效标记（复审C P2）：写状态/预算后 bump，routers/ads 比对缓存时间戳
+# 决定是否重新拉 FB——否则用户刚暂停点「实时核验」会命中旧缓存回 ACTIVE，以为暂停失败。
+import time as _time_mod
+LIVE_STALE_MARKS: dict[str, float] = {}   # {f"{tenant_id}:{act_id}": mark_ts}
+
+
 def _patch_cache_status(db: Session, tenant_id: int, act_id: str, node_id: str,
                         level: str, new_status: str, new_effective: str):
     """写后 patch ads_cache JSON（避免等 15min 同步才看到变更）。"""
+    LIVE_STALE_MARKS[f"{tenant_id}:{act_id}"] = _time_mod.time()
     row = db.query(AdsCache).filter(
         AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id).first()
     if not row:
@@ -213,17 +237,11 @@ def set_budget(db: Session, tenant_id: int, act_id: str, node_id: str,
 
         # 资金安全上限：绝对上限（>$5000/日 USD 等值）+ 步进上限（>旧值×5）。
         # 防手滑/单位错（如本币金额当 USD 填）；超限一律拒绝（无 force 通道），指引分步调整。
-        usd_eq = to_usd(amount, currency)
-        if usd_eq is None:
-            return {"success": False, "error": "该账户币种汇率未知，无法校验预算上限，已拒绝修改（防误放大）", "reason": "unsupported_currency"}
-        if btype == "daily" and usd_eq > _BUDGET_MAX_USD:
-            return {"success": False, "error": "预算超安全上限，需分步调整",
-                    "reason": f"日预算上限 ${_BUDGET_MAX_USD:.0f} 等值，本次约 ${usd_eq:.0f}"}
         old_local = from_minor_units(
             before.get("daily_budget" if btype == "daily" else "lifetime_budget"), currency)
-        if old_local and amount > old_local * _BUDGET_MAX_STEP:
-            return {"success": False, "error": "预算超安全上限，需分步调整",
-                    "reason": f"单次不能超过旧值 {_BUDGET_MAX_STEP:.0f} 倍（旧值 {old_local:.2f} {currency}）"}
+        _guard = _budget_guard_check(amount, currency, btype, old_local)
+        if _guard:
+            return _guard
 
         minor = _to_minor(amount, currency)
         if btype == "lifetime":
@@ -447,6 +465,13 @@ def tt_set_budget(db: Session, tenant_id: int, act_id: str, node_id: str,
             return {"success": False, "error": "该对象使用日预算，不支持改总预算"}
         if btype == "daily" and has_lifetime and not has_daily:
             return {"success": False, "error": "该对象使用总预算(lifetime)，不支持改日预算"}
+
+        # 资金护栏（复审C P1：TT 曾整条绕过——手滑大额直接下发）。TT before.budget 是整本币，
+        # 与 FB from_minor_units 后的 old_local 同为本币口径，同一守卫直接复用。
+        _old_tt = float(before.get("budget") or 0) or None
+        _guard = _budget_guard_check(amount, currency, btype, _old_tt)
+        if _guard:
+            return _guard
 
         amount_int = int(round(amount))  # TT 整本币（无 ×100）
         want_mode = _TT_BUDGET_MODE[btype]

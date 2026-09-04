@@ -103,12 +103,13 @@ def dashboard(
         _bf_min = (datetime.now(BUSINESS_TZ) - timedelta(days=6)).strftime("%Y-%m-%d")
         _bf_floor = (datetime.now(BUSINESS_TZ) - timedelta(days=89)).strftime("%Y-%m-%d")
         if since < _bf_min and since >= _bf_floor and background_tasks is not None:
-            _bf_key = (user.tenant_id, since, until)
+            _bf_key = (user.tenant_id, platform, since, until)   # 含 platform（复审C P2）：backfill 只拉 FB，TT 视图不该触发 FB 回填白耗配额
             _bf_now = _time.time()
             if _bf_now - _BACKFILL_TRIED.get(_bf_key, 0) > 600:
                 _BACKFILL_TRIED[_bf_key] = _bf_now
-                from ..services.guard_engine import backfill_history_range
-                background_tasks.add_task(backfill_history_range, user.tenant_id, since, until)
+                if platform == "fb":
+                    from ..services.guard_engine import backfill_history_range
+                    background_tasks.add_task(backfill_history_range, user.tenant_id, since, until)
                 if len(_BACKFILL_TRIED) > 200:
                     _BACKFILL_TRIED.clear()
     except Exception:

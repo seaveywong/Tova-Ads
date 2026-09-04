@@ -86,7 +86,8 @@ def _maybe_low_balance_alert(db, tenant_id: int, acc, threshold_usd: float) -> b
                     db, tenant_id, act_id=acc.act_id, name=acc.name,
                     avail_usd=0.0, threshold_usd=threshold_usd, basis="prepaid_balance")
             return False
-        avail_usd, basis = round(to_usd(bal, acc.currency), 2), "prepaid_balance"
+        _tu = to_usd(bal, acc.currency)   # to_usd 未知币种返 None（复审A P2）——round(None) 会 TypeError，被外层吞掉后低额告警永远发不出
+        avail_usd, basis = (round(_tu, 2) if _tu is not None else None), "prepaid_balance"
     if avail_usd is not None and avail_usd < threshold_usd:
         return emit_low_balance_alert_if_due(
             db, tenant_id, act_id=acc.act_id, name=acc.name,

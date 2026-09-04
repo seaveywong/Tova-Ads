@@ -1154,7 +1154,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
           <el-icon v-if="card.clickable" class="stat-arrow" :class="{ rotated: landingKpiExpanded === i }"><ArrowDown /></el-icon>
         </div>
       </div>
-      <div v-show="mainTab === 'landing'" v-if="landingKpiDetail" class="kpi-detail-panel">
+      <div v-show="mainTab === 'landing'" v-if="landingKpiDetail" class="kpi-detail-panel landing-detail">
         <div class="detail-header">
           <span>{{ landingKpiDetail.title }}</span>
           <div class="detail-tools">
@@ -1199,7 +1199,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
       <div v-if="landingTrend.labels?.length" class="trend-main-canvas lt"><canvas ref="ltCanvas"></canvas></div>
       <div v-else class="trend-empty">{{ t('dashboard.noLandingTrendData') }}</div>
     </div>
-      <div v-show="mainTab === 'landing'" class="card" v-loading="landingLoading">
+      <div v-show="mainTab === 'landing'" class="card landing-subcodes" v-loading="landingLoading">
         <div class="card-header">
           <span class="card-title">{{ t('dashboard.subcodePerformance') }}</span>
           <div class="table-tools">
@@ -1637,8 +1637,12 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
   .strip-metric:nth-child(odd) { border-left: none; }
   .strip-metric:nth-child(n+3) { border-top: 1px solid var(--bd); }
   .trend-main-canvas { height: 240px; }
-  /* 单列重排（堆叠是布局不是折叠）：KPI → 待处理事项 → 趋势 → 账户明细 → 守护 → 告警 */
-  .dashboard { display: flex; flex-direction: column; }
+  /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 待处理事项 → 趋势 → 账户明细 → 守护 → 告警；
+     落地页 Tab 指标 → 明细 → 趋势 → 子码 → 屏蔽明细（trend-main 两个 Tab 都排 3，互不干扰）。
+     间距用 gap：margin-top 只命中 .dashboard 直接子级，main-split/side-stack 变 contents 后
+     孙级卡拿不到 margin 曾零间距贴边（复审D P1） */
+  .dashboard { display: flex; flex-direction: column; gap: 16px; }
+  .dashboard > * + * { margin-top: 0; }
   .main-split, .side-stack { display: contents; }
   .kpi-zone { order: 1; }
   .todo-card { order: 2; }
@@ -1646,6 +1650,10 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
   .accounts-card { order: 4; }
   .guard-card { order: 5; }
   .notif-card { order: 6; }
+  .stat-grid { order: 1; }
+  .landing-detail { order: 2; }
+  .landing-subcodes { order: 4; }
+  .block-detail { order: 5; }
   .card-header .search-input { width: 120px; }
   .ph-title { font-size: 18px; }
 }

@@ -467,22 +467,26 @@ def _budget_guard_400(t: LaunchTemplate) -> None:
 def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0) -> int:
     """模板预算 → 该账户本币最小单位（FB daily_budget）。
     优先 budget_usd（美元，按账户 currency + 汇率转）；无则用 legacy daily_budget。
-    空预算不再回退 $2000——静默兜底=钱上瞎猜，直接 ValueError（端点层 _budget_guard_400 先行 400）。"""
+    空预算不再回退 $2000——静默兜底=钱上瞎猜，直接 ValueError（端点层 _budget_guard_400 先行 400）。
+    legacy daily_budget 也过 $5000 USD 等值上限（复审C P2：曾三处守卫都只看 budget_usd，裸透传绕护栏）。"""
     if not ((tpl.budget_usd or 0) > 0 or (tpl.daily_budget or 0) > 0):
         raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
+    q = sdb.query(Account).filter(Account.act_id == act_id)
+    if tenant_id:
+        q = q.filter(Account.tenant_id == tenant_id)
+    acc = q.first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    if not cr and currency.upper() != "USD":
+        raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
+    rate = cr.rate if cr else 1.0
     if tpl.budget_usd and tpl.budget_usd > 0:
-        q = sdb.query(Account).filter(Account.act_id == act_id)
-        if tenant_id:
-            q = q.filter(Account.tenant_id == tenant_id)
-        acc = q.first()
-        currency = (acc.currency if acc else "USD") or "USD"
-        cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
-        if not cr and currency.upper() != "USD":
-            raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
-        rate = cr.rate if cr else 1.0
         return usd_to_fb_amount(tpl.budget_usd, currency, rate)
+    _usd_eq = (tpl.daily_budget or 0) / 100.0 / rate   # FB minor units 本币 → major 本币 → USD
+    if _usd_eq > _BUDGET_MAX_USD:
+        raise ValueError(f"模板 legacy 日预算约 ${_usd_eq:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请改用预算(USD)字段并调低")
     return tpl.daily_budget
 
 
@@ -496,16 +500,19 @@ def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
         raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
+    q = sdb.query(Account).filter(Account.act_id == act_id)
+    if tenant_id:
+        q = q.filter(Account.tenant_id == tenant_id)
+    acc = q.first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    if not cr and currency.upper() != "USD":
+        raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
     if tpl.budget_usd and tpl.budget_usd > 0:
-        q = sdb.query(Account).filter(Account.act_id == act_id)
-        if tenant_id:
-            q = q.filter(Account.tenant_id == tenant_id)
-        acc = q.first()
-        currency = (acc.currency if acc else "USD") or "USD"
-        cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
-        if not cr and currency.upper() != "USD":
-            raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种），无法转换预算。请在系统设置手动配置或先 USD 部署")
         return usd_to_tt_amount(tpl.budget_usd, currency, cr.rate if cr else 1.0)
+    _usd_eq = (tpl.daily_budget or 0) / 100.0 / (cr.rate if cr else 1.0)   # 同 FB：legacy 也过 USD 等值上限（复审C P2）
+    if _usd_eq > _BUDGET_MAX_USD:
+        raise ValueError(f"模板 legacy 日预算约 ${_usd_eq:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请改用预算(USD)字段并调低")
     return max(1, int(round(tpl.daily_budget / 100)))
 
 
@@ -1333,19 +1340,36 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     return {"job_id": job_id, "item_id": item_id, "retrying": True}
 
 
-def _find_existing_campaign(fb, act_id: str, name_prefix: str) -> str:
-    """查账户下同名 campaign（部署链 campaign 名=name_prefix 原样透传，见 deploy_one_account）。
+def _find_existing_campaign(fb, act_id: str, name_prefix: str, prefer_id: str = "") -> str:
+    """查账户下可复用的 campaign（部署链 campaign 名=name_prefix 原样透传，见 deploy_one_account）。
     命中返回 campaign_id，未命中返空串。campaigns edge 不支持 name 等值 filtering →
-    拉 id+name 本地比对（get_paged 自动翻页）。查询失败返空串（不阻断重试，保持原行为）。"""
-    if not (name_prefix or "").strip():
+    拉 id+name 本地比对（get_paged 自动翻页）。查询失败返空串（不阻断重试，保持原行为）。
+    复审C P1：只认「非 ARCHIVED/DELETED 且下面挂了 adset」的 campaign——上次 attempt 建完
+    campaign 在 adset/ad 撞错失败的裸 campaign、或用户已归档的同名旧 campaign，命中即标
+    success 会假成功（用户以为在投，实际零广告在跑）。多只候选时优先上次 attempt 已存的 id。"""
+    if not (name_prefix or "").strip() and not prefer_id:
         return ""
     try:
-        camps = fb.get_paged(f"act_{act_id}/campaigns", {"fields": "id,name"})
+        camps = fb.get_paged(f"act_{act_id}/campaigns", {"fields": "id,name,effective_status"})
     except Exception:
         return ""
+    _dead = {"ARCHIVED", "DELETED"}
+    cands: list[str] = []
     for c in camps:
-        if (c.get("name") or "") == name_prefix:
-            return str(c.get("id") or "")
+        cid = str(c.get("id") or "")
+        if not cid or str(c.get("effective_status") or "").upper() in _dead:
+            continue
+        if prefer_id and cid == str(prefer_id):
+            cands.insert(0, cid)  # 上次 attempt 的 id 最优先
+        elif (c.get("name") or "") == name_prefix:
+            cands.append(cid)
+    for cid in cands:
+        try:
+            adsets = fb.get(f"{cid}/adsets", {"fields": "id", "limit": 5})
+        except Exception:
+            continue   # 查询失败不认（不能确认有广告链就不赌）
+        if (adsets.get("data") or []):
+            return cid
     return ""
 
 
@@ -1417,9 +1441,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
             # 幂等防重（P0-9）：上次 attempt 可能已把广告建进 FB（超时/读响应失败误标 fail），
-            # 盲重试=同账户再建一份双份预算。先查同名 campaign（名=name_prefix），命中→
+            # 盲重试=同账户再建一份双份预算。先查同名 campaign（名=name_prefix，且必须挂着
+            # adset 的才认——裸 campaign 假 success 见 _find_existing_campaign 注释），命中→
             # 复用已存在 id 标 success 跳过重建；未命中→正常重建。
-            _dup_camp = _find_existing_campaign(fb, it.act_id, tpl.name_prefix)
+            _dup_camp = _find_existing_campaign(fb, it.act_id, tpl.name_prefix,
+                                                prefer_id=(it.campaign_id or ""))
             if _dup_camp:
                 it.campaign_id = _dup_camp
                 it.status = "success"; it.error = None; it.error_code = None

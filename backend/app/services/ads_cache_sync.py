@@ -50,7 +50,7 @@ def run_ads_cache_sync():
             from ..core.notify_utils import emit_notification, dedup_recent
             from ..core.i18n import notify_text, tenant_locale
             for tid, n in _no_token.items():
-                if dedup_recent(db, tid, "sync_stalled", "ads_cache", 24 * 3600):
+                if dedup_recent(db, tid, "sync_stalled", "ads_cache", 24 * 60):   # 参数是分钟——曾写 24*3600=60 天，critical 发一条静默俩月（复审A P2）
                     continue
                 _loc = tenant_locale(db, tid)
                 _title, _body = notify_text(_loc, "sync_stalled", n=n)

@@ -351,7 +351,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
-            _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8])),
+            _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
         ).all()
         fb_accounts = [a for a in accounts if (a.platform or "fb") != "tt"]
         tt_accounts = [a for a in accounts if (a.platform or "fb") == "tt"]
@@ -502,7 +502,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             _fin_accs = db.query(Account).filter(
                 Account.tenant_id == tenant_id,
                 Account.is_managed.is_(True),
-                _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8])),
+                _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
             ).all()
             for _fa in _fin_accs:
                 if (_fa.platform or "fb") == "tt":
@@ -528,7 +528,8 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
         # 完成通知（TG + 站内）与汇总留痕（守护页「暂停记录」tab 数据源）——
         # 曾只落 state kv：TG/通知中心无任何记录，除触发者外无人知晓
         try:
-            from ..core.notify_utils import emit_notification, notify_text, tenant_locale
+            from ..core.notify_utils import emit_notification
+            from ..core.i18n import notify_text, tenant_locale   # notify_text/tenant_locale 定义在 i18n——曾误从 notify_utils 导入，运行时 ImportError 被 except 吞掉，完成通知/留痕从未发出（复审B P1）
             _loc = tenant_locale(db, tenant_id)
             _n_camp = _st.get("campaigns") or _st.get("paused") or 0
             _n_ads = _st.get("paused_ads", 0)

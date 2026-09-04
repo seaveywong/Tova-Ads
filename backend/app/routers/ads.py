@@ -470,8 +470,11 @@ def ads_live_status(
     _plat = _acc_platform(acc)
     _key = f"{user.tenant_id}:{aid}"
     _now_ts = time.time()
+    from ..services.ad_ops import LIVE_STALE_MARKS   # 写路径失效标记（复审C P2）
     _ent = _LIVE_STATUS_CACHE.get(_key)
-    if _ent and _now_ts - _ent[0] < _LIVE_STATUS_TTL:
+    # 写路径打过失效标记（刚暂停/改预算）→ 缓存作废重拉
+    _stale = LIVE_STALE_MARKS.get(_key, 0.0)
+    if _ent and _now_ts - _ent[0] < _LIVE_STATUS_TTL and _ent[0] > _stale:
         return {**_ent[1], "cached": True}
     client = client_for_account(db, user.tenant_id, aid, "read")
     if client is None:

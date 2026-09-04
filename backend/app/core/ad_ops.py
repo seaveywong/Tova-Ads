@@ -13,13 +13,14 @@ from .tt_client import TtApiError
 from .ad_builder import build_campaign, build_adset, build_creative
 
 # Meta 官方零小数币种，全仓唯一真相源（FB amount 单位 = 整本币，其余 ×100 进分）。
-# services/ad_ops._NO_DECIMAL 已改为 import 此表；guard_engine._NO_DECIMAL_CURRENCIES 与
-# core/tt_client._TT_ZERO_DECIMAL 仍是旧表（BE-1 待统一）。
+# 全仓引用：services/ad_ops._NO_DECIMAL / guard_engine._NO_DECIMAL_CURRENCIES / tt_client._TT_ZERO_DECIMAL。
+# PYG/XPF（复审C P1）：Meta 官方 offset=1 零小数，曾在换表时被误删——漏列会把预算 100× 放大下发。
 ZERO_DECIMAL = {
     "JPY", "KRW", "VND", "CLP", "COP", "HUF", "ISK",
     "IDR", "KHR", "LAK", "MMK", "NGN", "PKR", "TWD",
     "UGX", "XAF", "XOF", "RWF", "VUV",
     "BIF", "DJF", "GNF", "KMF",
+    "PYG", "XPF",
 }
 
 

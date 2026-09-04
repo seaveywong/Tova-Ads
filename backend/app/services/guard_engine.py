@@ -1588,10 +1588,12 @@ def run_inspection(force: bool = False):
             # 取已纳管账户：仅排除死状态（DISABLED=2/CLOSED=8，P0-5）——未结清3/受限7/宽限期9 的
             # 账户仍可能投放花钱，必须继续巡检（曾 ==1 全排除：账户一受限就漏管漏止损）；
             # NULL 视为可管（未知≠死）；已取消纳管的软删账户照旧跳过（保留历史不巡检）
+            # 死状态集（复审A P2）：2 禁用/8 待结算/100 待关闭/101 已关闭——花不了钱，巡检白耗
+            # 配额；3 未结清/7 受限/9 宽限仍可能投放，继续管。与下方哨兵/紧急暂停同口径。
             accounts = db.query(Account).filter(
                 Account.tenant_id == tenant_id,
                 or_(Account.account_status.is_(None),
-                    Account.account_status.notin_([2, 8])),
+                    Account.account_status.notin_([2, 8, 100, 101])),
                 Account.is_managed.is_(True),
             ).all()
 
@@ -1852,7 +1854,8 @@ def to_usd(amount: float, currency: str) -> float | None:
     fx = _fx_map()
     if cur in fx and fx[cur] > 0:
         return amount / fx[cur]  # CurrencyRate: 1 USD = rate × 本币 → USD = amount / rate
-    return amount * CURRENCY_TO_USD.get(cur)  # 表里没有 → 硬编码兜底；也没有 → None（未知币种）
+    _r = CURRENCY_TO_USD.get(cur)  # 表里没有 → 硬编码兜底
+    return amount * _r if _r is not None else None  # 也没有 → None（复审C P0：曾写 amount*.get(cur)，float×None 是 TypeError 不是 None，全部 None 防护变死代码）
 
 
 # 汇率缓存（1h TTL；首次调用从 CurrencyRate 表懒加载，止损热路径不每条广告查 DB）
@@ -2165,18 +2168,13 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
         # 保活广告永不停（哨兵跳过 [Tova-保活]，同 FB）
         if "[Tova-保活]" in ad_name:
             continue
-        since = datetime.now(timezone.utc) - timedelta(hours=1)
-        already = db.query(ActionLog).filter(
-            ActionLog.tenant_id == acc.tenant_id,
-            ActionLog.target_id == ad_id,
-            ActionLog.action_type == "pause",
-            ActionLog.trigger_type == "sentinel",
-            ActionLog.platform == "tt",
-            ActionLog.created_at >= since,
-        ).first()
-        if already:
-            continue
+        # 不做日志去重（复审A P1）：get_active_ads 本身就是状态过滤后的实时清单——
+        # 出现在列表里=实际在投（地面真相），日志命中就跳过曾让 TT 广告漏停整小时
+        # （FB 侧同根因已修）。重复停对已停广告幂等；通知侧用 1h 去重防刷屏。
         try:
+            # 通知去重要在 write_log 之前查（autoflush 会让自己刚写的日志立刻可见，
+            # 放后面=永命中=永不通知）；去重键=1h 内同 ad 的 pause 日志（上一轮已写过）
+            _notify_ok = not dedup_recent(db, acc.tenant_id, "pause", ad_id, 60)
             tt.update_status(ad_id, "PAUSED", "ad", acc.act_id)  # opt_status=DISABLE
             paused += 1
             write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",
@@ -2184,13 +2182,14 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
                       action_type="pause", source="sentinel_patrol", result="success",
                       trigger_type="sentinel", platform="tt",
                       trigger_detail=f"[TT] sentinel armed, ad {ad_name} 直接停")
-            _loc = tenant_locale(db, acc.tenant_id)
-            _t_sp, _b_sp = notify_text(_loc, "sentinel_pause_ad",
-                                       name=acc.name, act_id=acc.act_id,
-                                       ad_name=ad_name or ad_id, ad_id=ad_id)
-            emit_notification(db, tenant_id=acc.tenant_id, level="critical",
-                              event_type="sentinel_pause", trace_id=trace_id,
-                              title=_t_sp, body=_b_sp, platform="tt")
+            if _notify_ok:
+                _loc = tenant_locale(db, acc.tenant_id)
+                _t_sp, _b_sp = notify_text(_loc, "sentinel_pause_ad",
+                                           name=acc.name, act_id=acc.act_id,
+                                           ad_name=ad_name or ad_id, ad_id=ad_id)
+                emit_notification(db, tenant_id=acc.tenant_id, level="critical",
+                                  event_type="sentinel_pause", trace_id=trace_id,
+                                  title=_t_sp, body=_b_sp, platform="tt")
             db.commit()
         except Exception as e:
             logger.warning(f"[Sentinel][TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}")
@@ -2224,10 +2223,10 @@ def run_sentinel_patrol():
             (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)  # noqa: E712
         ).all()
         for acc in armed:
-            # 仅死状态跳过（P0-5）：DISABLED(2)/CLOSED(8) 花不了钱，停是马后炮；
+            # 仅死状态跳过（P0-5）：2 禁用/8 待结算/100 待关闭/101 已关闭——花不了钱，停是马后炮；
             # 宽限期9/受限7/未结清3 仍可能投放，继续管（曾 !=1 全跳过：账户一受限哨兵就漏管）。
             # 恢复到非死状态后哨兵自然恢复生效（armed 仍在，account_sync 刷状态后下轮就停）。
-            if acc.account_status in (2, 8):
+            if acc.account_status in (2, 8, 100, 101):
                 continue
             # 预热账户哨兵也跑（只跳过保活系列）
             if (acc.platform or "fb") == "tt":
@@ -2299,9 +2298,14 @@ def run_sentinel_patrol():
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
                     _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
                                       f"停系列 {camp_id} 失败: {e.friendly}"))
-        # 一轮巡逻按租户聚合通知（明细 ≤10 行，全量见守护页「暂停记录」）
+        # 一轮巡逻按租户聚合通知（明细 ≤10 行，全量见守护页「暂停记录」）。
+        # 通知 30min/租户去重（复审A P1）：重停是每轮该做的（kill-switch 语义，pause 不粘/被
+        # 重启就再停），但通知不能跟着每 3 分钟刷一条——sentinel_pause 在 NO_CAP 豁免风暴上限，
+        # 无去重=持续异常时 20 条/小时。首轮必发（无日志命中），异常持续时最多 1 条/30min。
         for _tid, _items in (_paused_by_tenant or {}).items():
             try:
+                if dedup_recent(db, _tid, "sentinel_pause_batch_alert", "*", 30):
+                    continue
                 _loc = tenant_locale(db, _tid)
                 _lines = [f"· {n}（{a}）：{c}（{cid}）" for n, a, c, cid in _items[:10]]
                 if len(_items) > 10:
@@ -2311,6 +2315,11 @@ def run_sentinel_patrol():
                 emit_notification(db, tenant_id=_tid, level="critical",
                                   event_type="sentinel_pause", trace_id=trace_id,
                                   title=_t_sb, body=_b_sb, platform="fb")
+                write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="sentinel",
+                          target_type="tenant", target_id="*",
+                          action_type="sentinel_pause_batch_alert", source="sentinel_patrol",
+                          result="success",
+                          trigger_detail=f"paused={len(_items)}")
                 db.commit()
             except Exception as e:
                 logger.warning(f"[Sentinel] 聚合通知失败 tenant={_tid}: {e}")
