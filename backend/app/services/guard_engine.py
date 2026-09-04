@@ -75,8 +75,10 @@ RULE_DEFAULTS = {
                          "consecutive_days": 1, "cooldown_hours": 24},
 }
 
-# 学习期保护默认（system_settings.guard_learning_hours 可覆盖；0=关）：创建 < N 小时的广告不动
-DEFAULT_LEARNING_HOURS = 24.0
+# 学习期保护默认（system_settings.guard_learning_hours 可覆盖；0=关）：创建 < N 小时的广告不动。
+# 默认 0=不保护——用户明确"从来不允许有保护期"（止损优先于 FB 学习期，2026-09-04）；
+# 曾默认 24h（879e3ec 批量带入，未经逐项确认），导致新广告空耗 $51 不被停
+DEFAULT_LEARNING_HOURS = 0.0
 # 巡检并发默认（system_settings.guard_concurrency，1-8）
 DEFAULT_CONCURRENCY = 4
 
