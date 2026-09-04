@@ -100,6 +100,14 @@ NOTIFY = {
             "en": "No successful inspection heartbeat for over {minutes} minutes.\nThe guard engine may be down — stop-loss/budget alerts are inactive, please investigate the toveads service immediately.",
         },
     },
+    # 单账户巡检停滞（watchdog per-account 检测：全局心跳正常≠每个账户都被巡到）
+    "inspection_stale_accounts": {
+        "title": {"zh": "🔴 {n} 个账户超过30分钟未被巡检", "en": "🔴 {n} Accounts Not Inspected for 30+ Minutes"},
+        "body": {
+            "zh": "以下账户超过 30 分钟无成功巡检记录（无令牌/insights 拉取失败/引擎异常），止损对其可能失效。名单：",
+            "en": "The accounts below have no successful inspection for over 30 minutes (no token / insights fetch failure / engine error); stop-loss may be inactive for them. List:",
+        },
+    },
     # ── 止损 / 哨兵 ──
     "rule_pause": {
         "title": {"zh": "止损【{category}】· {name}", "en": "Stop-Loss [{category}] · {name}"},
@@ -185,6 +193,22 @@ NOTIFY = {
         "body": {
             "zh": "本轮有 {n} 条今日有消耗的广告被排除在巡检外（active_ids 拉取失败/ads_cache 为空），止损规则对它们失效，请检查令牌/同步。",
             "en": "This round {n} ads with today's spend were excluded from inspection (active_ids fetch failed / ads_cache empty), stop-loss rules are inactive for them, please check token/sync.",
+        },
+    },
+    # 每轮整账户跳过聚合（无令牌/insights 失败的账户——止损对其失效但曾只留服务日志）
+    "inspection_skipped": {
+        "title": {"zh": "🟡 本轮 {n} 个账户未被巡检", "en": "🟡 {n} Accounts Skipped This Round"},
+        "body": {
+            "zh": "本轮巡检跳过了以下账户（无令牌/insights 拉取失败），止损对其失效，请检查令牌与授权。名单：",
+            "en": "This inspection round skipped the following accounts (no token / insights fetch failure); stop-loss is inactive for them. Please check tokens and authorization. List:",
+        },
+    },
+    # live /ads 拉取连续降级（连续多轮 cache 兜底——巡检覆盖降级为 15min 缓存口径）
+    "live_fetch_degraded": {
+        "title": {"zh": "🟡 live 广告拉取连续 {streak} 轮降级", "en": "🟡 Live Ad Fetch Degraded for {streak} Rounds"},
+        "body": {
+            "zh": "连续 {streak} 轮 live /ads 拉取失败或为空（本轮 {n} 个账户用 ads_cache 兜底），巡检覆盖降级为 15 分钟缓存口径，请检查令牌/限流。",
+            "en": "Live /ads fetch has failed or returned empty for {streak} consecutive rounds ({n} accounts fell back to the ads_cache this round); inspection coverage is degraded to the 15-minute cache scope. Please check tokens and rate limits.",
         },
     },
     # ── 预算进度 ──

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { GET, POST, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
-import { accountStatus } from '../composables/useStatus'
+import { accountStatus, disableReason } from '../composables/useStatus'
 import { fmtTime, userTz } from '../composables/useTz'
 import { DATE_PRESETS } from '../composables/useDateRange'
 import { usePlatform, platformQuery } from '../composables/usePlatform'
@@ -608,7 +608,11 @@ const kpiDetail = computed(() => {
       cols: [
         { key: 'name', label: t('dashboard.colAccount'), left: true },
         { key: 'act', label: t('dashboard.colAccountId'), fmt: (v, a) => a.act_id },
-        { key: 'st', label: t('common.status'), fmt: (v, a) => accountStatus(a.account_status).label },
+        // 状态+禁用原因同行（不可用账户第一问"为什么坏"——FB disable_reason 枚举映射）
+        { key: 'st', label: t('common.status'), fmt: (v, a) => {
+          const _dr = disableReason(a.disable_reason)
+          return accountStatus(a.account_status).label + (_dr ? ` · ${t('ads.drPrefix')}${_dr.label}` : '')
+        } },
       ],
     }
   }
@@ -1183,7 +1187,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
             <tbody>
               <tr v-for="acc in filteredAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (accountView === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
                 <td v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
-                  <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
+                  <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span><span v-if="acc.group_label" class="grp-chip" :title="acc.group_label">{{ acc.group_label }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
                   <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
                 </td>
               </tr>
@@ -1809,6 +1813,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-header { padding: 12px 16px; border-bottom: 1px solid var(--bd); display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; color: var(--t1); }
 .detail-close { cursor: pointer; color: var(--t3); font-size: 18px; }
 .detail-close:hover { color: var(--t1); }
+/* 分组小 chip（与平台 chip 同排；组管理在 Ads 页） */
+.grp-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; margin-right: 6px; border-radius: 4px; background: var(--bg3); color: var(--t2); font-size: 10px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 /* 平台小标（plat-chip）已收敛到 main.css 全局类 */
 .detail-table { width: 100%; border-collapse: collapse; }
 .detail-table th { padding: 8px 16px; font-size: 12px; font-weight: 500; color: var(--t3); border-bottom: 1px solid var(--bd); white-space: nowrap; }

@@ -3,7 +3,7 @@
 // 用法：<TgManager ref="tg" /> + tg.value.open()（仪表盘/设置页通用）
 import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GET, POST, DELETE } from '../api'
+import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 defineOptions({ inheritAttrs: false })
@@ -20,6 +20,8 @@ const waiting = ref(false)
 const manual = ref({ chat_id: '', saving: false })
 const team = ref({ loading: false, members: [] })
 const canManage = ref(false)
+// TG 通知偏好（④白名单矩阵）：warning/info 可关，critical 恒推（后端强制，UI 只作锁定展示）
+const prefs = ref({ bound: false, levels: { warning: true, info: true } })
 
 const bindings = computed(() => userB.value.bindings || [])
 
@@ -31,12 +33,14 @@ const fmtTs = (iso) => {
 const load = async () => {
   loading.value = true
   try {
-    const [bi, ub] = await Promise.all([
+    const [bi, ub, pf] = await Promise.all([
       GET('/notifications/tg/bot-info'),
       GET('/notifications/tg/user-binding'),
+      GET('/notifications/tg/prefs'),
     ])
     botInfo.value = bi
     userB.value = ub
+    prefs.value = pf
     if (!ub.bound) tab.value = 'add'
     try { canManage.value = ((await GET('/auth/me')).permissions || []).includes('members.manage') } catch {}
     await refreshCode()
@@ -124,6 +128,22 @@ const sendTest = async () => {
   } catch (e) { ElMessage.error(e.message || t('tg.opFail')) }
 }
 
+// 偏好开关：el-change 即时 PUT 保存，失败回滚开关状态（不留在"已保存"假象里）
+const savePrefs = async (key) => {
+  const prev = !prefs.value.levels[key]
+  try {
+    const r = await PUT('/notifications/tg/prefs', {
+      warning: prefs.value.levels.warning,
+      info: prefs.value.levels.info,
+    })
+    prefs.value.levels = r.levels
+    ElMessage.success(t('tg.prefsSaved'))
+  } catch (e) {
+    prefs.value.levels[key] = prev
+    ElMessage.error(e.message || t('tg.opFail'))
+  }
+}
+
 const bindManual = async () => {
   if (!manual.value.chat_id.trim()) return
   manual.value.saving = true
@@ -184,6 +204,23 @@ load()
           <div class="tg-actions">
             <button class="btn" @click="sendTest">{{ t('tg.sendTest') }}</button>
             <button class="btn primary" @click="tab = 'add'; refreshCode()">{{ t('tg.addAnother') }}</button>
+          </div>
+          <!-- 通知范围（④白名单矩阵）：critical 锁定恒推，warning/info 开关即时保存 -->
+          <div class="tg-prefs">
+            <div class="tg-prefs-title">{{ t('tg.prefsTitle') }}</div>
+            <div class="tg-prefs-row">
+              <span class="lbl">{{ t('tg.prefsCritical') }}</span>
+              <span class="lock">🔒 {{ t('tg.prefsLocked') }}</span>
+            </div>
+            <div class="tg-prefs-row">
+              <span class="lbl">{{ t('tg.prefsWarning') }}</span>
+              <el-switch v-model="prefs.levels.warning" size="small" @change="savePrefs('warning')" />
+            </div>
+            <div class="tg-prefs-row">
+              <span class="lbl">{{ t('tg.prefsInfo') }}</span>
+              <el-switch v-model="prefs.levels.info" size="small" @change="savePrefs('info')" />
+            </div>
+            <div class="tg-note">{{ t('tg.prefsNote') }}</div>
           </div>
           <div class="tg-note">{{ t('tg.multiNote') }}</div>
         </div>
@@ -249,6 +286,11 @@ load()
 .tg-badge { font-weight: 600; font-size: 13px; }
 .tg-row-sub { font-size: 12px; color: var(--tx-3, #999); }
 .tg-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.tg-prefs { margin-top: 14px; border-top: 1px dashed var(--bd); padding-top: 10px; }
+.tg-prefs-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.tg-prefs-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; }
+.tg-prefs-row .lbl { font-size: 13px; }
+.tg-prefs-row .lock { font-size: 12px; color: var(--tx-3, #999); }
 .tg-note { margin-top: 8px; font-size: 12px; color: var(--tx-3, #999); }
 .tg-step { font-size: 13px; margin: 10px 0 8px; display: flex; gap: 8px; align-items: center; }
 .tg-step .n { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--el-color-primary, #409eff); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }

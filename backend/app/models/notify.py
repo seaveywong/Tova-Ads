@@ -40,3 +40,6 @@ class UserTgBinding(Base):
     chat_id = Column(Text, nullable=False)
     verified_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # TG 通知偏好（FBInsider ④白名单矩阵）：JSON {"levels":{"warning":true,"info":true}}。
+    # NULL=未设置=全推（fail-open，零迁移负担）；critical 恒推是代码强制，不存此字段。
+    prefs = Column(Text)

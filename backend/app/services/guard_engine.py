@@ -141,6 +141,58 @@ def _acc_platform(acc) -> str:
     return "tt" if (getattr(acc, "platform", None) or "fb") == "tt" else "fb"
 
 
+def _patch_cache_after_pause(db, tenant_id: int, act_id: str, platform: str,
+                             node_id: str, level: str) -> None:
+    """暂停成功后回写 ads_cache（逻辑照 ad_ops._patch_cache_status 三层按 id 匹配——不直接
+    import：ad_ops 反向 import 本模块 to_usd 会循环）。不回写 → 下轮 live /ads 已排除暂停
+    对象、cache 仍 ACTIVE → coverage_lost 自我误报（生产"7条未被评估"噪声根因）。
+    级联：campaign/adset 级暂停连带旗下对象一并 PAUSED（FB/TT 状态传播，live /ads 同样
+    排除它们；只 patch 系列本体的话旗下广告在 cache 仍 ACTIVE，哨兵 campaign 级暂停照样误报）。
+    行不存在/JSON 损坏静默跳过（15min 全量同步自愈）。level 仅级联判定用，三层按 id 匹配不变。"""
+    try:
+        row = db.query(AdsCache).filter(
+            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+            AdsCache.platform == platform).first()
+        if not row or not node_id:
+            return
+        changed_any = False
+        for field in ("campaigns_json", "adsets_json", "ads_json"):
+            raw = getattr(row, field)
+            if not raw:
+                continue
+            try:
+                items = json.loads(raw)
+                if not isinstance(items, list):
+                    continue
+                changed = False
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    _hit = str(it.get("id") or "") == str(node_id)
+                    if not _hit and field == "adsets_json" and level == "campaign":
+                        _hit = str(it.get("campaign_id") or "") == str(node_id)
+                    elif not _hit and field == "ads_json":
+                        _hit = ((level == "campaign" and str(it.get("campaign_id") or "") == str(node_id))
+                                or (level == "adset" and str(it.get("adset_id") or "") == str(node_id)))
+                    if _hit:
+                        it["status"] = "PAUSED"
+                        it["effective_status"] = "PAUSED"
+                        it["configured_status"] = "PAUSED"
+                        changed = True
+                if changed:
+                    setattr(row, field, json.dumps(items, ensure_ascii=False))
+                    changed_any = True
+            except Exception:
+                continue
+        if changed_any:
+            db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _ad_id_of(a: dict) -> str:
     """广告行 id 归一（FB 对象=id / TT 对象=ad_id）。"""
     return str(a.get("ad_id") or a.get("id") or "")
@@ -823,7 +875,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
     armed = bool(ctx.get("armed", False))  # 哨兵armed：跳规则评估，快照/上报照跑（主循环注释）
     res = {"tenant_id": tenant_id, "act_id": acc.act_id, "evaluated": 0, "hits": 0,
            "paused": 0, "scaled": 0, "skipped_spend": 0, "learning_skipped": 0,
-           "paused_details": [], "scale_details": [], "events": [], "error": None}
+           "paused_details": [], "scale_details": [], "events": [], "error": None,
+           "skip_reasons": [], "live_fallback": False}
     events = res["events"]
     db = SuperSessionLocal()
     scaled_targets: set = set()  # 本账户本轮已扩量目标（同组多广告防重复；跨账户无交集）
@@ -835,10 +888,13 @@ def _inspect_account_worker(ctx: dict) -> dict:
             from ..core.fb_tokens import tt_client_for_account
             fb, cred = tt_client_for_account(db, tenant_id, acc.act_id, "read")
             if not fb:
+                # 无令牌静默 return 曾只留 dedup 过滤后的孤儿告警——本轮跳过原因回传主循环聚合告警
+                res["skip_reasons"].append(f"{acc.name}({acc.act_id}): 无令牌")
                 return res
         else:
             cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
             if not cred:
+                res["skip_reasons"].append(f"{acc.name}({acc.act_id}): 无令牌")
                 return res
             fb = FbClient(decrypt(cred.access_token_enc))
         _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）
@@ -856,7 +912,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                            currency=(acc.currency or "?"))
                 emit_notification(db, tenant_id=tenant_id, level="critical",
                                   event_type="unsupported_currency", trace_id=trace_id,
-                                  title=_t_uc, body=_b_uc, platform=platform)
+                                  title=_t_uc, body=_b_uc, platform=platform, act_id=acc.act_id)
                 write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                           target_type="account", target_id=acc.act_id,
                           action_type="unsupported_currency_alert", source="guard",
@@ -894,6 +950,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                         for _a in _cache_ads})
                     if _cache_ids:
                         active_ids = _cache_ids
+                        res["live_fallback"] = True  # cache 顶替 live（主循环降级 streak 统计+心跳后缀）
                         logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE")
             except Exception:
                 pass
@@ -915,6 +972,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
             logger.warning(f"[Guard] 账户 {acc.act_id} 读 insights 失败: {e.friendly}")
             _cred = cred
             _alias = (_cred.alias if _cred else "") or ""
+            # 三类白名单已有专项告警（token_expired/permissions/rate_limited），其余只 logger.warning
+            # ——跳过原因全记回传主循环聚合告警（聚合侧 dedup 6h 挡频，不与专项告警叠加成 spam）
+            res["skip_reasons"].append(f"{acc.name}({acc.act_id}): insights失败-{e.category or '未知'}")
             if e.category == "token_expired":
                 if _cred:
                     _cred.status = "expired"
@@ -930,7 +990,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
                     emit_notification(db, tenant_id=tenant_id, level="critical",
                         event_type="account_permission_error",
-                        title=_title, body=_body, platform=platform)
+                        title=_title, body=_body, platform=platform, act_id=acc.act_id)
                     write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
                         target_type="account", target_id=acc.act_id,
                         action_type="account_permission_error", source="guard",
@@ -1343,6 +1403,10 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 action_text = f"已暂停{label} PAUSED" + ("（已核验）" if verified else "（未核验）")
                                 paused_ok = True
                                 pause_verified = verified
+                                # 暂停成功回写 ads_cache（根除 coverage_lost 自我误报：live /ads 已
+                                # 排除暂停对象、cache 仍 ACTIVE → 下轮误报"未被评估"）
+                                _patch_cache_after_pause(db, tenant_id, acc.act_id, platform, pid,
+                                                         {"广告": "ad", "组": "adset", "系列": "campaign"}[label])
                                 break
                             except (FbApiError, TtApiError) as _pause_err:
                                 # 记录平台 code/错误原文供排障（交接包 pitfall#7：不丢弃错误码）
@@ -1455,7 +1519,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 ratio=f"{acc_tick_spend / _avg7:.1f}" if _avg7 > 0 else "∞")
                             emit_notification(db, tenant_id=tenant_id, level="warning",
                                               event_type="spend_spike", trace_id=trace_id,
-                                              title=_t_sk, body=_b_sk, platform="fb")
+                                              title=_t_sk, body=_b_sk, platform="fb",
+                                              act_id=acc.act_id)
                             # dedup_recent 查 action_logs——emit 后必须写同名 log，
                             # 否则下轮查无记录每 5 分钟重发（曾因此刷屏）
                             write_log(db, tenant_id=tenant_id, trace_id=trace_id,
@@ -1567,6 +1632,7 @@ def run_inspection(force: bool = False):
     多 worker 进程：advisory lock 101 保证每轮只有一个 worker 真跑（防 TG spam）。
     force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
     """
+    global _LIVE_FALLBACK_STREAK  # live 拉取降级连续轮数（进程内计数，见模块常量区）
     lock = acquire_run_lock(101)
     if not lock:
         return {"skipped": "lock_busy"}
@@ -1580,6 +1646,7 @@ def run_inspection(force: bool = False):
     total_skipped_spend = 0  # 有消耗但被 active_ids 过滤掉的广告数（覆盖丢失，止损盲区）
     _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
     _tenant_skipped_names: dict = {}  # tenant_id -> [广告名（id）]——告警带名单（用户第一问"哪些"）
+    _tenant_skipped_accs: dict = {}  # tenant_id -> ["账户名(act_id): 原因"]——本轮整账户跳过清单（聚合告警）
     paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
     scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
 
@@ -1670,6 +1737,8 @@ def run_inspection(force: bool = False):
             if _sk > 0:
                 _tenant_skipped[_res["tenant_id"]] = _tenant_skipped.get(_res["tenant_id"], 0) + _sk
                 _tenant_skipped_names.setdefault(_res["tenant_id"], []).extend(_res.get("skipped_ads") or [])
+            # 整账户跳过（无令牌/insights 失败）——按租户分桶，轮末聚合告警（曾只剩服务日志一条 warning）
+            _tenant_skipped_accs.setdefault(_res["tenant_id"], []).extend(_res.get("skip_reasons") or [])
             for _e in (_res.get("events") or []):
                 try:
                     if _e.get("kind") == "log":
@@ -1686,13 +1755,50 @@ def run_inspection(force: bool = False):
         logger.info(f"[Guard] 巡检完成: 评估 {total_evaluated} 条广告, "
                     f"命中 {total_hits}, 停止 {total_paused}, 扩量 {total_scaled}, "
                     f"学习期跳过 {total_learning} (LIVE，按 rule.action)")
+        # ── 心跳动态后缀："评估0条"无法区分预期（哨兵armed全停）vs 故障（拉取失败）——生产曾
+        # 158 轮 0 条无人察觉。跳过/兜底计数让心跳自解释。──
+        _all_skip = [s for _lst in _tenant_skipped_accs.values() for s in _lst]
+        _n_no_token = sum(1 for s in _all_skip if "无令牌" in s)
+        _n_fetch_fail = sum(1 for s in _all_skip if "insights失败" in s)
+        _n_fallback = sum(1 for _r in results if _r.get("live_fallback"))
+        _n_armed = sum(1 for t in tasks if t.get("armed"))
+        _why = ""
+        if total_evaluated == 0 and tasks:
+            if _n_armed == len(tasks):
+                _why = "（哨兵armed-全部跳过）"
+            else:
+                _why = "（live广告清单为空-可能全部已暂停或拉取失败-见兜底计数）"
+        if _all_skip:
+            _why += f" · 跳过{len(_all_skip)}账户({_n_no_token}无令牌,{_n_fetch_fail}拉取失败)"
+        if _n_fallback:
+            _why += f" · 兜底{_n_fallback}账户(cache顶替live)"
         # 巡检心跳（watchdog 用：长时间无成功心跳 = 巡检停滞）
         write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                   target_type="scheduler", action_type="inspection_heartbeat",
                   source="scheduled", result="success",
                   trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条 · 停{total_paused} · "
                                  f"扩量{total_scaled} · 学习期跳过{total_learning} · "
-                                 f"跳过{total_skipped_spend}条有消耗广告")
+                                 f"跳过{total_skipped_spend}条有消耗广告{_why}")
+        # ── live 拉取降级 streak：连续 ≥3 轮有账户 cache 兜底 → 降级告警（1h/tenant1，与
+        # watchdog 同口径——平台级基础设施问题）。进程内计数，多 worker 各自计数可接受
+        # （巡检有 advisory lock 单进程跑）。偶发一轮抖动不告。──
+        if _n_fallback > 0:
+            _LIVE_FALLBACK_STREAK += 1
+        else:
+            _LIVE_FALLBACK_STREAK = 0
+        _degraded = (_LIVE_FALLBACK_STREAK >= _LIVE_FALLBACK_ALERT_STREAK
+                     and not dedup_recent(db, 1, "live_fetch_degraded", "*", 60))
+        if _degraded:
+            _loc = tenant_locale(db, 1)
+            _t_lf, _b_lf = notify_text(_loc, "live_fetch_degraded",
+                                       streak=_LIVE_FALLBACK_STREAK, n=_n_fallback)
+            emit_notification(db, tenant_id=1, level="warning",
+                              event_type="live_fetch_degraded", trace_id=trace_id,
+                              title=_t_lf, body=_b_lf, platform="fb")
+            write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
+                      target_type="scheduler", target_id="*",
+                      action_type="live_fetch_degraded", source="guard", result="fail",
+                      trigger_detail=f"streak={_LIVE_FALLBACK_STREAK} fallback_accounts={_n_fallback}")
         # 覆盖丢失告警：按租户分桶（原实现用循环残留 tenant_id → 发错租户+压制真盲区租户的告警）
         for _tid, _skipped in _tenant_skipped.items():
             if _skipped <= 0:
@@ -1718,6 +1824,25 @@ def run_inspection(force: bool = False):
                 event_type="coverage_lost", trace_id=trace_id,
                 title=_t_cl, body=_b_cl, platform="fb",
             )
+        # ── 整账户跳过聚合告警：无令牌/insights 失败的账户曾只留一条服务日志——止损对其
+        # 失效但用户无感。按租户聚合一条 warning（6h 去重；token 三类白名单已有专项告警，
+        # dedup 挡频不叠加 spam；明细 ≤5，全量见日志中心）。──
+        for _tid, _sk_list in _tenant_skipped_accs.items():
+            if not _sk_list or dedup_recent(db, _tid, "inspection_skipped", "*", 360):
+                continue
+            write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
+                      target_type="account", target_id="*",
+                      action_type="inspection_skipped", source="guard", result="fail",
+                      trigger_detail=f"skipped={len(_sk_list)}")
+            _loc = tenant_locale(db, _tid)
+            _t_ik, _b_ik = notify_text(_loc, "inspection_skipped", n=len(_sk_list))
+            _lines = [f"· {x}" for x in _sk_list[:5]]
+            if len(_sk_list) > 5:
+                _lines.append(f"… 共 {len(_sk_list)} 个")
+            _b_ik = _b_ik + "\n" + "\n".join(_lines)
+            emit_notification(db, tenant_id=_tid, level="warning",
+                              event_type="inspection_skipped", trace_id=trace_id,
+                              title=_t_ik, body=_b_ik, platform="fb")
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
                 "scaled": total_scaled, "learning_skipped": total_learning,
@@ -1742,6 +1867,13 @@ def run_inspection(force: bool = False):
 
 # 巡检停滞阈值（分钟）：超过此无成功心跳 = 停滞（3 个 5-min 周期）
 INSPECTION_STALL_MIN = 15
+# 单账户停滞阈值（分钟）：managed 账户超过此时长无 last_inspected_at = 漏巡（watchdog 检测；
+# 打点在 worker 实际处理完成后，无令牌/insights 失败的账户不刷新 → 全局心跳正常也有单账户盲区）
+ACCOUNT_STALE_MIN = 30
+# live /ads 拉取降级计数（进程内）：连续 N 轮有账户用 ads_cache 兜底 → 降级告警
+# （偶发一轮抖动不告；多 worker 各自计数可接受——巡检有 advisory lock 单进程跑）
+_LIVE_FALLBACK_STREAK = 0
+_LIVE_FALLBACK_ALERT_STREAK = 3
 # 重试冷却（分钟）：暂停失败后缩短冷却，下轮（~5min）重试（22，1.0 _set_retry_cooldown）
 RETRY_COOLDOWN_MIN = 5
 # BLEED_ABORT：broader 转化 action 集（23，防 KPI 字段错配误杀 bleed_abs）
@@ -1999,7 +2131,7 @@ def run_watchdog():
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
     trace_id = new_trace_id()
-    alerts = {"inspection_stalled": 0, "token_expiring": 0}
+    alerts = {"inspection_stalled": 0, "token_expiring": 0, "inspection_stale_accounts": 0}
     try:
         # ── ① 巡检心跳停滞检测（全局，跨所有租户的 scheduler）──
         since = datetime.now(timezone.utc) - timedelta(minutes=INSPECTION_STALL_MIN)
@@ -2027,6 +2159,45 @@ def run_watchdog():
                           trigger_detail=f"last_ok={last_ok.created_at if last_ok else 'never'}")
                 db.commit()
                 alerts["inspection_stalled"] = 1
+
+        # ── ①b 单账户巡检停滞（per-account 盲区）：全局心跳只看最近一条成功——个别账户
+        # 无令牌/insights 失败在 worker 内 return（不刷新 last_inspected_at），心跳每轮照写，
+        # 单账户漏巡完全无感。>30min 未巡检 = critical（止损对该账户失效）。──
+        try:
+            _stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=ACCOUNT_STALE_MIN)
+            _stale = db.query(Account).filter(
+                Account.is_managed.is_(True),
+                Account.account_status == 1,
+                or_(Account.last_inspected_at.is_(None),
+                    Account.last_inspected_at < _stale_cutoff),
+            ).all()
+            _stale_by_tenant: dict = {}
+            for _a in _stale:
+                _stale_by_tenant.setdefault(_a.tenant_id, []).append(_a.name or _a.act_id)
+            for _tid, _names in _stale_by_tenant.items():
+                # dedup 6h/租户（target_id="*" 与 write_log 同名配对，下轮查得到才不重发）
+                if dedup_recent(db, _tid, "inspection_stale_accounts", "*", 360):
+                    continue
+                write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
+                          target_type="account", target_id="*",
+                          action_type="inspection_stale_accounts", source="watchdog",
+                          result="fail",
+                          trigger_detail=f"stale={len(_names)} accs={'; '.join(_names[:20])}")
+                _loc = tenant_locale(db, _tid)
+                _t_sa, _b_sa = notify_text(_loc, "inspection_stale_accounts", n=len(_names))
+                # 名单 ≤5（全量见日志中心）：用户第一问"哪些账户"，数量不可行动
+                _lines = [f"· {x}" for x in _names[:5]]
+                if len(_names) > 5:
+                    _lines.append(f"… 共 {len(_names)} 个")
+                _b_sa = _b_sa + "\n" + "\n".join(_lines)
+                emit_notification(db, tenant_id=_tid, level="critical",
+                                  event_type="inspection_stale_accounts", trace_id=trace_id,
+                                  title=_t_sa, body=_b_sa, platform="fb")
+                alerts["inspection_stale_accounts"] += 1
+            if _stale_by_tenant:
+                db.commit()
+        except Exception as e:
+            logger.warning(f"[Watchdog] 单账户停滞检测异常: {e}")
 
         # ── ② token 主动健康检查（debug_token，快过期/失效预警）──
         creds = db.query(FbCredential).filter(FbCredential.status == "active").all()
@@ -2216,6 +2387,7 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
             _notify_ok = not dedup_recent(db, acc.tenant_id, "pause", f"{acc.act_id}:{ad_id}", 60)
             tt.update_status(ad_id, "PAUSED", "ad", acc.act_id)  # opt_status=DISABLE
             paused += 1
+            _patch_cache_after_pause(db, acc.tenant_id, acc.act_id, "tt", ad_id, "ad")
             write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",
                       target_type="ad", target_id=ad_id,
                       action_type="pause", source="sentinel_patrol", result="success",
@@ -2228,7 +2400,7 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
                                            ad_name=ad_name or ad_id, ad_id=ad_id)
                 emit_notification(db, tenant_id=acc.tenant_id, level="critical",
                                   event_type="sentinel_pause", trace_id=trace_id,
-                                  title=_t_sp, body=_b_sp, platform="tt")
+                                  title=_t_sp, body=_b_sp, platform="tt", act_id=acc.act_id)
             db.commit()
         except Exception as e:
             logger.warning(f"[Sentinel][TT] 停广告 {ad_id} 失败: {getattr(e, 'friendly', e)}")
@@ -2324,6 +2496,7 @@ def run_sentinel_patrol():
                 try:
                     fb.pause_ad(camp_id)  # pause_ad 对 campaign 通用
                     total_paused += 1
+                    _patch_cache_after_pause(db, acc.tenant_id, acc.act_id, "fb", camp_id, "campaign")
                     write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",
                               target_type="campaign", target_id=camp_id,
                               action_type="pause", source="sentinel_patrol", result="success",

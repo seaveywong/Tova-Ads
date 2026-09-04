@@ -101,6 +101,16 @@ export default {
     ttPreflightTitle: '预检 · 即将发给 TikTok 的参数',
     ttDeploySubtitle: '勾选 TikTok 账户。每账户的 TikTok 像素从下拉选（留空=自动从 TT 像素库解析）。',
     deployNoTtAccounts: '暂无已导入的 TikTok 账户（先在令牌页授权 TikTok 并导入）',
+    // 按素材批量生成系列（部署抽屉批量模式）
+    deployMode: '部署模式', modeSingle: '单模板部署', modeBatch: '按素材批量生成系列',
+    batchHint: '批量生成：模板作为母版，每个选中素材克隆出一个完整系列（系列名/广告名=素材名）；模板自带的素材在本模式下被忽略',
+    batchAssetCount: '已选 {n} 个素材', batchSelectAll: '全选素材', batchMaxReached: '最多选择 {n} 个素材',
+    batchNeedAssets: '请先选择素材', batchNoAssets: '素材库暂无图片/视频素材',
+    batchPreview: '{n} 账户 × {m} 素材 → 将生成 {total} 个系列（系列名=素材名）',
+    batchBudgetHint: '· 合计 ≈ ${total}/天（{n} 账户 × {m} 素材 × ${per}/天）',
+    batchConfirmMsg: '批量生成系列：将向 {n} 个账户部署，每账户按 {m} 个素材各建 1 个系列（共 {total} 个系列，合计 ≈ ${amt}/天，立即产生花费）。确认开始？',
+    batchSubmitted: '已提交：{n} 账户 × {m} 素材（共 {total} 系列）',
+    batchSeriesCount: '批量模式：将生成 {n} 个系列（账户数 × 素材数，系列名=素材名）',
   },
   en: {
     title: 'Launch Templates', tplCount: '{n} templates', subtitle: 'Pick a template + pick accounts → one-click batch deploy to multiple accounts.',
@@ -203,5 +213,15 @@ export default {
     ttPreflightTitle: 'Preflight · parameters to be sent to TikTok',
     ttDeploySubtitle: 'Check TikTok accounts. Each account\'s TikTok pixel is picked from the dropdown (empty = auto-resolved from the TT pixel library).',
     deployNoTtAccounts: 'No imported TikTok accounts yet (authorize TikTok on the Tokens page and import first)',
+    // Batch series per asset (batch mode in the deploy drawer)
+    deployMode: 'Deploy mode', modeSingle: 'Single template', modeBatch: 'Batch series per asset',
+    batchHint: 'Batch generate: the template acts as the master — each selected asset clones a full campaign (campaign/ad named after the asset). The template\'s own asset is ignored in this mode',
+    batchAssetCount: '{n} assets selected', batchSelectAll: 'Select all assets', batchMaxReached: 'Select up to {n} assets',
+    batchNeedAssets: 'Select assets first', batchNoAssets: 'No image/video assets in the library yet',
+    batchPreview: '{n} accounts × {m} assets → {total} campaigns will be created (campaign name = asset name)',
+    batchBudgetHint: '· Total ≈ ${total}/day ({n} accounts × {m} assets × ${per}/day)',
+    batchConfirmMsg: 'Batch generate: deploy to {n} accounts, each with 1 campaign per asset ({total} campaigns, ≈ ${amt}/day total, spending starts immediately). Start?',
+    batchSubmitted: 'Submitted: {n} accounts × {m} assets ({total} campaigns)',
+    batchSeriesCount: 'Batch mode: {n} campaigns will be created (accounts × assets, campaign name = asset name)',
   },
 }

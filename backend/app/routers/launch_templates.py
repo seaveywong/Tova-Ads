@@ -208,6 +208,10 @@ class DeployItem(BaseModel):
 
 class DeployIn(BaseModel):
     items: list[DeployItem]
+    # 按素材批量生成系列（对标 FBInsider batchGenerate）：空 = 单模板旧行为（完全向后兼容）；
+    # 非空 = 批量模式——模板当母版，忽略 tpl.asset_id，每个选中素材克隆一个完整系列
+    # （campaign+adset+ad），系列名/广告名 = 素材名
+    asset_ids: list[int] = []
 
 
 @router.post("/{tid}/deploy")
@@ -254,6 +258,9 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
                 raise HTTPException(400, f"账户 {it.act_id} 的部署主页 {_item_page} 与跟帖帖子主页 {_ref_page} 不一致（帖子不能跨主页引用）")
         clean_items.append(it)
     body.items = clean_items
+    # 批量模式素材校验（deploy/preflight 共用口径）：失败 400 快失败——坏素材放进 job 会
+    # 逐账户重复失败 N 次，浪费一整轮部署还污染进度列表
+    batch_assets = _validate_batch_assets(db, body.asset_ids, user.tenant_id) if body.asset_ids else []
     # 防重竞态（P1-1）：原「查 running → 建 job」两步在并发提交下都查空 → 双 job 双份广告。
     # advisory lock 115 把 查重→建 job→commit 串成原子段；拿不到锁=另一请求正在提交，409 快失败。
     _dlock = acquire_run_lock(115)
@@ -276,12 +283,54 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
         write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
                   actor_user_id=user.id, target_type="launch_job", target_id=str(job.id),
                   action_type="deploy", source="user", result="success",
-                  metadata={"template_id": t.id, "accounts": len(body.items)})
+                  # 批量素材清单存日志 metadata：launch_jobs 无专用列（加列需迁移，超出本次
+                  # 改动范围），_run_deploy_job/_retry_one 用 _job_batch_assets 从这里回读
+                  # （与 job 同事务写入，可靠；见其注释）
+                  metadata={"template_id": t.id, "accounts": len(body.items),
+                            **({"asset_ids": [a.id for a in batch_assets]} if batch_assets else {})})
         db.commit()
     finally:
         release_run_lock(_dlock, 115)
     bg.add_task(_run_deploy_job, job.id, user.tenant_id, t.id)
-    return {"job_id": job.id, "total": len(body.items)}
+    # series_total = 账户数 × 素材数（仅批量模式带；单模板模式响应形状与原来完全一致）
+    return {"job_id": job.id, "total": len(body.items),
+            **({"series_total": len(body.items) * len(batch_assets)} if batch_assets else {})}
+
+
+def _validate_batch_assets(db, asset_ids: list[int], tenant_id: int) -> list:
+    """批量模式素材校验（deploy/preflight 共用）：去重保序 + 存在 + 本租户 + image/video + 有文件。
+    任一不满足 → 400 快失败（带具体素材名，用户能直接定位修哪个）。"""
+    if len(asset_ids) > 200:
+        # 上限 200：一个 item（账户）内最多 200 系列已是极端用法，再多单 job 跑不完且
+        # 出错面太大（与前端 BATCH_ASSET_MAX 一致，更多请分批部署）
+        raise HTTPException(400, "批量素材最多 200 个（更多请分批部署）")
+    seen, ids = set(), []
+    for aid in asset_ids:
+        if aid in seen:
+            continue
+        seen.add(aid)
+        ids.append(aid)
+    rows = db.query(Asset).filter(Asset.id.in_(ids), Asset.tenant_id == tenant_id).all()
+    by_id = {a.id: a for a in rows}
+    out = []
+    for aid in ids:
+        a = by_id.get(aid)
+        if not a:
+            raise HTTPException(400, f"素材 #{aid} 不存在或不属于本团队")
+        _n = a.name or a.filename or str(aid)
+        if (a.type or "") not in ("image", "video"):
+            raise HTTPException(400, f"素材「{_n}」类型不支持（批量生成仅支持图片/视频）")
+        if not a.storage_key:
+            raise HTTPException(400, f"素材「{_n}」缺少源文件，不能部署")
+        out.append(a)
+    return out
+
+
+def _series_name(tpl: LaunchTemplate, asset, idx: int) -> str:
+    """批量模式系列名（campaign/adset/ad 共用的 name_prefix）= 素材名；素材名空回退
+    母版前缀+序号（FB/TT campaign 名不能为空）。截 100 字符——FB 上限 400，留余量保证各处列表可读。"""
+    n = (asset.name or asset.filename or "").strip()
+    return (n or f"{tpl.name_prefix}-{idx + 1}")[:100]
 
 
 @router.get("/{tid}/reuse-eligible")
@@ -312,6 +361,11 @@ class PreflightIn(BaseModel):
     act_id: str
     page_id: str = ""
     pixel_id: str = ""
+    # 批量模式预检（部署抽屉「按素材批量生成系列」）：asset_ids 非空时忽略 tpl.asset_id，
+    # 示例 payload 用第一个素材构建（campaign 名=素材名，直观展示每系列长什么样）；
+    # account_count = 抽屉已选账户数，series_count = 素材数 × 账户数（预检本身只构建单账户 payload）
+    asset_ids: list[int] = []
+    account_count: int = 0
 
 
 @router.post("/{tid}/preflight")
@@ -327,9 +381,11 @@ def preflight_deploy(tid: int, body: PreflightIn,
     if not t:
         raise HTTPException(404, "模板不存在")
     _budget_guard_400(t)
+    # 批量模式：先校验选中素材（与 deploy 同口径），示例 payload 改用第一个素材
+    batch_assets = _validate_batch_assets(db, body.asset_ids, user.tenant_id) if body.asset_ids else []
     # TikTok 模板走 TT 预检（TK P3）：payload 构建器/预算单位/像素解析全不同
     if (t.platform or "fb") == "tt":
-        return _preflight_tt(db, t, body, user.tenant_id)
+        return _preflight_tt(db, t, body, user.tenant_id, batch_assets)
     # 子码存在性预检：拼错/已归档的 slug 部署时静默丢追踪（runner 查不到 link 就不带 /a/{slug}），
     # 部署"成功"但归因链路全断——最阴的隐性事故，预检必须提前拦
     subcode_warn_slug = None
@@ -351,19 +407,22 @@ def preflight_deploy(tid: int, body: PreflightIn,
     advanced = _parse_advanced(t)
     page_id = body.page_id or t.page_id
     pixel_id = body.pixel_id or t.pixel_id
-    asset = (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == user.tenant_id).first()
-             if t.asset_id else None)
+    # 批量模式：示例系列用第一个素材（系列名=素材名，与部署 runner 的 _series_name 同口径）
+    asset = (batch_assets[0] if batch_assets else
+             (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == user.tenant_id).first()
+              if t.asset_id else None))
+    _prefix = _series_name(t, asset, 0) if batch_assets else t.name_prefix
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
     try:
         campaign_payload = build_campaign(
-            name=t.name_prefix, objective=t.objective,
+            name=_prefix, objective=t.objective,
             daily_budget=daily_budget_fb if t.budget_mode.upper() == "CBO" else None,
             budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
         )
         adset_payload = build_adset(
-            name=f"{t.name_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
+            name=f"{_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
             daily_budget=daily_budget_fb, objective=t.objective,
             conversion_goal=t.conversion_goal, page_id=page_id, pixel_id=pixel_id,
             landing_url=t.landing_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
@@ -386,7 +445,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
     except ValueError as e:
         # build_adset 对缺 pixel/page 等抛 ValueError —— 预检就该把这个告诉用户
         raise HTTPException(400, f"参数校验失败：{e}")
-    return {
+    out = {
         "act_id": body.act_id, "platform": "fb", "currency": currency,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
@@ -407,6 +466,12 @@ def preflight_deploy(tid: int, body: PreflightIn,
             "成功判定：FB 返回 id→success；抛错或无 id→fail（item 记 campaign_id）",
         ],
     }
+    if batch_assets:
+        # 批量模式附加：将生成的系列总数 + 素材清单（account_count 未传按 1 账户口径）
+        out["series_count"] = len(batch_assets) * max(body.account_count or 0, 1)
+        out["batch_assets"] = [{"id": a.id, "name": _series_name(t, a, i), "type": a.type}
+                               for i, a in enumerate(batch_assets)]
+    return out
 
 
 def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0):
@@ -579,12 +644,14 @@ def _resolve_tt_pixel(sdb, tenant_id: int, tpl: LaunchTemplate, item_pixel: str 
 
 
 def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, tenant_id: int,
-                    link, is_retry: bool = False) -> None:
+                    link, is_retry: bool = False, name_prefix_override: str = "") -> None:
     """单账户 TT 部署（_run_deploy_job / _retry_one 的 TT 分支共用）。
 
     链路：纳管复查 → tt_client_for_account（TT 令牌不走 FB 令牌池）→ 素材 file_id
     （按广告主上传+行锁缓存）→ 预算本币整数 → 像素 code → deploy_one_account_tt 三件套。
     错误消化为 item fail（TtApiError.category 进 error_code 供前端 i18n），不外抛。
+    name_prefix_override：批量模式由 _deploy_item_tt_batch 传入（系列名=素材名）；
+    空 = 单模板模式沿用 tpl.name_prefix。job=None 时只写 item 状态不动 job 计数（批量汇总用）。
     """
     from ..core.ad_ops import (deploy_one_account_tt, ensure_tt_file_id_for_account,
                                tt_client_for_account, pick_random_copy)
@@ -625,7 +692,7 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
             tt, advertiser_id=item.act_id, objective=tpl.objective,
             conversion_goal=tpl.conversion_goal, pixel_code=pixel_code,
             landing_url=tpl.landing_url, daily_budget=daily_budget_tt,
-            budget_mode=tpl.budget_mode, name_prefix=tpl.name_prefix,
+            budget_mode=tpl.budget_mode, name_prefix=name_prefix_override or tpl.name_prefix,
             headline=_rh or (tpl.headline or ""), body=_body, cta_type=tpl.cta_type,
             image_file_id=image_file_id, video_file_id=video_file_id,
             subcode_slug=tpl.subcode_slug, subcode_link=link,
@@ -660,10 +727,12 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
                   metadata={"act_id": item.act_id, "template_id": tpl.id, "platform": "tt"})
 
 
-def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int) -> dict:
+def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int, batch_assets: list = None) -> dict:
     """TT 模板预检：构建（不发送）campaign/adgroup/creative payload + 预算换算 + 像素解析。
-    不调 TT、不花钱；sandbox 校准期最有价值的核对工具。"""
+    不调 TT、不花钱；sandbox 校准期最有价值的核对工具。批量模式（batch_assets 非空）：
+    示例 payload 用第一个素材（系列名=素材名）+ 附 series_count。"""
     from ..core.tt_ad_builder import build_tt_campaign, build_tt_adgroup, build_tt_creative
+    batch_assets = batch_assets or []
     try:
         daily_budget_tt = _resolve_budget_tt(db, body.act_id, t, tenant_id)
     except ValueError as e:
@@ -671,18 +740,20 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int) -> d
         raise HTTPException(400, "预算换算失败：账户币种缺少汇率，请在系统设置配置汇率或改用 USD 模板")
     targeting = _resolve_tt_targeting(db, t.audience_id, t.audience_json or "", tenant_id)
     pixel_code = _resolve_tt_pixel(db, tenant_id, t, body.pixel_id or "", body.act_id)
-    asset = (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == tenant_id).first()
-             if t.asset_id else None)
+    asset = (batch_assets[0] if batch_assets else
+             (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == tenant_id).first()
+              if t.asset_id else None))
+    _prefix = _series_name(t, asset, 0) if batch_assets else t.name_prefix
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
     try:
         campaign_payload = build_tt_campaign(
-            name=t.name_prefix, objective=t.objective,
+            name=_prefix, objective=t.objective,
             daily_budget=daily_budget_tt if t.budget_mode.upper() == "CBO" else None,
             budget_mode=t.budget_mode)
         adgroup_payload = build_tt_adgroup(
-            name=f"{t.name_prefix} 组", campaign_id="<TT 创建 campaign 后返回>",
+            name=f"{_prefix} 组", campaign_id="<TT 创建 campaign 后返回>",
             daily_budget=daily_budget_tt, objective=t.objective,
             conversion_goal=t.conversion_goal,
             pixel_code=pixel_code or "<部署时从 TT 像素库解析>",
@@ -694,7 +765,7 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int) -> d
     except ValueError as e:
         raise HTTPException(400, f"参数校验失败：{e}")
     # daily_budget_fb 键名沿用（前端预检弹窗按此键渲染；TT 值为本币整数，notes 里说明单位差异）
-    return {
+    out = {
         "act_id": body.act_id, "platform": "tt", "currency": currency,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_tt, "budget_mode": t.budget_mode,
@@ -714,6 +785,11 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int) -> d
             "campaign_id / adgroup_id 部署时由 TT 返回填入",
         ],
     }
+    if batch_assets:
+        out["series_count"] = len(batch_assets) * max(body.account_count or 0, 1)
+        out["batch_assets"] = [{"id": a.id, "name": _series_name(t, a, i), "type": a.type}
+                               for i, a in enumerate(batch_assets)]
+    return out
 
 
 def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
@@ -1005,6 +1081,189 @@ def _refresh_ads_cache_after_deploy(tenant_id: int, act_ids: list[str]):
         sdb.close()
 
 
+def _job_batch_assets(sdb, job_id: int, tenant_id: int) -> list:
+    """回读 job 的批量素材清单。launch_jobs 没有素材清单列（加列需迁移，超出本次改动
+    范围），deploy 端点把 asset_ids 存进 action_logs.metadata（与 job 同事务提交，
+    target_id=job.id 唯一定位）。查不到/空 = 单模板模式（旧 job 一律走这里，天然兼容）。
+    素材行已被删的静默剔除——重试时素材可能已删，剩余素材照跑（少建对应系列好过硬建失败）。"""
+    from ..models.log import ActionLog
+    try:
+        row = sdb.query(ActionLog).filter(
+            ActionLog.tenant_id == tenant_id, ActionLog.target_type == "launch_job",
+            ActionLog.target_id == str(job_id), ActionLog.action_type == "deploy",
+            ActionLog.result == "success",
+        ).order_by(ActionLog.id.desc()).first()
+        if not row or not row.metadata_:
+            return []
+        ids = json.loads(row.metadata_).get("asset_ids") or []
+    except Exception:
+        return []
+    if not ids:
+        return []
+    rows = sdb.query(Asset).filter(Asset.id.in_(ids), Asset.tenant_id == tenant_id).all()
+    by = {a.id: a for a in rows}
+    return [by[i] for i in ids if i in by]
+
+
+def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: list,
+                        last: Optional[dict], is_retry: bool = False) -> None:
+    """批量 item（=账户）汇总落账：全部系列成功 = success/error=None；任一失败 = fail +
+    error_code="partial" + 汇总文案（成功 X/Y 系列 + 前 3 条「素材名:原因」，300 字内）。
+    item 的 campaign/adset/ad id 存最后一个成功系列——已部署清单的跳转/live_status 至少
+    能对账一个，全量明细看 error 汇总与平台后台（200 系列塞 item 字段既没列也不可读）。
+    计数口径与单模板模式一致：item 是计数单位（成功+1 / 失败+1），不是按系列计。"""
+    if last:
+        item.campaign_id = str(last.get("campaign_id") or "")
+        item.adset_id = str(last.get("adset_id") or "")
+        item.ad_id = str(last.get("ad_id") or "")
+        if last.get("page_post_id"):
+            item.page_post_id = str(last["page_post_id"])
+    if not fails:
+        item.status = "success"; item.error = None; item.error_code = None
+        if job:
+            job.succeeded = (job.succeeded or 0) + 1
+            if is_retry and (job.failed or 0) > 0:
+                job.failed -= 1  # 重试成功：撤销原 fail 计数（与单模板 _retry_one 口径一致）
+        return
+    item.status = "fail"; item.error_code = "partial"
+    shown = "；".join(fails[:3]) + ("…" if len(fails) > 3 else "")
+    item.error = f"成功 {ok}/{total} 系列：{shown}"[:300]
+    if job and not is_retry:
+        job.failed = (job.failed or 0) + 1  # 重试仍失败：原 fail 已计过，不重复加
+
+
+def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, tenant_id: int,
+                      link, targeting, advanced, post_content: dict, series_name: str = "") -> dict:
+    """单系列 FB 部署（原 _run_deploy_job/_retry_one 的素材相关内联块抽成公共函数，行为不变）：
+    per-asset 缓存（image_hash/video_id 按账户隔离）→ 预算 → Instant Form 解析 → AI 消息兜底 →
+    随机文案 → 主页帖 → deploy_one_account 三件套。批量模式逐素材调用（series_name=素材名
+    覆盖系列名），单模板模式 series_name 空 = 沿用 tpl.name_prefix。成功返 r dict；失败外抛
+    （调用方消化为 item/系列级失败）。"""
+    # per-account 素材缓存（FB image_hash / video_id 都按账户隔离）
+    image_hash = ""
+    video_id = ""
+    if asset and asset.type in ("image", "video"):
+        filepath = os.path.join(ASSET_DIR, asset.storage_key)
+        if not os.path.exists(filepath):
+            raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
+        if asset.type == "image":
+            image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
+        else:
+            video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
+        sdb.commit()  # 持久化 hash/video_id 缓存
+    page_id = item.page_id or tpl.page_id
+    pixel_id = item.pixel_id or tpl.pixel_id
+    daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+    # 解析 Instant Form ID：表单模板 > 已建 form_id > AI 自动生成（LEADS 目标）
+    lead_form_id = ""
+    if tpl.objective == "OUTCOME_LEADS" and page_id:
+        try:
+            lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "", post_content=post_content)
+        except Exception:
+            pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
+    # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
+    message_template = tpl.message_template or ""
+    if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
+        _msg_body = ""
+        if asset:
+            try:
+                ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                _msg_body = (ai_copy.get("bodies") or [""])[0]
+            except Exception:
+                pass
+        elif post_content.get("message"):
+            _msg_body = post_content["message"]  # 跟帖：用帖子文案当欢迎语
+        if _msg_body:
+            message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
+    # 随机组合素材 AI 文案+标题（每系列/每账户不同，增多样性）
+    from ..core.ad_ops import pick_random_copy
+    _rh, _rb = pick_random_copy(asset)
+    _headline = _rh or (tpl.headline or "")
+    _body = _rb or (tpl.body or "")
+    page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
+    if page_post_id:
+        sdb.commit()  # 持久化 page_posts 缓存
+    return deploy_one_account(
+        fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
+        page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
+        daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
+        name_prefix=series_name or tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
+        image_hash=image_hash, video_id=video_id,
+        subcode_slug=tpl.subcode_slug, subcode_link=link,
+        targeting=targeting, ad_language=tpl.ad_language,
+        dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
+        optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
+        destination_type_override=tpl.destination_type or "",
+        page_post_id=page_post_id,
+        advanced_config=advanced,
+        lead_form_id=lead_form_id, message_template=message_template,
+    )
+
+
+def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
+                          tenant_id: int, link, targeting, advanced, post_content: dict, fb,
+                          is_retry: bool = False) -> None:
+    """批量模式 FB：item(=账户) 内逐素材克隆系列（模板=母版，系列名=素材名）。
+    单系列失败不中断后续（收集失败清单，_apply_batch_result 汇总 partial）。
+    每系列 touch job 心跳——200 素材×视频上传远超 reap 的 10min 无心跳窗口，
+    不 touch 会被判孤儿标 failed → 用户重试 = 已建系列再建一份（双份预算）。"""
+    from sqlalchemy import text as _t
+    ok, fails, last = 0, [], None
+    for i, a in enumerate(assets):
+        name = _series_name(tpl, a, i)
+        sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
+                    {"jid": item.job_id})
+        sdb.commit()  # 心跳即提交——视频上传可能>10min，不提交的话 reap 在别的事务里看不到未提交心跳
+        try:
+            r = _deploy_series_fb(sdb, fb, item, tpl, a, tenant_id, link,
+                                  targeting, advanced, post_content, series_name=name)
+            ok += 1; last = r
+            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                      target_type="ad", target_id=str(r.get("ad_id", "")),
+                      action_type="deploy", source="launch", result="success",
+                      metadata={"act_id": item.act_id, "campaign_id": r.get("campaign_id"),
+                                "template_id": tpl.id, "series_name": name})
+        except FbApiError as e:
+            fails.append(f"{name}: {(e.friendly or str(e))[:120]}")
+            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                      target_type="ad", target_id="", action_type="deploy", source="launch",
+                      result="fail", friendly_error=(e.friendly or str(e))[:200],
+                      metadata={"act_id": item.act_id, "template_id": tpl.id, "series_name": name})
+        except Exception as e:
+            fails.append(f"{name}: {str(e)[:120]}")
+            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                      target_type="ad", target_id="", action_type="deploy", source="launch",
+                      result="fail", friendly_error=str(e)[:200],
+                      metadata={"act_id": item.act_id, "template_id": tpl.id, "series_name": name})
+    _apply_batch_result(job, item, len(assets), ok, fails, last, is_retry=is_retry)
+
+
+def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
+                          tenant_id: int, link, is_retry: bool = False) -> None:
+    """批量模式 TT：item 内逐素材克隆系列。_deploy_item_tt 当「单系列执行器」用——
+    传 job=None 关掉它内部的 job 计数（每系列各加一次 succeeded/failed 会把计数翻倍），
+    由 _apply_batch_result 统一汇总；系列名经 name_prefix_override 传入（=素材名）。"""
+    from sqlalchemy import text as _t
+    ok, fails, last = 0, [], None
+    for i, a in enumerate(assets):
+        name = _series_name(tpl, a, i)
+        sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
+                    {"jid": item.job_id})
+        sdb.commit()  # 心跳即提交（理由同 _deploy_item_fb_batch：reap 看不到未提交心跳）
+        try:
+            _deploy_item_tt(sdb, None, item, tpl, a, tenant_id, link,
+                            name_prefix_override=name)
+            if item.status == "success" and item.campaign_id:
+                ok += 1
+                last = {"campaign_id": item.campaign_id, "adset_id": item.adset_id,
+                        "ad_id": item.ad_id}
+            else:
+                fails.append(f"{name}: {item.error or '未知错误'}")
+        except Exception as e:  # 双保险：_deploy_item_tt 理论上自消化不外抛
+            fails.append(f"{name}: {str(e)[:120]}")
+    _apply_batch_result(job, item, len(assets), ok, fails, last, is_retry=is_retry)
+
+
 def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
     """后台逐账户建广告。独立 SuperSessionLocal（bypass RLS，显式 tenant_id 过滤，避开 BackgroundTask 无请求上下文的 SET LOCAL 坑）。"""
     sdb = SuperSessionLocal()
@@ -1019,6 +1278,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
         job.status = "running"; sdb.commit()
         asset = (sdb.query(Asset).filter(Asset.id == tpl.asset_id, Asset.tenant_id == tenant_id).first()
                  if tpl.asset_id else None)
+        # 批量模式素材清单（deploy 端点存日志 metadata，这里回读；空 = 单模板旧行为）
+        batch_assets = _job_batch_assets(sdb, job_id, tenant_id)
         targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "", sdb_tenant_id=tenant_id)
         advanced = _parse_advanced(tpl)
         # 子码链接（一个 slug 共享多广告，{{ad.id}} 宏区分）
@@ -1045,9 +1306,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                             {"jid": job_id})
                 item.status = "creating"; sdb.commit()
                 # TikTok 分支（TK P3）：TT 三件套走 _deploy_item_tt（内部含纳管复查/错误消化）；
-                # platform='fb'（含存量行 server_default）走的下方 FB 路径零改动
+                # platform='fb'（含存量行 server_default）走的下方 FB 路径零改动。
+                # 批量模式：item 内逐素材克隆系列（partial 汇总语义见 _apply_batch_result）
                 if (tpl.platform or "fb") == "tt":
-                    _deploy_item_tt(sdb, job, item, tpl, asset, tenant_id, link)
+                    if batch_assets:
+                        _deploy_item_tt_batch(sdb, job, item, tpl, batch_assets, tenant_id, link)
+                    else:
+                        _deploy_item_tt(sdb, job, item, tpl, asset, tenant_id, link)
                     sdb.commit()
                     continue
                 # 纳管复查（部署请求后到本 item 执行间隙账户可能被移除——同 retry 守卫理由）
@@ -1069,67 +1334,18 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     fb = client_for_account(sdb, tenant_id, item.act_id, "write")
                     if not fb:
                         raise FbApiError("no_id", f"act_{item.act_id} 未绑定写令牌")
-                # per-account 素材缓存（FB image_hash / video_id 都按账户隔离）
-                image_hash = ""
-                video_id = ""
-                if asset and asset.type in ("image", "video"):
-                    filepath = os.path.join(ASSET_DIR, asset.storage_key)
-                    if not os.path.exists(filepath):
-                        raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
-                    if asset.type == "image":
-                        image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
-                    else:
-                        video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
-                    sdb.commit()  # 持久化 hash/video_id 缓存
-                page_id = item.page_id or tpl.page_id
-                pixel_id = item.pixel_id or tpl.pixel_id
-                daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
-                # 解析 Instant Form ID：表单模板 > 已建 form_id > AI 自动生成（LEADS 目标）
-                lead_form_id = ""
-                if tpl.objective == "OUTCOME_LEADS" and page_id:
-                    try:
-                        lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "", post_content=post_content)
-                    except Exception:
-                        pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
-                # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
-                message_template = tpl.message_template or ""
-                if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
-                    _msg_body = ""
-                    if asset:
-                        try:
-                            ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
-                            _msg_body = (ai_copy.get("bodies") or [""])[0]
-                        except Exception:
-                            pass
-                    elif post_content.get("message"):
-                        _msg_body = post_content["message"]  # 跟帖：用帖子文案当欢迎语
-                    if _msg_body:
-                        message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-                # 随机组合素材 AI 文案+标题（每账户不同，增多样性）
-                from ..core.ad_ops import pick_random_copy
-                _rh, _rb = pick_random_copy(asset)
-                _headline = _rh or (tpl.headline or "")
-                _body = _rb or (tpl.body or "")
-                page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
-                if page_post_id:
-                    sdb.commit()  # 持久化 page_posts 缓存
-                r = deploy_one_account(
-                    fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-                    page_id=page_id, pixel_id=pixel_id, landing_url=tpl.landing_url,
-                    daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
-                    name_prefix=tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
-                    image_hash=image_hash, video_id=video_id,
-                    subcode_slug=tpl.subcode_slug, subcode_link=link,
-                    targeting=targeting, ad_language=tpl.ad_language,
-                    dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
-                    optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
-                    destination_type_override=tpl.destination_type or "",
-                    page_post_id=page_post_id,
-                    advanced_config=advanced,
-                    lead_form_id=lead_form_id, message_template=message_template,
-                )
+                # 批量模式（按素材批量生成系列）：item 内逐素材克隆系列，单素材失败不中断后续
+                # （partial 汇总）。item = 账户 的粒度不变——job.total / 前端进度轮询 / 重试入口零改动
+                if batch_assets:
+                    _deploy_item_fb_batch(sdb, job, item, tpl, batch_assets, tenant_id, link,
+                                          targeting, advanced, post_content, fb)
+                    sdb.commit()
+                    continue
+                # 单模板模式：一个系列（原内联块抽为 _deploy_series_fb，行为不变）
+                r = _deploy_series_fb(sdb, fb, item, tpl, asset, tenant_id, link,
+                                      targeting, advanced, post_content)
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
-                item.page_post_id = r.get("page_post_id") or page_post_id
+                item.page_post_id = r.get("page_post_id") or ""
                 item.status = "success"; item.error = None
                 job.succeeded = (job.succeeded or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
@@ -1154,7 +1370,9 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                           friendly_error=str(e)[:200],
                           metadata={"act_id": item.act_id, "template_id": template_id})
             sdb.commit()
-        tpl.deploy_count = (tpl.deploy_count or 0) + len(items)
+        # deploy_count 语义=建出的系列数（卡片「已部署 N」）：单模板 1 账户=1 系列；
+        # 批量模式 1 账户=M 系列，按系列数累计才不虚标
+        tpl.deploy_count = (tpl.deploy_count or 0) + len(items) * (len(batch_assets) or 1)
         job.status = "partial_failed" if job.failed else "completed"
         job.finished_at = datetime.now(timezone.utc)
         sdb.commit()
@@ -1335,6 +1553,11 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     # 前端进度轮询首拍即判终态停表，重试结果永不回显且再试被 job 终态守卫放行后 item 又 400
     j.status = "running"
     j.finished_at = None
+    # 心跳 touch：重试 job 的 created_at 是原创建时间（几乎必然 >10min 前），而批量重试可能
+    # 跑几十分钟——不 touch 会被 5min 一次的 _reap_stale_jobs 判孤儿标 failed → 用户再重试 =
+    # 已建系列再建一份（双份预算）。touch 后与 runner「无心跳 10min 才算死」口径一致
+    # （副作用：job 列表的创建时间显示为最近一次重试时间，可接受——runner 本就把它当心跳用）
+    j.created_at = datetime.now(timezone.utc)
     db.commit()
     bg.add_task(_retry_one, job_id, user.tenant_id, j.template_id, item_id)
     return {"job_id": job_id, "item_id": item_id, "retrying": True}
@@ -1389,6 +1612,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
         # 借用 _run_deploy_job 的单账户逻辑：把 job 的 total 固定，succeeded/failed 增量
         asset = (sdb.query(Asset).filter(Asset.id == tpl.asset_id, Asset.tenant_id == tenant_id).first()
                  if tpl.asset_id else None)
+        # 批量模式素材清单回读（与 _run_deploy_job 同源：日志 metadata；空 = 单模板重试）
+        batch_assets = _job_batch_assets(sdb, job_id, tenant_id)
         targeting = _resolve_targeting(sdb, tpl.audience_id, tpl.audience_json or "", sdb_tenant_id=tenant_id)
         advanced = _parse_advanced(tpl)
         link = (sdb.query(LandingAdLink).filter(
@@ -1407,9 +1632,12 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
         if (tpl.platform or "fb") == "tt":
             try:
                 it.status = "creating"; sdb.commit()
-                _deploy_item_tt(sdb, job, it, tpl, asset, tenant_id, link, is_retry=True)
+                if batch_assets:
+                    _deploy_item_tt_batch(sdb, job, it, tpl, batch_assets, tenant_id, link, is_retry=True)
+                else:
+                    _deploy_item_tt(sdb, job, it, tpl, asset, tenant_id, link, is_retry=True)
             except Exception:
-                pass  # _deploy_item_tt 内部已消化为 item fail
+                pass  # 执行器内部已消化为 item fail
             if it.status == "fail" and job:
                 job.status = "partial_failed"   # 此 item 仍 fail → 必落 partial_failed
                 job.finished_at = datetime.now(timezone.utc)
@@ -1440,6 +1668,26 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 fb = client_for_account(sdb, tenant_id, it.act_id, "write")
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
+            # 批量模式重试 = 整个 item 重跑（全部素材重建）。不走下方 _find_existing_campaign
+            # 同名幂等捷径——它只对单模板模式可靠：批量系列名=素材名，与账户里既有的同名
+            # campaign 无法区分是否本次 job 所建（素材名撞已有系列名时误命中=假成功漏建系列）。
+            # 注意：partial 重试会把上次已成功的系列再建一份（重试前先按 error 汇总核对 FB 后台）
+            if batch_assets:
+                _deploy_item_fb_batch(sdb, job, it, tpl, batch_assets, tenant_id, link,
+                                      targeting, advanced, post_content, fb, is_retry=True)
+                if it.status == "fail" and job:
+                    job.status = "partial_failed"   # 仍 fail → 必落 partial_failed（与单模板口径一致）
+                    job.finished_at = datetime.now(timezone.utc)
+                elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
+                    job.status = "partial_failed" if job.failed else "completed"
+                    job.finished_at = datetime.now(timezone.utc)
+                sdb.commit()
+                if it.status == "success" and it.ad_id:
+                    try:
+                        _refresh_ads_cache_after_deploy(tenant_id, [it.act_id])
+                    except Exception:
+                        pass
+                return
             # 幂等防重（P0-9）：上次 attempt 可能已把广告建进 FB（超时/读响应失败误标 fail），
             # 盲重试=同账户再建一份双份预算。先查同名 campaign（名=name_prefix，且必须挂着
             # adset 的才认——裸 campaign 假 success 见 _find_existing_campaign 注释），命中→

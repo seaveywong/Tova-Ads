@@ -28,6 +28,12 @@ STATUS_ADVICE = {
     101: "账户已关闭或停用，请勿继续铺广告。",
 }
 
+# /me/adaccounts 拉取字段：FbClient.get_ad_accounts 的字段表不含 disable_reason（禁用原因
+# 副行要落库），且 fb_client 不在本模块改动管辖——故此处显式声明全量字段，
+# routers/fb.py 的 refresh-accounts/_bg_complete_imported 复用同一常量防两处漂移。
+ADACCOUNT_SYNC_FIELDS = ("account_id,account_status,disable_reason,name,currency,"
+                         "timezone_name,balance,spend_cap,amount_spent")
+
 
 def _last_notified_status(db, tenant_id: int, act_id: str):
     """该账户最近一次状态告警记录的状态（action_logs.metadata.status）。
@@ -237,7 +243,8 @@ def run_account_status_sync():
             tenant_id = cred.tenant_id
             try:
                 fb = FbClient(decrypt(cred.access_token_enc))
-                raw_accounts = fb.get_ad_accounts()
+                # 带 disable_reason 的全量字段（见 ADACCOUNT_SYNC_FIELDS 注释）
+                raw_accounts = fb.get_paged("me/adaccounts", {"fields": ADACCOUNT_SYNC_FIELDS})
             except FbApiError as e:
                 logger.warning(f"[AccountSync] cred {cred.id} 拉 adaccounts 失败: {e.friendly}")
                 continue
@@ -265,6 +272,11 @@ def run_account_status_sync():
                     acc.currency = raw["currency"]
                 if raw.get("timezone_name"):
                     acc.timezone_name = raw["timezone_name"]
+                # 禁用原因落库（FB 官方数字枚举；显式判 None——0=恢复正常是合法值，
+                # or 兜底会跳过导致旧原因残留，前端副行就永远清不掉）
+                _dr = raw.get("disable_reason")
+                if _dr is not None:
+                    acc.disable_reason = int(_dr)
                 # 状态告警（一次事件只告一次 + 恢复告知）。
                 # 关键：acc.account_status 始终写真值（看板/规则/哨兵看真状态），
                 # 只对"告警通知"去重——停在同一个异常状态不重报，恢复正常或变成另一种异常才再告。

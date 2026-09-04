@@ -59,6 +59,17 @@ const accPages = ref({})  // {act_id: [pages]}
 const accPixels = ref({}) // {act_id: [pixels]}
 const deployItems = ref({})  // {act_id: {page_id, pixel_id}}
 const deploying = ref(false)
+// 按素材批量生成系列（对标 FBInsider batchGenerate）：模板=母版，每个选中素材克隆一个
+// 完整系列（campaign+adset+ad），系列名/广告名=素材名；模板自带素材在批量模式下被忽略
+const deployMode = ref('single')   // single=单模板部署（默认，旧行为） / batch=按素材批量生成系列
+const BATCH_ASSET_MAX = 200        // 批量素材上限（与后端 _validate_batch_assets 一致）
+const batchAssets = ref([])        // 素材库（批量选择卡片；懒加载——首次切到批量模式才拉）
+const batchAssetsLoading = ref(false)
+const batchAssetIds = ref(new Set())
+const batchPreview = computed(() => ({
+  n: selectedAccs.value.size, m: batchAssetIds.value.size,
+  total: selectedAccs.value.size * batchAssetIds.value.size,
+}))
 // 落地页
 const landingPages = ref([])
 // 进度
@@ -903,6 +914,7 @@ const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   reuseEligibleActs.value = new Set()
   deployAsset.value = null
+  deployMode.value = 'single'; batchAssetIds.value = new Set()
   if (tpl.asset_id) { try { deployAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   accLoading.value = true
   try {
@@ -958,18 +970,77 @@ const deploySelectActive = () => {
   _selectableAccs().filter(a => s.has(a.act_id)).forEach(a => ensureAccConfig(a.act_id))
 }
 const deployClearSel = () => { selectedAccs.value = new Set() }
+// 批量模式：懒加载素材库（仅图片/视频可参与批量生成系列）
+const switchDeployMode = async (m) => {
+  deployMode.value = m
+  if (m === 'batch' && !batchAssets.value.length && !batchAssetsLoading.value) {
+    batchAssetsLoading.value = true
+    try { batchAssets.value = await GET('/assets') } catch (e) { showError(e, t('launch.loadAccFail')) }
+    batchAssetsLoading.value = false
+  }
+}
+const batchSelectable = computed(() => batchAssets.value.filter(a => a.type === 'image' || a.type === 'video'))
+const toggleBatchAsset = (id) => {
+  const s = new Set(batchAssetIds.value)
+  if (s.has(id)) { s.delete(id) }
+  else {
+    if (s.size >= BATCH_ASSET_MAX) return ElMessage.warning(t('launch.batchMaxReached', { n: BATCH_ASSET_MAX }))
+    s.add(id)
+  }
+  batchAssetIds.value = s
+}
+const batchSelectAllAssets = () => {
+  batchAssetIds.value = new Set(batchSelectable.value.slice(0, BATCH_ASSET_MAX).map(a => a.id))
+  if (batchSelectable.value.length > BATCH_ASSET_MAX) ElMessage.warning(t('launch.batchMaxReached', { n: BATCH_ASSET_MAX }))
+}
+const batchClearAssets = () => { batchAssetIds.value = new Set() }
+// 批量预检：后端按第一个素材构建示例 payload（campaign 名=素材名）+ 返回 series_count
+const batchPreflighting = ref(false)
+const batchPreflight = async () => {
+  if (!batchAssetIds.value.size) return ElMessage.warning(t('launch.batchNeedAssets'))
+  const wantPlat = deployTpl.value?.platform === 'tt' ? 'tt' : 'fb'
+  const accs = accounts.value.filter(a => (a.platform || 'fb') === wantPlat)
+  const sel = [...selectedAccs.value]
+  // 预检目标账户：优先已选且正常的 → 已选 → 未选但正常 → 第一个（payload 结构与账户无关，只影响币种/汇率展示）
+  const target = accs.find(a => sel.includes(a.act_id) && a.account_status === 1)
+    || accs.find(a => sel.includes(a.act_id)) || accs.find(a => a.account_status === 1) || accs[0]
+  if (!target) return ElMessage.warning(t('launch.preflightNoAccount'))
+  batchPreflighting.value = true
+  try {
+    const r = await POST('/launch-templates/' + deployTpl.value.id + '/preflight',
+      { act_id: target.act_id, asset_ids: [...batchAssetIds.value], account_count: sel.length })
+    preflightResult.value = r; preflightVisible.value = true
+  } catch (e) { showError(e, t('launch.preflightFail')) }
+  batchPreflighting.value = false
+}
 const startDeploy = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('launch.selectAccFirst'))
-  // 批量部署直接产生花费——提交前二次确认（列明账户数）
+  const isBatch = deployMode.value === 'batch'
+  if (isBatch && !batchAssetIds.value.size) return ElMessage.warning(t('launch.batchNeedAssets'))
+  // 批量部署直接产生花费——提交前二次确认（单模式列账户数；批量模式额外列系列总数与合计日预算）
+  const n = selectedAccs.value.size
+  const m = isBatch ? batchAssetIds.value.size : 0
+  const total = isBatch ? n * m : n
   try {
-    await ElMessageBox.confirm(t('launch.deployConfirmMsg', { n: selectedAccs.value.size }), t('launch.deployConfirmTitle'),
+    await ElMessageBox.confirm(
+      isBatch
+        ? t('launch.batchConfirmMsg', { n, m, total, amt: (total * Number(deployTpl.value.budget_usd || 0)).toFixed(0) })
+        : t('launch.deployConfirmMsg', { n }),
+      t('launch.deployConfirmTitle'),
       { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
   } catch { return }
   const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
   deploying.value = true
   try {
-    const r = await POST('/launch-templates/' + deployTpl.value.id + '/deploy', { items })
-    deployOpen.value = false; ElMessage.success(t('launch.submitted', { n: r.total })); openProgress(r.job_id); await load()
+    const body = { items }
+    // 仅批量模式带 asset_ids——不带/空数组 = 后端单模板旧行为（完全向后兼容）
+    if (isBatch) body.asset_ids = [...batchAssetIds.value]
+    const r = await POST('/launch-templates/' + deployTpl.value.id + '/deploy', body)
+    deployOpen.value = false
+    ElMessage.success(isBatch
+      ? t('launch.batchSubmitted', { n: r.total, m, total: r.series_total ?? total })
+      : t('launch.submitted', { n: r.total }))
+    openProgress(r.job_id); await load()
   } catch (e) { showError(e, t('launch.deploySubmitFail')) }
   deploying.value = false
 }
@@ -998,6 +1069,12 @@ const retryItem = async (it) => {
     if (!pollTimer) startPoll(activeJob.value.id, 0) } catch (e) { showError(e, t('launch.retryFail')) }
 }
 const statusText = (s) => itemStatus(s).label
+// 错误文案展示：partial（批量部分失败）汇总含「成功X/Y系列+失败明细」是决策信息——不截断、
+// 允许换行；普通错误沿用截断（60/40 字，完整文案在 title 悬浮）
+const itemErrText = (it, n) => {
+  const txt = fbErrorText(it.error_code) || it.error || ''
+  return it.error_code === 'partial' ? txt : txt.slice(0, n)
+}
 const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
 const jobText = (s) => jobStatus(s).label
 const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/campaigns?act=${actId}&selected_campaign_ids=${campId}`
@@ -1470,8 +1547,34 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
       <div class="d">{{ deployTpl?.platform === 'tt' ? t('launch.ttDeploySubtitle') : t('launch.deploySubtitle') }}</div>
+      <div class="deploy-mode-row">
+        <label class="dm-label">{{ t('launch.deployMode') }}</label>
+        <div class="seg dm-seg">
+          <button :class="{on:deployMode==='single'}" @click="deployMode='single'">{{ t('launch.modeSingle') }}</button>
+          <button :class="{on:deployMode==='batch'}" @click="switchDeployMode('batch')">{{ t('launch.modeBatch') }}</button>
+        </div>
+      </div>
+      <template v-if="deployMode==='batch'">
+        <div class="deploy-reuse-hint batch-hint">🎬 {{ t('launch.batchHint') }}</div>
+        <div class="batch-bar">
+          <span class="batch-count">{{ t('launch.batchAssetCount', { n: batchAssetIds.size }) }}</span>
+          <button class="op sm" @click="batchSelectAllAssets">{{ t('launch.batchSelectAll') }}</button>
+          <button class="op sm" @click="batchClearAssets">{{ t('launch.deployClear') }}</button>
+          <button class="op sm" :disabled="batchPreflighting" @click="batchPreflight">{{ t('launch.preflight') }}</button>
+        </div>
+        <div class="picker-grid batch-grid" v-loading="batchAssetsLoading">
+          <div v-for="a in batchSelectable" :key="a.id" :class="['picker-card','batch-card',{on:batchAssetIds.has(a.id)}]" @click="toggleBatchAsset(a.id)">
+            <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
+            <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
+            <span class="picker-name">{{ a.name }}<template v-if="a.type==='video' && a.duration_sec"> · {{ a.duration_sec }}s</template></span>
+            <span class="batch-check">{{ batchAssetIds.has(a.id) ? '✓' : '' }}</span>
+          </div>
+          <div v-if="!batchSelectable.length && !batchAssetsLoading" class="empty-sm">{{ t('launch.batchNoAssets') }}</div>
+        </div>
+        <div v-if="batchPreview.n && batchPreview.m" class="batch-preview">{{ t('launch.batchPreview', { n: batchPreview.n, m: batchPreview.m, total: batchPreview.total }) }}</div>
+      </template>
       <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">⚠ {{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
-      <div v-if="deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
+      <div v-if="deployMode==='single' && deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
       <div class="deploy-search-row">
         <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
@@ -1518,9 +1621,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         </div>
       </div>
       <template #footer>
-        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl"> · {{ t('launch.totalBudgetHint', { total: (selectedAccs.size * Number(deployTpl.budget_usd || 0)).toFixed(0), per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
+        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl && deployMode==='single'"> · {{ t('launch.totalBudgetHint', { total: (selectedAccs.size * Number(deployTpl.budget_usd || 0)).toFixed(0), per: Number(deployTpl.budget_usd || 0) }) }}</template><template v-else-if="selectedAccs.size && deployTpl && deployMode==='batch' && batchAssetIds.size"> · {{ t('launch.batchBudgetHint', { total: (selectedAccs.size * batchAssetIds.size * Number(deployTpl.budget_usd || 0)).toFixed(0), n: selectedAccs.size, m: batchAssetIds.size, per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
         <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
-        <button class="btn primary" :disabled="deploying||!selectedAccs.size" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
+        <button class="btn primary" :disabled="deploying||!selectedAccs.size||(deployMode==='batch'&&!batchAssetIds.size)" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
       </template>
     </el-drawer>
 
@@ -1538,7 +1641,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="pi-act">{{ it.act_id }}</span>
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
             <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
-            <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,60) }}</span>
+            <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="fbErrorText(it.error_code) || it.error">{{ itemErrText(it, 60) }}</span>
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
           </div>
         </div>
@@ -1548,6 +1651,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     <el-dialog v-model="preflightVisible" :title="preflightResult?.platform === 'tt' ? t('launch.ttPreflightTitle') : t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
         <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
+        <div v-if="preflightResult.series_count" class="pf-series-count">🎬 {{ t('launch.batchSeriesCount', { n: preflightResult.series_count }) }}</div>
         <div v-if="preflightResult.asset?.type === 'video'" style="padding:4px 0;font-size:13px">{{ t('launch.videoAsset') }}：{{ preflightResult.asset.name || preflightResult.asset.filename }}<template v-if="preflightResult.asset.duration_sec"> · {{ t('launch.durationLabel') }} {{ preflightResult.asset.duration_sec }}s</template></div>
         <div class="pf-summary">
           <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
@@ -1607,7 +1711,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
               </span>
               <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(depJobDetail?.platform) }}→</a>
-              <span v-if="it.error" class="pi-err" :title="fbErrorText(it.error_code) || it.error">{{ (fbErrorText(it.error_code) || it.error).slice(0,40) }}</span>
+              <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="fbErrorText(it.error_code) || it.error">{{ itemErrText(it, 40) }}</span>
             </div>
             <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
           </div>
@@ -1673,7 +1777,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dep-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block}
 .dep-arrow.open{transform:rotate(90deg)}
 .dep-items{border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:2px;padding:6px 0;max-height:40vh;overflow-y:auto}
-.dep-item{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px}
+.dep-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 12px;font-size:12px}
 .dep-ad-id{font-family:monospace;color:var(--ac);cursor:pointer;font-size:11px}
 .dep-ad-id:hover{text-decoration:underline}
 .dep-live{font-size:11px;white-space:nowrap}
@@ -1810,6 +1914,21 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .acc-no-perm{font-size:12px;cursor:help}
 .acc-count-hint{font-size:11px;color:var(--t3);white-space:nowrap}
 .deploy-search-row{display:flex;gap:8px;align-items:center;margin-bottom:8px }
+/* 部署模式切换 + 批量生成系列（batch） */
+.deploy-mode-row{display:flex;align-items:center;gap:10px;margin:10px 0 2px}
+.dm-label{font-size:12px;color:var(--t3);flex:none}
+.dm-seg{flex:none;width:280px}
+.dm-seg button{flex:none;padding:5px 14px}
+.batch-hint{margin:8px 0;background:rgba(10,132,255,.08);border-color:rgba(10,132,255,.25);color:var(--t2)}
+.batch-bar{display:flex;gap:6px;align-items:center;margin:8px 0}
+.batch-count{font-size:12px;color:var(--t2);margin-right:auto}
+.batch-grid{max-height:300px;overflow-y:auto;padding:1px}
+.batch-card{position:relative}
+.batch-card.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}
+.batch-check{position:absolute;top:6px;right:6px;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:var(--ac);color:#fff;font-size:11px}
+.batch-preview{margin-top:8px;padding:8px 12px;background:rgba(10,132,255,.08);border:1px solid rgba(10,132,255,.25);border-radius:6px;font-size:12px;color:var(--t2)}
+.pi-err.wrap{white-space:normal;overflow:visible;text-overflow:clip;flex-basis:100%;line-height:1.45;font-size:11px}
+.pf-series-count{padding:8px 0 0;font-size:13px;color:var(--ac)}
 .deploy-search-row .inp{flex:1}
 .acc-config{padding:8px 10px;background:var(--bg3);display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px;align-items:center}
 .acc-config label{font-size:11px;color:var(--t3)}
@@ -1823,7 +1942,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .prog-status.running{color:var(--ac);background:rgba(10,132,255,.13)}
 .prog-status.failed{color:var(--error);background:rgba(255,69,58,.13)}
 .prog-items{display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow-y:auto}
-.prog-item{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:12px;border-bottom:1px solid var(--bd)}
+.prog-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 8px;font-size:12px;border-bottom:1px solid var(--bd)}
 .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .pi-act{font-family:monospace;color:var(--t2);width:130px}
 .pi-status{font-size:11px;width:50px}

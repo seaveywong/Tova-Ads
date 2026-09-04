@@ -6,6 +6,7 @@ import assets from './views/assets'
 import landing from './views/landing'
 import guard from './views/guard'
 import lplogs from './views/lplogs'
+import adsExtra from './views/ads'
 
 // English message dictionary. Mirrors zh.js key-for-key.
 export default {
@@ -19,6 +20,11 @@ export default {
     sendTest: 'Send test message', addAnother: '+ Add another', multiNote: 'Alerts are sent to ALL bound Telegrams.',
     unbind: 'Unbind', unbindConfirm: 'Unbind Telegram {id}? It will no longer receive alerts.', unbound: 'Unbound',
     testSent: 'Test message sent to {n} Telegram(s), please check',
+    // Notification scope (TG preference matrix: warning/info toggleable, critical always pushed)
+    prefsTitle: 'Notification scope', prefsCritical: 'Critical alerts', prefsLocked: 'Always pushed, cannot be turned off',
+    prefsWarning: 'Warning alerts', prefsInfo: 'Info alerts',
+    prefsNote: 'Turned-off levels stop going to Telegram only; in-app notifications are unaffected. Critical alerts are always pushed.',
+    prefsSaved: '✅ Notification preferences saved',
     step1: 'Open Telegram with the button (or copy the command and send it manually)',
     openTg: 'Open Telegram to bind',
     copyCmd: 'Copy command', cmdCopied: 'Command copied (valid 30 minutes)',
@@ -156,6 +162,16 @@ export default {
     generic: 'Facebook returned an error',
   },
   status: {
+    // FB adaccount disable_reason (numeric enum; 0/absent = no reason)
+    drAdsPolicy: 'Ads policy violation', drAdsIntegrity: 'Ads integrity', drRiskPayment: 'Payment risk',
+    drGrayAccount: 'Gray account provisioning', drHiRiskRestricted: 'High-risk restricted',
+    drEngagementAbuse: 'Engagement abuse', drAdsAbuse: 'Ads abuse',
+    drUnsupportedBusiness: 'Unsupported business', drMiscMkt: 'misc_mkt',
+    drAnCrowdsource: 'AN_CROWDSOURCE', drCanadaCra: 'CANADA_CRA', drChinaBci: 'CHINA_BCI',
+    drRpTosViolation: 'RP_TOS_VIOLATION', drMexicoProfeco: 'MEXICO_PROFECO',
+    drAgePolicy: 'Age policy', drWeatherSensor: 'WEATHER_SENSOR',
+    drGoodStanding: 'GOOD_STANDING_VIOLATED', drRomaniaAnpc: 'ROMANIA_ANPC',
+    drMisrepresentation: 'Misrepresentation',
     adActive: 'Active',
     adPaused: 'Paused',
     adCampaignPaused: 'Campaign Paused',
@@ -261,6 +277,7 @@ export default {
     mustChangePwd: 'Please change your initial password first (Settings → Account)', errGeneric: 'Sign-in failed, please retry',
   },
   ads: {
+    ...adsExtra.en,
     title: 'Ad Accounts',
     accountCount: '{n} accounts',
     account: 'Account',

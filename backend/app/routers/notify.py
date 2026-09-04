@@ -285,6 +285,52 @@ def get_user_tg_binding(
                          for b in binds]}
 
 
+# ── 用户 TG 通知偏好（FBInsider ④白名单矩阵：critical 恒推不受限，warning/info 可关）──
+class TgPrefsIn(BaseModel):
+    warning: bool = True
+    info: bool = True
+
+
+@router.get("/tg/prefs")
+def get_tg_prefs(
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """当前用户的 TG 通知偏好。未绑定也返回默认全推（bound=false 供前端隐藏开关区）。"""
+    from ..models.notify import UserTgBinding
+    from ..core.notify_utils import parse_tg_levels
+    b = db.query(UserTgBinding).filter(
+        UserTgBinding.tenant_id == user.tenant_id,
+        UserTgBinding.user_id == user.id,
+    ).order_by(UserTgBinding.id).first()
+    # prefs 缺省/脏数据 → parse_tg_levels 兜底全 true（fail-open，与发送层同口径）
+    return {"bound": b is not None,
+            "levels": parse_tg_levels(b.prefs if b else None)}
+
+
+@router.put("/tg/prefs")
+def put_tg_prefs(
+    body: TgPrefsIn,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """保存 TG 通知偏好（warning/info 开关；critical 不在开关内——发送层代码强制恒推）。
+    偏好是用户级语义：一人多 TG 时写该用户全部绑定行，保证任一行读出一致。"""
+    import json
+    from ..models.notify import UserTgBinding
+    binds = db.query(UserTgBinding).filter(
+        UserTgBinding.tenant_id == user.tenant_id,
+        UserTgBinding.user_id == user.id,
+    ).all()
+    if not binds:
+        raise HTTPException(400, "你未绑定 TG，请先绑定再设置通知偏好")
+    prefs_json = json.dumps({"levels": {"warning": body.warning, "info": body.info}})
+    for b in binds:
+        b.prefs = prefs_json
+    db.commit()
+    return {"bound": True, "levels": {"warning": body.warning, "info": body.info}}
+
+
 @router.get("/tg/team-bindings")
 def tg_team_bindings(
     user: CurrentUser = Depends(require_permission("members.manage")),

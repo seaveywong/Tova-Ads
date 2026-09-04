@@ -72,6 +72,37 @@ export const accountStatus = (code) => {
   return e ? { label: t(e.key), cls: e.cls } : { label: '—', cls: 'off' }
 }
 
+// FB 账户禁用原因（Graph API adaccount.disable_reason 数字枚举）。
+// 仅常用码给本地化标签；长尾（各国监管/风控项目）保留 FB 官方英文原词，
+// 避免生造翻译误导排查。tone: danger=违规/封禁类（基本不可救） warning=支付/风控类（可申诉补救）。
+// 0=none 不入库展示（disableReason 返回 null）；未知新枚举透传 '#码'，不吞掉线索。
+export const FB_DISABLE_REASON = {
+  1:  { key: 'status.drAdsPolicy',           tone: 'danger' },
+  2:  { key: 'status.drAdsIntegrity',        tone: 'danger' },
+  3:  { key: 'status.drRiskPayment',         tone: 'warning' },
+  4:  { key: 'status.drGrayAccount',         tone: 'warning' },
+  5:  { key: 'status.drHiRiskRestricted',    tone: 'danger' },
+  7:  { key: 'status.drEngagementAbuse',     tone: 'danger' },
+  8:  { key: 'status.drAdsAbuse',            tone: 'danger' },
+  9:  { key: 'status.drUnsupportedBusiness', tone: 'warning' },
+  10: { key: 'status.drMiscMkt',             tone: 'warning' },
+  11: { key: 'status.drAnCrowdsource',       tone: 'warning' },
+  12: { key: 'status.drCanadaCra',           tone: 'warning' },
+  13: { key: 'status.drChinaBci',            tone: 'warning' },
+  14: { key: 'status.drRpTosViolation',      tone: 'danger' },
+  15: { key: 'status.drMexicoProfeco',       tone: 'warning' },
+  16: { key: 'status.drAgePolicy',           tone: 'danger' },
+  17: { key: 'status.drWeatherSensor',       tone: 'warning' },
+  18: { key: 'status.drGoodStanding',        tone: 'warning' },
+  19: { key: 'status.drRomaniaAnpc',         tone: 'warning' },
+  20: { key: 'status.drMisrepresentation',   tone: 'danger' },
+}
+export const disableReason = (code) => {
+  if (code == null || Number(code) === 0) return null   // 0=无原因，副行不显示
+  const e = FB_DISABLE_REASON[Number(code)]
+  return e ? { label: t(e.key), tone: e.tone } : { label: `#${code}`, tone: 'warning' }
+}
+
 // 部署任务状态
 export const JOB_STATUS = {
   pending:        { key: 'status.jobPending',   cls: 'off' },

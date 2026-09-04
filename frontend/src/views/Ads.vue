@@ -2,9 +2,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { GET, POST, DELETE } from '../api'
+import { GET, POST, PUT, DELETE } from '../api'
 import { isSuperadminSync } from '../router'
-import { accountStatus } from '../composables/useStatus'
+import { accountStatus, disableReason } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -24,12 +24,23 @@ const isSuper = ref(isSuperadminSync())
 const { platform } = usePlatform()
 const searchQ = ref('')
 const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
+
+// ── 账户分组标签（自由文本）：筛选下拉 + 列头点击聚合排序 ──
+const groupFilter = ref('')   // ''=全部分组
+const groupSort = ref(false)  // 列头点击切换：开=同组相邻（无组沉底）；关=恢复后端「需关注在上」原序
+const groupOptions = computed(() => [...new Set(platAccounts.value.map(a => (a.group_label || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)))
+const _NOGRP = String.fromCharCode(0xFFFF)   // 无分组哨兵：码点极大值，排序时无分组行沉底
+const sortForView = (rows) => groupSort.value
+  ? [...rows].sort((a, b) => ((a.group_label || '').trim() || _NOGRP).localeCompare((b.group_label || '').trim() || _NOGRP))
+  : rows
 const filteredAccounts = computed(() => {
-  if (!searchQ.value.trim()) return platAccounts.value
+  // 分组筛选与搜索叠加（都在 platAccounts 基础上收窄）
+  let rows = groupFilter.value ? platAccounts.value.filter(a => (a.group_label || '').trim() === groupFilter.value) : platAccounts.value
+  if (!searchQ.value.trim()) return sortForView(rows)
   // 搜索只过滤、保序（fuse.search 按相关度重排会打乱列表既有排序——同 Dashboard 修法）
-  const fuseAcc = new Fuse(platAccounts.value, { keys: ['name', 'act_id'], threshold: 0.3 })
+  const fuseAcc = new Fuse(rows, { keys: ['name', 'act_id'], threshold: 0.3 })
   const hits = new Set(fuseAcc.search(searchQ.value.trim()).map(r => r.item.act_id))
-  return platAccounts.value.filter(a => hits.has(a.act_id))
+  return sortForView(rows.filter(a => hits.has(a.act_id)))
 })
 // 展示行（platform=all 时按 FB/TT 分段：段头「Facebook (N)」+ 数据行；单平台时纯数据行）
 const displayRows = computed(() => {
@@ -178,6 +189,7 @@ const doImport = async () => {
 const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('ads.idCopied', { id })) }
 const onCmd = async (cmd, a) => {
   if (cmd === 'manager') router.push({ name: 'ad-manager', query: { act: a.act_id } })
+  else if (cmd === 'group') openGroupEdit(a)
   else if (cmd === 'sync') {
     if (!a.fb_credential_id) return ElMessage.warning(t('ads.noBoundToken'))
     try { await POST(`/fb/credentials/${a.fb_credential_id}/refresh-accounts`); ElMessage.success(t('ads.refreshedSimple')); await load() }
@@ -207,6 +219,30 @@ const batchWarmup = async (arm) => {
   await toggleWarmup([...selectedAccs.value], arm)
   selectedAccs.value.clear()
 }
+
+// ── 分组编辑（单账户走行菜单，批量走多选条；同一弹窗复用）──
+const groupEdit = ref(null)   // { actIds: string[], label: string, batch: bool }
+const groupSaving = ref(false)
+const openGroupEdit = (a) => { groupEdit.value = { actIds: [a.act_id], label: (a.group_label || '').trim(), batch: false } }
+const openGroupBatch = () => {
+  if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
+  groupEdit.value = { actIds: [...selectedAccs.value], label: '', batch: true }   // 批量不预填（多账户现值不一，留空=统一设置或清除）
+}
+const saveGroup = async () => {
+  const g = groupEdit.value
+  groupSaving.value = true
+  try {
+    const r = await PUT('/fb/accounts/group', { act_ids: g.actIds, group_label: g.label.trim() })
+    ElMessage.success(t('ads.groupSaved', { n: r.updated }))
+    groupEdit.value = null
+    if (g.batch) selectedAccs.value.clear()
+    await load()
+  } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
+  groupSaving.value = false
+}
+// 禁用原因副行（FBInsider ⑤）：状态非正常且 FB 给了非 0 原因码才显示
+const drInfo = (a) => (Number(a.account_status) !== 1 && a.disable_reason != null && Number(a.disable_reason) !== 0)
+  ? disableReason(a.disable_reason) : null
 
 const syncing = ref(false)
 const syncCampaigns = async () => {
@@ -240,30 +276,39 @@ onMounted(async () => {
     <div class="date-bar">
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <input v-model="searchQ" class="acc-search" :placeholder="t('ads.searchPh')" />
+      <select v-model="groupFilter" class="grp-filter" :title="t('ads.groupFilterTip')">
+        <option value="">{{ t('ads.groupAll') }}</option>
+        <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+      </select>
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>
       <button class="batch-btn" @click="batchSync" :disabled="accLoading">{{ batchSyncLabel || batchSyncBase }}</button>
       <button class="batch-btn" @click="batchWarmup(true)" :disabled="accLoading">{{ t('ads.warmupArm') }}</button>
       <button class="batch-btn" @click="batchWarmup(false)" :disabled="accLoading">{{ t('ads.warmupDisarm') }}</button>
+      <button class="batch-btn" @click="openGroupBatch" :disabled="accLoading">{{ t('ads.groupSet') }}</button>
       <button class="batch-btn danger" @click="batchRemove" :disabled="accLoading">{{ t('ads.batchRemove') }}</button>
       <button class="batch-btn" @click="selectedAccs.clear()">{{ t('common.cancel') }}</button>
     </div>
     <div class="tbl" v-loading="loading || accLoading">
       <div class="row head">
         <div><input type="checkbox" :checked="selectedAccs.size === filteredAccounts.length && filteredAccounts.length > 0" @click="selectAllAccs" /></div>
-        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
+        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div class="th-grp" :title="t('ads.groupSortTip')" @click="groupSort = !groupSort">{{ t('ads.groupCol') }}<span v-if="groupSort" class="sort-ind">▲</span></div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
       <template v-for="d in displayRows" :key="d.type === 'grp' ? 'grp-' + d.key : d.a.act_id">
         <div v-if="d.type === 'grp'" class="grp-title" :class="d.key"><span class="grp-dot" :class="d.key"></span>{{ d.label }} <span class="grp-n">({{ d.n }})</span></div>
         <div v-else class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
-        <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
+        <div class="st-cell">
+          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
+          <div v-if="drInfo(d.a)" class="dr-line" :class="drInfo(d.a).tone">{{ t('ads.drPrefix') }}{{ drInfo(d.a).label }}</div>
+        </div>
         <div class="acc">
           <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: d.a.act_id } })"><span v-if="platChip(d.a)" :class="['plat-chip', platChip(d.a)]">{{ platChip(d.a).toUpperCase() }}</span>{{ (d.a.name && d.a.name !== d.a.act_id) ? d.a.name : t('ads.unnamedAccount') }}</div>
           <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}</div>
         </div>
+        <div class="grp-cell"><span v-if="d.a.group_label" class="tag grp" :title="d.a.group_label">{{ d.a.group_label }}</span><span v-else class="grp-none">—</span></div>
         <div>{{ fmtMoney(d.a.balance, d.a.currency) }}<span v-if="d.a.balance_usd != null && d.a.currency !== 'USD'" class="sub"> ≈${{ d.a.balance_usd }}</span></div>
         <div>
           <span v-if="d.a.available_usd != null">${{ d.a.available_usd }}</span>
@@ -286,6 +331,7 @@ onMounted(async () => {
               <el-dropdown-menu>
                 <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
                 <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
+                <el-dropdown-item command="group">{{ t('ads.groupEditTitle') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
                 <el-dropdown-item command="remove" class="danger">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
@@ -327,6 +373,18 @@ onMounted(async () => {
         <button class="btn primary" :disabled="importing" style="margin-top:12px" @click="doImport">{{ importing ? t('ads.importing') : t('ads.importSelected') }}</button>
       </div>
     </div>
+
+    <div v-if="groupEdit" class="overlay" @click.self="groupEdit = null">
+      <div class="modal modal-sm">
+        <div class="modal-title">{{ groupEdit.batch ? t('ads.groupBatchTitle', { n: groupEdit.actIds.length }) : t('ads.groupEditTitle') }} <button class="mb" @click="groupEdit = null">✕</button></div>
+        <div v-if="groupEdit.batch" class="grp-edit-note">{{ t('ads.groupBatchNote') }}</div>
+        <input v-model="groupEdit.label" class="grp-input" maxlength="50" :placeholder="t('ads.groupPh')" />
+        <div class="grp-edit-ops">
+          <button class="btn" @click="groupEdit = null">{{ t('common.cancel') }}</button>
+          <button class="btn primary" :disabled="groupSaving" @click="saveGroup">{{ groupSaving ? t('common.loading') : t('common.save') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -352,7 +410,7 @@ onMounted(async () => {
 .acc-search:focus { outline: none; border-color: var(--ac) }
 .acc-search::placeholder { color: var(--t3) }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 30px 0.8fr 1.7fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1080px; font-variant-numeric: tabular-nums }
+.row { display: grid; grid-template-columns: 30px 0.9fr 1.7fr 0.8fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1180px; font-variant-numeric: tabular-nums }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .row:not(.head):hover { background: var(--bg2) }
@@ -370,6 +428,24 @@ onMounted(async () => {
 .sub { color: var(--t3); font-size: 11px }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: var(--t3); vertical-align: middle }
 .dot.ok { background: var(--success) } .dot.warn { background: var(--warning) } .dot.err { background: var(--error) } .dot.off { background: var(--t3); opacity: .5 }
+/* 状态列内两行：主状态 + 禁用原因副行（小字红/黄） */
+.st-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.dr-line { font-size: 11px; line-height: 1.3; overflow-wrap: anywhere }
+.dr-line.danger { color: var(--error) }
+.dr-line.warning { color: var(--warning) }
+/* 分组列：chip 显标签，无组灰 —；列头可点击聚合排序 */
+.th-grp { cursor: pointer; user-select: none }
+.th-grp:hover { color: var(--t1) }
+.sort-ind { font-size: 10px; color: var(--ac); margin-left: 2px }
+.tag.grp { background: rgba(10,132,255,.12); color: var(--ac); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle }
+.grp-none { color: var(--t3); opacity: .6 }
+.grp-filter { height: 32px; padding: 0 8px; background: var(--bg2); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark; max-width: 160px }
+.grp-filter:focus { outline: none; border-color: var(--ac) }
+.modal-sm { width: 420px }
+.grp-input { width: 100%; height: 34px; padding: 0 10px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark }
+.grp-input:focus { outline: none; border-color: var(--ac) }
+.grp-edit-note { font-size: 12px; color: var(--t3); margin-bottom: 10px; line-height: 1.5 }
+.grp-edit-ops { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg3); color: var(--t2) }
 .tag.ok { color: var(--success) } .tag.warn { color: var(--warning) } .tag.off { color: var(--t3) }
 .pool-n { font-size: 10px; color: var(--success); margin-left: 2px; font-weight: 600 }

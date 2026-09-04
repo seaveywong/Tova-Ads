@@ -157,6 +157,11 @@ def store_credential(
 class RenameIn(BaseModel):
     alias: str = ""
 
+
+class AccountGroupIn(BaseModel):
+    act_ids: list[str]
+    group_label: str = ""
+
 @router.post("/credentials/{cred_id}/rename")
 def rename_credential(
     cred_id: int,
@@ -856,7 +861,10 @@ def refresh_credential_accounts(
         raise HTTPException(404, "令牌不存在")
     fb = FbClient(decrypt(cred.access_token_enc))
     try:
-        fb_accounts = fb.get_ad_accounts()
+        # 显式带 disable_reason（FbClient.get_ad_accounts 的字段表不含它，且 fb_client
+        # 不在本次改动管辖——字段常量与 account_sync cron 共用，避免两处漂移）
+        from ..services.account_sync import ADACCOUNT_SYNC_FIELDS
+        fb_accounts = fb.get_paged("me/adaccounts", {"fields": ADACCOUNT_SYNC_FIELDS})
     except FbApiError as e:
         raise HTTPException(400, e.friendly)
     fb_map = {a.get("account_id"): a for a in fb_accounts}
@@ -869,6 +877,10 @@ def refresh_credential_accounts(
         if not live:
             continue
         acc.account_status = live.get("account_status") or acc.account_status
+        # 显式判 None 而非 or 兜底：disable_reason=0（恢复正常）是合法值，or 会跳过导致旧原因残留
+        _dr = live.get("disable_reason")
+        if _dr is not None:
+            acc.disable_reason = int(_dr)
         acc.balance = str(live.get("balance", "") or "")
         acc.spend_cap = str(live.get("spend_cap", "") or "")
         acc.amount_spent = str(live.get("amount_spent", "") or "")
@@ -996,7 +1008,7 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
         avail = _is_cred_available(c)
         for i in range(0, len(pending), 50):
             chunk = pending[i:i + 50]
-            urls = [f"act_{a}?fields=account_id,name,currency,timezone_name,account_status"
+            urls = [f"act_{a}?fields=account_id,name,currency,timezone_name,account_status,disable_reason"
                     for a in chunk]
             try:
                 results = fb.batch_get(urls)
@@ -1010,6 +1022,7 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
                         "currency": meta.get("currency", "USD"),
                         "timezone_name": meta.get("timezone_name") or "UTC",
                         "account_status": meta.get("account_status"),
+                        "disable_reason": meta.get("disable_reason"),
                         "tokens": [{"id": c.id, "alias": c.alias or c.fb_user_name,
                                     "available": avail}],
                     }
@@ -1030,7 +1043,11 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
             if not cred:
                 continue
             try:
-                fb_map = {a.get("account_id"): a for a in FbClient(decrypt(cred.access_token_enc)).get_ad_accounts()}
+                # 同 refresh-accounts：显式带 disable_reason（fb_client 字段表不含它）
+                from ..services.account_sync import ADACCOUNT_SYNC_FIELDS
+                fb_map = {a.get("account_id"): a for a in
+                          FbClient(decrypt(cred.access_token_enc)).get_paged(
+                              "me/adaccounts", {"fields": ADACCOUNT_SYNC_FIELDS})}
             except FbApiError:
                 continue
             for acc in db.query(Account).filter(
@@ -1041,6 +1058,9 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
                 if not live:
                     continue
                 acc.account_status = live.get("account_status") or acc.account_status
+                _dr = live.get("disable_reason")
+                if _dr is not None:   # 0 是合法值（恢复正常），or 兜底会跳过导致旧原因残留
+                    acc.disable_reason = int(_dr)
                 if live.get("timezone_name"):
                     acc.timezone_name = live["timezone_name"]  # 时区是巡检/加白日期的基准，必须补准
                 acc.balance = str(live.get("balance", "") or "")
@@ -1140,6 +1160,7 @@ def import_accounts(
             timezone_name=row.get("timezone_name", "UTC"),
             owner_user_id=user.id,
             account_status=row.get("account_status", 1),
+            disable_reason=(int(row["disable_reason"]) if row.get("disable_reason") is not None else None),
         )
         db.add(new_acc)
         db.flush()  # 拿 new_acc.id 用于关联
@@ -1225,6 +1246,7 @@ def list_accounts(
             "id": a.id, "act_id": a.act_id, "name": a.name, "currency": cur,
             "platform": a.platform or "fb",
             "timezone": a.timezone_name, "account_status": a.account_status,
+            "group_label": a.group_label or "", "disable_reason": a.disable_reason,
             "is_managed": a.is_managed if a.is_managed is not None else True,
             "warmup_state": a.warmup_state or "none",
             "balance": bal, "balance_usd": (round(_tu, 2) if (bal is not None and (_tu := to_usd(bal, cur)) is not None) else None),   # 未知币种 None 不崩
@@ -1240,6 +1262,56 @@ def list_accounts(
             "recent_spend": perf.get("spend", 0.0), "recent_conversions": perf.get("conversions", 0),
         })
     return out
+
+
+@router.put("/accounts/group")
+def set_account_group(
+    body: AccountGroupIn,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """批量设置账户分组标签（group_label 空串=清除）。
+
+    纯用户自定义标签（"主投组/测试组"），不关联 FB 任何对象——分组本质是标签，
+    保持轻（无分组表/无枚举约束）。tenant 隔离 + operator 只能动名下账户（同列表
+    可见性），写 action_logs 留痕（action_type=group_update，FB/TT 混批按平台分行）。
+    """
+    cleaned = [a.replace("act_", "").replace("ACT_", "").strip() for a in body.act_ids]
+    cleaned = [a for a in cleaned if a]
+    if not cleaned:
+        raise HTTPException(400, "未选择账户")
+    if len(cleaned) > 500:
+        raise HTTPException(400, "单次最多 500 个账户")
+    label = (body.group_label or "").strip()
+    if len(label) > 50:
+        raise HTTPException(400, "分组名过长（≤50 字符）")
+    query = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id,
+        Account.act_id.in_(cleaned),
+        Account.is_managed == True,  # noqa: E712
+    )
+    if user.role == "operator":
+        query = query.filter(Account.owner_user_id == user.id)
+    accs = query.all()
+    if not accs:
+        raise HTTPException(404, "账户不存在或无权限")
+    for acc in accs:
+        acc.group_label = label or None   # 空串归一为 NULL（无分组），避免空串/NULL 两态并存
+    from ..core.log_utils import write_log, new_trace_id
+    # 留痕按平台分组各写一行（FB/TT 混批不把 TT 记成 fb；write_log 的 platform 默认 'fb'）
+    _tid = new_trace_id()
+    _by_plat: dict = {}
+    for a in accs:
+        _by_plat.setdefault(a.platform or "fb", []).append(a.act_id)
+    for _plat, _ids in _by_plat.items():
+        write_log(db, tenant_id=user.tenant_id, trace_id=_tid, actor_type="user",
+                  actor_user_id=user.id, target_type="account",
+                  target_id=_ids[0] if len(_ids) == 1 else f"batch:{len(_ids)}",
+                  action_type="group_update", source="user", result="success", platform=_plat,
+                  trigger_detail=f"n={len(_ids)} label={label or '(clear)'}",
+                  metadata={"act_ids": _ids, "group_label": label or None})
+    db.commit()
+    return {"updated": len(accs), "group_label": label or None}
 
 
 @router.get("/accounts/at-risk")

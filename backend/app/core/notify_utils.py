@@ -173,6 +173,30 @@ def dedup_recent(db: Session, tenant_id: int, action_type: str,
     return q.first() is not None
 
 
+# ── 用户 TG 通知偏好（FBInsider ④通知白名单矩阵）──
+# prefs = 绑定行上的 JSON 字符串：{"levels": {"warning": true, "info": true}}。
+# 缺省(NULL)/空/解析失败 = 全 true——fail-open：偏好是降噪手段不是可靠性手段，宁可多推不可漏推。
+# critical 恒推由调用处强制（不存 prefs、不出现在开关里）：重大资金/系统风险不能被用户关掉。
+# 未来扩展位：levels 之外可加按 event_type / 账户过滤的键，本期只实现 levels。
+
+
+def parse_tg_levels(prefs_json: str | None) -> dict:
+    """prefs JSON → {"warning": bool, "info": bool}；任何缺失/异常 → 全 True（fail-open）。"""
+    try:
+        d = _json.loads(prefs_json) if prefs_json else {}
+        lv = (d or {}).get("levels") or {}
+        # 只有显式 false 才算关：缺键/None/非布尔值都按开（容错老数据/手改库）
+        return {"warning": lv.get("warning") is not False,
+                "info": lv.get("info") is not False}
+    except Exception:
+        return {"warning": True, "info": True}
+
+
+def tg_prefs_allow(prefs_json: str | None, level: str) -> bool:
+    """该用户是否允许此级别的通知推 TG（critical 调用方已豁免，不走这里）。"""
+    return parse_tg_levels(prefs_json).get((level or "").lower(), True)
+
+
 def emit_notification(
     db: Session,
     *,
@@ -190,16 +214,25 @@ def emit_notification(
     reply_markup=None,
     force_tg: bool = False,
     platform: str = "fb",  # fb/tt——告警按平台隔离展示（看板切平台时只看该平台告警）
+    act_id: str | None = None,  # 预留账户维度过滤（guard_engine 集成接线用）：notifications
+                                # 表暂无 act_id 列，本期只挂参不落库不迁移；确需账户级
+                                # 关联时调用方直接传 target_type="account", target_id=act_id
 ) -> bool:
     """发通知：写站内信（带 roles 订阅）+ 按角色路由 TG 到用户级绑定。
 
     roles：决策①订阅矩阵（空则按 event_type 自动解析 _roles_for_event）。
     TG 路由：查租户内 role∈roles 的用户 → 各自 user_tg_binding 发；
     若租户无任何用户级绑定 → fallback tenant_tg_binding（不断现网）。
+    TG 偏好：warning/info 受用户 prefs（user_tg_bindings.prefs）门控，critical 恒推
+    （④白名单矩阵，只挡 TG 分发层——站内信不受影响，见 _send_tg_by_role）。
     force_tg：info 级也发 TG（默认 info 只进站内信；扩量通知等需要即时可见的用）。
     返回：True=已发；False=被每日风暴上限抑制（见 _storm_allows）。
     """
     roles = roles or _roles_for_event(event_type)
+    # act_id 账户维度关联：映射进已有 target_type/target_id 列（零迁移）——
+    # 前端 notiActId 从 body 正则提取是脆弱路径，落库后可直接按列过滤
+    if act_id and not target_type and not target_id:
+        target_type, target_id = "account", act_id
     if not _storm_allows(db, tenant_id, event_type):
         n = _record_storm_suppression(tenant_id, event_type)
         # 当日该事件首条被压制 → 补一条站内 summary（per-tenant 24h dedup），
@@ -232,7 +265,9 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
     """按角色路由 TG：用户级绑定优先，无则 fallback 租户级。chat_id 去重防重复。
     critical 放宽（统一规则）：level=="critical" → 发给该租户所有已绑 TG 的用户
     （operator 也能收到 token_expired/orphan_account 等系统级 critical）；
-    非 critical 维持 roles 分工（广告级 owner+operator / 系统级 owner）。"""
+    非 critical 维持 roles 分工（广告级 owner+operator / 系统级 owner）。
+    通知偏好（④白名单矩阵）：warning/info 被用户显式关 → 跳过该用户的 TG；
+    critical 恒推不受限。只挡本 TG 分发层——站内信在 emit_notification 已落库，不受影响。"""
     icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(level, "🔵")
     text = f"{icon} <b>{title}</b>\n{body}"[:1000]
     sent_keys: set[tuple] = set()  # (bot_token, chat_id) 去重
@@ -260,6 +295,10 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
     for b in ubindings:
         key = (b.bot_token_enc, b.chat_id)
         if key in sent_keys:
+            continue
+        # 通知偏好（④白名单矩阵）：critical 恒推；warning/info 被用户显式关 → 跳过
+        # （prefs 是用户级语义，PUT 时写该用户全部绑定行，任一行读出一致）
+        if level != "critical" and not tg_prefs_allow(b.prefs, level):
             continue
         _tg_send_tracked(db, tenant_id, decrypt(b.bot_token_enc), b.chat_id,
                          text, reply_markup)

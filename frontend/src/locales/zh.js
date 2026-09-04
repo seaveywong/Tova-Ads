@@ -6,6 +6,7 @@ import assets from './views/assets'
 import landing from './views/landing'
 import guard from './views/guard'
 import lplogs from './views/lplogs'
+import adsExtra from './views/ads'
 
 // 中文文案字典。按命名空间组织：common(通用按钮) / nav(导航) / role(角色) /
 // status(状态术语，配合 useStatus.js) / layout(外壳) / login / 各业务页。
@@ -21,6 +22,11 @@ export default {
     sendTest: '发送测试消息', addAnother: '+ 添加绑定', multiNote: '告警将同时发送到以上全部 Telegram。',
     unbind: '解绑', unbindConfirm: '解绑 Telegram {id}？解绑后该 TG 不再收到告警。', unbound: '已解绑',
     testSent: '测试消息已发送到 {n} 个 TG，请查收',
+    // 通知范围（TG 偏好矩阵：warning/info 可关，critical 恒推）
+    prefsTitle: '通知范围', prefsCritical: '严重告警', prefsLocked: '始终推送，无法关闭',
+    prefsWarning: '警告通知', prefsInfo: '提示通知',
+    prefsNote: '关闭的级别仅不再推送到 Telegram，站内通知不受影响；严重告警始终推送。',
+    prefsSaved: '✅ 通知偏好已保存',
     step1: '点击按钮打开 Telegram 发送绑定命令（或复制命令手动发送）',
     openTg: '打开 Telegram 绑定',
     copyCmd: '复制命令', cmdCopied: '命令已复制（30 分钟内有效）',
@@ -158,6 +164,16 @@ export default {
     generic: 'Facebook 返回错误',
   },
   status: {
+    // FB 账户 disable_reason（adaccount.disable_reason 数字枚举；0/空不入表=无原因）
+    drAdsPolicy: '广告政策违规', drAdsIntegrity: '广告诚信', drRiskPayment: '支付风险',
+    drGrayAccount: 'Gray account provisioning', drHiRiskRestricted: '高风险受限',
+    drEngagementAbuse: 'Engagement abuse', drAdsAbuse: 'Ads abuse',
+    drUnsupportedBusiness: 'Unsupported business', drMiscMkt: 'misc_mkt',
+    drAnCrowdsource: 'AN_CROWDSOURCE', drCanadaCra: 'CANADA_CRA', drChinaBci: 'CHINA_BCI',
+    drRpTosViolation: 'RP_TOS_VIOLATION', drMexicoProfeco: 'MEXICO_PROFECO',
+    drAgePolicy: '年龄政策', drWeatherSensor: 'WEATHER_SENSOR',
+    drGoodStanding: 'GOOD_STANDING_VIOLATED', drRomaniaAnpc: 'ROMANIA_ANPC',
+    drMisrepresentation: '虚假陈述',
     // FB 广告 effective_status
     adActive: '投放中',
     adPaused: '已暂停',
@@ -272,6 +288,7 @@ export default {
     mustChangePwd: '首次登录请先修改初始密码（设置 → 账户）', errGeneric: '登录失败，请重试',
   },
   ads: {
+    ...adsExtra.zh,
     title: '广告账户',
     accountCount: '{n} 个账户',
     account: '账户',

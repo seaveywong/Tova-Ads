@@ -52,6 +52,8 @@ class Account(Base):
     timezone_name = Column(Text, nullable=False, default="UTC")
     owner_user_id = Column(BigInteger, ForeignKey("users.id"))
     account_status = Column(Integer, default=1)
+    disable_reason = Column(Integer)  # FB adaccount.disable_reason 数字枚举（0=无；状态异常时官方禁用原因，30min 同步落库）
+    group_label = Column(Text)  # 用户自定义分组标签（如"主投组/测试组"）——纯标签非外键非枚举，空=NULL 即无分组
     balance = Column(Text)
     spend_cap = Column(Text)
     amount_spent = Column(Text)
