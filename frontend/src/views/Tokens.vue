@@ -327,6 +327,15 @@ const statusMeta = (tk) => {
   if (f > 0) return { dot: 'warn', label: t('tokens.abnormal') + f }
   return { dot: 'ok', label: t('status.tokenValid') }
 }
+// 页头副信息：当前平台令牌 可用/停用 计数（可用=状态正常无异常，其余计入停用）
+const tokenStatusCount = computed(() => {
+  if (platform.value === 'tt') {
+    const ok = ttCreds.value.filter(c => c.status === 'active').length
+    return { ok, off: ttCreds.value.length - ok }
+  }
+  const ok = tokens.value.filter(tk => statusMeta(tk).dot === 'ok').length
+  return { ok, off: tokens.value.length - ok }
+})
 const typeMeta = (tk) => {
   const m = {
     operate: { label: t('tokens.typeOperate'), title: t('tokens.typeOperateTitle') },
@@ -467,9 +476,9 @@ const loadDrawerAssets = async (tk) => {
   } catch (e) { assetCache.value[tk.id] = { accounts: [], pages: [], businesses: [], error: e.message || t('tokens.assetReadFail') } }
   assetLoading.value = false
 }
-const openDrawer = async (tk) => {
+const openDrawer = async (tk, tab) => {
   drawerToken.value = tk
-  drawerTab.value = 'accounts'
+  drawerTab.value = tab || 'accounts'
   drawerOpen.value = true
   if (!assetCache.value[tk.id]) await loadDrawerAssets(tk)
 }
@@ -591,23 +600,29 @@ const deleteToken = async (tk) => {
 
 <template>
   <div class="page">
-    <div class="bar">
-      <div class="seg">
-        <button class="seg-btn seg-fb" :class="{on:platform==='fb'}" @click="switchPlatform('fb')"><span class="seg-dot fb"></span>Facebook</button>
-        <button class="seg-btn seg-tt" :class="{on:platform==='tt'}" @click="switchPlatform('tt')"><span class="seg-dot tt"></span>TikTok</button>
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('tokens.pageTitle') }}</h1>
+        <span class="ph-fresh">{{ t('tokens.statusCount', { ok: tokenStatusCount.ok, off: tokenStatusCount.off }) }}</span>
+        <div class="seg">
+          <button class="seg-btn seg-fb" :class="{on:platform==='fb'}" @click="switchPlatform('fb')"><span class="seg-dot fb"></span>Facebook</button>
+          <button class="seg-btn seg-tt" :class="{on:platform==='tt'}" @click="switchPlatform('tt')"><span class="seg-dot tt"></span>TikTok</button>
+        </div>
       </div>
-      <div v-if="platform==='fb'" class="bar-r">
-        <button class="btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
-        <button class="btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
-        <button class="btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
-        <button v-if="isSuper" class="btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
+      <div class="ph-actions">
+        <template v-if="platform==='fb'">
+          <button class="head-btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
+          <button class="head-btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
+          <button class="head-btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
+          <button v-if="isSuper" class="head-btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
+        </template>
+        <template v-else>
+          <button class="head-btn primary" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
+          <button class="head-btn" @click="openTtLoad">{{ t('tokens.importAccounts') }}</button>
+          <button class="head-btn" @click="copyTtOAuth">{{ t('tokens.copyOAuthUrl') }}</button>
+        </template>
       </div>
-      <div v-else class="bar-r">
-        <button class="btn primary" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
-        <button class="btn" @click="openTtLoad">{{ t('tokens.importAccounts') }}</button>
-        <button class="btn" @click="copyTtOAuth">{{ t('tokens.copyOAuthUrl') }}</button>
-      </div>
-    </div>
+    </header>
 
     <!-- FB/TT 分区面板：key 随分区切换重挂载，触发 .plat-pane 轻过渡 -->
     <div :key="platform" class="plat-pane">
@@ -717,9 +732,9 @@ const deleteToken = async (tk) => {
           <span class="fbn">{{ tk.fb_user_name || '—' }}</span>
           <span class="fbi" :title="tk.fb_user_id">{{ tk.fb_user_id?.slice(-10) || '—' }}</span>
         </span>
-        <span class="c-num" :class="{err:summaryError(tk)}" :title="summaryError(tk)||t('tokens.accountsCountTip')">{{ summaryError(tk) ? '!' : countOf(tk,'accounts') }}</span>
-        <span class="c-num">{{ countOf(tk,'pages') }}</span>
-        <span class="c-num">{{ countOf(tk,'businesses') }}</span>
+        <span class="c-num clickable" :class="{err:summaryError(tk)}" :title="summaryError(tk)||t('tokens.accountsCountTip')" @click.stop="openDrawer(tk, 'accounts')">{{ summaryError(tk) ? '!' : countOf(tk,'accounts') }}</span>
+        <span class="c-num clickable" @click.stop="openDrawer(tk, 'pages')">{{ countOf(tk,'pages') }}</span>
+        <span class="c-num clickable" @click.stop="openDrawer(tk, 'businesses')">{{ countOf(tk,'businesses') }}</span>
         <span class="c-ty">
           <span class="tag" :class="tk.token_type" :title="typeMeta(tk.token_type).title">{{ typeMeta(tk.token_type).label }}</span>
           <span v-if="(tk.account_count||0) > 0" class="tag rotate" :title="t('tokens.rotatePoolTip')">↻</span>
@@ -1029,6 +1044,8 @@ const deleteToken = async (tk) => {
 
 .num-h{text-align:center}
 .c-num{text-align:center;font-size:13px;color:var(--t2);font-variant-numeric:tabular-nums}
+.c-num.clickable{cursor:pointer}
+.c-num.clickable:hover{color:var(--t1);text-decoration:underline;text-decoration-style:dotted}
 .c-num.err{color:var(--error);font-weight:600;cursor:help}
 
 .c-ty{display:flex;align-items:center;justify-content:center}

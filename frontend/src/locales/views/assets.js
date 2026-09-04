@@ -1,6 +1,7 @@
 // Assets namespace（素材库）。zh/en 同文件。
 export default {
   zh: {
+    pageTitle: '素材库', assetCount: '{n} 个素材',
     typeImage: '图片', typeVideo: '视频', tagPh: '标签', searchNamePh: '搜索名称',
     aiRecognition: 'AI 识别', aiOnTitle: 'AI 识别开：点 AI分析 自动生成文案/受众', aiOffTitle: 'AI 识别关：手动键入文案/受众',
     uploadAsset: '+ 上传素材', depth: '深度', style: '风格', depthTitle: '{copy} 条文案{framePart}',
@@ -36,6 +37,7 @@ export default {
     uploadSummary: '成功 {ok} · 失败 {fail} · 重复 {dup}',
   },
   en: {
+    pageTitle: 'Asset Library', assetCount: '{n} asset(s)',
     typeImage: 'Image', typeVideo: 'Video', tagPh: 'Tag', searchNamePh: 'Search name',
     aiRecognition: 'AI Recognition', aiOnTitle: 'AI Recognition ON: click AI Analysis to auto-generate copy/audience', aiOffTitle: 'AI Recognition OFF: enter copy/audience manually',
     uploadAsset: '+ Upload Asset', depth: 'Depth', style: 'Style', depthTitle: '{copy} copies{framePart}',

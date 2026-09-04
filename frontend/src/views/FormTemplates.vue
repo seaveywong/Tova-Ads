@@ -190,6 +190,17 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('formtpl.pageTitle') }}</h1>
+        <span class="ph-fresh">{{ t('formtpl.countSummary', { f: forms.length, m: messages.length }) }}</span>
+      </div>
+      <div class="ph-actions">
+        <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
+        <button v-if="tab==='form'" class="head-btn primary" @click="formPlatDialog = true">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }}</button>
+        <button v-else class="head-btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
+      </div>
+    </header>
     <div class="bar">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div class="tabs">
@@ -202,9 +213,6 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
           <button :class="['tab',{on:formPlatFilter==='tt'}]" @click="formPlatFilter='tt'">TikTok</button>
         </div>
       </div>
-      <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
-      <button v-if="tab==='form'" class="btn primary" @click="formPlatDialog = true">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }}</button>
-      <button v-else class="btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
     </div>
 
     <!-- Instant Form 列表 -->

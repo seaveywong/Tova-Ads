@@ -267,19 +267,25 @@ const doInspect = async (force = false) => {
 
 <template>
   <div class="page">
-    <div class="bar">
-      <div class="bar-l view-tabs">
-        <button class="cat-chip" :class="{ on: viewTab === 'rules' }" @click="viewTab = 'rules'">{{ t('guard.tabRules') }}</button>
-        <button class="cat-chip" :class="{ on: viewTab === 'log' }" @click="viewTab = 'log'; loadPauseLog()">{{ t('guard.tabLog') }}</button>
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('guard.pageTitle') }}</h1>
+        <div class="view-tabs">
+          <button class="cat-chip" :class="{ on: viewTab === 'rules' }" @click="viewTab = 'rules'">{{ t('guard.tabRules') }}</button>
+          <button class="cat-chip" :class="{ on: viewTab === 'log' }" @click="viewTab = 'log'; loadPauseLog()">{{ t('guard.tabLog') }}</button>
+        </div>
+        <span v-if="viewTab === 'rules'" class="ph-fresh">{{ t('guard.rulesCount', { n: rules.length }) }}</span>
       </div>
-      <div v-if="viewTab === 'rules'" class="bar-l cat-chips">
+      <div class="ph-actions">
+        <button v-if="isSuper" class="head-btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
+        <button v-if="isSuper" class="head-btn force" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
+        <button v-if="viewTab === 'rules'" class="head-btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
+        <button v-if="viewTab === 'log'" class="head-btn" :disabled="pauseLoading" @click="loadPauseLog">{{ t('common.refresh') }}</button>
+      </div>
+    </header>
+    <div v-if="viewTab === 'rules'" class="bar">
+      <div class="bar-l cat-chips">
         <button v-for="c in catChips" :key="c.v" class="cat-chip" :class="{ on: catFilter === c.v }" @click="catFilter = c.v">{{ c.label }}<b>{{ c.n }}</b></button>
-      </div>
-      <div class="bar-r">
-        <button v-if="isSuper" class="btn" :disabled="inspecting" @click="doInspect(false)" :title="t('guard.inspectNowTip')">{{ t('guard.inspectNow') }}</button>
-        <button v-if="isSuper" class="btn btn-warn" :disabled="inspecting" @click="doInspect(true)" :title="t('guard.forceTip')">{{ t('guard.force') }}</button>
-        <button v-if="viewTab === 'rules'" class="btn primary" @click="openCreate">{{ t('guard.newRule') }}</button>
-        <button v-if="viewTab === 'log'" class="btn" :disabled="pauseLoading" @click="loadPauseLog">{{ t('common.refresh') }}</button>
       </div>
     </div>
 

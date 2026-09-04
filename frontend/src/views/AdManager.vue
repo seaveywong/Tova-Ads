@@ -122,6 +122,12 @@ const { platform } = usePlatform()
 const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
 const platActIds = computed(() => platform.value === 'all' ? null : new Set(platAccounts.value.map(a => a.act_id)))
 const platMatch = (item) => { const ids = platActIds.value; return !ids || ids.has(item.act_id) }
+// 页头副信息：仅选中单个账户时显示该账户名
+const currentAccountName = computed(() => {
+  if (selectedActs.value.length !== 1) return ''
+  const a = accounts.value.find(x => x.act_id === selectedActs.value[0])
+  return a?.name || ''
+})
 watch(platform, () => {
   // 切平台：勾选账户里不属于新平台的清掉（防"选中永不匹配"空列表）
   if (platActIds.value) selectedActs.value = selectedActs.value.filter(id => platActIds.value.has(id))
@@ -172,7 +178,11 @@ const curList = computed(() => {
     if (sortKey.value === '_status_rank') { const d = statusRank(a.effective_status) - statusRank(b.effective_status); return sortDir.value === 'desc' ? d : -d }
     // 用户主动选了排序列：该列为主排序，状态仅作同值兜底（否则"消耗降序"时 PAUSED 永远压底，找不到已停的高消耗）
     const _sk = (mixedCur.value && (sortKey.value === 'spend' || sortKey.value === 'cpa')) ? sortKey.value + '_usd' : sortKey.value
-    let va = Number(a[_sk] || 0), vb = Number(b[_sk] || 0)
+    // 预算列：日预算缺省时回退总预算（lifetime-only 系列不至于按 0 排序）
+    const _num = (x) => _sk === 'daily_budget_amount'
+      ? Number(x.daily_budget_amount ?? x.lifetime_budget_amount ?? 0)
+      : Number(x[_sk] || 0)
+    let va = _num(a), vb = _num(b)
     if (va !== vb) return sortDir.value === 'desc' ? vb - va : va - vb
     return statusRank(a.effective_status) - statusRank(b.effective_status)
   })
@@ -451,6 +461,16 @@ const subscribeLeads = async () => {
 
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('adm.pageTitle') }}</h1>
+        <span v-if="currentAccountName" class="ph-fresh">{{ currentAccountName }}</span>
+        <span v-if="data.cached_at" class="cache-at" :class="{ stale: cacheStale }" :title="cacheStale ? t('adm.cacheStaleTip') : ''">{{ t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) }}</span>
+      </div>
+      <div class="ph-actions">
+        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
+      </div>
+    </header>
     <div class="ctrl-bar">
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
@@ -464,8 +484,6 @@ const subscribeLeads = async () => {
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <button class="ctrl-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load(true)" style="margin-left:auto">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
-      <span v-if="data.cached_at" class="cache-at" :class="{ stale: cacheStale }" :title="cacheStale ? t('adm.cacheStaleTip') : ''">{{ t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) }}</span>
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">

@@ -227,12 +227,19 @@ onMounted(async () => {
 
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('ads.title') }}</h1>
+        <span class="ph-fresh">{{ t('ads.accountCount', { n: accounts.length }) }}</span>
+      </div>
+      <div class="ph-actions">
+        <button class="head-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
+        <button class="head-btn" :disabled="syncing" @click="syncCampaigns">{{ syncing ? t('common.loading') : t('ads.syncCampaigns') }}</button>
+      </div>
+    </header>
     <div class="date-bar">
-      <h2 class="title">{{ t('ads.title') }} <span class="cnt">{{ filteredAccounts.length }}</span></h2>
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <input v-model="searchQ" class="acc-search" :placeholder="t('ads.searchPh')" />
-      <button class="refresh-btn primary" @click="openLoad">{{ t('ads.loadAccounts') }}</button>
-      <button class="refresh-btn" :disabled="syncing" @click="syncCampaigns">{{ syncing ? t('common.loading') : t('ads.syncCampaigns') }}</button>
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>

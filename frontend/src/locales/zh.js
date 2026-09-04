@@ -127,7 +127,7 @@ export default {
     'launch-templates': '投放模板',
     'form-templates': '表单模板',
     assets: '素材库',
-    landing: '落地页',
+    landing: '投放链接',
     guard: '规则引擎',
     tokens: '令牌',
     settings: '设置',
@@ -273,6 +273,7 @@ export default {
   },
   ads: {
     title: '广告账户',
+    accountCount: '{n} 个账户',
     account: '账户',
     balance: '余额',
     availableCredit: '可用额度',
@@ -334,6 +335,8 @@ export default {
     noMatch: '无匹配账户',
   },
   tokens: {
+    pageTitle: '令牌',
+    statusCount: '{ok} 可用 · {off} 停用',
     loadFail: '加载失败',
     openDetailTip: '点击查看令牌详情（账户 / 主页 / BM / 权限）',
     closeLoadConfirm: '已勾选 {n} 个账户尚未导入，关闭将丢失勾选。确定关闭？',
@@ -686,7 +689,7 @@ export default {
       rulesRead: '看规则',
       rulesCreate: '建规则',
       rulesEdit: '改规则',
-      landingManage: '落地页',
+      landingManage: '投放链接',
       assetsManage: '素材库',
       billingView: '看账单',
       billingManage: '管账单',
@@ -696,6 +699,7 @@ export default {
     },
   },
   settings: {
+    pageTitle: '设置', pageMeta: '账号 · 通知 · 调度 · 系统',
     tzShanghai: '北京/上海', tzHongKong: '香港', tzTaipei: '台北', tzTokyo: '东京',
     tzSeoul: '首尔', tzSingapore: '新加坡', tzBangkok: '曼谷', tzJakarta: '雅加达',
     tzMumbai: '孟买', tzLosAngeles: '洛杉矶', tzNewYork: '纽约', tzSaoPaulo: '圣保罗',
@@ -866,6 +870,7 @@ export default {
     addSuccess: '添加成功', addFail: '添加失败',
   },
   adm: {
+    pageTitle: '广告管理器',
     loadAccountsFail: '加载账户失败',
     budgetDaily: '{v}/日', budgetLifetime: '{v} 总',
     budgetAdsetLevel: '组预算', budgetCampaignLevel: '系列预算',

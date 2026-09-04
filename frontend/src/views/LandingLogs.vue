@@ -271,8 +271,15 @@ watch(() => route.query, (q) => {
 
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('lplogs.pageTitle') }}</h1>
+        <span v-if="stats" class="ph-fresh">{{ stats.window === 'today' ? t('common.today') : t('lplogs.selectedRange') }} · {{ stats.total }}</span>
+        <span v-if="fPage" class="ph-fresh">· {{ pageTitle() }}</span>
+        <span v-if="fSlug" class="ph-fresh">/a/{{ fSlug }}</span>
+      </div>
+    </header>
     <div class="ctrl-bar">
-      <h2 class="title">{{ t('lplogs.pageTitle') }} <span class="cnt">{{ total }}</span> <span v-if="fPage" class="pg-title">· {{ pageTitle() }}</span> <span v-if="fSlug" class="pg-slug">/a/{{ fSlug }}</span></h2>
       <DatePresetBar :presets="DATE_PRESETS" v-model="preset" @preset="setPreset" @custom="onCustomRange" />
       <el-select v-model="fPage" class="fl-sel" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />

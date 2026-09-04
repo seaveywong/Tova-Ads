@@ -616,12 +616,15 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">{{ t('landing.tabLogs') }}</div>
     </div>
     <div v-show="tab === 'manage'">
-    <div class="bar">
-      <div class="bar-l">{{ t('landing.totalPages', { n: pages.length }) }}</div>
-      <div class="bar-r">
-        <button class="btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('landing.pageTitle') }}</h1>
+        <span class="ph-fresh">{{ t('landing.headMeta', { n: pages.length, blocked: pages.filter(p => p.last_fb_status === 'fail').length }) }}</span>
+      </div>
+      <div class="ph-actions">
+        <button class="head-btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
         <el-dropdown trigger="click" @command="cmd => { if(cmd==='templates')openLandingTemplates(); else if(cmd==='domains')openDomains(); }">
-          <button class="btn">{{ t('landing.tools') }} ▾</button>
+          <button class="head-btn">{{ t('landing.tools') }} ▾</button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="templates">{{ t('landing.templates') }}</el-dropdown-item>
@@ -629,23 +632,35 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <button class="btn primary" @click="openCreate">+ {{ t('landing.newLink') }}</button>
+        <button class="head-btn primary" @click="openCreate">+ {{ t('landing.newLink') }}</button>
       </div>
-    </div>
+    </header>
 
     <div class="list" v-loading="loading">
       <div v-for="p in sortedPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
+          <span class="mode-chip" :class="p.redirect_mode" :title="p.redirect_mode === 'redirect' ? t('landing.modeHintRedirect') : t('landing.modeHintDisplay')">{{ p.redirect_mode === 'redirect' ? '🔗 ' + t('landing.chipRedirect') : '📄 ' + t('landing.chipDisplay') }}</span>
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-title">{{ p.title }}</span>
           <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} {{ t('landing.domainsUnit') }}</span>
-          <span class="tag">{{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
+          <span v-if="p.redirect_mode !== 'redirect'" class="tag">{{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
           <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
         </div>
-        <div class="lp-body">
-          {{ t('landing.cardStats', { sub: p.subcode_count, visit: p.visit_count||0, click: p.click_count||0, rate: p.pass_rate||0 }) }}<span v-if="(p.block_count||0) > 0" style="color:var(--warning);margin-left:4px">{{ t('landing.blockedCount', { n: p.block_count }) }}</span>
+        <div class="lp-body lp-stats">
+          <template v-if="p.redirect_mode === 'redirect'">
+            <div class="stat-num"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
+            <div class="stat-num"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stJumps') }}</span></div>
+            <div class="stat-num"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
+          </template>
+          <template v-else>
+            <div class="stat-num"><b>{{ p.subcode_count || 0 }}</b><span>{{ t('landing.stSubcodes') }}</span></div>
+            <div class="stat-num"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
+            <div class="stat-num"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stConvs') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
+          </template>
+          <div v-if="(p.block_count||0) > 0" class="stat-num warn"><b>{{ p.block_count }}</b><span>{{ t('landing.stBlocked') }}</span></div>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
@@ -680,13 +695,17 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div class="lp-section-body">
       <div class="form-l"><label>{{ t('landing.fTitle') }}</label><input v-model="form.title" class="input" :placeholder="t('landing.fTitlePh')" /></div>
       <div class="form-l"><label>{{ t('landing.accessMode') }}</label>
-        <el-radio-group v-model="form.redirect_mode">
-          <el-radio value="display">{{ t('landing.modeDisplay') }}</el-radio>
-          <el-radio value="redirect">{{ t('landing.modeRedirect') }}</el-radio>
-        </el-radio-group>
+        <div class="mode-picker">
+          <div :class="['mode-card', { on: form.redirect_mode === 'display' }]" @click="form.redirect_mode = 'display'">
+            <div class="mode-card-title">📄 {{ t('landing.modeDisplay') }}</div>
+            <div class="mode-card-desc">{{ t('landing.modeHintDisplay') }}</div>
+          </div>
+          <div :class="['mode-card', { on: form.redirect_mode === 'redirect' }]" @click="form.redirect_mode = 'redirect'">
+            <div class="mode-card-title">🔗 {{ t('landing.modeRedirect') }}</div>
+            <div class="mode-card-desc">{{ t('landing.modeHintRedirect') }}</div>
+          </div>
+        </div>
       </div>
-      <div class="mode-hint" v-if="form.redirect_mode === 'display'">{{ t('landing.modeHintDisplay') }}</div>
-      <div class="mode-hint" v-else>{{ t('landing.modeHintRedirect') }}</div>
 
       <div class="form-l"><label>{{ form.redirect_mode === 'redirect' ? t('landing.fRedirectUrl') : t('landing.fTargetUrl') }}</label>
         <el-select v-model="form.target_urls" multiple filterable allow-create default-first-option
@@ -697,7 +716,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <option v-for="o in rotationOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
         </select>
       </div>
-      <div class="form-l"><label>{{ t('landing.fLandingTpl') }}</label>
+      <div class="form-l" v-if="form.redirect_mode === 'display'"><label>{{ t('landing.fLandingTpl') }}</label>
         <select v-model="form.template_id" class="input" style="flex:1">
           <option :value="null">{{ t('landing.defaultTpl') }}</option>
           <option v-for="tpl in landingTemplates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
@@ -705,7 +724,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <button class="btn sm" @click="tplInlineUpload.click()" :title="t('landing.uploadTplHint')" :disabled="tplInlineUploading">📤</button>
         <input ref="tplInlineUpload" type="file" accept=".zip" @change="onTplInline" style="display:none" />
       </div>
-      <div class="pixel-hint" v-if="form.template_id" style="margin:0 0 6px">
+      <div class="pixel-hint" v-if="form.redirect_mode === 'display' && form.template_id" style="margin:0 0 6px">
         <a href="#" @click.prevent="openLandingTemplates" style="color:var(--ac)">{{ t('landing.tplMgmt') }}</a>
         <span v-if="tplInlineUploading" style="margin-left:8px">{{ t('landing.uploading') }}</span>
       </div>
@@ -1116,6 +1135,22 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .sec-title{font-size:12px;color:var(--ac);margin:18px 0 10px;font-weight:600}
 .tpl-desc{font-size:11px;color:var(--t3);margin:-4px 0 10px 92px;line-height:1.5}
 .mode-hint{font-size:11px;color:var(--t3);margin:-6px 0 12px 92px;line-height:1.5}
+/* 双模式卡片选择器（落地页/短链 完全分离的入口） */
+.mode-picker{display:flex;gap:10px;flex:1}
+.mode-card{flex:1;padding:10px 12px;border:1.5px solid var(--bd);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s}
+.mode-card:hover{border-color:var(--ac)}
+.mode-card.on{border-color:var(--ac);background:color-mix(in srgb, var(--ac) 7%, transparent)}
+.mode-card-title{font-size:13px;font-weight:600;margin-bottom:3px}
+.mode-card-desc{font-size:11px;color:var(--t3);line-height:1.4}
+/* 列表卡模式徽标 */
+.mode-chip{flex:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px}
+.mode-chip.display{background:rgba(10,132,255,.12);color:var(--ac)}
+.mode-chip.redirect{background:rgba(52,199,89,.14);color:#34c759}
+/* 卡片统计数字块（替代原灰色 prose） */
+.lp-stats{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.stat-num b{font-size:16px;font-variant-numeric:tabular-nums;margin-right:4px}
+.stat-num span{font-size:11px;color:var(--t3)}
+.stat-num.warn b,.stat-num.warn span{color:var(--warning)}
 .pixel-hint{font-size:11px;color:var(--t3);margin:-6px 0 10px 92px;line-height:1.5}
 .pixel-section{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .pixel-section-header{font-size:13px;font-weight:600;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}

@@ -429,6 +429,19 @@ const countryLabel = (code) => {
 
 <template>
   <div class="page">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('assets.pageTitle') }}</h1>
+        <span class="ph-fresh">{{ t('assets.assetCount', { n: assets.length }) }}</span>
+      </div>
+      <div class="ph-actions">
+        <div class="ai-toggle" :title="aiOn ? t('assets.aiOnTitle') : t('assets.aiOffTitle')">
+          <span class="ai-toggle-label">{{ t('assets.aiRecognition') }}</span>
+          <el-switch :model-value="aiOn" @change="toggleAi" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+        </div>
+        <button class="head-btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
+      </div>
+    </header>
     <!-- 工具栏 -->
     <div class="bar">
       <div class="bar-l">
@@ -439,13 +452,6 @@ const countryLabel = (code) => {
           <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
         </el-select>
         <el-input v-model="fSearch" :placeholder="t('assets.searchNamePh')" clearable size="small" style="width:180px" @keyup.enter="loadNow" />
-      </div>
-      <div class="bar-r">
-        <div class="ai-toggle" :title="aiOn ? t('assets.aiOnTitle') : t('assets.aiOffTitle')">
-          <span class="ai-toggle-label">{{ t('assets.aiRecognition') }}</span>
-          <el-switch :model-value="aiOn" @change="toggleAi" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
-        </div>
-        <button class="btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
       </div>
     </div>
 

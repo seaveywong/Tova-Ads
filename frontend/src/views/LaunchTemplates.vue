@@ -1009,17 +1009,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 <template>
   <div class="page">
-    <div class="bar">
-      <div class="t">{{ t('launch.title') }}</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('launch.title') }}</h1>
+        <span class="ph-fresh">{{ t('launch.tplCount', { n: filteredList.length }) }}</span>
+      </div>
+      <div class="ph-actions">
         <div class="seg plat-filter">
           <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
           <button class="pf-fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="pf-dot fb"></span>Facebook</button>
           <button class="pf-tt" :class="{on:platFilter==='tt'}" @click="platFilter='tt'"><span class="pf-dot tt"></span>TikTok</button>
         </div>
-        <button class="btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
+        <button class="head-btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
         <el-dropdown trigger="click" @command="p => openNew(p)">
-          <button class="btn primary">+ {{ t('launch.newTemplate') }} ▾</button>
+          <button class="head-btn primary">+ {{ t('launch.newTemplate') }} ▾</button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="fb">📘 {{ t('launch.newTplFb') }}</el-dropdown-item>
@@ -1028,7 +1031,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </template>
         </el-dropdown>
       </div>
-    </div>
+    </header>
     <div class="d">{{ t('launch.subtitle') }}</div>
 
     <div class="grid" v-loading="loading">

@@ -511,7 +511,10 @@ const runKeepaliveNow = async () => {
 <template>
   <div class="page">
     <!-- 分区导航：sticky 横条按「个人/平台」分组（移动端横向滚动） -->
-    <div class="anchor-strip">
+    <header class="page-head">
+    <div class="ph-left"><h1 class="ph-title">{{ t('settings.pageTitle') }}</h1><span class="ph-fresh">{{ t('settings.pageMeta') }}</span></div>
+  </header>
+  <div class="anchor-strip">
       <template v-for="(g, gi) in anchorGroups" :key="g.key">
         <span v-if="gi > 0" class="anchor-sep"></span>
         <span class="anchor-group-label">{{ g.label }}</span>
@@ -853,6 +856,10 @@ const runKeepaliveNow = async () => {
 .ret-hint{color:var(--t3);font-size:11px;font-variant-numeric:tabular-nums}
 .ret-lastrun{margin-top:10px;font-size:11px;color:var(--t3)}
 .fx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
+@media (max-width: 768px) {
+  .task-head,.task-row,.ret-head,.ret-row{grid-template-columns:1fr 1fr;row-gap:4px}
+  .anchor-strip{flex-wrap:wrap}
+}
 .fx-cell{display:flex;justify-content:space-between;padding:7px 11px;background:var(--bg3);border-radius:6px;font-size:12px}
 .fx-code{color:var(--t3);font-weight:600}
 .fx-rate{color:var(--t1);font-variant-numeric:tabular-nums}

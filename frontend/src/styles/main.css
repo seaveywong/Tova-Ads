@@ -176,3 +176,32 @@ a { color: var(--ac); text-decoration: none; }
   .platform-context-bar { min-height: 40px; padding: 0 12px; gap: 8px; --plat-bar-h: 40px; }
   .pc-scope { font-size: 11px; }
 }
+
+/* ── 全站统一页头（源自 Dashboard，各业务页共用）：标题 + 副信息 ｜ 动作按钮 ── */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
+.ph-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ph-title { margin: 0; font-size: 22px; font-weight: 700; color: var(--t1); letter-spacing: -0.01em; }
+.ph-fresh { font-size: 12px; color: var(--t3); }
+.ph-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 页头通用按钮（描边为主，仅主操作用强调色） */
+.head-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; background: var(--bg2); color: var(--t2);
+  border: 1px solid var(--bd); border-radius: var(--rs);
+  font-size: 12px; cursor: pointer; transition: all 0.15s; white-space: nowrap; font-family: inherit;
+}
+.head-btn .el-icon { font-size: 14px }
+.head-btn:hover { color: var(--t1); border-color: var(--bd2); }
+.head-btn:disabled { opacity: 0.6; cursor: wait; }
+.head-btn.primary { background: var(--acg); color: var(--ac); border-color: var(--ac); }
+.head-btn.primary:hover { background: var(--ac); color: #fff; }
+.head-btn.force { color: var(--warning); border-color: rgba(255,159,10,.5); background: transparent; }
+.head-btn.force:hover { background: rgba(255,159,10,.12); border-color: var(--warning); }
+.head-btn.force:disabled { opacity: .6; }
+/* 页头与下方工具栏/内容的间距（Dashboard 根节点是 .dashboard，不受此条影响，由其自身布局管） */
+.page > .page-head { margin-bottom: 12px; }
+@media (max-width: 768px) {
+  .ph-actions .btn-txt { display: none }
+  .ph-actions .head-btn { padding: 6px 8px }
+  .ph-title { font-size: 18px; }
+}

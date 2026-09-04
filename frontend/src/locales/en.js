@@ -125,7 +125,7 @@ export default {
     'launch-templates': 'Launch Templates',
     'form-templates': 'Form Templates',
     assets: 'Asset Library',
-    landing: 'Landing Pages',
+    landing: 'Ad Links',
     guard: 'Rule Engine',
     tokens: 'Tokens',
     settings: 'Settings',
@@ -262,6 +262,7 @@ export default {
   },
   ads: {
     title: 'Ad Accounts',
+    accountCount: '{n} accounts',
     account: 'Account',
     balance: 'Balance',
     availableCredit: 'Available Credit',
@@ -323,6 +324,8 @@ export default {
     noMatch: 'No matching accounts',
   },
   tokens: {
+    pageTitle: 'Tokens',
+    statusCount: '{ok} active · {off} disabled',
     loadFail: 'Failed to load',
     openDetailTip: 'Click to view token details (accounts / pages / BM / permissions)',
     closeLoadConfirm: '{n} account(s) are checked but not imported yet. Close and lose the selection?',
@@ -675,7 +678,7 @@ export default {
       rulesRead: 'View Rules',
       rulesCreate: 'Create Rules',
       rulesEdit: 'Edit Rules',
-      landingManage: 'Landing Pages',
+      landingManage: 'Ad Links',
       assetsManage: 'Asset Library',
       billingView: 'View Billing',
       billingManage: 'Manage Billing',
@@ -685,6 +688,7 @@ export default {
     },
   },
   settings: {
+    pageTitle: 'Settings', pageMeta: 'Account · Notifications · Schedule · System',
     tzShanghai: 'Beijing/Shanghai', tzHongKong: 'Hong Kong', tzTaipei: 'Taipei', tzTokyo: 'Tokyo',
     tzSeoul: 'Seoul', tzSingapore: 'Singapore', tzBangkok: 'Bangkok', tzJakarta: 'Jakarta',
     tzMumbai: 'Mumbai', tzLosAngeles: 'Los Angeles', tzNewYork: 'New York', tzSaoPaulo: 'São Paulo',
@@ -855,6 +859,7 @@ export default {
     addSuccess: 'Added successfully', addFail: 'Failed to add',
   },
   adm: {
+    pageTitle: 'Ad Manager',
     loadAccountsFail: 'Failed to load accounts',
     budgetDaily: '{v}/day', budgetLifetime: '{v} total',
     budgetAdsetLevel: 'Ad set budget', budgetCampaignLevel: 'Campaign budget',

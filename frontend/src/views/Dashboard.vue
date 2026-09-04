@@ -739,7 +739,9 @@ const _bindStickyObs = () => {
   if (!rootEl) return   // 找不到滚动容器则退化为常规圆角（无贴顶态）
   _stickyObs = new IntersectionObserver(
     (es) => { toolbarStuck.value = !es[0].isIntersecting },
-    { root: rootEl, threshold: 0 }
+    // 2px 滞后带：sentinel 在 content 顶缘 0~2px 区间不触发切换，
+    // 防滚动到临界位置时 stuck 类逐像素反复翻转（工具栏抖动真因）
+    { root: rootEl, threshold: 0, rootMargin: '-2px 0px 0px 0px' }
   )
   _stickyObs.observe(stickySentinel.value)
 }
@@ -1320,7 +1322,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .tg-banner { display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 10px; border: 1px solid var(--el-color-warning, #e6a23c); background: var(--el-color-warning-light-9, #fdf6ec); border-radius: 8px; font-size: 13px; }
 .tg-banner-txt { flex: 1; }
 .tg-banner-x { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--tx-3, #999); padding: 2px 6px; }
-.toolbar { position: sticky; top: 0; z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); transition: border-radius .2s, box-shadow .2s, border-color .2s; }
+.toolbar { position: sticky; top: 0; z-index: 100; background: var(--bg); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-card); }   /* 无 transition：贴顶态切换曾伴随动画在滚动边缘反复播放=工具栏抖动 */
 /* 贴顶态：去上圆角+上边框与平台条平贴，投影只向下 */
 .toolbar.stuck { border-radius: 0 0 10px 10px; border-top-color: transparent; box-shadow: 0 5px 14px rgba(0,0,0,.14); }
 /* 贴顶检测哨兵：1px 占位用 -17px 下边距与相邻 margin 折叠抵消，不改变原间距 */

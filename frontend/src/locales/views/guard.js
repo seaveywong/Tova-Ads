@@ -3,6 +3,7 @@
 // 在此为嵌套对象——vue-i18n 的 t('guard.cat.bleed') 按点号走嵌套路径解析。
 export default {
   zh: {
+    pageTitle: '规则引擎', rulesCount: '{n} 条规则',
     loadFail: '加载失败', nameRequired: '填规则名', created: '已创建', deleted: '已删', toggleFail: '开关失败', inspectFail: '巡检失败',
     delConfirm: '删除规则「{name}」？',
     discardTitle: '未保存的修改', discardConfirm: '规则修改尚未保存，确定放弃？', discard: '放弃修改',
@@ -33,6 +34,7 @@ export default {
     ago: { minutes: ' · {n}分钟前', hours: ' · {n}小时前', date: ' · {d}' },
   },
   en: {
+    pageTitle: 'Rule Engine', rulesCount: '{n} rules',
     loadFail: 'Failed to load', nameRequired: 'Enter a rule name', created: 'Created', deleted: 'Deleted', toggleFail: 'Toggle failed', inspectFail: 'Inspection failed',
     delConfirm: 'Delete rule "{name}"?',
     discardTitle: 'Unsaved changes', discardConfirm: 'Rule edits are not saved yet. Discard them?', discard: 'Discard changes',
