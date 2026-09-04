@@ -1273,7 +1273,9 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 </template>
 
 <style scoped>
-.dashboard { display: block; }
+/* 限宽 1600 居中：全宽版曾把 KPI 卡拉到 440px（空置 60%）+ 趋势图成横幅（截图比例诊断）；
+   1440 窄版又被抱怨缩——1600 是两头之间的协调点 */
+.dashboard { display: block; max-width: 1600px; margin: 0 auto; }
 .dashboard > * + * { margin-top: 16px; }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
@@ -1332,8 +1334,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .trend-presets { display: flex; gap: 4px; }
 .tp-btn { padding: 3px 10px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 4px; font-size: 11px; cursor: pointer; }
 .tp-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
-.trend-main-canvas { height: 420px; padding: 8px 20px 20px; }
-.trend-main-canvas.lt { height: 300px; }   /* 落地页趋势：矮一档，与指标 chip 同卡 */
+.trend-main-canvas { height: 300px; padding: 8px 20px 16px; }   /* 曾 420 全宽成横幅；1600 容器下 5:1 比例 */
+.trend-main-canvas.lt { height: 260px; }   /* 落地页趋势：矮一档，与指标 chip 同卡 */
 .trend-empty { text-align: center; color: var(--t3); padding: 48px; font-size: 13px; }
 
 /* 任务列表（右列卡片内，单列堆叠；水平内边距与其他卡统一 16px） */
@@ -1380,7 +1382,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-search::placeholder { color: var(--t3); }
 
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
-/* KPI 统一规格：8 卡 2 行 × 4 列（曾 4 大卡+细条两行割裂，截图复审后统一） */
+/* KPI 统一规格 2 行 × 4 列（元素级实拍验证过"饱满专业"的形态；8 卡一行试过——
+   185px 窄卡把副文案挤成 3 行，弃）。1600 容器下单卡 ~388px，副文案单行不折 */
 .kpi-zone { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .kpi-core-grid { display: contents; }
 .kpi-card {
@@ -1427,7 +1430,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .accounts-table tbody tr.removed-row { opacity: .55; cursor: default; }
 .accounts-table tbody tr.removed-row:hover { background: transparent; }
 /* 左列表格不裁剪：内容不足保持基线高度（与右列平衡），超出随内容自然长高 */
-.acc-scroll { min-height: 320px; }   /* 曾 560：行少时大片空白（截图复审）；320 保形不撑空 */
+.acc-scroll { min-height: 400px; }   /* 信息密集块给足高度；上方 KPI 单行+图降高后表格上移首屏 */
 
 /* 守护概览 3 格（自动止损/今日放行/巡检覆盖）；水平内边距与其他卡统一 16px */
 .guard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 16px; }
