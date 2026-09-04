@@ -1,7 +1,7 @@
 // FormTemplates namespace（表单模板 + Messenger 消息）。zh/en 同文件。
 export default {
   zh: {
-    tabMsg: 'Messenger 消息', newBtn: '+ 新建{kind}', formUnit: '表单', msgUnit: '消息', deployed: '已部署',
+    tabForm: 'Instant Form 即时表单', tabMsg: 'Messenger 消息', newBtn: '+ 新建{kind}', formUnit: '表单', msgUnit: '消息', deployed: '已部署',
     newFormFb: '新建 Facebook 表单', newFormTt: '新建 TikTok 表单', pickPlatTitle: '选择表单平台', platform: '平台',
     pickPlatHint: '平台决定表单字段与部署链路，创建后不可更改。',
     noFormsForPlat: '该平台暂无表单模板',
@@ -35,7 +35,7 @@ export default {
     contact: { email: '邮箱', phone: '电话', city: '城市', state: '州/省', zip: '邮编', country: '国家', dob: '生日', gender: '性别', marital: '婚姻状况', lastName: '姓' },
   },
   en: {
-    tabMsg: 'Messenger Messages', newBtn: '+ New {kind}', formUnit: 'Form', msgUnit: 'Message', deployed: 'Deployed',
+    tabForm: 'Instant Form', tabMsg: 'Messenger Messages', newBtn: '+ New {kind}', formUnit: 'Form', msgUnit: 'Message', deployed: 'Deployed',
     newFormFb: 'New Facebook Form', newFormTt: 'New TikTok Form', pickPlatTitle: 'Choose form platform', platform: 'Platform',
     pickPlatHint: 'The platform determines form fields and the deployment pipeline; it cannot be changed after creation.',
     noFormsForPlat: 'No form templates for this platform yet',

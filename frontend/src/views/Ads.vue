@@ -280,7 +280,7 @@ onMounted(async () => {
                 <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
                 <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
-                <el-dropdown-item command="remove">{{ t('ads.removeManaged') }}</el-dropdown-item>
+                <el-dropdown-item command="remove" class="danger">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>

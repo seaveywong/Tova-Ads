@@ -137,7 +137,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         </div>
         <div class="filter-item">
           <span class="flabel">{{ t('audit.fieldTrace') }}</span>
-          <input v-model="fTrace" class="input mono" :placeholder="t('audit.tracePlaceholder')" @keyup.enter="load" />
+          <input v-model="fTrace" class="input mono" :placeholder="t('audit.tracePlaceholder')" @keyup.enter="page = 1; load()" />
         </div>
         <div class="filter-item" :class="{ dim: traceActive }">
           <span class="flabel">{{ t('audit.fieldDate') }}</span>
@@ -149,7 +149,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 
       <div class="pager">
         <span class="pager-info">{{ t('audit.pagerInfo', { total: total, page: page, pages: totalPages() }) }}</span>
-        <div class="pager-ops">
+        <div class="pager-ops" v-if="totalPages() > 1">
           <button class="btn" :disabled="page <= 1 || loading" @click="goPage(page - 1)">{{ t('audit.prevPage') }}</button>
           <input v-model="jumpPage" type="number" min="1" :max="totalPages()" class="jump-input" :placeholder="t('audit.jumpPh')" @keyup.enter="doJump" />
           <button class="btn" @click="doJump">{{ t('audit.jumpGo') }}</button>

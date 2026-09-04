@@ -76,7 +76,7 @@ export default {
     optional: '可选',
     required: '必填',
     noData: '暂无数据',
-    success: '成功',
+    success: '成功', createdOk: '创建成功',
     fail: '失败',
     retry: '重试',
     export: '导出',

@@ -503,7 +503,7 @@ const countryLabel = (code) => {
           </div>
           <div v-else class="name" :title="t('assets.dblclickRename')" @dblclick="startRename(a)">{{ a.name }}</div>
           <!-- 标签（国家/FB 上传标记收进同一行 chip） -->
-          <div class="tag-row">
+          <div class="tag-row" :title="(a.tags || []).join(' · ')">
             <span v-for="tg in (a.tags || []).slice(0,2)" :key="tg" class="tag-chip">{{ tg }}</span>
             <span v-if="(a.tags || []).length > 2" class="tag-more">+{{ a.tags.length - 2 }}</span>
             <span v-if="a.country" class="country-chip" :title="t('assets.countryTitle', { c: countryLabel(a.country) })">{{ a.country }}</span>
@@ -551,7 +551,7 @@ const countryLabel = (code) => {
     </el-dialog>
 
     <!-- 上传抽屉 -->
-    <el-drawer v-model="uploadOpen" :title="t('assets.uploadAsset')" direction="rtl" size="520px" :destroy-on-close="true">
+    <el-drawer v-model="uploadOpen" :title="t('assets.uploadAsset')" direction="rtl" size="min(520px, 100vw)" :destroy-on-close="true">
       <div class="drop-zone" @dragover.prevent @drop="onDrop">
         <div class="drop-text">{{ t('assets.dropHere') }}</div>
         <div class="drop-or">{{ t('assets.or') }}</div>
@@ -640,7 +640,7 @@ const countryLabel = (code) => {
     </el-dialog>
 
     <!-- 素材详情弹窗（点缩略图/「详情」打开：大图/视频 + 元信息 + AI 结果 + 快捷操作） -->
-    <el-dialog v-model="previewAsset" :title="t('assets.detailTitle', { name: previewAsset?.name || '' })" width="800px" @close="closePreview" append-to-body>
+    <el-dialog v-model="previewAsset" :title="t('assets.detailTitle', { name: previewAsset?.name || '' })" width="min(800px, 94vw)" @close="closePreview" append-to-body>
       <div v-if="previewAsset" style="text-align:center">
         <img v-if="previewAsset.type === 'image'" :src="previewAsset.public_url" style="max-width:100%;max-height:70vh;border-radius:8px" />
         <video v-else-if="previewAsset.type === 'video'" :src="previewAsset.public_url" controls style="max-width:100%;max-height:70vh;border-radius:8px" />
@@ -706,6 +706,7 @@ const countryLabel = (code) => {
 .card.selected { border-color: var(--ac); box-shadow: 0 0 0 2px rgba(10,132,255,.25); }
 .card-check { position: absolute; top: 6px; left: 6px; z-index: 2; width: 18px; height: 18px; border-radius: 4px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s; cursor: pointer; }
 .card:hover .card-check, .card-check.on { opacity: 1; }
+@media (pointer: coarse) { .card-check { opacity: 1 } }   /* 触屏无 hover——批量入口常显，否则移动端批量不可用 */
 .card-check.on { background: var(--ac); border-color: var(--ac); }
 .card-check input { appearance: none; width: 12px; height: 12px; margin: 0; cursor: pointer; }
 .card-check.on::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; position: absolute; }

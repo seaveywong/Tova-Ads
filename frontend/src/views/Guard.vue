@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { isSuperadminSync } from '../router'
+import { fmtTime } from '../composables/useTz'
 const isSuper = isSuperadminSync()
 
 const { t } = useI18n()
@@ -17,6 +18,7 @@ const loadPauseLog = async () => {
   try { pauseLog.value = await GET('/guard/pause-log?limit=150') } catch { pauseLog.value = [] }
   pauseLoading.value = false
 }
+const tgtLabel = (v) => ({ campaign: t('guard.plCampaign'), ad: t('guard.plAd'), adset: t('guard.plAdset'), tenant: t('guard.plTenant') }[v] || v)
 const srcLabel = (src) => ({
   sentinel_patrol: t('guard.plSentinel'), emergency_pause: t('guard.plEmergency'), rule_engine: t('guard.plRule'),
 }[src] || src)
@@ -231,8 +233,9 @@ const onToggle = async (r, val) => {
   catch (e) { r.enabled = !val; ElMessage.error(t('guard.toggleFail') + '：' + (e.message || '')) }
 }
 const remove = async (r) => {
-  try { await ElMessageBox.confirm(t('guard.delConfirm', { name: r.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/guard/rules/${r.id}`); ElMessage.success(t('guard.deleted')); await load() }
-  catch {}
+  try { await ElMessageBox.confirm(t('guard.delConfirm', { name: r.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) } catch { return }
+  try { await DELETE(`/guard/rules/${r.id}`); ElMessage.success(t('guard.deleted')); await load() }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }   // 曾空 catch 吞错：删除失败无任何反馈
 }
 const doInspect = async (force = false) => {
   if (force) {
@@ -283,11 +286,11 @@ const doInspect = async (force = false) => {
     <div v-if="viewTab === 'log'" class="list" v-loading="pauseLoading">
       <div v-if="!pauseLog.length && !pauseLoading" class="empty-title" style="padding:30px;text-align:center">{{ t('guard.plEmpty') }}</div>
       <div v-for="e in pauseLog" :key="e.id" class="pl-row">
-        <span class="pl-time">{{ e.created_at ? new Date(e.created_at).toLocaleString() : '' }}</span>
+        <span class="pl-time">{{ fmtTime(e.created_at) }}</span>
         <span :class="srcClass(e.source)">{{ srcLabel(e.source) }}</span>
-        <span class="pl-target">{{ e.target_type }}</span>
+        <span class="pl-target">{{ tgtLabel(e.target_type) }}</span>
         <span class="pl-detail">{{ e.detail }}</span>
-        <span class="pl-result" :class="{ fail: e.result !== 'success' }">{{ e.result }}</span>
+        <span class="pl-result" :class="{ fail: e.result !== 'success' }">{{ e.result === 'success' ? t('common.success') : t('common.fail') }}</span>
       </div>
     </div>
 

@@ -674,7 +674,7 @@ const deleteToken = async (tk) => {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="refresh" :disabled="!!ttRefreshing[c.id]">{{ ttRefreshing[c.id] ? t('tokens.refreshing') : t('tokens.ttRefreshNow') }}</el-dropdown-item>
-                  <el-dropdown-item command="delete" divided>{{ t('tokens.deleteToken') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -732,7 +732,7 @@ const deleteToken = async (tk) => {
                 <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
                 <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
                 <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
-                <el-dropdown-item command="delete" divided>{{ t('tokens.deleteToken') }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -749,7 +749,7 @@ const deleteToken = async (tk) => {
     </div>
     </div>
 
-    <el-drawer v-model="drawerOpen" :title="drawerTitle" direction="rtl" size="480px" :destroy-on-close="true">
+    <el-drawer v-model="drawerOpen" :title="drawerTitle" direction="rtl" size="min(480px, 100vw)" :destroy-on-close="true">
       <div v-if="drawerToken" class="info-sec">
         <div class="info-grid">
           <div class="info-cell"><label>{{ t('tokens.tokenName') }}</label><span>{{ drawerToken.alias || t('tokens.unnamed') }}</span></div>

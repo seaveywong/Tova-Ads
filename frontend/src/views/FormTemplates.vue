@@ -49,6 +49,7 @@ const LOCALES = [
   {v:'vi_VN',l:'Tiếng Việt'},{v:'th_TH',l:'ภาษาไทย'},{v:'id_ID',l:'Bahasa Indonesia'},
   {v:'ja_JP',l:'日本語'},{v:'ko_KR',l:'한국어'},{v:'es_ES',l:'Español'},{v:'pt_BR',l:'Português'},
 ]
+const contactFieldLabel = (v) => (CONTACT_FIELDS.value.find(x => x.v === v) || {}).l || v
 const CONTACT_FIELDS = computed(() => [
   {v:'EMAIL',l:t('formtpl.contact.email')},{v:'PHONE',l:t('formtpl.contact.phone')},{v:'CITY',l:t('formtpl.contact.city')},{v:'STATE',l:t('formtpl.contact.state')},
   {v:'ZIP_CODE',l:t('formtpl.contact.zip')},{v:'COUNTRY',l:t('formtpl.contact.country')},{v:'DATE_OF_BIRTH',l:t('formtpl.contact.dob')},{v:'GENDER',l:t('formtpl.contact.gender')},
@@ -107,7 +108,7 @@ const saveForm = async () => {
     cfgOut.custom_questions = (cfgOut.custom_questions || []).map(({ _keyAuto, ...q }) => q)
     const body = { name: fMeta.value.name, description: fMeta.value.description, locale: fMeta.value.locale, platform: fPlat.value, config: cfgOut }
     if (editingForm.value) { await PUT('/form-templates/forms/' + editingForm.value.id, body); ElMessage.success(t('common.saved')) }
-    else { await POST('/form-templates/forms', body); ElMessage.success(t('common.create') + t('common.success')) }
+    else { await POST('/form-templates/forms', body); ElMessage.success(t('common.createdOk')) }
     formOpen.value = false; await load()
   } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
@@ -175,7 +176,7 @@ const saveMsg = async () => {
   try {
     const body = { name: mCfg.value.name, welcome_text: mCfg.value.welcome_text, ice_breakers: mCfg.value.ice_breakers }
     if (editingMsg.value) { await PUT('/form-templates/messages/' + editingMsg.value.id, body); ElMessage.success(t('common.saved')) }
-    else { await POST('/form-templates/messages', body); ElMessage.success(t('common.create') + t('common.success')) }
+    else { await POST('/form-templates/messages', body); ElMessage.success(t('common.createdOk')) }
     msgOpen.value = false; await load()
   } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
@@ -192,7 +193,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
     <div class="bar">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div class="tabs">
-          <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">Instant Form</button>
+          <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">{{ t('formtpl.tabForm') }}</button>
           <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
         </div>
         <div v-if="tab==='form'" class="tabs">
@@ -355,7 +356,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
           <div v-if="previewData.description" class="pm-desc">{{ previewData.description }}</div>
           <div class="pm-fields">
             <div class="pm-field"><span class="pm-label">{{ t('formtpl.pmFirstName') }}</span><div class="pm-input-mock">—</div></div>
-            <div v-for="f in (previewData.extra_contact_fields||[])" :key="f" class="pm-field"><span class="pm-label">{{ f }}</span><div class="pm-input-mock">—</div></div>
+            <div v-for="f in (previewData.extra_contact_fields||[])" :key="f" class="pm-field"><span class="pm-label">{{ contactFieldLabel(f) }}</span><div class="pm-input-mock">—</div></div>
             <div v-for="(q,i) in (previewData.custom_questions||[])" :key="'q'+i" class="pm-field">
               <span class="pm-label">{{ q.label || t('formtpl.pmQuestion') }}</span>
               <div v-if="q.options && q.options.length" class="pm-options">

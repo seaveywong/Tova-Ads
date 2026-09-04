@@ -74,7 +74,7 @@ export default {
     optional: 'Optional',
     required: 'Required',
     noData: 'No data',
-    success: 'Success',
+    success: 'Success', createdOk: 'Created successfully',
     fail: 'Failed',
     retry: 'Retry',
     export: 'Export',

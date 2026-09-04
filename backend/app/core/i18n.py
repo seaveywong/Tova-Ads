@@ -102,21 +102,21 @@ NOTIFY = {
         },
     },
     "spend_spike": {
-        "title": {"zh": "⚡ 花费骤变：{name}", "en": "⚡ Spend Spike: {name}"},
+        "title": {"zh": "花费骤变：{name}", "en": "Spend Spike: {name}"},
         "body": {
             "zh": "账户：{name}（{act_id}）\n今日已花费：<b>{today}</b>\n近7天日均：{avg}（阈值 = max(3×日均, $50)）\n今日消耗已达日均 {ratio} 倍——请检查是否爆量/预算设置错误。",
             "en": "Account: {name} ({act_id})\nToday spend: <b>{today}</b>\n7-day daily avg: {avg} (threshold = max(3x avg, $50))\nToday is {ratio}x of average — check for runaway spend / budget misconfig.",
         },
     },
     "emergency_done": {
-        "title": {"zh": "⛔ 全局紧急暂停完成", "en": "⛔ Global Emergency Pause Done"},
+        "title": {"zh": "全局紧急暂停完成", "en": "Global Emergency Pause Done"},
         "body": {
             "zh": "覆盖 {total} 个账户\n已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）\n核验失败：{failed}\n{errs}",
             "en": "Covered {total} accounts\nPaused <b>{camps}</b> campaigns ({ads} ads under them)\nVerify failed: {failed}\n{errs}",
         },
     },
     "sentinel_pause_batch": {
-        "title": {"zh": "🔴 哨兵暂停 {n} 个系列", "en": "🔴 Sentinel Paused {n} Campaigns"},
+        "title": {"zh": "哨兵暂停 {n} 个系列", "en": "Sentinel Paused {n} Campaigns"},
         "body": {
             "zh": "{detail}\n\n哨兵已 arm，ACTIVE 系列直接停。明细见守护页「暂停记录」。",
             "en": "{detail}\n\nSentinel armed, ACTIVE campaigns paused directly. Details in Guard → Pause Log.",

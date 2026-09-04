@@ -5,7 +5,8 @@ import { useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
-import { jobStatus, itemStatus, fbAdStatus } from '../composables/useStatus'
+import { fmtTime } from '../composables/useTz'
+import { jobStatus, itemStatus, fbAdStatus, subcodeStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
 import { fmtUsd } from '../composables/useFormat'
 import { COUNTRIES as ALL_COUNTRIES, countryName } from '../composables/useCountries'
@@ -959,6 +960,11 @@ const deploySelectActive = () => {
 const deployClearSel = () => { selectedAccs.value = new Set() }
 const startDeploy = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('launch.selectAccFirst'))
+  // 批量部署直接产生花费——提交前二次确认（列明账户数）
+  try {
+    await ElMessageBox.confirm(t('launch.deployConfirmMsg', { n: selectedAccs.value.size }), t('launch.deployConfirmTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+  } catch { return }
   const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
   deploying.value = true
   try {
@@ -1376,7 +1382,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="form.landing_url" class="inp" placeholder="https://..." /></div>
         <div class="row"><label>{{ t('launch.subcode') }}</label>
           <el-select v-model="form.subcode_slug" filterable clearable :placeholder="t('launch.subcodePlaceholder')" style="width:100%" size="small">
-            <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + (s.status ? ' ('+s.status+')' : '')" />
+            <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + ' (' + subcodeStatus(s.status).label + ')'" />
           </el-select>
           <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
         </div>
@@ -1572,7 +1578,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="hi-name">{{ j.template_name }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
           </div>
-          <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ (j.created_at||'').slice(0,16) }}</div>
+          <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ fmtTime(j.created_at) }}</div>
         </div>
         <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
       </div>
@@ -1583,7 +1589,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-loading="depLoading">
         <div v-for="j in depJobs" :key="j.id" class="dep-job">
           <div class="dep-job-head" @click="toggleDepJob(j)">
-            <span class="dep-job-time">{{ (j.created_at||'').slice(0,19).replace('T',' ') }}</span>
+            <span class="dep-job-time">{{ fmtTime(j.created_at) }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
             <span class="dep-job-counts">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
             <span class="dep-arrow" :class="{open: depJobDetail?.id === j.id}">▶</span>

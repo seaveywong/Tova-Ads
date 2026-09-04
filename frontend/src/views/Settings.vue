@@ -528,7 +528,7 @@ const runKeepaliveNow = async () => {
       <div class="acct-sep"></div>
       <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>
       <div class="form-l"><label>{{ t('settings.newPwd') }}</label><el-input v-model="pwdForm.new" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="t('settings.pwdMin8Ph')" /></div>
-      <div class="form-l"><label>{{ t('settings.confirm') }}</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm ? t('settings.pwdMismatchPh') : t('settings.reenterNewPwdPh')" /></div>
+      <div class="form-l"><label>{{ t('settings.confirm') }}</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="t('settings.reenterNewPwdPh')" /><div v-if="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm" class="pwd-mismatch">{{ t('settings.pwdMismatch') }}</div></div>
       <button class="btn primary" :disabled="pwdSaving" @click="savePwd">{{ t('settings.changePwd') }}</button>
     </div>
 
@@ -836,6 +836,7 @@ const runKeepaliveNow = async () => {
 .eff{color:var(--t2);font-variant-numeric:tabular-nums;text-align:right}
 .task-row.fixed .task-name{color:var(--t3)}
 .fixed-tag{font-size:10px;padding:1px 6px;background:var(--bg3);border-radius:4px;color:var(--t3);width:fit-content}
+.pwd-mismatch { color: var(--el-color-danger, #f56c6c); font-size: 12px; margin-top: 4px }
 .acct-sep{height:1px;background:var(--bd);margin:14px 0}
 .form-l{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .form-l > label{font-size:12px;color:var(--t3);width:72px;text-align:right;flex-shrink:0}

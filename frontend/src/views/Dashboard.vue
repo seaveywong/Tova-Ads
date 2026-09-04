@@ -1080,7 +1080,7 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
                 <tbody>
                   <tr v-for="(log, i) in kpiDetail.logs" :key="i">
                     <td class="left mono">{{ log.col1 }}</td>
-                    <td v-for="j in kpiDetail.headers.length - 1" :key="j" class="right mono">{{ log['col' + (j + 1)] }}</td>
+                    <td v-for="j in kpiDetail.headers.length - 1" :key="j" class="right mono log-cell">{{ log['col' + (j + 1)] }}</td>
                     <td v-if="kpiDetail.mode === 'pause'" class="right"><button class="allow-btn" @click="addAllowance(log)">{{ t('dashboard.allowToday') }}</button></td>
                     <td v-if="kpiDetail.mode === 'allowance'" class="right"><button class="allow-btn remove" @click="removeAllowance(log)">{{ t('dashboard.removeAllowance') }}</button></td>
                   </tr>
@@ -1094,9 +1094,10 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
         <div v-show="!loading" class="card">
           <div class="card-header"><span class="card-title">{{ t('dashboard.todoTitle') }}</span></div>
           <div class="task-list">
-            <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length }]" @click="toggleCard(i)">
+            <div v-for="(card, i) in taskCards" :key="i" class="task-card" :class="[card.kind, { expanded: expandedCard === i, flat: !card.detailAccounts?.length && !card.toTokens }]" @click="toggleCard(i)">
               <div class="task-icon-wrap"><el-icon class="task-icon"><component :is="card.icon" /></el-icon></div>
               <div class="task-body"><div class="task-title">{{ card.title }}</div><div class="task-desc">{{ card.desc }}</div></div>
+              <span v-if="card.toTokens" class="task-go">{{ t('dashboard.taskTokenGo') }} →</span>
               <el-icon v-if="card.detailAccounts?.length" class="task-expand-icon" :class="{ rotated: expandedCard === i }"><ArrowDown /></el-icon>
             </div>
           </div>
@@ -1559,6 +1560,8 @@ onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearI
 .detail-table th.left { text-align: left; } .detail-table th.right { text-align: right; }
 .detail-table thead th { position: sticky; top: 0; background: var(--bg2); z-index: 1; }
 .detail-table td { padding: 8px 16px; font-size: 13px; border-bottom: 1px solid var(--bd); white-space: nowrap; }
+.task-go { flex: none; font-size: 13px; font-weight: 600; color: var(--ac); }
+.detail-table td.log-cell { max-width: 260px; white-space: normal; word-break: break-all; }
 .detail-table td.left { text-align: left; } .detail-table td.right { text-align: right; }
 .detail-table tbody tr:last-child td { border-bottom: none; }
 .detail-table tbody tr.selected-row { background: var(--acg); }

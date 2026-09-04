@@ -243,7 +243,7 @@ const saveRedirect = async () => {
 }
 const eventLabel = (v) => EVENT_TYPES.value.find(x => x.v === v)?.l || v || '-'
 const decisionLabel = (v) => DECISIONS.value.find(x => x.v === v)?.l || v || ''
-const decisionClass = (d, et) => et === 'block' ? 'err' : (d === 'display' || et === 'visit' ? 'ok' : 'warn')
+const decisionClass = (d, et) => et === 'block' ? 'err' : (d === 'display' || et === 'visit' || et === 'click' || et === 'redirect' ? 'ok' : 'warn')
 const pageTitle = () => {
   const p = pages.value.find(x => String(x.id) === String(fPage.value))
   return p ? p.title : t('lplogs.allLandingPages')
