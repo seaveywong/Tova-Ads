@@ -629,7 +629,7 @@ def trend_data(
             for _rt in raw_times:
                 if not _rt:
                     _ys_arr.append(None); _yc_arr.append(None); continue
-                _ykey = (datetime.fromisoformat(_rt) + timedelta(days=1)).isoformat()
+                _ykey = (datetime.fromisoformat(_rt) - timedelta(days=1)).isoformat()
                 _v = _ymap.get(_ykey)
                 _ys_arr.append(_v[0] if _v else None)
                 _yc_arr.append(_v[1] if _v else None)
