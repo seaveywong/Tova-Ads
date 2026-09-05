@@ -1150,3 +1150,9 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 **文档化接受（不修，均有 reason）**：①四类通知对同一无令牌账户叠加（各类 dedup 独立，6h/24h 窗口下量可控）②聚合告警 platform="fb" 硬编码（TT 未投产，投产后升 P1）③legacy daily_budget 模板确认弹窗金额 $0（budget_usd 是主路径）④批量+LEADS 未选表单模板的 AI 生成风暴（低频）⑤reap 并发窗口超大视频上传心跳粒度（存量）⑥子码+query URL 拼接变形（存量）⑦已移除账户行缺两键（前端 falsy 安全）⑧⑨ dashboard.py:278 与 notify.py 权限粒度（无实际触发面）。
 
 **验证**：4 后端文件 py_compile+import 门 → restart → health ok → 全量 smoke 回归 **ALL_PASS**（含心跳「哨兵armed-全部跳过」后缀仍落地=streak 改造未破坏主链）→ 前端 build ✓ + CF 已部署 → commit aeb1386 已推送。
+
+### 哨兵权限退避（2026-09-05 00:30，commit 98b3384）——用户报"权限不足"+「已停用账户没必要再关」
+- **根因（四段生产诊断）**：BSCH-TD-O336/O338 两账户的令牌（Sagar Bos，scope 全齐含 ads_management）读 insights/系列正常、**写 pause 被 FB 拒**——BM 广告账户角色被降/收回或账户被供应商回收（账户级永久错误）。哨兵每 3 分钟重试必然再失败，journal 刷"停系列失败"+sentinel_failure 告警。
+- **修复**：停系列遇 permissions → 写 `sentinel_perm_deny_{act_id}` 标记（24h）+ 发一条 critical（含处理指引）+ break 跳过该账户剩余系列；巡逻开头查标记 <24h 整账户静默跳过，**过期自动重试探权限恢复**（恢复即正常巡逻，未恢复再退避）。
+- **生产验证**：手动巡逻 → 2 标记落库 + 2 告警发出 → 下一轮 cron（armed=20）停 0 系列、**0 条失败日志**（刷屏消失）。
+- 遗留决策（用户）：这两账户若确认不再使用 → 取消纳管（历史数据保留）或解除哨兵 armed；若还要用 → BM 里恢复该用户广告投放及以上角色。
