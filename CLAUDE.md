@@ -42,7 +42,7 @@ node _sshx.js 'cd /opt/toveads/backend && venv/bin/python -m py_compile <file> &
 坑：`MSYS_NO_PATHCONV=1` 防 Git Bash 路径转换；cwd 漂移报 module not found 就 cd 回 `/d/dev/Mira_One`；前端 build cwd 必须在 frontend。
 
 ## 多租户 / RLS
-两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-114，新增从 115 起）。
+两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-116 已占，新增从 117 起）。
 
 ## 详细文档（按需读，别全读）
 - `TECH_REVIEW.md` — 每次大改的复审记录（概述+变更表+迁移+结论+commit）。改完按 `tech-review-format` 追加。

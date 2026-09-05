@@ -116,6 +116,14 @@ NOTIFY = {
             "en": "Account: {name} (<code>{act_id}</code>)\nPausing ads was rejected by Facebook (insufficient permission) — usually the BM ad-account role was revoked/downgraded, or the account was reclaimed by the vendor.\nThe sentinel has paused stop attempts for this account for 24 hours (no futile retries); protection resumes automatically once permission is restored.\nActions: if the account is no longer used, unmanage it / disarm the sentinel; otherwise restore the user's advertiser access in Business Manager.",
         },
     },
+    # KPI/评估口径异常（静默降级必须发声：resolver 异常→conv=0 有误杀面；objectives 缺口→口径漂移）
+    "kpi_resolve_error": {
+        "title": {"zh": "🟡 转化数据口径异常 {n} 处（相关广告已跳过评估防误杀）", "en": "🟡 Conversion-Data Irregularities: {n} (affected ads skipped to avoid false kills)"},
+        "body": {
+            "zh": "本轮巡检发现 {n} 处 KPI 解析/评估异常（转化口径未知）。\n相关广告本轮已跳过规则评估（宁纵勿枉，防误杀有转化的广告）、快照照写。\n常见原因：KPI 映射配置损坏、campaign objective 拉取失败。\n排查：设置 → 转化映射检查该租户配置；日志中心过滤 kpi_resolve_error 看明细。",
+            "en": "This inspection round found {n} KPI parsing/evaluation irregularities (conversion basis unknown).\nRule evaluation was skipped for affected ads (better lenient than wrongly paused); snapshots still written.\nCommon causes: broken KPI mapping config, campaign-objective fetch failures.\nTroubleshoot: Settings → Conversion Mapping; filter kpi_resolve_error in the Log Center for details.",
+        },
+    },
     # ── 止损 / 哨兵 ──
     "rule_pause": {
         "title": {"zh": "止损【{category}】· {name}", "en": "Stop-Loss [{category}] · {name}"},

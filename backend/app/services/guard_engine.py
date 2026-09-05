@@ -26,6 +26,23 @@ from ..models.ads_cache import AdsCache
 def _esc(s) -> str:
     """TG HTML 转义（用户提供的广告/账户名可能含 <>&，避免破坏 parse_mode=HTML）。"""
     return html.escape(str(s if s is not None else ""))
+
+
+def _sf(v, default: float = 0.0) -> float:
+    """安全 float（复审R1：FB insights 偶发脏值——空串/异常字符串——裸 float() 会炸掉
+    整账户本轮剩余广告的评估，last_inspected_at 不打点，30min 后才被 watchdog 发现）。"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _si(v, default: int = 0) -> int:
+    """安全 int（同 _sf；FB 的 clicks/impressions/reach 偶发返回字符串数字）。"""
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
 from ..models.guard import GuardRule, GuardAllowance
 from ..models.fb import FbCredential, Account
 from ..models.log import ActionLog
@@ -270,11 +287,11 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     raw_params = {k: v for k, v in raw_params.items() if v not in (None, "", [])}
     defaults = RULE_DEFAULTS.get(rule.rule_type, {})
     p = {**defaults, **raw_params}
-    spend = float(ad_insights.get("spend", 0))
+    spend = _sf(ad_insights.get("spend", 0))
     spend_usd = to_usd(spend, currency)
-    clicks = int(ad_insights.get("clicks", 0))
-    impressions = int(ad_insights.get("impressions", 0))
-    reach = int(ad_insights.get("reach", 0))
+    clicks = _si(ad_insights.get("clicks", 0))
+    impressions = _si(ad_insights.get("impressions", 0))
+    reach = _si(ad_insights.get("reach", 0))
     rt = rule.rule_type
     # 未知币种（to_usd=None：汇率表+兜底字典均无）：金额类规则不可判——本币数字直接当 USD 比
     # 阈值会误杀，1:1 兜底换算对小面额币种放大数千倍同样误杀。仅跳过金额类规则；click_no_conv/
@@ -311,7 +328,7 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     if rt == "low_ctr_no_conv":
         min_spend = float(p.get("min_spend", 10))
         max_ctr = float(p.get("max_ctr", 0.5))
-        ctr = float(ad_insights.get("ctr", 0) or 0)
+        ctr = _sf(ad_insights.get("ctr", 0) or 0)
         if spend_usd >= min_spend and impressions >= 100 and conversions == 0 and ctr <= max_ctr:
             return True, f"CTR {ctr:.2f}%≤{max_ctr}% / 空 {fmt_spend(spend, currency)}"
         return False, ""
@@ -636,6 +653,19 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
     from ..services.ad_ops import set_budget as _set_budget
     _sr = _set_budget(db, tenant_id, acc.act_id, tgt_id, scale_level,
                       daily_budget=new_native, currency=(acc.currency or "USD"), operator="guard")
+    _verified = bool(_sr.get("verified"))
+    if _sr.get("success") and not _verified:
+        # 假成功（复审R1）：写成功但回读核验未过——按成功记 24h 冷却会让未生效的加预算
+        # 一整天不重试（暂停链 unverified 早已走 5min 重试，扩量漏了对等机制）。
+        # 记 fail 走 RETRY_COOLDOWN_MIN 短重试；不加 scaled_targets/不计 scaled。
+        _log_evt("increase_budget", "fail",
+                 f"{detail} | 写已提交但核验未过（预算状态未知），5 分钟后重试 "
+                 f"act={acc.act_id} level={scale_level}",
+                 target_id=tgt_id, target_type=scale_level)
+        _notify_evt("warning",
+                    ("Budget change unverified, will retry" if loc == "en" else "加预算核验未过，稍后重试"),
+                    budget_disp, False)
+        return
     if _sr.get("success"):
         scaled_targets.add(tgt_id)  # 载体 id（P0-4）：CBO 时=campaign id，与冷却查询键/日志 target_id 一致
         res["scaled"] += 1
@@ -933,6 +963,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
             else:
                 active_ids = {a.get("id") for a in active_ads}
                 created_map = {a.get("id"): a.get("created_time") for a in active_ads}
+        except FbApiError as e:
+            # 限流统一冷却（复审R1）：曾只在 insights 分支冷却令牌——get_active_ads 撞限流
+            # 不冷却，同轮其余 worker/下轮继续选同一令牌撞墙。DB 级冷却对后续 worker 立即可见
+            if e.category == "rate_limited" and cred and platform == "fb":
+                try:
+                    mark_cred_cooldown(db, cred.id, minutes=30, status="rate_limited")
+                except Exception:
+                    pass
+            active_ids = None  # 平台 API 拉失败，下面用 ads_cache 兜底
         except Exception:
             active_ids = None  # 平台 API 拉失败，下面用 ads_cache 兜底
         # ads_cache 兜底：平台 API 失败 或 补充过滤——只评估投放中的广告
@@ -1085,6 +1124,13 @@ def _inspect_account_worker(ctx: dict) -> dict:
             leads_map = {}
         # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
         obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
+        # objectives 缺口观测（复审R1）：拉不到 objective 时 resolver 落 fallback 转化集聚合，
+        # 转化口径可能系统性漂移（多算/少算）——曾完全静默。计数进轮末 KPI 告警（仅 FB：
+        # TT 的 objective 走报表行自带，不经此路径）
+        if platform == "fb":
+            _obj_gaps = sum(1 for _v in obj_map.values() if not _v[0])
+            if _obj_gaps:
+                res["objective_gaps"] = res.get("objective_gaps", 0) + _obj_gaps
         # 该账户适用规则：全局(scope_act_id NULL) + 本账户(scope_act_id==acc.act_id)，并存各评估
         acc_rules = [r for r in all_rules if r.scope_act_id is None
                      or acc.act_id in [s.strip() for s in (r.scope_act_id or "").split(",")]]
@@ -1140,7 +1186,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
             ad_name = ad.get("ad_name", ad_id)[:50]
             res["evaluated"] += 1
-            spend = float(ad.get("spend", 0))
+            spend = _sf(ad.get("spend", 0))
             # KPI resolver：目标感知转化数 + target_cpa（审计项目10/11）
             try:
                 kpi = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
@@ -1160,6 +1206,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 logger.warning(f"[Guard] KPI 解析异常 ad={ad_id}: {e}")
                 conv, target_cpa = 0, None
                 kpi = {"kpi_field": "", "source": "error"}
+                # 数据不可信宁纵勿枉（1.0 思想）：resolver 异常=转化口径未知，conv=0 会让
+                # click_no_conv/reach_no_conv 等（无 BLEED_ABORT 守卫的）规则误杀有转化广告
+                res["kpi_errors"] = res.get("kpi_errors", 0) + 1
             # 落地页侧转化数（conversion_source landing/either 用）
             # landing_metric 配置取"通过"还是"访问"：
             #   pass = click+redirect（按钮点击/跳转通过量，用户真实意向）
@@ -1246,18 +1295,29 @@ def _inspect_account_worker(ctx: dict) -> dict:
             # 评估规则（全局 + 本账户级，并存）。三种"只跳评估、快照照写"（基线不断档）：
             # 学习期 / 当日加白 / 哨兵armed（armed=哨兵已全停，规则评估多余，但快照+错误上报保留，
             # disarm 后 burn_fast 基线不虚高）
-            if not learning_skip and not whitelisted and not armed:
+            # KPI 解析异常的广告跳过评估（快照照写，kpi_errors 计数轮末告警）：转化口径未知时
+            # 按 conv=0 评估，click_no_conv/reach_no_conv 等（无 BLEED_ABORT 守卫）有误杀面
+            if (not learning_skip and not whitelisted and not armed
+                    and kpi.get("source") != "error"):
                 # P2-7：先全量收集命中，动作类（非 observe）优先执行；仅 observe 命中时取第一条告警。
                 # 曾"首条命中即 break"：observe 规则排前会把后面的真止损规则挡掉（只告警不停，钱继续烧）。
+                # per-rule 沙箱（复审R1）：单条规则评估异常只跳过该条——曾裸 float() 脏值
+                # 冒泡到 worker 顶层，整账户本轮剩余广告全部不评估且 last_inspected_at 不打点
                 _hits_all: list = []
                 for rule in acc_rules:
-                    _h, _d = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
-                                            landing_clicks=landing_clicks,
-                                            landing_visits=landing_visits,
-                                            leads_count=leads_map.get(ad_id, 0),
-                                            yesterday_insight=yesterday_map.get(ad_id),
-                                            prev_spend=prev_spend, history=history,
-                                            currency=acc.currency)
+                    try:
+                        _h, _d = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
+                                                landing_clicks=landing_clicks,
+                                                landing_visits=landing_visits,
+                                                leads_count=leads_map.get(ad_id, 0),
+                                                yesterday_insight=yesterday_map.get(ad_id),
+                                                prev_spend=prev_spend, history=history,
+                                                currency=acc.currency)
+                    except Exception as _re:
+                        logger.warning(f"[Guard] 规则评估异常（跳过该条）rule={rule.rule_type} "
+                                       f"ad={ad_id}: {_re}")
+                        res["rule_eval_errors"] = res.get("rule_eval_errors", 0) + 1
+                        continue
                     if _h:
                         _hits_all.append((rule, _d))
                 _cand = ([x for x in _hits_all if (x[0].action or "default").lower() != "observe"]
@@ -1367,8 +1427,17 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         else:  # pause_campaign
                             chain = [(campaign_id, "系列")]
                         paused_ok = False
+                        _perm_only_fail = True   # 升级链失败是否全为 permissions（账户级永久错误判定）
+                        _deny_key = f"sentinel_perm_deny_{acc.act_id}"
+                        # 权限退避（复审R1，与哨兵对称）：写权限已标记丢失(24h) → 不空试暂停链
+                        # （每 5min 重试必然再失败）；权限恢复由标记过期后自动重试发现
+                        _deny_row = db.query(SystemSetting).filter(SystemSetting.key == _deny_key).first()
+                        if _deny_row:
+                            action_text = "暂停跳过（账户写权限丢失退避中，见「写权限丢失」告警）"
+                            pause_result = "fail"
+                            _perm_only_fail = False   # 已有标记：不重写/不重发告警
                         for pid, label in chain:
-                            if not pid:
+                            if _deny_row or not pid:
                                 continue
                             try:
                                 if platform == "tt":
@@ -1412,10 +1481,37 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             except (FbApiError, TtApiError) as _pause_err:
                                 # 记录平台 code/错误原文供排障（交接包 pitfall#7：不丢弃错误码）
                                 logger.warning(f"[Guard] 暂停{label}失败 ad={ad_id} pid={pid} code={getattr(_pause_err,'category','')} raw={str(getattr(_pause_err,'raw',''))[:100]}")
+                                if getattr(_pause_err, "category", "") not in ("permissions", "permission"):
+                                    _perm_only_fail = False
                                 continue  # 该级暂停失败，升级下一级
                         if not paused_ok:
-                            action_text = "暂停失败（ad→组→系列均未生效）"
+                            action_text = ("暂停跳过（写权限退避中）" if _deny_row
+                                           else "暂停失败（ad→组→系列均未生效）")
                             pause_result = "fail"
+                            # 权限永久错误退避（复审R1）：升级链全败且全为 permissions——BM 角色被收/
+                            # 账户被回收，每 5min 重试必然再失败。写 24h 标记（哨兵同款，共用判读）
+                            # + 告警一次；权限恢复由 24h 过期自动重试发现
+                            if _perm_only_fail and platform == "fb":
+                                try:
+                                    db.add(SystemSetting(key=_deny_key, value=json.dumps(
+                                        {"since": datetime.now(timezone.utc).isoformat()})))
+                                    db.commit()
+                                except Exception:
+                                    db.rollback()
+                                if not dedup_recent(db, tenant_id, "sentinel_perm_denied", acc.act_id, 1440):
+                                    write_log(db, tenant_id=tenant_id, trace_id=trace_id,
+                                              actor_type="system", target_type="account", target_id=acc.act_id,
+                                              action_type="sentinel_perm_denied", source="rule_engine",
+                                              result="fail", trigger_detail=f"act={acc.act_id} rule={rule.rule_type}")
+                                    _loc = tenant_locale(db, tenant_id)
+                                    _t_pd, _b_pd = notify_text(
+                                        _loc, "sentinel_perm_denied", name=_esc(acc.name or acc.act_id),
+                                        act_id=acc.act_id)
+                                    emit_notification(db, tenant_id=tenant_id, level="critical",
+                                                      event_type="sentinel_perm_denied", trace_id=trace_id,
+                                                      title=_t_pd, body=_b_pd, platform="fb",
+                                                      act_id=acc.act_id)
+                                    db.commit()
                         elif not pause_verified:
                             # 停了但没核验上 → 不给 60min 成功冷却，按 fail 记走 5min 重试：
                             # 下轮重进暂停链（对已停对象重发 pause 幂等）直到核验通过
@@ -1647,6 +1743,7 @@ def run_inspection(force: bool = False):
     _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
     _tenant_skipped_names: dict = {}  # tenant_id -> [广告名（id）]——告警带名单（用户第一问"哪些"）
     _tenant_skipped_accs: dict = {}  # tenant_id -> ["账户名(act_id): 原因"]——本轮整账户跳过清单（聚合告警）
+    _tenant_kpi_issues: dict = {}    # tenant_id -> KPI/评估口径异常计数（kpi_errors+rule_eval_errors+objective_gaps）
     paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
     scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
 
@@ -1739,6 +1836,12 @@ def run_inspection(force: bool = False):
                 _tenant_skipped_names.setdefault(_res["tenant_id"], []).extend(_res.get("skipped_ads") or [])
             # 整账户跳过（无令牌/insights 失败）——按租户分桶，轮末聚合告警（曾只剩服务日志一条 warning）
             _tenant_skipped_accs.setdefault(_res["tenant_id"], []).extend(_res.get("skip_reasons") or [])
+            # KPI/评估口径异常分桶（复审R1：静默降级必须发声——kpi_resolver 异常会让 conv=0
+            # 误杀、objectives 缺口让转化口径漂移、评估异常跳过单条规则）
+            _ke = (_res.get("kpi_errors", 0) + _res.get("rule_eval_errors", 0)
+                   + _res.get("objective_gaps", 0))
+            if _ke > 0:
+                _tenant_kpi_issues[_res["tenant_id"]] = _tenant_kpi_issues.get(_res["tenant_id"], 0) + _ke
             for _e in (_res.get("events") or []):
                 try:
                     if _e.get("kind") == "log":
@@ -1849,6 +1952,19 @@ def run_inspection(force: bool = False):
             emit_notification(db, tenant_id=_tid, level="warning",
                               event_type="inspection_skipped", trace_id=trace_id,
                               title=_t_ik, body=_b_ik, platform="fb")
+        # ── KPI/评估口径异常聚合告警（复审R1：静默降级必须发声）──
+        for _tid, _ke_n in _tenant_kpi_issues.items():
+            if _ke_n <= 0 or dedup_recent(db, _tid, "kpi_resolve_error", "*", 360):
+                continue
+            write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
+                      target_type="tenant", target_id="*",
+                      action_type="kpi_resolve_error", source="guard", result="fail",
+                      trigger_detail=f"issues={_ke_n}")
+            _loc = tenant_locale(db, _tid)
+            _t_ki, _b_ki = notify_text(_loc, "kpi_resolve_error", n=_ke_n)
+            emit_notification(db, tenant_id=_tid, level="warning",
+                              event_type="kpi_resolve_error", trace_id=trace_id,
+                              title=_t_ki, body=_b_ki, platform="fb")
         db.commit()
         return {"evaluated": total_evaluated, "hits": total_hits, "paused": total_paused,
                 "scaled": total_scaled, "learning_skipped": total_learning,

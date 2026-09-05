@@ -168,7 +168,10 @@ app.mount("/static-assets", _StaticFiles(directory=_ASSET_DIR), name="static-ass
 
 # ── APScheduler（定时巡检）──
 from apscheduler.schedulers.background import BackgroundScheduler
-_scheduler = BackgroundScheduler()
+# 独立线程池（复审R1）：默认 ThreadPoolExecutor(10) 共享——guard 4 worker × 长轮次（每次
+# 暂停 sleep 2.5s×多命中）会把哨兵/watchdog 等其他 cron 的触发挤掉。扩到 20 且单独配置
+_scheduler = BackgroundScheduler(executors={"default": {
+    "type": "threadpool", "max_workers": 20}})
 
 
 @app.on_event("startup")
