@@ -148,13 +148,16 @@ def _patch_cache_after_pause(db, tenant_id: int, act_id: str, platform: str,
     对象、cache 仍 ACTIVE → coverage_lost 自我误报（生产"7条未被评估"噪声根因）。
     级联：campaign/adset 级暂停连带旗下对象一并 PAUSED（FB/TT 状态传播，live /ads 同样
     排除它们；只 patch 系列本体的话旗下广告在 cache 仍 ACTIVE，哨兵 campaign 级暂停照样误报）。
-    行不存在/JSON 损坏静默跳过（15min 全量同步自愈）。level 仅级联判定用，三层按 id 匹配不变。"""
+    行不存在/JSON 损坏静默跳过（15min 全量同步自愈）。level 仅级联判定用，三层按 id 匹配不变。
+    事务边界（复审R1-P2）：SAVEPOINT 内提交——失败只回滚本回写，绝不 rollback 调用方
+    session 里挂起的 snapshot/tick 半成品；失败必须 logger.warning（静默失效不可观测=排障靠猜）。"""
     try:
         row = db.query(AdsCache).filter(
             AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
             AdsCache.platform == platform).first()
         if not row or not node_id:
             return
+        _sp = db.begin_nested()
         changed_any = False
         for field in ("campaigns_json", "adsets_json", "ads_json"):
             raw = getattr(row, field)
@@ -185,12 +188,10 @@ def _patch_cache_after_pause(db, tenant_id: int, act_id: str, platform: str,
             except Exception:
                 continue
         if changed_any:
-            db.commit()
-    except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+            _sp.commit()   # 释放 SAVEPOINT；持久化随调用方下一次 commit（暂停链必 commit）
+    except Exception as e:
+        logger.warning(f"[Guard] 暂停回写 ads_cache 失败(自愈=15min全量同步) "
+                       f"act={act_id} node={node_id} level={level}: {e}")
 
 
 def _ad_id_of(a: dict) -> str:
@@ -1632,7 +1633,6 @@ def run_inspection(force: bool = False):
     多 worker 进程：advisory lock 101 保证每轮只有一个 worker 真跑（防 TG spam）。
     force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
     """
-    global _LIVE_FALLBACK_STREAK  # live 拉取降级连续轮数（进程内计数，见模块常量区）
     lock = acquire_run_lock(101)
     if not lock:
         return {"skipped": "lock_busy"}
@@ -1780,25 +1780,31 @@ def run_inspection(force: bool = False):
                                  f"扩量{total_scaled} · 学习期跳过{total_learning} · "
                                  f"跳过{total_skipped_spend}条有消耗广告{_why}")
         # ── live 拉取降级 streak：连续 ≥3 轮有账户 cache 兜底 → 降级告警（1h/tenant1，与
-        # watchdog 同口径——平台级基础设施问题）。进程内计数，多 worker 各自计数可接受
-        # （巡检有 advisory lock 单进程跑）。偶发一轮抖动不告。──
-        if _n_fallback > 0:
-            _LIVE_FALLBACK_STREAK += 1
-        else:
-            _LIVE_FALLBACK_STREAK = 0
-        _degraded = (_LIVE_FALLBACK_STREAK >= _LIVE_FALLBACK_ALERT_STREAK
+        # watchdog 同口径——平台级基础设施问题）。偶发一轮抖动不告。
+        # 跨进程计数（复审R1-P2）：从 inspection_heartbeat 的 trigger_detail 数连续「兜底」
+        # 后缀——进程内计数在 gunicorn 多 worker 轮流抢 lock 时会把非连续轮拼成 streak 误报。──
+        _hb_rows = db.query(ActionLog.trigger_detail).filter(
+            ActionLog.action_type == "inspection_heartbeat").order_by(
+            ActionLog.id.desc()).limit(_LIVE_FALLBACK_ALERT_STREAK).all()
+        _streak = 0
+        for (_d,) in _hb_rows:
+            if "兜底" in (_d or ""):
+                _streak += 1
+            else:
+                break
+        _degraded = (_streak >= _LIVE_FALLBACK_ALERT_STREAK
                      and not dedup_recent(db, 1, "live_fetch_degraded", "*", 60))
         if _degraded:
             _loc = tenant_locale(db, 1)
             _t_lf, _b_lf = notify_text(_loc, "live_fetch_degraded",
-                                       streak=_LIVE_FALLBACK_STREAK, n=_n_fallback)
+                                       streak=_streak, n=_n_fallback)
             emit_notification(db, tenant_id=1, level="warning",
                               event_type="live_fetch_degraded", trace_id=trace_id,
                               title=_t_lf, body=_b_lf, platform="fb")
             write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
                       target_type="scheduler", target_id="*",
                       action_type="live_fetch_degraded", source="guard", result="fail",
-                      trigger_detail=f"streak={_LIVE_FALLBACK_STREAK} fallback_accounts={_n_fallback}")
+                      trigger_detail=f"streak={_streak} fallback_accounts={_n_fallback}")
         # 覆盖丢失告警：按租户分桶（原实现用循环残留 tenant_id → 发错租户+压制真盲区租户的告警）
         for _tid, _skipped in _tenant_skipped.items():
             if _skipped <= 0:
@@ -1870,9 +1876,8 @@ INSPECTION_STALL_MIN = 15
 # 单账户停滞阈值（分钟）：managed 账户超过此时长无 last_inspected_at = 漏巡（watchdog 检测；
 # 打点在 worker 实际处理完成后，无令牌/insights 失败的账户不刷新 → 全局心跳正常也有单账户盲区）
 ACCOUNT_STALE_MIN = 30
-# live /ads 拉取降级计数（进程内）：连续 N 轮有账户用 ads_cache 兜底 → 降级告警
-# （偶发一轮抖动不告；多 worker 各自计数可接受——巡检有 advisory lock 单进程跑）
-_LIVE_FALLBACK_STREAK = 0
+# live /ads 拉取降级告警阈值：连续 N 轮有账户用 ads_cache 兜底 → 降级告警
+# （偶发一轮抖动不告；连续性从 inspection_heartbeat 的「兜底」后缀数——跨 worker 真相源）
 _LIVE_FALLBACK_ALERT_STREAK = 3
 # 重试冷却（分钟）：暂停失败后缩短冷却，下轮（~5min）重试（22，1.0 _set_retry_cooldown）
 RETRY_COOLDOWN_MIN = 5
@@ -2165,9 +2170,11 @@ def run_watchdog():
         # 单账户漏巡完全无感。>30min 未巡检 = critical（止损对该账户失效）。──
         try:
             _stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=ACCOUNT_STALE_MIN)
+            # 账户集镜像巡检主循环口径（复审R1-P1）：仅排除死状态（2/8/100/101），NULL/未结清3/
+            # 受限7/宽限9 仍在投放必须覆盖——用 ==1 会把这些账户挡在停滞告警外（漏报）
             _stale = db.query(Account).filter(
                 Account.is_managed.is_(True),
-                Account.account_status == 1,
+                or_(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
                 or_(Account.last_inspected_at.is_(None),
                     Account.last_inspected_at < _stale_cutoff),
             ).all()

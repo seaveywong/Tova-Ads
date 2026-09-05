@@ -205,6 +205,9 @@ ERROR_ZH_EN: dict[str, str] = {
     "你未绑定 TG（POST /notifications/tg/user-binding）": (
         "You have not bound Telegram (POST /notifications/tg/user-binding)"
     ),
+    "你未绑定 TG，请先绑定再设置通知偏好": (
+        "You have not bound Telegram; bind it before setting notification preferences"
+    ),
     "管理员未配置 TG Bot": "The administrator has not configured a Telegram bot",
     "管理员未配置 TG Bot（联系管理员先绑租户 TG）": (
         "The administrator has not configured a Telegram bot "

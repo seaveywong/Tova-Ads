@@ -73,17 +73,20 @@ export const accountStatus = (code) => {
 }
 
 // FB 账户禁用原因（Graph API adaccount.disable_reason 数字枚举）。
-// 仅常用码给本地化标签；长尾（各国监管/风控项目）保留 FB 官方英文原词，
-// 避免生造翻译误导排查。tone: danger=违规/封禁类（基本不可救） warning=支付/风控类（可申诉补救）。
+// 复审R3-P1 校准：1-8 按官方语义重排（曾整体错位——支付失败被标成政策封禁会误导用户
+// 走错补救路径）。官方 1=ADS_INTEGRITY_POLICY 2=ADS_PAYMENT_FAILURE 3/5=GRAY_ACCOUNT_SHUT_DOWN
+// 4=RISK_PAYMENT 7=INACTIVE_ACCOUNT 8=UNDECIDED；9+ 长尾保留 FB 原词，避免生造翻译误导排查。
+// tone: danger=违规/封禁类（基本不可救） warning=支付/风控/不活跃类（可申诉/补救）。
 // 0=none 不入库展示（disableReason 返回 null）；未知新枚举透传 '#码'，不吞掉线索。
+// ⚠️ 拿到真实被禁账户时建议 GET act_x?fields=disable_reason 实测复核对一遍。
 export const FB_DISABLE_REASON = {
-  1:  { key: 'status.drAdsPolicy',           tone: 'danger' },
-  2:  { key: 'status.drAdsIntegrity',        tone: 'danger' },
-  3:  { key: 'status.drRiskPayment',         tone: 'warning' },
-  4:  { key: 'status.drGrayAccount',         tone: 'warning' },
-  5:  { key: 'status.drHiRiskRestricted',    tone: 'danger' },
-  7:  { key: 'status.drEngagementAbuse',     tone: 'danger' },
-  8:  { key: 'status.drAdsAbuse',            tone: 'danger' },
+  1:  { key: 'status.drAdsIntegrity',        tone: 'danger' },   // ADS_INTEGRITY_POLICY
+  2:  { key: 'status.drPaymentFailure',      tone: 'warning' },  // ADS_PAYMENT_FAILURE（充值/换卡可解）
+  3:  { key: 'status.drGrayAccount',         tone: 'danger' },   // GRAY_ACCOUNT_SHUT_DOWN
+  4:  { key: 'status.drRiskPayment',         tone: 'warning' },  // RISK_PAYMENT
+  5:  { key: 'status.drGrayAccount',         tone: 'danger' },   // 官方表与 3 重复项
+  7:  { key: 'status.drInactiveAccount',     tone: 'warning' },  // INACTIVE_ACCOUNT
+  8:  { key: 'status.drUndecided',           tone: 'warning' },  // UNDECIDED
   9:  { key: 'status.drUnsupportedBusiness', tone: 'warning' },
   10: { key: 'status.drMiscMkt',             tone: 'warning' },
   11: { key: 'status.drAnCrowdsource',       tone: 'warning' },

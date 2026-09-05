@@ -105,6 +105,7 @@ export default {
     deployMode: '部署模式', modeSingle: '单模板部署', modeBatch: '按素材批量生成系列',
     // 追踪参数通用插值（落地 URL 静态占位符）
     urlPhHint: 'URL 支持占位符：{{campaign.name}} {{adset.name}} {{account.name}} {{account.id}} {{asset.name}} {{template.name}} {{platform}}（部署时逐账户替换，URL 编码；不支持 {{ad.id}}）',
+    retryPartialConfirm: '批量重试会重新部署该账户的全部系列（含上次已成功的系列——不走同名去重，已建系列不会自动删除）。确认重试？',
     batchHint: '批量生成：模板作为母版，每个选中素材克隆出一个完整系列（系列名/广告名=素材名）；模板自带的素材在本模式下被忽略',
     batchAssetCount: '已选 {n} 个素材', batchSelectAll: '全选素材', batchMaxReached: '最多选择 {n} 个素材',
     batchNeedAssets: '请先选择素材', batchNoAssets: '素材库暂无图片/视频素材',
@@ -219,6 +220,7 @@ export default {
     deployMode: 'Deploy mode', modeSingle: 'Single template', modeBatch: 'Batch series per asset',
     // Tracking-param interpolation (static placeholders in the landing URL)
     urlPhHint: 'URL placeholders: {{campaign.name}} {{adset.name}} {{account.name}} {{account.id}} {{asset.name}} {{template.name}} {{platform}} — resolved per account at deploy time, URL-encoded; {{ad.id}} is not supported',
+    retryPartialConfirm: 'Batch retry redeploys ALL series for this account — including the ones that succeeded last time (no name-based dedup; existing series are not removed automatically). Retry anyway?',
     batchHint: 'Batch generate: the template acts as the master — each selected asset clones a full campaign (campaign/ad named after the asset). The template\'s own asset is ignored in this mode',
     batchAssetCount: '{n} assets selected', batchSelectAll: 'Select all assets', batchMaxReached: 'Select up to {n} assets',
     batchNeedAssets: 'Select assets first', batchNoAssets: 'No image/video assets in the library yet',

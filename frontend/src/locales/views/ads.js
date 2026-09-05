@@ -15,6 +15,7 @@ export default {
     groupPh: '如：主投组 / 测试组（留空=清除）',
     groupSet: '设分组',
     groupSaved: '已更新 {n} 个账户的分组',
+    groupClearConfirm: '即将清除 {n} 个账户的分组标签（留空保存=清除）。确认清除？',
     drPrefix: '原因：',
   },
   en: {
@@ -28,6 +29,7 @@ export default {
     groupPh: 'e.g. Main / Test (empty = clear)',
     groupSet: 'Set group',
     groupSaved: 'Group updated for {n} account(s)',
+    groupClearConfirm: 'This will clear the group label of {n} account(s) (saving empty = clear). Confirm?',
     drPrefix: 'Reason: ',
   },
 }

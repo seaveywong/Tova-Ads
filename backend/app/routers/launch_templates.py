@@ -270,6 +270,16 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     # 批量模式素材校验（deploy/preflight 共用口径）：失败 400 快失败——坏素材放进 job 会
     # 逐账户重复失败 N 次，浪费一整轮部署还污染进度列表
     batch_assets = _validate_batch_assets(db, body.asset_ids, user.tenant_id) if body.asset_ids else []
+    # 占位符校验（复审R2-P1）：create/update/preflight 拦的是"保存时"；部署是最后一道门——
+    # ⑥ 上线前保存的存量模板可能带脏占位符，插值会静默清空（追踪参数无声丢失）→ 400 快失败
+    try:
+        _check_url_placeholders(t.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    # 跟帖(reuse)模板不支持批量（复审R2-P2）：reuse 分支固定引用同一帖子——M 个系列全部
+    # 指向同一帖（创意零差异、预算×M），还白做 M 次素材上传
+    if batch_assets and (t.post_source or "new") == "reuse":
+        raise HTTPException(400, "跟帖（复用帖子）模板不支持按素材批量：批量模式会创建多个系列但全部引用同一条帖子（创意无差异、预算翻倍）。请先在模板编辑器切换为「新建帖子」模式")
     # 防重竞态（P1-1）：原「查 running → 建 job」两步在并发提交下都查空 → 双 job 双份广告。
     # advisory lock 115 把 查重→建 job→commit 串成原子段；拿不到锁=另一请求正在提交，409 快失败。
     _dlock = acquire_run_lock(115)
@@ -347,7 +357,9 @@ def _series_name(tpl: LaunchTemplate, asset, idx: int) -> str:
 # 且子码绑 {{ad.id}} 占位符曾有像素不 fire 的事故——见 subcode-placeholder-binding-bug）
 _URL_PLACEHOLDERS = {"campaign.name", "adset.name", "account.name", "account.id",
                      "asset.name", "template.name", "platform"}
-_URL_PH_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}")
+# 宽匹配（复审R2-P2）：吃任何 {{...}}（含带空格/连字符等非法写法）——窄正则会漏检
+# `{{campaign name}}`，check 放行 + interp 原样保留 = 字面垃圾 URL 直达 FB
+_URL_PH_RE = re.compile(r"\{\{([^{}]*)\}\}")
 
 
 def _check_url_placeholders(url: str):
@@ -355,13 +367,17 @@ def _check_url_placeholders(url: str):
     if not url or "{{" not in url:
         return
     for m in _URL_PH_RE.finditer(url):
-        key = m.group(1)
+        key = m.group(1).strip()
         if key == "ad.id":
             raise ValueError(
                 "落地页 URL 不支持 {{ad.id}}：FB 建广告前拿不到广告 ID（子码绑此占位符曾导致像素不 fire）。"
                 "请改用 {{campaign.name}} / {{account.id}} 等静态值")
         if key not in _URL_PLACEHOLDERS:
             raise ValueError(f"未知占位符 {{{{{key}}}}}，支持：{', '.join(sorted(_URL_PLACEHOLDERS))}")
+    # 宽正则吃不到的残留（如 {{{x}}} 嵌套）也算脏占位符——任何 {{ 走到部署即垃圾 URL
+    _rest = _URL_PH_RE.sub("", url)
+    if "{{" in _rest:
+        raise ValueError("落地页 URL 含无法解析的占位符写法（检查 {{ }} 配对）")
 
 
 def _interp_landing_url(url: str, *, campaign_name: str = "", account_name: str = "",
@@ -378,9 +394,16 @@ def _interp_landing_url(url: str, *, campaign_name: str = "", account_name: str 
             "asset.name": asset_name, "template.name": template_name, "platform": platform}
 
     def _sub(m):
-        v = str(vals.get(m.group(1)) or "")
+        v = str(vals.get(m.group(1).strip()) or "")
         return quote(v, safe="") if v else ""
     return _URL_PH_RE.sub(_sub, url)
+
+
+def _stable_landing_url(url: str, template_name: str, platform: str = "fb") -> str:
+    """跨系列/跨账户复用场景（Instant Form 感谢页、跟帖链接——按 page/asset 缓存共享）的
+    稳定插值（复审R2-P2）：只解 template.name/platform，系列/账户/素材级占位符剥离为空
+    ——把某个系列名烧进共享表单会错误归因其他系列，字面 {{xxx}} 直接上线更是垃圾 URL。"""
+    return _interp_landing_url(url, template_name=template_name, platform=platform)
 
 
 @router.get("/{tid}/reuse-eligible")
@@ -1099,7 +1122,10 @@ def _resolve_page_post(sdb, fb, tenant_id: int, tpl: LaunchTemplate, asset, page
         return ""
     if not (page_id and asset and asset.type == "image"):
         return ""
-    return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, body or tpl.body or "", tpl.landing_url or "", asset.public_url or "")
+    # 帖子按 (page,asset) 缓存跨账户共享 → 链接只解稳定占位符（复审R2-P2）：
+    # 系列/账户级变量剥离为空，避免字面 {{xxx}} 进帖子链接
+    _lp = _stable_landing_url(tpl.landing_url or "", tpl.name or "")
+    return get_or_create_page_post(sdb, fb, tenant_id, page_id, asset.id, body or tpl.body or "", _lp, asset.public_url or "")
 
 
 def _reap_stale_jobs():
@@ -1174,7 +1200,11 @@ def _job_batch_assets(sdb, job_id: int, tenant_id: int) -> list:
         if not row or not row.metadata_:
             return []
         ids = json.loads(row.metadata_).get("asset_ids") or []
-    except Exception:
+    except Exception as e:
+        # 复审R2-P1：这里静默 return [] 会把批量 job 降级成单模板部署（少建系列且无感）——
+        # 必须留痕；仍返回 [] 兜底（旧 job 本来就是单模板语义，15min 对账/清单可核）
+        logging.getLogger("toveads.launch").warning(
+            f"batch assets 回读失败(job={job_id})，按单模板处理: {e}")
         return []
     if not ids:
         return []
@@ -1236,7 +1266,9 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     lead_form_id = ""
     if tpl.objective == "OUTCOME_LEADS" and page_id:
         try:
-            lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id, tpl.landing_url or "", post_content=post_content)
+            lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id,
+                                              _stable_landing_url(tpl.landing_url or "", tpl.name or ""),
+                                              post_content=post_content)
         except Exception:
             pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
     # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
@@ -1608,6 +1640,11 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         LaunchTemplate.id == j.template_id, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not _tpl or _tpl.status == "archived":
         raise HTTPException(400, "模板已归档，不能重试（恢复模板或复制新模板后再部署）")
+    # 占位符校验（复审R2-P1，与 deploy 端点同口径）：拦截 ⑥ 上线前的存量脏占位符
+    try:
+        _check_url_placeholders(_tpl.landing_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     it = db.query(LaunchJobItem).filter(LaunchJobItem.id == item_id, LaunchJobItem.job_id == job_id).first()
     if not it:
         raise HTTPException(404, "item 不存在")
@@ -1624,8 +1661,11 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     # 原子抢占：UPDATE ... WHERE status='fail' 判 rowcount——双击并发时只有一个请求能置 pending
     # （原 check-then-write：两请求都读到 fail 都通过 → 两个后台任务 = 同账户两份广告）
     from sqlalchemy import text as _text
+    # 清残留 ids（复审R2-P2）：批量全败重试时 item 还带着上一轮旧系列的 campaign/ad id——
+    # 失败期间清单页显示旧系列跳转链接会误导"去 FB 后台核对"；重试成功会覆盖，全败则保持空
     claimed = db.execute(
-        _text("UPDATE launch_job_items SET status='pending', error=NULL WHERE id=:id AND status='fail'"),
+        _text("UPDATE launch_job_items SET status='pending', error=NULL, campaign_id=NULL, "
+              "adset_id=NULL, ad_id=NULL WHERE id=:id AND status='fail'"),
         {"id": item_id},
     ).rowcount
     db.commit()
@@ -1813,7 +1853,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             lead_form_id = ""
             if tpl.objective == "OUTCOME_LEADS" and _page_id:
                 try:
-                    lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id, tpl.landing_url or "", post_content=post_content)
+                    lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id,
+                                                      _stable_landing_url(tpl.landing_url or "", tpl.name or ""),
+                                                      post_content=post_content)
                 except Exception:
                     pass
             # 没选消息模板 → AI 生成（ENGAGEMENT+消息）；跟帖无素材→用帖内容

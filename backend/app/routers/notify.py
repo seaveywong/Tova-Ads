@@ -234,8 +234,17 @@ def set_user_tg_binding(
             if not any_b:
                 raise HTTPException(400, "缺少 bot_token")
             _tok_to_store = decrypt(any_b.bot_token_enc)
+            # 新绑定行继承用户已设的通知偏好（复审R1-P2）：prefs 是用户级语义，
+            # 新行 NULL=fail-open 会悄悄恢复被用户关掉的 warning/info 推送
+            _inherit_prefs = any_b.prefs
+        else:
+            _prev = db.query(UserTgBinding).filter(
+                UserTgBinding.tenant_id == user.tenant_id,
+                UserTgBinding.user_id == user.id).first()
+            _inherit_prefs = _prev.prefs if _prev else None
         db.add(UserTgBinding(tenant_id=user.tenant_id, user_id=user.id,
-                             bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id))
+                             bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id,
+                             prefs=_inherit_prefs))
     db.commit()
     return {"status": "saved", "user_id": user.id}
 
@@ -495,10 +504,15 @@ def tg_oauth_callback(body: TgOAuthIn,
         existing.bot_token_enc = tb.bot_token_enc
         existing.verified_at = datetime.now(timezone.utc)
     else:
+        # 继承用户已设偏好（复审R1-P2，同 save_user_tg_binding 口径）
+        _prev = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == user.tenant_id,
+            UserTgBinding.user_id == user.id).first()
         db.add(UserTgBinding(
             tenant_id=user.tenant_id, user_id=user.id,
             bot_token_enc=tb.bot_token_enc, chat_id=chat_id,
             verified_at=datetime.now(timezone.utc),
+            prefs=(_prev.prefs if _prev else None),
         ))
     db.commit()
     return {"bound": True, "tg_username": body.username or str(body.id)}

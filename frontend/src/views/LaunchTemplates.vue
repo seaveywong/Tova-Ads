@@ -1065,14 +1065,26 @@ const pollJob = async (jobId) => {
   } catch {}
 }
 const retryItem = async (it) => {
+  // partial（批量部分失败）重试确认（复审R2-P1）：批量重试=整个账户全部系列重跑，
+  // 上轮已成功的系列会被重建（不走同名幂等）——必须像部署一样先确认
+  if (it.error_code === 'partial') {
+    try {
+      await ElMessageBox.confirm(t('launch.retryPartialConfirm'), t('common.confirm'),
+        { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+    } catch { return }
+  }
   try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success(t('launch.retrySubmitted'))
     if (!pollTimer) startPoll(activeJob.value.id, 0) } catch (e) { showError(e, t('launch.retryFail')) }
 }
 const statusText = (s) => itemStatus(s).label
 // 错误文案展示：partial（批量部分失败）汇总含「成功X/Y系列+失败明细」是决策信息——不截断、
-// 允许换行；普通错误沿用截断（60/40 字，完整文案在 title 悬浮）
+// 允许换行；普通错误沿用截断（60/40 字，完整文案在 title 悬浮）。
+// partial 必须直用 it.error（复审R2-P0）：fbErrorText 对未知 code 返回兜底翻译，
+// 非空字符串会遮蔽 it.error——后端精心构造的「成功X/Y系列」汇总用户永远看不到
 const itemErrText = (it, n) => {
-  const txt = fbErrorText(it.error_code) || it.error || ''
+  const txt = it.error_code === 'partial'
+    ? (it.error || '')
+    : (fbErrorText(it.error_code) || it.error || '')
   return it.error_code === 'partial' ? txt : txt.slice(0, n)
 }
 const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
@@ -1642,7 +1654,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="pi-act">{{ it.act_id }}</span>
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
             <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
-            <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="fbErrorText(it.error_code) || it.error">{{ itemErrText(it, 60) }}</span>
+            <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 60) }}</span>
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
           </div>
         </div>
@@ -1712,7 +1724,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
               </span>
               <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(depJobDetail?.platform) }}→</a>
-              <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="fbErrorText(it.error_code) || it.error">{{ itemErrText(it, 40) }}</span>
+              <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 40) }}</span>
             </div>
             <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
           </div>

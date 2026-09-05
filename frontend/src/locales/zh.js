@@ -164,10 +164,9 @@ export default {
     generic: 'Facebook 返回错误',
   },
   status: {
-    // FB 账户 disable_reason（adaccount.disable_reason 数字枚举；0/空不入表=无原因）
-    drAdsPolicy: '广告政策违规', drAdsIntegrity: '广告诚信', drRiskPayment: '支付风险',
-    drGrayAccount: 'Gray account provisioning', drHiRiskRestricted: '高风险受限',
-    drEngagementAbuse: 'Engagement abuse', drAdsAbuse: 'Ads abuse',
+    // FB 账户 disable_reason（官方语义，复审R3-P1 校准：1诚信政策/2支付失败/3+5灰号关停/4支付风险/7不活跃/8待定）
+    drAdsIntegrity: '广告诚信政策', drPaymentFailure: '支付失败', drGrayAccount: '灰色账号关停',
+    drRiskPayment: '支付风险', drInactiveAccount: '不活跃关停', drUndecided: '待定',
     drUnsupportedBusiness: 'Unsupported business', drMiscMkt: 'misc_mkt',
     drAnCrowdsource: 'AN_CROWDSOURCE', drCanadaCra: 'CANADA_CRA', drChinaBci: 'CHINA_BCI',
     drRpTosViolation: 'RP_TOS_VIOLATION', drMexicoProfeco: 'MEXICO_PROFECO',

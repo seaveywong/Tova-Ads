@@ -230,6 +230,13 @@ const openGroupBatch = () => {
 }
 const saveGroup = async () => {
   const g = groupEdit.value
+  // 批量清除防护（复审R3-P2）：留空保存=一键清掉最多 500 个账户的全部分组——必须确认
+  if (g.batch && !g.label.trim()) {
+    try {
+      await ElMessageBox.confirm(t('ads.groupClearConfirm', { n: g.actIds.length }), t('common.confirm'),
+        { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+    } catch { return }
+  }
   groupSaving.value = true
   try {
     const r = await PUT('/fb/accounts/group', { act_ids: g.actIds, group_label: g.label.trim() })

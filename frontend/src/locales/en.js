@@ -162,10 +162,9 @@ export default {
     generic: 'Facebook returned an error',
   },
   status: {
-    // FB adaccount disable_reason (numeric enum; 0/absent = no reason)
-    drAdsPolicy: 'Ads policy violation', drAdsIntegrity: 'Ads integrity', drRiskPayment: 'Payment risk',
-    drGrayAccount: 'Gray account provisioning', drHiRiskRestricted: 'High-risk restricted',
-    drEngagementAbuse: 'Engagement abuse', drAdsAbuse: 'Ads abuse',
+    // FB adaccount disable_reason (official semantics, recalibrated in review R3-P1)
+    drAdsIntegrity: 'Ads integrity policy', drPaymentFailure: 'Payment failure', drGrayAccount: 'Gray account shut down',
+    drRiskPayment: 'Payment risk', drInactiveAccount: 'Inactive account', drUndecided: 'Undecided',
     drUnsupportedBusiness: 'Unsupported business', drMiscMkt: 'misc_mkt',
     drAnCrowdsource: 'AN_CROWDSOURCE', drCanadaCra: 'CANADA_CRA', drChinaBci: 'CHINA_BCI',
     drRpTosViolation: 'RP_TOS_VIOLATION', drMexicoProfeco: 'MEXICO_PROFECO',

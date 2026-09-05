@@ -33,15 +33,22 @@ const fmtTs = (iso) => {
 const load = async () => {
   loading.value = true
   try {
-    const [bi, ub, pf] = await Promise.all([
+    // allSettled（复审R3-P2）：prefs 单独失败只回退默认全 true（后端本就 fail-open），
+    // 不拖垮 bot-info/user-binding——Promise.all 任一 reject 会把整个弹窗打成空态
+    const [biR, ubR, pfR] = await Promise.allSettled([
       GET('/notifications/tg/bot-info'),
       GET('/notifications/tg/user-binding'),
       GET('/notifications/tg/prefs'),
     ])
-    botInfo.value = bi
-    userB.value = ub
-    prefs.value = pf
-    if (!ub.bound) tab.value = 'add'
+    if (biR.status === 'rejected' || ubR.status === 'rejected') {
+      throw (biR.reason || ubR.reason)
+    }
+    botInfo.value = biR.value
+    userB.value = ubR.value
+    prefs.value = pfR.status === 'fulfilled'
+      ? pfR.value
+      : { bound: !!(ubR.value?.bound), levels: { warning: true, info: true } }
+    if (!ubR.value.bound) tab.value = 'add'
     try { canManage.value = ((await GET('/auth/me')).permissions || []).includes('members.manage') } catch {}
     await refreshCode()
   } catch (e) { ElMessage.error(e.message || t('tg.loadFail')) }
