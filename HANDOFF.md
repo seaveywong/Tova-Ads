@@ -8,6 +8,18 @@
 
 ---
 
+## 0. 文档地图（先读什么）
+
+| 读什么 | 文件 |
+|---|---|
+| ① 本文档：怎么干活不踩雷（铁律/部署/验证/恢复） | `toveads/HANDOFF.md` |
+| ② **系统架构全景**（45 表/265 路由/16 cron/数据流图/核心机制深读/历史速览） | `toveads/ARCHITECTURE.md` |
+| ③ 目录速查 | `toveads/CLAUDE.md` |
+| ④ 变更历史（每批改动的 why+验证+commit，最权威的"为什么长这样"） | `toveads/TECH_REVIEW.md` |
+| ⑤ 设计渊源（00-12 章原始设计，部分漂移**以代码为准**） | 根目录 `Mira_2.0_docs/` |
+| ⑥ 产品方向（自动驾驶规划/竞品拆解/TK 接入） | `极简操作与自动驾驶规划.md` 等 |
+| ⑦ 1.0 旧系统（bug-fix-only，本任务别碰） | 根目录 `CLAUDE.md` + `Mira_System_Map_v2.md` |
+
 ## 1. 系统是什么
 
 **ToveAds 2.0** — 多平台（Facebook/TikTok）多租户广告管理 SaaS：
