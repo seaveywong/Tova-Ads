@@ -1121,3 +1121,32 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - 前端：模板编辑器落地 URL 输入框白名单提示（zh/en）
 - smoke 增 4 断言全过：ad.id 拒 400 / 未知占位符拒 400 / 预检 payload 无残留 `{{` / 含 account.id+p=fb
 - 附带生产实证：本轮心跳「评估0条广告…（哨兵armed-全部跳过）」——F1 心跳带原因 suffix 真实落地
+
+### 批F 主管复审（2026-09-05，/goal 复审 优化）——3 Agent 对抗性复审 + 全清修复（commit aeb1386）
+
+**复审方式**：R1（巡检可靠性链 F1+F4）/ R2（花钱链 F2+⑥）/ R3（分组/前端/i18n F3+集成）并行，按 6 维度逐条取证（文件:行号）。**结论：P0×1 + P1×5 + P2×16，全部修复并部署；未修项均为文档化接受（见下）。**
+
+| 级别 | 问题 | 修法 |
+|---|---|---|
+| **P0** | `itemErrText` 里 `fbErrorText('partial')` 兜底翻译**遮蔽 it.error**——后端构造的「成功X/Y系列」汇总（重试前唯一决策信息）用户永不可见（R2，资金链信息断裂） | partial 直用 it.error（正文+title 两处 3 个模板点） |
+| P1 | watchdog 停滞账户集 `account_status==1` 与巡检死状态集口径矛盾——受限/未结清/NULL 仍在花钱的账户被挡在 critical 告警外（R1，漏报向） | 镜像巡检过滤 `or_(is_(None), notin_([2,8,100,101]))` |
+| P1 | 批量 partial retry 零确认一键重建已成功系列（R2） | `retryPartialConfirm` 确认弹窗（zh/en） |
+| P1 | deploy/retry 端点缺占位符校验——⑥ 前存量模板脏占位符部署时静默清空（R2） | 两端点补 `_check_url_placeholders` → 400 |
+| P1 | `_job_batch_assets` 裸 except return [] 可把批量 job 静默降级单模板（R2） | logger.warning 留痕（保留 [] 兜底） |
+| P1 | FB_DISABLE_REASON 1-8 官方语义错位——支付失败(2)标成「广告诚信」danger，用户走错补救路径（R3；10-19 已证吻合只修头部） | 重排 1=诚信政策/2=支付失败/3+5=灰号/4=支付风险/7=不活跃/8=待定 + 3 新键 -4 废弃键 |
+| P2 | 暂停回写 rollback 会丢调用方挂起写+零日志（R1） | SAVEPOINT + logger.warning |
+| P2 | live streak 进程内计数多 worker 失真（R1） | 改从心跳 trigger_detail 数连续「兜底」（跨进程真相源） |
+| P2 | 新 TG 绑定行 prefs=NULL 悄悄恢复用户关闸（R1） | 建绑定两处继承既有 prefs |
+| P2 | prefs 400 中文未入译表（R1） | ERROR_ZH_EN 补条目 |
+| P2 | `{{campaign name}}` 类非法写法漏检直达 FB（R2） | 宽 regex + 残留 `{{` 兜底拒 |
+| P2 | LEADS 表单/跟帖链接吃字面 `{{xxx}}`（R2） | `_stable_landing_url`（只解 template.name/platform，系列/账户级剥离） |
+| P2 | reuse 跟帖模板可进批量（全系列同帖、预算×M）（R2） | deploy 400 |
+| P2 | 批量 retry 残留旧系列 campaign_id/ad_id 误导核对（R2） | claim 时清三 id |
+| P2 | Ads 批量清除分组无确认（R3） | confirm 弹窗 |
+| P2 | TgManager Promise.all prefs 失败拖垮弹窗（R3） | allSettled + prefs 单独回退默认 |
+
+**复审确认无损的关键面**（原文取证）：暂停回写级联字段名与 FB/TT 存储行逐字段一致、三新告警 dedup↔write_log 严格配对、F4 fail-open 三态+critical 恒推+站内信不受影响、act_id 映射不覆盖 rule_pause 既有 target、迁移 0084/0085 链+GRANT 幂等、launch.js 388/388 键成对 en 零 CJK、PUT group 走 ORM 逐行无 bulk-update 越权面、views/ads.js spread 与内联 62 键零冲突、抽屉 409/锁 115 唯一/心跳提交守卫骨架完好。
+
+**文档化接受（不修，均有 reason）**：①四类通知对同一无令牌账户叠加（各类 dedup 独立，6h/24h 窗口下量可控）②聚合告警 platform="fb" 硬编码（TT 未投产，投产后升 P1）③legacy daily_budget 模板确认弹窗金额 $0（budget_usd 是主路径）④批量+LEADS 未选表单模板的 AI 生成风暴（低频）⑤reap 并发窗口超大视频上传心跳粒度（存量）⑥子码+query URL 拼接变形（存量）⑦已移除账户行缺两键（前端 falsy 安全）⑧⑨ dashboard.py:278 与 notify.py 权限粒度（无实际触发面）。
+
+**验证**：4 后端文件 py_compile+import 门 → restart → health ok → 全量 smoke 回归 **ALL_PASS**（含心跳「哨兵armed-全部跳过」后缀仍落地=streak 改造未破坏主链）→ 前端 build ✓ + CF 已部署 → commit aeb1386 已推送。
