@@ -131,5 +131,8 @@ try:
 finally:
     db.close()
 
+from _smoke_kpi_ai import run_checks as _run_kpi_ai_checks
+check("KPI AI 429 regression (data + cross-process + i18n)", _run_kpi_ai_checks())
+
 print("\nSMOKE_RESULT: " + ("ALL_PASS" if not FAILS else f"FAILED {len(FAILS)}: {FAILS}"))
 sys.exit(1 if FAILS else 0)

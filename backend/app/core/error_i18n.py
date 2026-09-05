@@ -115,6 +115,8 @@ ERROR_ZH_EN: dict[str, str] = {
     "AI 未配置（缺 ai_api_key）": "AI is not configured (missing ai_api_key)",
     "AI 未配置（.env 缺 ai_api_key）": "AI is not configured (.env is missing ai_api_key)",
     "AI 未配置": "AI is not configured",
+    "AI 服务额度不足，请检查服务商余额或配额后重试。": "AI service credits or quota are exhausted. Check your provider balance or quota, then retry.",
+    "AI 请求过于频繁，请稍后重试。": "Too many AI requests. Please try again later.",
     "素材不存在": "Asset does not exist",
 
     # ---- assets.py / 素材库 ----

@@ -2,7 +2,7 @@
 import json
 import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -236,7 +236,7 @@ def set_ai_config(body: AiConfigIn, user: CurrentUser = Depends(require_superadm
 
 
 @router.post("/ai/test")
-def test_ai(vision: bool = False, user: CurrentUser = Depends(require_superadmin)):
+def test_ai(request: Request, vision: bool = False, user: CurrentUser = Depends(require_superadmin)):
     """测试 AI 连接。vision=False 测文案(DeepSeek)，vision=True 测视觉(Gemini 看图)。"""
     from ..core.ai_client import AiClient, vision_client
     client = vision_client() if vision else AiClient()
@@ -248,7 +248,9 @@ def test_ai(vision: bool = False, user: CurrentUser = Depends(require_superadmin
         resp = client.chat([{"role": "user", "content": "回复 OK"}], temperature=0, max_tokens=64)
         return {"ok": True, "detail": resp[:50]}
     except Exception as e:
-        return {"ok": False, "detail": str(e)[:120]}
+        # 此接口以 200 + ok=false 返回，须显式翻译（不会进入 HTTPException 处理器）。
+        from ..core.error_i18n import translate_error
+        return {"ok": False, "detail": translate_error(str(e)[:120], request.headers.get("X-Locale", "zh").lower())}
 
 
 def _get_sys_setting(key: str) -> str | None:

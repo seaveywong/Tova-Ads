@@ -87,6 +87,17 @@ class AiClient:
             timeout=timeout,
         )
         if resp.status_code != 200:
+            if resp.status_code == 429:
+                # RESOURCE_EXHAUSTED 也用于普通限流；仅明确的余额/配额信息归为额度不足。
+                body = resp.text.lower()
+                quota_markers = (
+                    "prepayment credits are depleted", "insufficient_quota",
+                    "insufficient_balance", "billing_hard_limit_reached",
+                    "credit balance is too low", "exceeded your current quota",
+                )
+                if any(marker in body for marker in quota_markers):
+                    raise AiError("AI 服务额度不足，请检查服务商余额或配额后重试。", 429)
+                raise AiError("AI 请求过于频繁，请稍后重试。", 429)
             raise AiError(f"AI 调用失败 ({resp.status_code}): {resp.text[:300]}", resp.status_code)
         data = resp.json()
         # 健壮解析：空 choices（被安全过滤）/ content 是 list（部分代理返输入形状）都兜住
