@@ -108,6 +108,14 @@ NOTIFY = {
             "en": "The accounts below have no successful inspection for over 30 minutes (no token / insights fetch failure / engine error); stop-loss may be inactive for them. List:",
         },
     },
+    # 哨兵权限退避（写令牌 permissions=永久错误：BM 角色被收/账户被收回，重试必然再失败）
+    "sentinel_perm_denied": {
+        "title": {"zh": "🔴 账户写权限丢失，哨兵已暂停防护 · {name}", "en": "🔴 Write Permission Lost, Sentinel Paused · {name}"},
+        "body": {
+            "zh": "账户：{name}（<code>{act_id}</code>）\n停广告被 FB 拒绝（权限不足）——通常为 BM 广告账户角色被降/收回，或账户已被供应商停用回收。\n哨兵已暂停该账户的停广告尝试 24 小时（避免无效重试刷屏）；权限恢复后下一轮自动恢复防护。\n处理：若账户已不用 → 取消纳管/解除哨兵；若还要用 → 在 BM 里恢复该用户的广告投放权限。",
+            "en": "Account: {name} (<code>{act_id}</code>)\nPausing ads was rejected by Facebook (insufficient permission) — usually the BM ad-account role was revoked/downgraded, or the account was reclaimed by the vendor.\nThe sentinel has paused stop attempts for this account for 24 hours (no futile retries); protection resumes automatically once permission is restored.\nActions: if the account is no longer used, unmanage it / disarm the sentinel; otherwise restore the user's advertiser access in Business Manager.",
+        },
+    },
     # ── 止损 / 哨兵 ──
     "rule_pause": {
         "title": {"zh": "止损【{category}】· {name}", "en": "Stop-Loss [{category}] · {name}"},

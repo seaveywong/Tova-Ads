@@ -2446,6 +2446,21 @@ def run_sentinel_patrol():
             # 恢复到非死状态后哨兵自然恢复生效（armed 仍在，account_sync 刷状态后下轮就停）。
             if acc.account_status in (2, 8, 100, 101):
                 continue
+            # 权限退避（2026-09-05）：写令牌对该账户报 permissions = 账户级永久错误（BM 角色被收/
+            # 账户被供应商收回），每 3 分钟重试必然再失败——曾持续刷 journal+告警。首次失败即写
+            # 24h 退避标记（system_settings），期间哨兵整账户跳过（不试不停不进 failures）；
+            # 24h 后自动重试一次探权限是否恢复，未恢复则再退避。死状态集跳过照旧。
+            _deny_key = f"sentinel_perm_deny_{acc.act_id}"
+            _deny_row = db.query(SystemSetting).filter(SystemSetting.key == _deny_key).first()
+            if _deny_row:
+                try:
+                    _since = datetime.fromisoformat(json.loads(_deny_row.value).get("since"))
+                except Exception:
+                    _since = None
+                if _since and datetime.now(timezone.utc) - _since < timedelta(hours=24):
+                    continue   # 退避期内：静默跳过（告警已在写入标记时发过）
+                db.delete(_deny_row)   # 过期：清标记，本轮重试探权限（可能已恢复）
+                db.commit()
             # 预热账户哨兵也跑（只跳过保活系列）
             if (acc.platform or "fb") == "tt":
                 from ..core.fb_tokens import tt_client_for_account
@@ -2515,6 +2530,30 @@ def run_sentinel_patrol():
                     db.commit()
                 except FbApiError as e:
                     logger.warning(f"[Sentinel] 停系列 {camp_id} 失败: {e.friendly}")
+                    if e.category in ("permissions", "permission"):
+                        # 永久错误：写 24h 退避标记 + 发一条可行动告警，然后跳过该账户剩余系列
+                        # （同账户后续 campaign 也必然 permissions，白打 API）
+                        try:
+                            db.add(SystemSetting(key=_deny_key, value=json.dumps(
+                                {"since": datetime.now(timezone.utc).isoformat()})))
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                        if not dedup_recent(db, acc.tenant_id, "sentinel_perm_denied", acc.act_id, 1440):
+                            write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id,
+                                      actor_type="sentinel", target_type="account", target_id=acc.act_id,
+                                      action_type="sentinel_perm_denied", source="sentinel_patrol",
+                                      result="fail", trigger_detail=f"act={acc.act_id} camp={camp_id}")
+                            _loc = tenant_locale(db, acc.tenant_id)
+                            _t_pd, _b_pd = notify_text(
+                                _loc, "sentinel_perm_denied", name=_esc(acc.name or acc.act_id),
+                                act_id=acc.act_id)
+                            emit_notification(db, tenant_id=acc.tenant_id, level="critical",
+                                              event_type="sentinel_perm_denied", trace_id=trace_id,
+                                              title=_t_pd, body=_b_pd, platform="fb",
+                                              act_id=acc.act_id)
+                            db.commit()
+                        break   # 跳出该账户的系列循环（整账户退避）
                     _failures.append((acc.tenant_id, acc.act_id, acc.name or acc.act_id,
                                       f"停系列 {camp_id} 失败: {e.friendly}"))
         # 一轮巡逻按租户聚合通知（明细 ≤10 行，全量见守护页「暂停记录」）。
