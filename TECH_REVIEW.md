@@ -1156,3 +1156,9 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - **修复**：停系列遇 permissions → 写 `sentinel_perm_deny_{act_id}` 标记（24h）+ 发一条 critical（含处理指引）+ break 跳过该账户剩余系列；巡逻开头查标记 <24h 整账户静默跳过，**过期自动重试探权限恢复**（恢复即正常巡逻，未恢复再退避）。
 - **生产验证**：手动巡逻 → 2 标记落库 + 2 告警发出 → 下一轮 cron（armed=20）停 0 系列、**0 条失败日志**（刷屏消失）。
 - 遗留决策（用户）：这两账户若确认不再使用 → 取消纳管（历史数据保留）或解除哨兵 armed；若还要用 → BM 里恢复该用户广告投放及以上角色。
+
+### AI 额度耗尽：长退避 + 告警（2026-09-06，commit d046e12，/goal 修BUG）
+- **根因（生产实测）**：Gemini 返回 `prepayment credits are depleted`（**余额耗尽**，非限流）——每轮巡检 17 账户逐个撞 AI、每次 dump 原始 JSON 刷 journal，且完全静默（AI 功能全停无人知晓）。接手 AI 的 429 跨 worker 5min 退避（1574b12）方向对但**未部署**，且 5min 对余额耗尽语义错误（充值前重试必然再失败）。
+- **修复（在其骨架上补齐并一并部署 5 文件）**：AiError 加 `quota` 标记 → quota=True 走 **6h 长退避**（充值后改 AI 配置即换键立即恢复）+ 首次发 `ai_quota_exhausted` warning（24h dedup，文案含充值指引）+ 前端事件翻译。
+- **生产断言**：强制巡检后 `kpi_ai_retry:* quota=True retry_in_min=360` ✓ / notifications 1 条「🟡 AI 服务额度已耗尽」✓ / 5min 后 journal `prepayment credits` 出现 0 次（刷屏消失）✓。
+- **用户行动项**：Gemini 余额充值（ai.studio → Billing）。
