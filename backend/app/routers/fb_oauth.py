@@ -25,7 +25,9 @@ logger = logging.getLogger("toveads.fb_oauth")
 # 已去掉：read_insights（广告成效由 ads_read 覆盖）、pages_manage_posts、pages_manage_metadata。
 # 建帖(pages_manage_posts)+webhook订阅(pages_manage_metadata)等过审后加回；当前 token 不含这俩权限。
 OAUTH_SCOPES = "ads_management,ads_read,business_management,pages_show_list,pages_manage_ads,pages_read_engagement"
-STATE_TTL = 600  # state 有效期 10 分钟
+STATE_TTL = 1800  # state 有效期 30 分钟（曾 10 分钟：管理员授权要在 FB 侧选 BM/资产，加
+                  # 上复制链接到已登录浏览器再打开的常见流程，10 分钟频繁踩过期 → 报
+                  # "state 无效或过期"。HMAC 签名+单次使用语义下 30 分钟窗口可控）
 FRONTEND_URL = settings.frontend_base_url  # OAuth 完成页"返回前端"链接（默认生产域，可 env 覆盖）
 
 

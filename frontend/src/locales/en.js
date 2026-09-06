@@ -388,7 +388,7 @@ export default {
     startOAuthFail: 'Failed to start authorization: ',
     oauthUrlTitle: 'Facebook OAuth URL',
     copyOAuthUrl: 'Copy auth link', openInBrowser: 'Open in this browser',
-    oauthLinkCopied: 'Auth link copied — paste it in another device/browser logged into Facebook',
+    oauthLinkCopied: 'Auth link copied (valid for 30 minutes) — paste it in another device/browser logged into Facebook',
     oauthPickHint: 'Click "Open in this browser" to authorize here, or "Copy auth link" to paste it in another device/browser. The token imports automatically after authorization.',
     fillToken: 'Fill token',
     importedOk: 'Success',

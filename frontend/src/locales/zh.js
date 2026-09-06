@@ -399,7 +399,7 @@ export default {
     startOAuthFail: '启动授权失败：',
     oauthUrlTitle: 'Facebook 授权链接',
     copyOAuthUrl: '复制授权链接', openInBrowser: '在本浏览器打开',
-    oauthLinkCopied: '授权链接已复制，可粘贴到其他设备/已登录 FB 的浏览器打开',
+    oauthLinkCopied: '授权链接已复制（30 分钟内有效），可粘贴到其他设备/已登录 FB 的浏览器打开',
     oauthPickHint: '点「在本浏览器打开」直接跳转授权；或点「复制授权链接」粘到其他设备/已登录 FB 的浏览器完成授权。授权后令牌自动导入。',
     fillToken: '填 token',
     importedOk: '成功',
