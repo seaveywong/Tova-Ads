@@ -116,6 +116,14 @@ NOTIFY = {
             "en": "Account: {name} (<code>{act_id}</code>)\nPausing ads was rejected by Facebook (insufficient permission) — usually the BM ad-account role was revoked/downgraded, or the account was reclaimed by the vendor.\nThe sentinel has paused stop attempts for this account for 24 hours (no futile retries); protection resumes automatically once permission is restored.\nActions: if the account is no longer used, unmanage it / disarm the sentinel; otherwise restore the user's advertiser access in Business Manager.",
         },
     },
+    # AI 额度耗尽（KPI 纠偏/文案生成全停——充值前退避 6h，曾完全静默）
+    "ai_quota_exhausted": {
+        "title": {"zh": "🟡 AI 服务额度已耗尽，AI 功能暂停", "en": "🟡 AI Quota Exhausted — AI Features Paused"},
+        "body": {
+            "zh": "AI 供应商返回「预付费额度已用完」（KPI 纠偏、AI 文案等 AI 功能已全部暂停，规则引擎正常运转不受影响）。\n系统已暂停 AI 调用 6 小时（避免无效重试）。\n处理：前往 AI 服务商充值（Gemini：ai.studio → Billing），充值后到 设置 → AI 配置 任意保存一次即可立即恢复。",
+            "en": "The AI provider returned 'prepayment credits depleted' (KPI correction, AI copy and other AI features are paused; the rule engine is unaffected).\nAI calls are backed off for 6 hours.\nAction: top up at the provider (Gemini: ai.studio Billing), then re-save any field in Settings, AI Config, to resume immediately.",
+        },
+    },
     # KPI/评估口径异常（静默降级必须发声：resolver 异常→conv=0 有误杀面；objectives 缺口→口径漂移）
     "kpi_resolve_error": {
         "title": {"zh": "🟡 转化数据口径异常 {n} 处（相关广告已跳过评估防误杀）", "en": "🟡 Conversion-Data Irregularities: {n} (affected ads skipped to avoid false kills)"},

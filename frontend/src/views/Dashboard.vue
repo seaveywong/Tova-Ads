@@ -808,6 +808,7 @@ const NOTIF_EVENT_LABEL_KEY = {
   unmanage_active_ads: 'dashboard.evUnmanage', tt_token_expiring: 'dashboard.evTokenExpiring',
   sentinel_perm_denied: 'dashboard.evSentinelPermDenied',
   kpi_resolve_error: 'dashboard.evKpiError',
+  ai_quota_exhausted: 'dashboard.evAiQuota',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
 const levelLabel = (lv) => ({ critical: t('dashboard.levelCritical'), warning: t('dashboard.levelWarning'), info: t('dashboard.levelInfo') }[lv] || t('dashboard.levelNotice'))

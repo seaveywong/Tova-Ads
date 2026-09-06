@@ -51,11 +51,13 @@ def _extract_json(raw: str):
 
 
 class AiError(Exception):
-    """AI 调用失败。"""
+    """AI 调用失败。quota=True 表示余额/配额耗尽（充值前重试必然再失败——退避应按小时级，
+    且要告警用户；普通限流按分钟级退避即可）。"""
 
-    def __init__(self, message: str, status: int = 0):
+    def __init__(self, message: str, status: int = 0, quota: bool = False):
         self.message = message
         self.status = status
+        self.quota = quota
         super().__init__(message)
 
 
@@ -96,7 +98,7 @@ class AiClient:
                     "credit balance is too low", "exceeded your current quota",
                 )
                 if any(marker in body for marker in quota_markers):
-                    raise AiError("AI 服务额度不足，请检查服务商余额或配额后重试。", 429)
+                    raise AiError("AI 服务额度不足，请检查服务商余额或配额后重试。", 429, quota=True)
                 raise AiError("AI 请求过于频繁，请稍后重试。", 429)
             raise AiError(f"AI 调用失败 ({resp.status_code}): {resp.text[:300]}", resp.status_code)
         data = resp.json()

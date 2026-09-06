@@ -26,6 +26,10 @@ _AI_KPI_CACHE: dict = {}
 # 118：可选 KPI AI 请求互斥；117 已由 leads_poll 占用。失败状态跨 worker 存 DB。
 _AI_KPI_LOCK = 118
 _AI_KPI_RETRY_SECONDS = 300
+# 额度耗尽（quota=True）退避 6h：充值前重试必然再失败（曾 5min 一撞×17 账户×每轮 dump
+# 原始 JSON 刷屏 journal——2026-09-06 生产实测）。充值后可提前恢复：设置页改任意 AI 配置
+# 即换退避键（_ai_retry_key 含配置指纹），或等 6h 自动到期探测。
+_AI_KPI_QUOTA_RETRY_SECONDS = 6 * 3600
 
 
 def _ai_retry_key(client: AiClient) -> str:
@@ -55,13 +59,37 @@ def _kpi_ai_json(client: AiClient, messages: list) -> Optional[dict]:
             data = client.chat_json(messages, temperature=0.1, max_tokens=800)
         except AiError as exc:
             if exc.status == 429:
-                value = json.dumps({"retry_after": time.time() + _AI_KPI_RETRY_SECONDS,
-                                    "status": 429})
+                quota = bool(getattr(exc, "quota", False))
+                value = json.dumps({
+                    "retry_after": time.time() + (_AI_KPI_QUOTA_RETRY_SECONDS if quota
+                                                  else _AI_KPI_RETRY_SECONDS),
+                    "status": 429, "quota": quota})
                 if row:
                     row.value = value
                 else:
                     sdb.add(SystemSetting(key=key, value=value))
                 sdb.commit()
+                if quota:
+                    # 额度耗尽必须发声（曾完全静默：AI 功能全停只有 journal 刷屏，无人知晓）。
+                    # 平台级告警（AI 配置本就是超管配的，与 live_fetch_degraded 同口径）
+                    try:
+                        from ..core.notify_utils import emit_notification, dedup_recent
+                        from ..core.log_utils import write_log, new_trace_id
+                        if not dedup_recent(sdb, 1, "ai_quota_exhausted", "*", 1440):
+                            write_log(sdb, tenant_id=1, trace_id=new_trace_id(),
+                                      actor_type="system", target_type="system", target_id="*",
+                                      action_type="ai_quota_exhausted", source="kpi_resolver",
+                                      result="fail", trigger_detail=str(exc)[:120])
+                            from ..core.i18n import notify_text, tenant_locale
+                            _loc = tenant_locale(sdb, 1)
+                            _t_q, _b_q = notify_text(_loc, "ai_quota_exhausted")
+                            emit_notification(sdb, tenant_id=1, level="warning",
+                                              event_type="ai_quota_exhausted",
+                                              trace_id=new_trace_id(),
+                                              title=_t_q, body=_b_q)
+                            sdb.commit()
+                    except Exception as _ne:
+                        logger.warning(f"ai_quota_exhausted 告警发送失败: {_ne}")
             raise
         if row:
             sdb.delete(row)
