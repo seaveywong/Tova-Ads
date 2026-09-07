@@ -2862,7 +2862,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
-                landing_url=_lp_url, daily_budget=_resolve_budget_fb(sdb, it.act_id, tpl, tenant_id),
+                landing_url=_lp_url,
+                daily_budget=(0 if (tpl.budget_type or "daily") == "lifetime"
+                              else _resolve_budget_fb(sdb, it.act_id, tpl, tenant_id)),
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
                 video_id=video_id,
@@ -2876,6 +2878,18 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 spend_cap=(_usd_to_account_minor(sdb, it.act_id, float(tpl.spend_cap_usd), tenant_id)
                            if tpl.spend_cap_usd else None),
                 instagram_actor_id=(tpl.instagram_actor_id or ""),
+                # 批G字段补齐（重试=等价于全新部署，agent 复审抓的既有缺口）
+                budget_type=(tpl.budget_type or "daily"),
+                lifetime_budget=(_usd_to_account_minor(sdb, it.act_id, float(tpl.lifetime_budget_usd), tenant_id)
+                                 if (tpl.budget_type or "daily") == "lifetime" and tpl.lifetime_budget_usd else None),
+                start_time=(tpl.schedule_start or ""), end_time=(tpl.schedule_end or ""),
+                pacing=(tpl.pacing or ""),
+                bid_amount=(_usd_to_account_minor(sdb, it.act_id, float(tpl.bid_amount_usd), tenant_id)
+                            if tpl.bid_amount_usd else None),
+                minimum_roas=(tpl.minimum_roas if tpl.minimum_roas else None),
+                special_ad_categories=(json.loads(tpl.special_ad_categories or "[]")
+                                       if tpl.special_ad_categories else None),
+                description=(tpl.link_description or ""),
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.page_post_id = r.get("page_post_id") or page_post_id
