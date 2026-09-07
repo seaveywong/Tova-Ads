@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { GET, POST, DELETE } from '../api'
+import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
 import { isSuperadminSync } from '../router'
@@ -441,6 +441,7 @@ const handleAction = (cmd, tk) => {
   else if (cmd === 'refresh') refreshAccounts(tk)
   else if (cmd === 'delete') deleteToken(tk)
   else if (cmd === 'update_token') updateToken(tk)
+  else if (cmd === 'change_type') changeTokenType(tk)
 }
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
@@ -483,6 +484,58 @@ const openDrawer = async (tk, tab) => {
   if (!assetCache.value[tk.id]) await loadDrawerAssets(tk)
 }
 const onTabChange = () => {}
+
+// ── 主页改名 / 令牌类型 / BM 成员·资产（原"即将上线"占位激活，2026-09-07）──
+const renamePage = async (tk, p) => {
+  try {
+    const { value } = await ElMessageBox.prompt(t('tokens.pageRenamePrompt'), t('tokens.renameBtn'), {
+      confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
+      inputValue: p.name || '', inputValidator: (v) => (v && v.trim() && v.trim().length <= 100) || t('tokens.pageRenameLimit'),
+    })
+    const nv = value.trim()
+    if (nv === (p.name || '')) return
+    await POST(`/fb/credentials/${tk.id}/pages/rename`, { page_id: p.id, name: nv })
+    ElMessage.success(t('tokens.pageRenamed'))
+    delete assetCache.value[tk.id]; await loadDrawerAssets(tk)   // 主页名即刻刷新
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+}
+const changeTokenType = async (tk) => {
+  const cur = tk.token_type || 'manage'
+  const next = cur === 'operate' ? 'manage' : 'operate'
+  try {
+    await ElMessageBox.confirm(t('tokens.tokenTypeConfirm', { from: t(`tokens.tt${cur}`), to: t(`tokens.tt${next}`) }),
+      t('tokens.changeTypeBtn'), { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+  } catch { return }
+  try {
+    await PUT(`/fb/credentials/${tk.id}/token-type`, { token_type: next })
+    tk.token_type = next
+    ElMessage.success(t('tokens.tokenTypeSaved'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+// BM 成员/资产弹层（抽屉内二级浮层）
+const bmDetailOpen = ref(false)
+const bmDetailTab = ref('members')   // members / assets
+const bmDetail = ref(null)           // { bm, members?, assets? }
+const bmDetailLoading = ref(false)
+const openBmMembers = async (tk, b) => {
+  bmDetail.value = { bm: b, members: null, assets: null }
+  bmDetailTab.value = 'members'
+  bmDetailOpen.value = true
+  bmDetailLoading.value = true
+  try { bmDetail.value.members = await GET(`/fb/credentials/${tk.id}/bm/${b.id}/members`) }
+  catch (e) { bmDetail.value.members = []; ElMessage.error(e.message || t('common.opFail')) }
+  bmDetailLoading.value = false
+}
+const openBmAssets = async (tk, b) => {
+  bmDetail.value = { bm: b, members: null, assets: null }
+  bmDetailTab.value = 'assets'
+  bmDetailOpen.value = true
+  bmDetailLoading.value = true
+  try { bmDetail.value.assets = await GET(`/fb/credentials/${tk.id}/bm/${b.id}/assets`) }
+  catch (e) { bmDetail.value.assets = { accounts: [], pages: [] }; ElMessage.error(e.message || t('common.opFail')) }
+  bmDetailLoading.value = false
+}
+const closeBmDetail = () => { bmDetailOpen.value = false; bmDetail.value = null }
 const drawerTitle = computed(() => {
   if (!drawerToken.value) return ''
   return `${drawerToken.value.fb_user_name || t('tokens.unknown')} · ${t('tokens.userAssets')}`
@@ -747,6 +800,7 @@ const deleteToken = async (tk) => {
                 <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
                 <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
                 <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
+                <el-dropdown-item command="change_type" divided>{{ t('tokens.changeTypeBtn') }}（{{ t(`tokens.tt${tk.token_type || 'manage'}`) }} → {{ t(`tokens.tt${(tk.token_type || 'manage') === 'operate' ? 'manage' : 'operate'}`) }}）</el-dropdown-item>
                 <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -823,8 +877,7 @@ const deleteToken = async (tk) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>{{ t('tokens.renameSoon') }}</el-dropdown-item>
-                    <el-dropdown-item disabled>{{ t('tokens.changeTypeSoon') }}</el-dropdown-item>
+                    <el-dropdown-item @click="renamePage(drawerToken, p)">{{ t('tokens.renameBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -844,8 +897,8 @@ const deleteToken = async (tk) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>{{ t('tokens.viewMembersSoon') }}</el-dropdown-item>
-                    <el-dropdown-item disabled>{{ t('tokens.manageAssetsSoon') }}</el-dropdown-item>
+                    <el-dropdown-item @click="openBmMembers(drawerToken, b)">{{ t('tokens.viewMembersBtn') }}</el-dropdown-item>
+                    <el-dropdown-item @click="openBmAssets(drawerToken, b)">{{ t('tokens.manageAssetsBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -864,6 +917,45 @@ const deleteToken = async (tk) => {
       </div>
       <div v-if="drawerToken && assetCache[drawerToken.id]?.error" class="asset-err">{{ t('tokens.assetReadPartialShort') }}{{ assetCache[drawerToken.id].error }}</div>
     </el-drawer>
+
+    <!-- BM 详情二级浮层（成员/资产，2026-09-07 原"即将上线"占位激活） -->
+    <div v-if="bmDetailOpen" class="overlay" style="z-index: 3000" @click.self="closeBmDetail">
+      <div class="modal bm-detail-modal">
+        <div class="m-title">
+          {{ bmDetail?.bm?.name || 'BM' }}
+          <span class="ai-id blue" @click="copyId(bmDetail?.bm?.id)">{{ bmDetail?.bm?.id }}</span>
+          <button class="mb" @click="closeBmDetail">✕</button>
+        </div>
+        <div v-loading="bmDetailLoading" class="bm-detail-body">
+          <template v-if="bmDetailTab === 'members'">
+            <div v-if="bmDetail?.members?.length" class="bm-member-list">
+              <div v-for="m in bmDetail.members" :key="m.buid" class="bm-member">
+                <span class="bm-member-title">{{ m.title || t('tokens.bmMemberNoTitle') }}</span>
+                <span class="ai-id blue" @click="copyId(m.buid)" :title="t('tokens.clickToCopy')">{{ m.buid }}</span>
+                <span class="st-tag" :class="m.role === 'ADMIN' ? 'ok' : 'off'">{{ m.role === 'ADMIN' ? t('tokens.bmFull') : t('tokens.bmEmployee') }}</span>
+                <span class="ai-meta">{{ m.joined }}</span>
+              </div>
+            </div>
+            <div v-else-if="!bmDetailLoading" class="drawer-empty">{{ t('tokens.bmNoMembers') }}</div>
+          </template>
+          <template v-else>
+            <div v-if="bmDetail?.assets?.accounts?.length" class="bm-member-list">
+              <div v-for="a in bmDetail.assets.accounts" :key="a.ownership + a.act_id" class="bm-member">
+                <span class="bm-member-title">{{ a.name || a.act_id }}</span>
+                <span class="ai-id blue" @click="copyId(a.act_id)" :title="t('tokens.clickToCopy')">{{ a.act_id }}</span>
+                <span class="st-tag" :class="a.ownership === 'owned' ? 'ok' : 'off'">{{ a.ownership === 'owned' ? t('tokens.bmOwned') : t('tokens.bmClient') }}</span>
+                <span v-if="a.managed" class="st-tag ok">{{ t('tokens.bmManaged') }}</span>
+                <span class="ai-meta">{{ a.currency }}</span>
+              </div>
+            </div>
+            <div v-else-if="!bmDetailLoading" class="drawer-empty">{{ t('tokens.bmNoAccounts') }}</div>
+            <div v-if="bmDetail?.assets?.pages?.length" class="bm-pages-line">
+              {{ t('tokens.bmPagesLine', { n: bmDetail.assets.pages.length }) }}
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
 
     <div v-if="loadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="confirmCloseLoad">
       <div class="modal wide">
@@ -1187,4 +1279,13 @@ const deleteToken = async (tk) => {
   .tt-card > .st-tag{order:4}
   .tt-card .tt-cell{order:5}
 }
+/* BM 详情二级浮层（成员/资产） */
+.bm-detail-modal{width:560px;max-height:80vh;display:flex;flex-direction:column}
+.bm-detail-modal .m-title{display:flex;align-items:center;gap:8px}
+.bm-detail-modal .mb{margin-left:auto}
+.bm-detail-body{overflow-y:auto;min-height:120px}
+.bm-member-list{display:flex;flex-direction:column;gap:4px}
+.bm-member{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px}
+.bm-member-title{font-size:13px;color:var(--t1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.bm-pages-line{margin-top:10px;font-size:12px;color:var(--t3)}
 </style>

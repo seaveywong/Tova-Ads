@@ -159,6 +159,144 @@ class RenameIn(BaseModel):
     alias: str = ""
 
 
+class PageRenameIn(BaseModel):
+    page_id: str
+    name: str
+
+
+class TokenTypeIn(BaseModel):
+    token_type: str  # manage / operate
+
+
+@router.post("/credentials/{cred_id}/pages/rename")
+def rename_page(
+    cred_id: int,
+    body: PageRenameIn,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """主页改名（真改 FB 主页名，需 page token + 该页管理权）。
+    同名令牌可管多页——page_id 定位；失败给 FB 原始指引（无页权限/改名频控）。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    name = body.name.strip()
+    if not name or len(name) > 100:
+        raise HTTPException(400, "主页名需 1-100 字符")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    page_token = fb.get_page_access_token(body.page_id)
+    if not page_token:
+        raise HTTPException(400, "该令牌无此主页的管理权限（me/accounts 未返回页 token）")
+    try:
+        # FB 主页改名走 page token 的 POST /{page}（user token 会 code200）
+        from ..core.fb_client import FbClient as _FC
+        pfb = _FC(page_token)
+        pfb.post(body.page_id, {"name": name})
+    except FbApiError as e:
+        # 常见失败：pages_manage_posts 类页权限/改名频率限制（FB 7 天窗口）
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="page", target_id=body.page_id,
+              action_type="page_rename", source="user", result="success",
+              trigger_detail=f"cred#{cred_id} → {name[:50]}")
+    db.commit()
+    return {"renamed": True, "page_id": body.page_id, "name": name}
+
+
+@router.put("/credentials/{cred_id}/token-type")
+def set_token_type(
+    cred_id: int,
+    body: TokenTypeIn,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """修改令牌类型（manage 管理号 / operate 操作号）。写令牌选择按 operate 优先
+    （tiebreaker，0ac194b）——改类型即时影响该令牌下的写路径分流，无副作用。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    tt = (body.token_type or "").strip().lower()
+    if tt not in ("manage", "operate"):
+        raise HTTPException(400, "token_type 必须是 manage 或 operate")
+    cred.token_type = tt
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="fb_credential", target_id=str(cred_id),
+              action_type="token_type_update", source="user", result="success",
+              trigger_detail=f"→ {tt}")
+    db.commit()
+    return {"id": cred_id, "token_type": tt}
+
+
+@router.get("/credentials/{cred_id}/bm/{bm_id}/members")
+def bm_members(
+    cred_id: int,
+    bm_id: str,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """BM 成员列表（只读）。/{bm}/business_users 含 buid/role/title——
+    找谁在管这个 BM、谁是 ADMIN（完全控制）一眼可见。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    try:
+        users = fb.get_paged(f"{bm_id}/business_users", {
+            "fields": "id,role,title,business,created_time", "limit": "200"})
+    except FbApiError as e:
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+    return [{"buid": u.get("id", ""), "role": u.get("role", ""),
+             "title": u.get("title", ""),
+             "joined": u.get("created_time", "")} for u in users]
+
+
+@router.get("/credentials/{cred_id}/bm/{bm_id}/assets")
+def bm_assets(
+    cred_id: int,
+    bm_id: str,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """BM 资产清单（只读）：旗下广告账户（owned）/主页/像素计数+列表。
+    /{bm}/owned_adaccounts 是 BM 自有账户；client_adaccounts 是代理客户的——都拉，
+    前缀标注归属。纳管判断关联 DB（已导入账户标"已纳管"）。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    managed = {a.act_id for a in db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.is_managed == True).all()}  # noqa: E712
+
+    def _accs(edge, ownership):
+        try:
+            rows = fb.get_paged(f"{bm_id}/{edge}", {
+                "fields": "account_id,name,currency,account_status", "limit": "200"})
+        except FbApiError:
+            return []
+        return [{"act_id": r.get("account_id") or r.get("id") or "",
+                 "name": r.get("name", ""), "currency": r.get("currency", ""),
+                 "status": r.get("account_status"),
+                 "ownership": ownership,
+                 "managed": (r.get("account_id") or r.get("id") or "") in managed}
+                for r in rows]
+
+    out = {"accounts": _accs("owned_adaccounts", "owned") + _accs("client_adaccounts", "client")}
+    try:
+        out["pages"] = [{"id": p.get("id", ""), "name": p.get("name", "")}
+                        for p in fb.get_paged(f"{bm_id}/owned_pages", {"fields": "id,name", "limit": "200"})]
+    except FbApiError:
+        out["pages"] = []
+    return out
+
+
 class AccountGroupIn(BaseModel):
     act_ids: list[str]
     group_label: str = ""
