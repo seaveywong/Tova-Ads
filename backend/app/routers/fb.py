@@ -264,8 +264,10 @@ def bm_assets(
     db: Session = Depends(get_db),
 ):
     """BM 资产清单（只读）：旗下广告账户（owned）/主页/像素计数+列表。
-    /{bm}/owned_adaccounts 是 BM 自有账户；client_adaccounts 是代理客户的——都拉，
-    前缀标注归属。纳管判断关联 DB（已导入账户标"已纳管"）。"""
+    /{bm}/owned_ad_accounts 是 BM 自有账户；client_ad_accounts 是代理客户的——都拉，
+    前缀标注归属。纳管判断关联 DB（已导入账户标"已纳管"）。
+    edge 名带下划线（v25 实测：无下划线版报 code2500 Unknown path 被吞成空白，
+    2026-09-08 生产诊断 Roly 就挂在 client_ad_accounts 下而面板恒空白）。"""
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
     ).first()
@@ -288,7 +290,7 @@ def bm_assets(
                  "managed": (r.get("account_id") or r.get("id") or "") in managed}
                 for r in rows]
 
-    out = {"accounts": _accs("owned_adaccounts", "owned") + _accs("client_adaccounts", "client")}
+    out = {"accounts": _accs("owned_ad_accounts", "owned") + _accs("client_ad_accounts", "client")}
     try:
         out["pages"] = [{"id": p.get("id", ""), "name": p.get("name", "")}
                         for p in fb.get_paged(f"{bm_id}/owned_pages", {"fields": "id,name", "limit": "200"})]
