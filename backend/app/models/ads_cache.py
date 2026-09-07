@@ -14,3 +14,7 @@ class AdsCache(Base):
     adsets_json = Column(Text)
     ads_json = Column(Text)
     updated_at = Column(DateTime(timezone=True))
+    # 广告层独立时间戳（0086）：巡检独家回写 ads_json 时刷新；updated_at 是结构层
+    # （campaigns/adsets 15min sync）的时间——单时间戳盖两层会让「缓存不到1分钟」与陈旧
+    # 广告数据并存（令牌切换间隙实测误导）。TT 行由 sync 全量拉取，两列同刷。
+    ads_updated_at = Column(DateTime(timezone=True))

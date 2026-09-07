@@ -247,6 +247,7 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
     row.adsets_json = json.dumps(adsets)
     if ads is not None:
         row.ads_json = json.dumps(ads)
+        row.ads_updated_at = datetime.now(timezone.utc)   # 广告层独立时间戳（0086）
     row.updated_at = datetime.now(timezone.utc)
     return True
 
@@ -385,16 +386,22 @@ def list_ads(
         ad["object_story_id"] = _sid
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
 
+    # cached_at/last_sync/cache_ages 全按 ads 层时间戳（0086：ads_updated_at，回退 updated_at）——
+    # 用户在管理器看的核心是广告行，结构层（campaigns/adsets 15min sync 刷 updated_at）的新鲜
+    # 不该冒充广告层新鲜（令牌切换间隙曾「缓存不到1分钟」配陈旧广告数据误导）。
     # cached_at 取全部账户的最旧值（语义=最迟也是这个时间的数据）。
-    # last_sync/cache_ages 是实时性戳：last_sync=最新一行的全量同步时间（前端显示
-    # "数据 X 分钟前"）；cache_ages=每账户缓存龄秒数（前端据此提示哪些账户该 live-status 核对）。
-    _cached_ats = [c.updated_at for c in caches if c.updated_at]
+    # last_sync/cache_ages 是实时性戳：last_sync=最新一行的广告层时间（前端显示"数据 X 分钟前"）；
+    # cache_ages=每账户缓存龄秒数（前端据此提示哪些账户该 live-status 核对）。
+    def _ads_at(c):
+        return getattr(c, "ads_updated_at", None) or c.updated_at
+    _cached_ats = [_ads_at(c) for c in caches if _ads_at(c)]
     _cache_ages: dict[str, int] = {}
     _now_utc = datetime.now(timezone.utc)
     for c in caches:
-        if not c.updated_at:
+        _at = _ads_at(c)
+        if not _at:
             continue
-        _u = c.updated_at if c.updated_at.tzinfo else c.updated_at.replace(tzinfo=timezone.utc)
+        _u = _at if _at.tzinfo else _at.replace(tzinfo=timezone.utc)
         _age = max(0, int((_now_utc - _u).total_seconds()))
         # 同 act_id 双平台行并存时取较新一行（最新数据口径）
         if c.act_id not in _cache_ages or _age < _cache_ages[c.act_id]:

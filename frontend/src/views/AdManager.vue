@@ -549,10 +549,10 @@ const exportLeads = async () => {
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   exportLeadsBusy.value = false
 }
-const subscribeLeads = async () => {
+const subscribeLeads = async (pageIds = null) => {
   opLoading.value = true
   try {
-    const r = await POST('/leads/subscribe')
+    const r = await POST('/leads/subscribe', pageIds ? { page_ids: pageIds } : {})
     if (r.error) { ElMessage.error(t('adm.leadsErr', { msg: r.error })) }
     else {
       // 部分失败时带第一条原因（0/N 时用户第一问就是"为什么"——FB 原文最有用）
@@ -560,10 +560,28 @@ const subscribeLeads = async () => {
       const base = t('adm.leadsSubscribed', { ok: r.subscribed || 0, n: r.total_pages || 0 })
       if ((r.subscribed || 0) < (r.total_pages || 0) && fail) ElMessage.warning(`${base} · ${fail.page_name || fail.page_id}: ${fail.error}`)
       else ElMessage.success(base)
+      if (pagesDlg.value) loadLeadPages()   // 面板开着 → 刷新订阅实况
     }
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
   opLoading.value = false
 }
+// 主页受控面板：页清单+权限面+订阅实况（哪些页真的在掌控中——权限是 FB 侧角色，OAuth 复制不了）
+const pagesDlg = ref(false)
+const leadPages = ref([])
+const pagesLoading = ref(false)
+const pageSel = ref(new Set())
+const loadLeadPages = async () => {
+  pagesLoading.value = true
+  try {
+    const r = await GET('/leads/pages')
+    leadPages.value = r.pages || []
+    pageSel.value = new Set(leadPages.value.filter(p => p.can_manage && p.subscribed !== true).map(p => p.page_id))
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  pagesLoading.value = false
+}
+const openPagesPanel = () => { pagesDlg.value = true; loadLeadPages() }
+const togglePage = (pid) => { const s = new Set(pageSel.value); s.has(pid) ? s.delete(pid) : s.add(pid); pageSel.value = s }
+const subscribeSelected = () => subscribeLeads([...pageSel.value])
 const unsubscribeLeads = async () => {
   try { await ElMessageBox.confirm(t('adm.leadsUnsubConfirm'), t('common.confirm'), { type: 'warning' }) }
   catch { return }
@@ -684,7 +702,8 @@ const unsubscribeLeads = async () => {
         </div>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
         <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads">🔔 {{ t('adm.leadsSubscribe') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="openPagesPanel">📄 {{ t('adm.pagesPanelBtn') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads()">🔔 {{ t('adm.leadsSubscribe') }}</button>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="unsubscribeLeads">🔕 {{ t('adm.leadsUnsubscribe') }}</button>
         <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
       </div>
@@ -719,6 +738,24 @@ const unsubscribeLeads = async () => {
         <div class="quick-btns"><button v-for="m in [1, 1.2, 1.5, 2]" :key="m" class="ctrl-btn sm" @click="budgetQuick(m)">×{{ m }}</button></div>
       </div>
       <template #footer><button class="ctrl-btn" @click="budgetDialog = false">{{ t('common.cancel') }}</button><button class="ctrl-btn primary" :disabled="opLoading" @click="saveBudget">{{ opLoading ? t('common.saving') + '…' : t('common.save') }}</button></template>
+    </el-dialog>
+
+    <el-dialog v-model="pagesDlg" :title="t('adm.pagesPanelTitle')" width="640px" :destroy-on-close="true" append-to-body>
+      <div v-loading="pagesLoading" class="pages-panel">
+        <div class="pp-hint">{{ t('adm.pagesPanelHint') }}</div>
+        <div class="pp-row pp-head"><div></div><div>{{ t('adm.ppColPage') }}</div><div>{{ t('adm.ppColPerm') }}</div><div>{{ t('adm.ppColSub') }}</div></div>
+        <div v-for="p in leadPages" :key="p.page_id" class="pp-row">
+          <input type="checkbox" :checked="pageSel.has(p.page_id)" :disabled="!p.can_manage" @change="togglePage(p.page_id)" :title="p.can_manage ? '' : t('adm.ppNoManage')" />
+          <div class="pp-name">{{ p.page_name }}<div class="sid">{{ p.alias }} · {{ p.page_id }}</div></div>
+          <div><span v-if="p.can_manage" class="pp-tag ok">{{ t('adm.ppManage') }}</span><span v-else-if="p.can_advertise" class="pp-tag mid" :title="t('adm.ppAdvertiseTip')">{{ t('adm.ppAdvertise') }}</span><span v-else class="pp-tag low" :title="t('adm.ppViewTip')">{{ t('adm.ppView') }}</span></div>
+          <div><span v-if="p.subscribed === true" class="pp-tag ok">✓ {{ t('adm.ppSubscribed') }}</span><span v-else-if="p.subscribed === false" class="muted">—</span><span v-else class="muted">?</span></div>
+        </div>
+        <div v-if="!leadPages.length && !pagesLoading" class="empty">{{ t('adm.ppEmpty') }}</div>
+      </div>
+      <template #footer>
+        <button class="ctrl-btn" :disabled="pagesLoading" @click="loadLeadPages">⟳ {{ t('common.refresh') }}</button>
+        <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected">🔔 {{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
+      </template>
     </el-dialog>
 
     <el-dialog v-model="redirectDialog" :title="t('adm.redirectDialogTitle', { name: redirectTarget?.name || '' })" width="440px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
@@ -907,6 +944,16 @@ const unsubscribeLeads = async () => {
 /* 数据源断链（无可用令牌）账户的快照态标注 */
 .dead-acc-bar { margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent) }
 .snap-tag { font-size: 9px; color: var(--t3); border: 1px solid var(--bd); border-radius: 3px; padding: 0 3px; margin-left: 4px; line-height: 1.4; cursor: help }
+/* 主页受控面板（页权限 + 订阅实况） */
+.pages-panel { max-height: 56vh; overflow-y: auto }
+.pp-hint { font-size: 11px; color: var(--t3); margin-bottom: 8px; line-height: 1.5 }
+.pp-row { display: grid; grid-template-columns: 22px 1fr 110px 90px; gap: 8px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--bd) }
+.pp-row.pp-head { font-size: 11px; color: var(--t3); border-bottom: 1px solid var(--bd) }
+.pp-name { min-width: 0; font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.pp-tag { font-size: 10px; border-radius: 3px; padding: 1px 5px; border: 1px solid var(--bd); white-space: nowrap }
+.pp-tag.ok { color: var(--ok, #34c759); border-color: currentColor }
+.pp-tag.mid { color: var(--warning) }
+.pp-tag.low { color: var(--t3) }
 .cache-at.live-ok { color: var(--success) }
 .rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--ac); color: #fff; border-radius: 8px }
 .rd-form { display: flex; flex-direction: column; gap: 8px }

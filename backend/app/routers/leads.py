@@ -161,6 +161,61 @@ def update_lead(
     return _lead_dict(lead)
 
 
+@router.get("/pages")
+def pages_status(
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """主页受控视图：遍历活跃令牌 me/accounts，逐页给权限面（能否管理/能否投广告）+
+    当前 webhook 订阅实况（GET /{page}/subscribed_apps 比对 App id）。
+
+    回答「哪些主页真的受控」：页权限是 FB 侧该号被分配的角色（OAuth 只能复制不能放大），
+    订阅需要「管理主页」任务。手动触发（前端打开面板时拉），每页 1 次订阅查询。
+    """
+    clients = _tenant_fb_clients(db, user.tenant_id)
+    if not clients:
+        return {"pages": [], "error": "no active FB credential"}
+    # 我方 App id 集（订阅列表按 app 匹配；无 App 配置时退化为「有任意订阅即算」）
+    _app_ids = set()
+    try:
+        from ..models.fb_app import FbApp
+        _app_ids = {str(a.app_id) for a in db.query(FbApp).all() if a.app_id}
+    except Exception:
+        pass
+    by_page: dict = {}
+    for fb, alias in clients:
+        try:
+            pages = fb.get_paged("me/accounts",
+                                 {"fields": "id,name,access_token,permitted_tasks"})
+        except FbApiError:
+            continue
+        for p in pages:
+            pid, ptoken, pname = p.get("id"), p.get("access_token"), p.get("name")
+            if not (pid and ptoken):
+                continue
+            tasks = [str(t).upper() for t in (p.get("permitted_tasks") or [])]
+            if pid in by_page:
+                continue   # 多令牌同页：保留首个（权限面以能拿到的为准）
+            row = {"page_id": pid, "page_name": pname, "alias": alias,
+                   "can_manage": any(t in ("MANAGE", "ADMINISTER", "MANAGE_PAGES",
+                                           "MANAGE_JOBS") for t in tasks),
+                   "can_advertise": "ADVERTISE" in tasks,
+                   "tasks": [t for t in tasks if t not in ("ANALYZE",)][:6],
+                   "subscribed": None}
+            try:
+                subs = FbClient(ptoken).get(f"{pid}/subscribed_apps", {"fields": "id"})
+                items = (subs.get("data") or []) if isinstance(subs, dict) else []
+                if _app_ids:
+                    row["subscribed"] = any(str(x.get("id")) in _app_ids for x in items)
+                else:
+                    row["subscribed"] = bool(items)
+            except FbApiError:
+                pass   # 查询失败保持 None（未知，前端显示 —）
+            by_page[pid] = row
+    pages = sorted(by_page.values(), key=lambda r: (not r["can_manage"], r["page_name"]))
+    return {"pages": pages, "subscribed_count": sum(1 for r in pages if r["subscribed"])}
+
+
 def _tenant_fb_clients(db: Session, tenant_id: int) -> list:
     """租户全部活跃令牌的 FbClient 列表 [(client, alias)]。
     潜客链路（订阅/拉取）按页/表单走的是用户级权限（页管理/leads_retrieval），不同令牌权限面
@@ -312,18 +367,25 @@ def sync_leads(
     return {"started": True, "forms": len(forms)}
 
 
+class SubscribeIn(BaseModel):
+    page_ids: list[str] = []   # 空=全部主页（兼容旧行为）；非空=只订阅指定页
+
+
 @router.post("/subscribe")
 def subscribe_webhook(
+    body: SubscribeIn | None = None,
     user: CurrentUser = Depends(require_permission("ads.create")),
     db: Session = Depends(get_db),
 ):
-    """订阅该租户所有主页的 leadgen webhook（page-level subscription）。
+    """订阅主页 leadgen webhook（page-level subscription，可指定页）。
 
     遍历全部活跃令牌的 me/accounts（含 access_token），逐页 POST /{page}/subscribed_apps +
     subscribed_fields=leadgen；同页任一令牌订阅成功即成（不同令牌权限面不同——曾单取首个
     active，令牌池轮换到操作员令牌时 13 页全灭 0/13，操作员无 pages_manage_metadata）。
-    需 pages_manage_metadata scope。app-level 订阅是一次性手动步骤（FB App Dashboard 配 callback URL）。
+    body.page_ids 非空时只订阅指定页（受控面板勾选）。需要 pages_manage_metadata scope；
+    app-level 订阅是一次性手动步骤（FB App Dashboard 配 callback URL）。
     """
+    only = set((body.page_ids if body else None) or [])
     clients = _tenant_fb_clients(db, user.tenant_id)
     if not clients:
         return {"subscribed": 0, "error": "no active FB credential"}
@@ -334,8 +396,9 @@ def subscribe_webhook(
             pages = fb.get_paged("me/accounts", {"fields": "id,name,access_token"})
         except FbApiError:
             continue   # 该令牌拉不到页清单（无 pages_show_list/失效）→ 换下一个令牌
-        total_pages = max(total_pages, len(pages))
-        for p in pages:
+        wanted = [p for p in pages if not only or p.get("id") in only]
+        total_pages = max(total_pages, len(wanted))
+        for p in wanted:
             pid, ptoken, pname = p.get("id"), p.get("access_token"), p.get("name")
             if not (pid and ptoken):
                 continue
@@ -348,6 +411,9 @@ def subscribe_webhook(
                 row.update(ok=True, error="")
             except FbApiError as e:
                 row["error"] = e.friendly   # 保留最新失败原因；后续令牌成功会覆盖
+    # 指定了页清单时 total_pages 按清单口径（wanted 可能空=页不属于任何令牌）
+    if only:
+        total_pages = len(by_page) or len(only)
     results = list(by_page.values())
     ok = sum(1 for r in results if r["ok"])
     return {"subscribed": ok, "total_pages": total_pages or len(results), "pages": results}

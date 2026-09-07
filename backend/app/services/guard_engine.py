@@ -227,6 +227,7 @@ def _writeback_ads_cache(db, tenant_id: int, act_id: str, ads: list) -> None:
             db.add(row)
         row.ads_json = json.dumps(ads, ensure_ascii=False)
         row.updated_at = datetime.now(timezone.utc)
+        row.ads_updated_at = datetime.now(timezone.utc)   # 广告层独立时间戳（0086）
         db.commit()
     except Exception as e:
         try:
