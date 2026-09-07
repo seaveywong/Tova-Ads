@@ -194,8 +194,16 @@ def pages_status(
             if not (pid and ptoken):
                 continue
             tasks = [str(t).upper() for t in (p.get("permitted_tasks") or [])]
+            _mg = any(t in ("MANAGE", "ADMINISTER", "MANAGE_PAGES", "MANAGE_JOBS")
+                      for t in tasks)
+            _ad = "ADVERTISE" in tasks
             if pid in by_page:
-                continue   # 多令牌同页：保留首个（权限面以能拿到的为准）
+                # 多令牌同页：权限 OR 合并（与 subscribe「任一令牌成功即成」同语义——
+                # 曾"首个即锁"，弱令牌在前会把可管理页误判只读、复选框全禁用）
+                row = by_page[pid]
+                row["can_manage"] = row["can_manage"] or _mg
+                row["can_advertise"] = row["can_advertise"] or _ad
+                continue
             row = {"page_id": pid, "page_name": pname, "alias": alias,
                    "can_manage": any(t in ("MANAGE", "ADMINISTER", "MANAGE_PAGES",
                                            "MANAGE_JOBS") for t in tasks),

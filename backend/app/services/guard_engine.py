@@ -214,10 +214,10 @@ def _patch_cache_after_pause(db, tenant_id: int, act_id: str, platform: str,
 def _writeback_ads_cache(db, tenant_id: int, act_id: str, ads: list) -> None:
     """巡检把 FB 全状态 /ads 结果回写 ads_cache.ads_json（广告管理器广告层的唯一数据源）。
 
-    全量替换 + 刷 updated_at（广告层新鲜度 5min；campaigns/adsets 两层仍由 15min cron 供数
-    ——updated_at 语义=广告层同步时间，管理器「数据更新至」随巡检走）。行不存在（新纳管
-    首巡）建行，campaigns/adsets 由 15min cron 补齐。失败不阻断巡检（warning，15min cron 自愈）。
-    与手动全量刷新并发时双方写的都是全量数据，后写赢无害。"""
+    全量替换 + 刷 updated_at（结构层时间，兼作行变更戳）+ ads_updated_at（广告层独立时间，
+    0086——管理器「数据更新至/缓存龄」按它取；campaigns/adsets 两层仍由 15min cron 供数）。
+    行不存在（新纳管首巡）建行，campaigns/adsets 由 15min cron 补齐。失败不阻断巡检
+    （warning，15min cron 自愈）。与手动全量刷新并发时双方写的都是全量数据，后写赢无害。"""
     try:
         row = db.query(AdsCache).filter(
             AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
@@ -2357,12 +2357,12 @@ def run_watchdog():
                 tid for (tid,) in db.query(FbCredential.tenant_id).filter(
                     FbCredential.status == "active").distinct().all()}
             try:
-                from ..models.fb import TtCredential
+                from ..models.tt import TtCredential
                 _active_cred_tids |= {
                     tid for (tid,) in db.query(TtCredential.tenant_id).filter(
                         TtCredential.status == "active").distinct().all()}
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning(f"[Watchdog] TT 凭证集查询失败（仅影响 TT 租户的停滞抑制判定）: {_e}")
             for _tid, _names in _stale_by_tenant.items():
                 if _tid not in _active_cred_tids:
                     continue   # 全平台无活跃凭证 → sync_stalled 已接管，不叠报
