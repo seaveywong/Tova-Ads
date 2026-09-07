@@ -216,16 +216,21 @@ def _writeback_ads_cache(db, tenant_id: int, act_id: str, ads: list) -> None:
 
     全量替换 + 刷 updated_at（结构层时间，兼作行变更戳）+ ads_updated_at（广告层独立时间，
     0086——管理器「数据更新至/缓存龄」按它取；campaigns/adsets 两层仍由 15min cron 供数）。
+    死广告（ARCHIVED/DELETED）写入前滤除——用户明确不要（素材已失效 FB 也不给预览图，
+    管理器只留可操作状态）；全量替换会连带清掉 cache 里的存量死行。
     行不存在（新纳管首巡）建行，campaigns/adsets 由 15min cron 补齐。失败不阻断巡检
     （warning，15min cron 自愈）。与手动全量刷新并发时双方写的都是全量数据，后写赢无害。"""
     try:
+        _live = [a for a in ads
+                 if str((a.get("effective_status") or a.get("status") or "")).upper()
+                 not in ("ARCHIVED", "DELETED")]
         row = db.query(AdsCache).filter(
             AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
             AdsCache.platform == "fb").first()
         if not row:
             row = AdsCache(tenant_id=tenant_id, act_id=act_id, platform="fb")
             db.add(row)
-        row.ads_json = json.dumps(ads, ensure_ascii=False)
+        row.ads_json = json.dumps(_live, ensure_ascii=False)
         row.updated_at = datetime.now(timezone.utc)
         row.ads_updated_at = datetime.now(timezone.utc)   # 广告层独立时间戳（0086）
         db.commit()

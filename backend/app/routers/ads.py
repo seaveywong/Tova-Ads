@@ -246,7 +246,11 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
     row.campaigns_json = json.dumps(campaigns)
     row.adsets_json = json.dumps(adsets)
     if ads is not None:
-        row.ads_json = json.dumps(ads)
+        # 死广告不进 cache（与巡检回写同口径——用户明确不要归档/已删除）
+        _live = [a for a in ads
+                 if str((a.get("effective_status") or a.get("status") or "")).upper()
+                 not in ("ARCHIVED", "DELETED")]
+        row.ads_json = json.dumps(_live)
         row.ads_updated_at = datetime.now(timezone.utc)   # 广告层独立时间戳（0086）
     row.updated_at = datetime.now(timezone.utc)
     return True
