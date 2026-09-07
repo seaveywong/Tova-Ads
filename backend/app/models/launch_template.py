@@ -64,6 +64,9 @@ class LaunchTemplate(Base):
     minimum_roas = Column(Float)                       # 最小 ROAS（SALES）
     special_ad_categories = Column(Text)               # JSON 数组：CREDIT/EMPLOYMENT/HOUSING/...
     link_description = Column(Text)                    # 创意描述（正文下灰色小字）
+    # 1:1 尾巴小件（0091）：系列支出上限（累计花到达即停整系列，区别于预算）+ IG 身份
+    spend_cap_usd = Column(Float)                      # 系列支出上限（USD，可选；部署时按账户本币换算 spend_cap）
+    instagram_actor_id = Column(Text)                  # IG 账号 ID（可选，空=用主页关联 IG）
     platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（模板按平台隔离字段集）
     # 1:1 FB 三层结构（0088）：{adsets:[{key,name,enabled,budget_usd?,audience_id?,
     # audience_json?,optimization_goal?,billing_event?,advanced_config?,ads:[{key,name,

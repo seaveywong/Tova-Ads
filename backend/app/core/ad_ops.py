@@ -171,7 +171,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        bid_amount: int | None = None,
                        minimum_roas: float | None = None,
                        special_ad_categories: list | None = None,
-                       description: str = "") -> dict:
+                       description: str = "",
+                       spend_cap: int | None = None,
+                       instagram_actor_id: str = "") -> dict:
     """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id, page_post_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
@@ -189,6 +191,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                                              and budget_type.lower() == "lifetime") else None),
         budget_mode=budget_mode, bid_strategy=bid_strategy,
         special_ad_categories=special_ad_categories,
+        spend_cap=spend_cap,
     )
     camp = fb.post(f"{act}/campaigns", camp_payload)
     campaign_id = camp.get("id")
@@ -246,6 +249,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         image_hash=image_hash, cta_type=cta_type, video_id=video_id,
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
         description=description,
+        instagram_actor_id=instagram_actor_id,
     )
     if page_post_id:
         # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id

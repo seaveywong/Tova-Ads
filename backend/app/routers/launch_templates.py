@@ -37,6 +37,8 @@ ASSET_DIR = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
 _BUDGET_MAX_USD = 5000.0
 # 批G（0089）：总预算上限（多日累积）/特殊广告类别白名单/排期格式（模块级——pydantic 类内下划线属性会被当 ModelPrivateAttr）
 _BUDGET_MAX_LIFETIME_USD = 50000.0
+# 尾巴小件（0091）：系列支出上限（累计花到达即停整系列；与预算不同量纲，安全上限同总预算档）
+_SPEND_CAP_MAX_USD = 100000.0
 _SPECIAL_CATS = {"CREDIT", "EMPLOYMENT", "HOUSING",
                  "SOCIAL_ISSUES_ELECTIONS_POLITICS", "FINANCIAL_PRODUCTS"}
 _DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$")
@@ -70,6 +72,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "pacing": t.pacing or "", "bid_amount_usd": t.bid_amount_usd,
         "minimum_roas": t.minimum_roas, "special_ad_categories": t.special_ad_categories or "",
         "link_description": t.link_description or "",
+        "spend_cap_usd": t.spend_cap_usd, "instagram_actor_id": t.instagram_actor_id or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -311,6 +314,9 @@ class TemplateIn(BaseModel):
     minimum_roas: Optional[float] = None
     special_ad_categories: str = ""     # JSON 数组串（CREDIT/EMPLOYMENT/HOUSING/...）
     link_description: str = ""
+    # 1:1 尾巴小件（0091）
+    spend_cap_usd: Optional[float] = None   # 系列支出上限（USD；达到即停整系列，区别于预算）
+    instagram_actor_id: str = ""            # IG 账号 ID（空=用主页关联 IG）
 
 
 
@@ -386,6 +392,22 @@ class TemplateIn(BaseModel):
             raise ValueError(f"日预算超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低（大额预算分步上调）")
         return v
 
+    @field_validator("spend_cap_usd")
+    @classmethod
+    def _check_spend_cap(cls, v: Optional[float]) -> Optional[float]:
+        """系列支出上限（可选）：>0 且 ≤$100000（安全上限，与总预算同量级）。"""
+        if v is not None and not (0 < v <= _SPEND_CAP_MAX_USD):
+            raise ValueError(f"支出上限需在 0-{_SPEND_CAP_MAX_USD:.0f} USD（留空=不限）")
+        return v
+
+    @field_validator("instagram_actor_id")
+    @classmethod
+    def _check_ig_actor(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not v.isdigit():
+            raise ValueError("Instagram 账号 ID 应为数字（如 17841400000000）")
+        return v
+
 
 @router.get("")
 def list_templates(user: CurrentUser = Depends(require_permission("ads.create")),
@@ -457,6 +479,7 @@ _COPY_COLS = [
     "post_source", "reuse_post_ref", "structure",
     "budget_type", "lifetime_budget_usd", "schedule_start", "schedule_end", "pacing",
     "bid_amount_usd", "minimum_roas", "special_ad_categories", "link_description",
+    "spend_cap_usd", "instagram_actor_id",
 ]
 
 
@@ -805,6 +828,8 @@ def preflight_deploy(tid: int, body: PreflightIn,
                           if (_p_btype == "lifetime" and t.lifetime_budget_usd) else None)
         _p_bid_fb = (usd_to_fb_amount(float(t.bid_amount_usd), currency, cr.rate if cr else 1.0)
                      if t.bid_amount_usd else None)
+        _p_spend_cap_fb = (usd_to_fb_amount(float(t.spend_cap_usd), currency, cr.rate if cr else 1.0)
+                           if t.spend_cap_usd else None)
         try:
             _p_cats = json.loads(t.special_ad_categories or "[]")
         except Exception:
@@ -815,6 +840,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
             lifetime_budget=_p_lifetime_fb,
             budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
             special_ad_categories=_p_cats,
+            spend_cap=_p_spend_cap_fb,
         )
         adset_payload = build_adset(
             name=f"{_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
@@ -834,12 +860,14 @@ def preflight_deploy(tid: int, body: PreflightIn,
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
                 landing_url=_lp_url, headline=t.headline, body=t.body,
                 cta_type=t.cta_type, video_id="<部署时按账户上传缓存>",
+                instagram_actor_id=(t.instagram_actor_id or ""),
             )
         else:
             creative_payload = build_creative(
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
                 landing_url=_lp_url, headline=t.headline, body=t.body,
                 cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
+                instagram_actor_id=(t.instagram_actor_id or ""),
             )
     except ValueError as e:
         # build_adset 对缺 pixel/page 等抛 ValueError —— 预检就该把这个告诉用户
@@ -855,6 +883,8 @@ def preflight_deploy(tid: int, body: PreflightIn,
         "pacing": (t.pacing or ""), "bid_amount_usd": t.bid_amount_usd,
         "bid_amount_fb": _p_bid_fb, "minimum_roas": t.minimum_roas,
         "special_ad_categories": _p_cats, "link_description": (t.link_description or ""),
+        "spend_cap_usd": t.spend_cap_usd, "spend_cap_fb": _p_spend_cap_fb,
+        "instagram_actor_id": (t.instagram_actor_id or ""),
         "asset": {
             "type": (asset.type if asset else ""),
             "name": (asset.name or asset.filename or "") if asset else "",
@@ -893,6 +923,9 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         raise HTTPException(400, f"预算换算失败：{e}")
     is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
     campaign_name = (t.name_prefix or t.name or "Tova Ads")[:100]
+    # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；缺汇率同 lifetimes 取 1.0 兜底口径）
+    _p_spend_cap_fb = (usd_to_fb_amount(float(t.spend_cap_usd), currency, cr.rate if cr else 1.0)
+                       if t.spend_cap_usd else None)
 
     def _view(**ov):
         d = {c.name: getattr(t, c.name) for c in t.__table__.columns}
@@ -976,7 +1009,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         campaign_payload = build_campaign(
             name=campaign_name, objective=t.objective,
             daily_budget=camp_budget_fb if is_cbo else None,
-            budget_mode=t.budget_mode, bid_strategy=t.bid_strategy)
+            budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
+            spend_cap=_p_spend_cap_fb)
         adset_payload = build_adset(
             name=tree_out[0]["name"], campaign_id="<FB 创建 campaign 后返回>",
             daily_budget=tree_out[0]["budget_local_fb"], objective=t.objective,
@@ -998,7 +1032,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             video_id="<部署时按账户上传缓存>" if (first_asset and first_asset.type == "video")
                     else None,
             image_hash=None if (first_asset and first_asset.type == "video")
-                    else "<部署时按账户上传缓存>")
+                    else "<部署时按账户上传缓存>",
+            instagram_actor_id=(t.instagram_actor_id or ""))
     except ValueError as e:
         raise HTTPException(400, f"参数校验失败：{e}")
     return {
@@ -1008,6 +1043,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         "budget_usd": t.budget_usd,
         "camp_budget_fb": camp_budget_fb,
         "abo_total_usd": (round(abo_total_usd, 2) if not is_cbo else None),
+        "spend_cap_usd": t.spend_cap_usd, "spend_cap_fb": _p_spend_cap_fb,
+        "instagram_actor_id": (t.instagram_actor_id or ""),
         "adset_count": len(adsets),
         "ad_total": _tree_expanded_count(adsets),
         "account_count": max(body.account_count or 0, 1),
@@ -1487,6 +1524,10 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 try: cfg = json.loads(ft.config_json)
                 except: cfg = {}
             from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
+            # 感谢页按钮：显式选了 website 才带；whatsapp/none 是本地配置不进 FB payload
+            # （否则 landing_url 兜底会把 whatsapp 选择变成 FB VIEW_WEBSITE 按钮）。见 0090 批。
+            _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()
+            _btn_website = (_ty_btn_type == "website") if _ty_btn_type else True
             payload = build_lead_form_payload(
                 form_title=cfg.get("form_title", ft.name),
                 privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
@@ -1498,8 +1539,8 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
                 thank_you_title=cfg.get("thank_you_title", ""),
                 thank_you_body=cfg.get("thank_you_body", ""),
-                thank_you_button_text=cfg.get("thank_you_button_text", ""),
-                thank_you_website_url=cfg.get("thank_you_website_url", landing_url),
+                thank_you_button_text=cfg.get("thank_you_button_text", "") if _btn_website else "",
+                thank_you_website_url=cfg.get("thank_you_website_url", landing_url) if _btn_website else "",
                 follow_up_url=cfg.get("follow_up_url", landing_url),
                 context_card_title=cfg.get("context_card_title", ""),
                 name_prefix="Tova",
@@ -1818,6 +1859,10 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
                     if _btype == "lifetime" and tpl.lifetime_budget_usd else None)
     _bid_fb = (_usd_to_account_minor(sdb, item.act_id, float(tpl.bid_amount_usd), tenant_id)
                if tpl.bid_amount_usd else None)
+    # 系列支出上限（0091）：USD → 该账户本币 minor units（缺汇率抛 ValueError=系列级失败，
+    # 不能静默丢上限——那是资金安全字段）
+    _spend_cap_fb = (_usd_to_account_minor(sdb, item.act_id, float(tpl.spend_cap_usd), tenant_id)
+                     if tpl.spend_cap_usd else None)
     try:
         _cats = json.loads(tpl.special_ad_categories or "[]")
     except Exception:
@@ -1841,6 +1886,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         pacing=(tpl.pacing or ""), bid_amount=_bid_fb,
         minimum_roas=(tpl.minimum_roas if tpl.minimum_roas else None),
         special_ad_categories=_cats, description=(tpl.link_description or ""),
+        spend_cap=_spend_cap_fb, instagram_actor_id=(tpl.instagram_actor_id or ""),
     )
 
 
@@ -1924,12 +1970,20 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     else:
         _camp_lifetime_fb = None
         camp_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+    # 系列支出上限（0091）：USD → 该账户本币 minor units。缺汇率=整 item 失败
+    # （静默丢上限继续建 = 资金安全字段半接线，不允许）。
+    _spend_cap_fb = None
+    if tpl.spend_cap_usd:
+        try:
+            _spend_cap_fb = _usd_to_account_minor(sdb, item.act_id, float(tpl.spend_cap_usd), tenant_id)
+        except ValueError as e:
+            raise FbApiError("no_id", f"支出上限换算失败：{e}")
     camp_payload = build_campaign(
         name=campaign_name, objective=tpl.objective,
         daily_budget=(camp_budget_fb if (is_cbo and not _camp_lifetime_fb) else None),
         lifetime_budget=_camp_lifetime_fb,
         budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
-        special_ad_categories=_cats)
+        special_ad_categories=_cats, spend_cap=_spend_cap_fb)
     camp = fb.post(f"act_{item.act_id}/campaigns", camp_payload)
     campaign_id = camp.get("id")
     if not campaign_id:
@@ -2185,7 +2239,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         cta_type=(anode.get("cta_type") or tpl.cta_type or ""),
                         image_hash=image_hash, video_id=video_id,
                         lead_form_id=lead_form_id, welcome_message=welcome_msg,
-                        description=(anode.get("link_description") or tpl.link_description or ""))
+                        description=(anode.get("link_description") or tpl.link_description or ""),
+                        instagram_actor_id=(tpl.instagram_actor_id or ""))
                     if page_post_id:
                         _cta_t = (anode.get("cta_type") or tpl.cta_type or "") or pick_cta(_body, tpl.objective)
                         _cta_val = ({"page": _page_id} if _cta_t == "LIKE_PAGE"
@@ -2818,6 +2873,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 page_post_id=page_post_id,
                 advanced_config=advanced,
                 lead_form_id=lead_form_id, message_template=message_template,
+                spend_cap=(_usd_to_account_minor(sdb, it.act_id, float(tpl.spend_cap_usd), tenant_id)
+                           if tpl.spend_cap_usd else None),
+                instagram_actor_id=(tpl.instagram_actor_id or ""),
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.page_post_id = r.get("page_post_id") or page_post_id

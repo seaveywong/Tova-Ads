@@ -19,6 +19,8 @@ export default {
     drPrefix: '原因：',
     throttledLine: '⏳ 令牌限流中 · 约 {n} 分钟后自动恢复',
     tokenDeadLine: '⚠ 令牌已失效，重新授权',
+    noTokenTag: '无令牌',
+    noTokenTip: '令牌已移除/未绑定：巡检与部署不可用。请到令牌页绑定，或移除纳管。',
   },
   en: {
     groupCol: 'Group',
@@ -35,5 +37,7 @@ export default {
     drPrefix: 'Reason: ',
     throttledLine: '⏳ Token rate-limited · auto-recovers in ~{n} min',
     tokenDeadLine: '⚠ Token expired, re-authorize',
+    noTokenTag: 'No token',
+    noTokenTip: 'Token removed/not bound: patrol and deploy are unavailable. Bind a token on the Tokens page, or remove this account from management.',
   },
 }

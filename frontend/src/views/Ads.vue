@@ -316,7 +316,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         <div v-else class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
         <div class="st-cell">
-          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
+          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span><span v-if="d.a.no_token" class="tag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></div>
           <div v-if="drInfo(d.a)" class="dr-line" :class="drInfo(d.a).tone">{{ t('ads.drPrefix') }}{{ drInfo(d.a).label }}</div>
           <div v-if="throttleInfo(d.a)" class="dr-line" :class="throttleInfo(d.a).tone">{{ throttleInfo(d.a).label }}</div>
         </div>
@@ -464,6 +464,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .grp-edit-ops { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg3); color: var(--t2) }
 .tag.ok { color: var(--success) } .tag.warn { color: var(--warning) } .tag.off { color: var(--t3) }
+.tag.danger { color: var(--error); background: rgba(239,68,68,.1); font-weight: 600; margin-left: 4px; vertical-align: middle }
 .pool-n { font-size: 10px; color: var(--success); margin-left: 2px; font-weight: 600 }
 .ops { display: flex; justify-content: flex-end }
 .more-btn { width: 26px; height: 24px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); font-size: 13px; cursor: pointer; border-radius: 4px; padding: 0; line-height: 22px; text-align: center }

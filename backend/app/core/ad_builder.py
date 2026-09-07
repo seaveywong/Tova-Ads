@@ -111,6 +111,7 @@ def build_campaign(
     lifetime_budget: int | None = None,
     special_ad_categories: list | None = None,
     minimum_roas: float | None = None,
+    spend_cap: int | None = None,
 ) -> dict:
     obj = normalize_objective(objective)
     payload: dict[str, Any] = {
@@ -122,6 +123,11 @@ def build_campaign(
         "special_ad_categories": special_ad_categories or [],
         "buying_type": "AUCTION",
     }
+
+    # 系列支出上限（账户本币 minor units，调用方按汇率换算好）：累计花费达到即停整系列
+    # ——与预算（日/总，控制投放节奏）语义不同。可选，None/0=不限。
+    if spend_cap is not None and int(spend_cap) > 0:
+        payload["spend_cap"] = str(int(spend_cap))
 
     if budget_mode.upper() == "CBO":
         # CBO 预算在系列级：日预算/总预算二选一（总预算必须配排期，调用方校验）
@@ -335,6 +341,7 @@ def build_creative(
     lead_form_id: str = "",
     welcome_message: dict | None = None,
     description: str = "",                  # 链接描述（正文下方灰色小字，FB「描述」字段）
+    instagram_actor_id: str = "",           # IG 账号 ID（object_story_spec 外层；空=用主页关联 IG）
 ) -> dict:
     """构造广告创意（object_story_spec）。
 
@@ -396,6 +403,11 @@ def build_creative(
             "page_id": page_id,
             "video_data": video_data,
         }
+
+    # IG 身份（可选）：与 link_data/video_data 同层（object_story_spec 外层）。
+    # 空=不传，FB 用主页关联的 Instagram 账号。
+    if instagram_actor_id and instagram_actor_id.strip():
+        story_spec["instagram_actor_id"] = instagram_actor_id.strip()
 
     return {"object_story_spec": story_spec}
 

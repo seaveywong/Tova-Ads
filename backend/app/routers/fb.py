@@ -1529,6 +1529,10 @@ def list_accounts(
                 and cred.cooldown_until > datetime.now(timezone.utc) else 0),
             "pool_count": pool_map.get(a.id, 0),
             "pool_aliases": pool_alias_map.get(a.id, ""),
+            # 无令牌角标（0091）：候选池（account_fb_credentials）无 active 绑定 = 巡检/部署
+            # 均不可用。复用上方 pool_map（一次 JOIN 批量查好，无 N+1）；与
+            # fb_credential_id 主令牌冗余列无关——令牌删除时该表已无 active 行。
+            "no_token": pool_map.get(a.id, 0) == 0,
             "recent_spend": perf.get("spend", 0.0), "recent_conversions": perf.get("conversions", 0),
         })
     return out

@@ -525,6 +525,8 @@ const pfBudgetSegments = (r) => {
   if (r.bid_amount_usd != null)
     seg.push(t('launch.pfBid', { v: r.bid_amount_usd }) + (r.bid_amount_fb != null ? ' → ' + r.bid_amount_fb : ''))
   if (r.minimum_roas != null) seg.push(t('launch.pfRoas', { v: r.minimum_roas }))
+  if (r.spend_cap_usd != null)
+    seg.push(t('launch.pfSpendCap', { v: r.spend_cap_usd }) + (r.spend_cap_fb != null ? ' → ' + r.spend_cap_fb : ''))
   const cats = Array.isArray(r.special_ad_categories) ? r.special_ad_categories : []
   if (cats.length) {
     const labels = cats.map(c => { const hit = SPECIAL_CATS.find(x => x.v === c); return hit ? t(hit.l) : c })
@@ -579,6 +581,8 @@ const blankForm = () => ({
   schedule_start: '', schedule_end: '', pacing: '',
   bid_amount_usd: null, minimum_roas: null,
   special_ad_categories: '', link_description: '',
+  // 1:1 尾巴小件（0091）：系列支出上限 + IG 身份
+  spend_cap_usd: null, instagram_actor_id: '',
   // 组 AdSet
   optimization_goal: '', billing_event: 'IMPRESSIONS', destination_type: '',
   audience_id: 0,
@@ -768,6 +772,8 @@ const specialCatsSel = computed({
   get: () => { try { const v = JSON.parse(form.value.special_ad_categories || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } },
   set: (v) => { form.value.special_ad_categories = (v && v.length) ? JSON.stringify([...v].sort()) : '' },
 })
+// 已声明特殊广告类别 → 年龄/性别定向被 FB 强制忽略（组卡受众区警告 + 输入禁用）
+const hasSpecialCats = computed(() => specialCatsSel.value.length > 0)
 const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
@@ -1354,6 +1360,8 @@ const saveTpl = async () => {
       minimum_roas: _numOrNull(form.value.minimum_roas),
       special_ad_categories: form.value.special_ad_categories || '',
       link_description: form.value.link_description || '',
+      spend_cap_usd: _numOrNull(form.value.spend_cap_usd),
+      instagram_actor_id: (form.value.instagram_actor_id || '').trim(),
       optimization_goal: form.value.optimization_goal, billing_event: form.value.billing_event,
       destination_type: form.value.destination_type, audience_id: form.value.audience_id || 0,
       // 选了保存受众 → 清内联 audience_json，部署走 SavedAudience 分支（内联非空会优先生效）
@@ -2011,6 +2019,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.bidAmountUsd') }}</label><input v-model.number="form.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.bidAmountPh')" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
         <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.minimumRoas') }}</label><input v-model.number="form.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.minRoasPh')" /></div>
+        <!-- 系列支出上限（0091）：达到即停整个系列——与预算（控制投放节奏）不同 -->
+        <div class="row"><label>{{ t('launch.spendCapUsd') }}</label>
+          <input v-model.number="form.spend_cap_usd" type="number" min="1" step="1" class="inp" :placeholder="t('launch.spendCapPh')" />
+          <span class="hint">{{ t('launch.spendCapHint') }}</span>
+</div>
         </template>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
         <div v-if="!isTt" class="row"><label>{{ t('launch.pageId') }}</label>
@@ -2018,6 +2031,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
+</div>
+        <!-- IG 身份（0091）：创意以该 IG 账号展示（IG 版位）；留空=用主页关联的 IG -->
+        <div v-if="!isTt" class="row"><label>{{ t('launch.instagramActor') }}</label>
+          <input v-model.trim="form.instagram_actor_id" class="inp" :placeholder="t('launch.instagramActorPh')" />
+          <span class="hint">{{ t('launch.instagramActorHint') }}</span>
 </div>
         <!-- structure mode campaign extras: pixel & disclosure (flat keeps pixel in the ad section) -->
         <template v-if="editMode === 'tree'">
@@ -2107,6 +2125,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   </el-select>
                   <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
+                <!-- 特殊广告类别已声明：受众定向被 FB 强制收窄（树模式组卡受众区提示） -->
+                <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
                 <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
                   <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
                     <el-option value="" :label="t('launch.autoByObj')" />
@@ -2170,6 +2190,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-else class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
+        <!-- 特殊广告类别已声明：FB 强制忽略年龄/性别/部分兴趣定向（合规收窄，提前告知） -->
+        <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
         <!-- 受众来源：保存的受众（SavedAudience，部署时用） / 自定义（下方手动定向） -->
         <div class="row"><label>{{ t('launch.audienceSource') }}</label>
           <el-select v-model="form.audience_id" filterable size="small" style="width:100%" :placeholder="t('launch.audienceCustom')">
@@ -2207,8 +2229,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
 </el-select>
 </div>
-        <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
-        <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
+        <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
+        <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
+        <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
         <div v-if="isTt" class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttAudienceHint') }}</div>
         <div v-if="!isTt" class="row"><label>{{ t('launch.languageLabel') }}</label>
           <el-select v-model="form.audience_language" filterable clearable :placeholder="t('launch.langAny')" style="width:100%" size="small">
@@ -3009,6 +3032,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .inp.sm{padding:4px 8px;font-size:12px}
 .inp.multi{min-height:70px}
 .hint{font-size:11px;color:var(--t3)}
+/* 特殊广告类别受众警告条（组卡受众区）：FB 强制忽略年龄/性别/部分兴趣定向 */
+.scat-warn{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(249,115,22,.1);color:var(--warning);border:1px solid rgba(249,115,22,.35)}
 .seg{display:flex;gap:4px}
 .seg button{flex:1;padding:6px;border:1px solid var(--bd);background:var(--bg3);color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit}
 .seg button.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}

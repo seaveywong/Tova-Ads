@@ -197,6 +197,14 @@ export default {
     cardLifetime: '总额 {v}', treeCboLifetimeBudget: '系列总预算（CBO）',
     totalBudgetLifetimeHint: '· 合计 ≈ ${total}（总额预算，每账户 ${per}）',
     pfBudgetSchedule: '预算与排期', pfLifetime: '总额 ${v}', pfBid: '出价 ${v}', pfRoas: 'ROAS ≥ {v}', pfDesc: '描述 {v}',
+    // 1:1 尾巴小件（0091）：系列支出上限 + IG 身份 + 特殊类别受众联动
+    spendCapUsd: '支出上限（可选）', spendCapPh: '如 300（达到即停整个系列）',
+    spendCapHint: '系列累计花费达到该金额即整系列停止；与预算不同——预算控制每日/总额的投放节奏',
+    instagramActor: 'Instagram 账号 ID', instagramActorPh: '如 17841400000000（留空=用主页关联 IG）',
+    instagramActorHint: '创意在 IG 版位以该账号身份展示；留空用主页关联的 Instagram 账号',
+    scatAudienceWarn: '特殊广告类别已声明：年龄/性别/部分兴趣定向将被 FB 强制忽略（合规限制定向）',
+    scatFieldIgnored: '特殊广告类别已声明，此定向被 FB 忽略',
+    pfSpendCap: '支出上限 ${v}',
   },
   en: {
     title: 'Launch Templates', tplCount: '{n} templates', subtitle: 'Pick a template + pick accounts → one-click batch deploy to multiple accounts.',
@@ -395,5 +403,12 @@ export default {
     cardLifetime: 'Lifetime {v}', treeCboLifetimeBudget: 'Campaign lifetime budget (CBO)',
     totalBudgetLifetimeHint: '· Total ≈ ${total} (lifetime budget, {per} per account)',
     pfBudgetSchedule: 'Budget & schedule', pfLifetime: 'Lifetime ${v}', pfBid: 'Bid ${v}', pfRoas: 'ROAS ≥ {v}', pfDesc: 'Desc {v}',
+    spendCapUsd: 'Spend cap (optional)', spendCapPh: 'e.g. 300 (whole campaign stops when reached)',
+    spendCapHint: 'The whole campaign stops once its total spend reaches this amount; unlike budget, which paces daily/total delivery.',
+    instagramActor: 'Instagram account ID', instagramActorPh: 'e.g. 17841400000000 (blank = page-linked IG)',
+    instagramActorHint: 'Creative appears under this IG identity on IG placements; blank uses the Instagram account linked to the page.',
+    scatAudienceWarn: 'Special ad category declared: age/gender and some interest targeting are forced off by FB (compliance restriction).',
+    scatFieldIgnored: 'Special ad category declared; this targeting is ignored by FB',
+    pfSpendCap: 'Spend cap ${v}',
   },
 }
