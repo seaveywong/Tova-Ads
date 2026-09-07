@@ -35,6 +35,11 @@ ASSET_DIR = os.environ.get("ASSET_DIR", "/opt/toveads/assets")
 # 部署预算安全上限（美元/日）：模板保存（TemplateIn 校验）与部署端点共用；
 # 超限拒绝——大额预算走分步调整（services/ad_ops.set_budget 另有旧值×5 步进上限）
 _BUDGET_MAX_USD = 5000.0
+# 批G（0089）：总预算上限（多日累积）/特殊广告类别白名单/排期格式（模块级——pydantic 类内下划线属性会被当 ModelPrivateAttr）
+_BUDGET_MAX_LIFETIME_USD = 50000.0
+_SPECIAL_CATS = {"CREDIT", "EMPLOYMENT", "HOUSING",
+                 "SOCIAL_ISSUES_ELECTIONS_POLITICS", "FINANCIAL_PRODUCTS"}
+_DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$")
 
 
 def _tpl_dict(t: LaunchTemplate) -> dict:
@@ -307,10 +312,7 @@ class TemplateIn(BaseModel):
     special_ad_categories: str = ""     # JSON 数组串（CREDIT/EMPLOYMENT/HOUSING/...）
     link_description: str = ""
 
-    _SPECIAL_CATS = {"CREDIT", "EMPLOYMENT", "HOUSING",
-                     "SOCIAL_ISSUES_ELECTIONS_POLITICS", "FINANCIAL_PRODUCTS"}
-    _BUDGET_MAX_LIFETIME_USD = 50000.0  # 总预算上限（多日累积，口径高于日预算 $5000）
-    _DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$")
+
 
     @field_validator("budget_type")
     @classmethod
@@ -327,15 +329,15 @@ class TemplateIn(BaseModel):
     @field_validator("lifetime_budget_usd")
     @classmethod
     def _cap_lifetime(cls, v: Optional[float]) -> Optional[float]:
-        if v is not None and v > cls._BUDGET_MAX_LIFETIME_USD:
-            raise ValueError(f"总预算超安全上限 ${cls._BUDGET_MAX_LIFETIME_USD:.0f}，请分系列分步投放")
+        if v is not None and v > _BUDGET_MAX_LIFETIME_USD:
+            raise ValueError(f"总预算超安全上限 ${_BUDGET_MAX_LIFETIME_USD:.0f}，请分系列分步投放")
         return v
 
     @field_validator("schedule_start", "schedule_end")
     @classmethod
     def _check_dt(cls, v: str) -> str:
         v = (v or "").strip()
-        if v and not cls._DT_RE.match(v):
+        if v and not _DT_RE.match(v):
             raise ValueError("排期时间格式应为 YYYY-MM-DD 或 YYYY-MM-DD HH:mm")
         return v
 
@@ -349,8 +351,8 @@ class TemplateIn(BaseModel):
             cats = json.loads(v)
         except Exception:
             raise ValueError("特殊广告类别需为 JSON 数组（如 [\"CREDIT\"]）")
-        if not isinstance(cats, list) or any(c not in cls._SPECIAL_CATS for c in cats):
-            raise ValueError(f"特殊广告类别仅支持：{sorted(cls._SPECIAL_CATS)}")
+        if not isinstance(cats, list) or any(c not in _SPECIAL_CATS for c in cats):
+            raise ValueError(f"特殊广告类别仅支持：{sorted(_SPECIAL_CATS)}")
         return json.dumps(sorted(set(cats)))
 
     @field_validator("structure")
