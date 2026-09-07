@@ -58,6 +58,13 @@ const accPages = ref({})  // {act_id: [pages]}
 const accPixels = ref({}) // {act_id: [pixels]}
 const deployItems = ref({})  // {act_id: {page_id, pixel_id}}
 const deploying = ref(false)
+// 像素策略（部署抽屉）：template=跟随模板（旧行为）/ random=随机用账户像素 / create=每账户新建像素
+const pixelStrategy = ref('template')
+// 主页权限总览（部署抽屉顶部折叠面板；懒加载——展开才拉 /leads/pages）
+const pageOverviewOpen = ref(false)
+const permPages = ref([])
+const permPagesLoading = ref(false)
+let permPagesLoaded = false
 // 按素材批量生成系列（对标 FBInsider batchGenerate）：模板=母版，每个选中素材克隆一个
 // 完整系列（campaign+adset+ad），系列名/广告名=素材名；模板自带素材在批量模式下被忽略
 const deployMode = ref('single')   // single=单模板部署（默认，旧行为） / batch=按素材批量生成系列
@@ -1520,6 +1527,10 @@ const singleIsLifetime = computed(() =>
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   reuseEligibleActs.value = new Set()
+  // 三件套状态复位（像素策略回默认；权限总览收起+清缓存——令牌权限可能已变化，每次抽屉打开重拉）
+  pixelStrategy.value = 'template'
+  pageOverviewOpen.value = false; permPages.value = []
+  permPagesLoaded = false; permPagesLoading.value = false
   deployAsset.value = null
   deployMode.value = 'single'; batchAssetIds.value = new Set()
   deployTree.value = null
@@ -1560,6 +1571,11 @@ const ensureAccConfig = async (id) => {
         GET('/fb/credentials/' + credId + '/pixels').catch(() => []),
       ])
       accPages.value[id] = pages; accPixels.value[id] = pixels
+      // 策略为「随机用账户像素」时，新加载池的账户立即随机填入（与已选账户保持同策略）
+      if (pixelStrategy.value === 'random') {
+        const pid = randomPixelFor(id)
+        if (pid) deployItems.value[id] = { ...(deployItems.value[id] || {}), pixel_id: pid }
+      }
     } catch {}
     accLoadingConfig.value.delete(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
   }
@@ -1581,6 +1597,103 @@ const deploySelectActive = () => {
   _selectableAccs().filter(a => s.has(a.act_id)).forEach(a => ensureAccConfig(a.act_id))
 }
 const deployClearSel = () => { selectedAccs.value = new Set() }
+// 账户显示名（toast 明细用；名字缺失退回 act_id）
+const accLabel = (id) => accounts.value.find(a => a.act_id === id)?.name || id
+// 主页权限总览：首次展开懒拉一次（每页按令牌计数分权限面——后端 OR 合并 + 逐令牌计数）
+const togglePageOverview = async () => {
+  pageOverviewOpen.value = !pageOverviewOpen.value
+  if (pageOverviewOpen.value && !permPagesLoaded) {
+    permPagesLoading.value = true
+    try { const r = await GET('/leads/pages'); permPages.value = r.pages || []; permPagesLoaded = true }
+    catch (e) { showError(e, t('launch.pagePermLoadFail')) }
+    permPagesLoading.value = false
+  }
+}
+const permPageSummary = computed(() => {
+  const p = permPages.value
+  return {
+    m: p.filter(x => (x.manage_tokens || 0) > 0).length,
+    a: p.filter(x => !(x.manage_tokens || 0) && (x.advertise_only_tokens || 0) > 0).length,
+    r: p.filter(x => !(x.manage_tokens || 0) && !(x.advertise_only_tokens || 0)).length,
+  }
+})
+const subStateText = (v) => v === true ? t('launch.ppSubscribed') : v === false ? t('launch.ppNotSubscribed') : '—'
+// 随机分配主页：对已选账户从各自 accPages 池随机选，全批去重（同一主页不给两个账户）；
+// 池小账户先分配（贪心近似匹配，减少"大池先占小池唯一主页"的伪不足）；不足的留空并 toast 明细；
+// 再点一次重摇（每次全新 used 集合 + 随机序）
+const randomAssignPages = () => {
+  const ids = [...selectedAccs.value]
+  if (!ids.length) return ElMessage.warning(t('launch.selectAccFirst'))
+  if (ids.some(id => accLoadingConfig.value.has(id)))
+    return ElMessage.warning(t('launch.randPageLoading'))
+  const used = new Set()
+  const done = []
+  const short = []
+  const order = ids.map(id => ({
+    id, r: Math.random(),
+    n: (accPages.value[id] || []).filter(p => p.id).length,
+  })).sort((a, b) => a.n - b.n || a.r - b.r)
+  for (const { id } of order) {
+    const pool = (accPages.value[id] || []).filter(p => p.id && !used.has(p.id))
+    const pick = pool[Math.floor(Math.random() * pool.length)]
+    if (!pick) {
+      deployItems.value[id] = { ...(deployItems.value[id] || {}), page_id: '' }
+      short.push(accLabel(id))
+      continue
+    }
+    used.add(pick.id)
+    deployItems.value[id] = { ...(deployItems.value[id] || {}), page_id: pick.id }
+    done.push(id)
+  }
+  if (done.length) ElMessage.success(t('launch.randPageDone', { n: done.length }))
+  if (short.length) ElMessage.warning(t('launch.randPageShort', { accs: short.join('、') }))
+}
+// 像素策略辅助：从该账户 accPixels 池随机取一个（池空返 ''）
+const randomPixelFor = (id) => {
+  const pool = (accPixels.value[id] || []).filter(p => p.id)
+  return pool.length ? pool[Math.floor(Math.random() * pool.length)].id : ''
+}
+// 「随机用账户像素」：立即为全部已选账户随机填像素（之后仍可手改下拉）
+const applyRandomPixels = () => {
+  const ids = [...selectedAccs.value]
+  if (!ids.length) return ElMessage.warning(t('launch.selectAccFirst'))
+  if (ids.some(id => accLoadingConfig.value.has(id)))
+    return ElMessage.warning(t('launch.randPageLoading'))
+  const short = []
+  for (const id of ids) {
+    const pid = randomPixelFor(id)
+    if (!pid) { short.push(accLabel(id)); continue }
+    deployItems.value[id] = { ...(deployItems.value[id] || {}), pixel_id: pid }
+  }
+  if (short.length) ElMessage.warning(t('launch.psRandomShort', { accs: short.join('、') }))
+  else ElMessage.success(t('launch.psRandomDone', { n: ids.length }))
+}
+const onPixelStrategyChange = () => {
+  if (pixelStrategy.value === 'random') applyRandomPixels()
+  // create 不在此建——部署确认后逐账户预创建（用户取消部署时不白建像素）
+}
+// 「每账户新建像素」预创建：逐账户顺序调（不并发打 FB），失败自动降级随机现有像素并 toast 说明；
+// 降级也无池 → 保持空（部署走模板默认像素）。内部逐账户 catch，永不抛出
+const precreatePixels = async () => {
+  const created = []
+  const fallback = []
+  let firstErr = ''
+  for (const id of [...selectedAccs.value]) {
+    try {
+      const r = await POST('/fb/accounts/' + id + '/create-pixel')
+      deployItems.value[id] = { ...(deployItems.value[id] || {}), pixel_id: r.pixel_id }
+      created.push(id)
+    } catch (e) {
+      const pid = randomPixelFor(id)
+      if (pid) deployItems.value[id] = { ...(deployItems.value[id] || {}), pixel_id: pid }
+      if (!firstErr) firstErr = e.message || ''
+      fallback.push(accLabel(id))
+    }
+  }
+  if (created.length) ElMessage.success(t('launch.psCreated', { n: created.length }))
+  if (fallback.length)
+    ElMessage.warning(t('launch.psCreateFallback', { accs: fallback.join('、'), err: (firstErr || '').slice(0, 120) }))
+}
 // 批量模式：懒加载素材库（仅图片/视频可参与批量生成系列）
 const switchDeployMode = async (m) => {
   deployMode.value = m
@@ -1651,9 +1764,13 @@ const startDeploy = async () => {
       t('launch.deployConfirmTitle'),
       { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
   } catch { return }
-  const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
   deploying.value = true
   try {
+    // 「每账户新建像素」：确认后才逐账户预创建（取消部署不白建）；失败自动降级随机现有并 toast
+    if (pixelStrategy.value === 'create' && (deployTpl.value?.platform || 'fb') !== 'tt') {
+      await precreatePixels()
+    }
+    const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
     const body = { items }
     // 仅批量模式带 asset_ids——不带/空数组 = 后端单模板旧行为（完全向后兼容）
     if (isBatch) body.asset_ids = [...batchAssetIds.value]
@@ -2536,6 +2653,41 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
       <div class="d">{{ deployTpl?.platform === 'tt' ? t('launch.ttDeploySubtitle') : t('launch.deploySubtitle') }}</div>
+      <!-- 主页权限总览（令牌×主页权限面；FB 专属，懒加载折叠面板） -->
+      <div v-if="deployTpl?.platform !== 'tt'" class="pp-ov">
+        <button type="button" class="pp-head" @click="togglePageOverview">
+          <span>{{ t('launch.pagePermTitle') }}<template v-if="permPages.length"> · {{ t('launch.pagePermCount', { n: permPages.length }) }}</template></span>
+          <span class="pp-arrow" :class="{ open: pageOverviewOpen }">▾</span>
+        </button>
+        <div v-if="pageOverviewOpen" class="pp-body" v-loading="permPagesLoading">
+          <div class="pp-hint">{{ t('launch.pagePermHint') }}</div>
+          <div v-if="permPages.length" class="pp-summary">{{ t('launch.ppSummary', { m: permPageSummary.m, a: permPageSummary.a, r: permPageSummary.r }) }}</div>
+          <table v-if="permPages.length" class="pp-table">
+            <thead>
+              <tr>
+                <th>{{ t('launch.page') }}</th>
+                <th>{{ t('launch.ppColManage') }}</th>
+                <th>{{ t('launch.ppColAdsOnly') }}</th>
+                <th>{{ t('launch.ppColReadonly') }}</th>
+                <th>{{ t('launch.ppColSubscribed') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in permPages" :key="p.page_id">
+                <td>
+                  <div class="pp-name">{{ p.page_name || p.page_id }}</div>
+                  <div class="pp-pid">{{ p.page_id }}</div>
+                </td>
+                <td :class="{ ok: (p.manage_tokens || 0) > 0 }">{{ p.manage_tokens || 0 }}</td>
+                <td>{{ p.advertise_only_tokens || 0 }}</td>
+                <td>{{ p.read_only_tokens || 0 }}</td>
+                <td :class="{ ok: p.subscribed === true, dim: p.subscribed !== true }">{{ subStateText(p.subscribed) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="!permPagesLoading && !permPages.length" class="empty-sm">{{ t('launch.pagePermEmpty') }}</div>
+        </div>
+      </div>
       <!-- 结构模板：树概览（素材在树内按节点配 → 「按素材批量生成」整块隐藏，后端也 400 拦） -->
       <div v-if="deployTreeStats" class="deploy-tree-card">
         <div class="dtc-title">{{ t('launch.treeOverview') }}</div>
@@ -2579,7 +2731,18 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <button class="op sm" @click="deploySelectAll">{{ t('launch.deploySelectAll') }}</button>
         <button class="op sm" @click="deploySelectActive">{{ t('launch.deploySelectActive') }}</button>
         <button class="op sm" @click="deployClearSel">{{ t('launch.deployClear') }}</button>
+        <button v-if="deployTpl?.platform !== 'tt' && deployTpl?.post_source !== 'reuse'" class="op sm" :disabled="!selectedAccs.size" @click="randomAssignPages">{{ t('launch.randAssignPages') }}</button>
 </div>
+      <!-- 像素策略（FB 专属）：跟随模板 / 随机用账户像素 / 每账户新建像素（部署时预创建） -->
+      <div v-if="deployTpl?.platform !== 'tt'" class="deploy-mode-row ps-row">
+        <label class="dm-label">{{ t('launch.pixelStrategy') }}</label>
+        <el-select v-model="pixelStrategy" size="small" style="width:200px" @change="onPixelStrategyChange">
+          <el-option value="template" :label="t('launch.psTemplate')" />
+          <el-option value="random" :label="t('launch.psRandom')" />
+          <el-option value="create" :label="t('launch.psCreate')" />
+        </el-select>
+        <span v-if="pixelStrategy === 'create'" class="ps-hint">{{ t('launch.psCreateHint') }}</span>
+      </div>
       <div v-if="deployTpl?.platform === 'tt' && !accLoading && !accounts.length" class="empty-sm">{{ t('launch.deployNoTtAccounts') }}</div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
@@ -2968,6 +3131,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .acc-config{padding:8px 10px;background:var(--bg3);display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px;align-items:center}
 .acc-config label{font-size:11px;color:var(--t3)}
 .sel-count{font-size:12px;color:var(--t3);margin-right:auto}
+/* 主页权限总览（部署抽屉折叠面板）+ 像素策略 */
+.pp-ov{border:1px solid var(--bd);border-radius:8px;margin:8px 0;overflow:hidden}
+.pp-head{display:flex;width:100%;align-items:center;justify-content:space-between;background:var(--bg3);border:none;padding:8px 10px;font-size:12px;color:var(--t2);cursor:pointer}
+.pp-head:hover{color:var(--t1)}
+.pp-arrow{transition:transform .15s;color:var(--t3)}
+.pp-arrow.open{transform:rotate(180deg)}
+.pp-body{padding:8px 10px;max-height:280px;overflow-y:auto}
+.pp-hint{font-size:11px;color:var(--t3);line-height:1.5;margin-bottom:6px}
+.pp-summary{font-size:11px;color:var(--ac);margin-bottom:6px}
+.pp-table{width:100%;border-collapse:collapse;font-size:11px}
+.pp-table th{text-align:left;color:var(--t3);font-weight:500;padding:3px 6px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.pp-table td{padding:4px 6px;border-bottom:1px solid var(--bd);color:var(--t2);vertical-align:top}
+.pp-table tr:last-child td{border-bottom:none}
+.pp-name{color:var(--t1);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-pid{font-family:monospace;color:var(--t3);font-size:10px}
+.pp-table td.ok{color:var(--success);font-weight:600}
+.pp-table td.dim{color:var(--t3)}
+.ps-row{gap:8px;flex-wrap:wrap}
+.ps-hint{font-size:11px;color:var(--t3);line-height:1.4;min-width:0;flex:1}
 
 .prog-head{display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:13px}
 .prog-stat{color:var(--t2);font-variant-numeric:tabular-nums}

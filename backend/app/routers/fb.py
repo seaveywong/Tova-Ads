@@ -1721,6 +1721,74 @@ def unmanage_account(
     return {"unmanaged": True, "act_id": aid, "active_ads_at_removal": active_ads}
 
 
+@router.post("/accounts/{act_id}/create-pixel")
+def create_account_pixel(
+    act_id: str,
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """在该 FB 广告账户下新建像素（部署抽屉「每账户新建像素」策略）。
+    用该账户的写令牌（cred_for_account_op write：候选池 priority 序、operate 先于 manage）
+    POST act_{id}/adspixels（name=Tova-时间戳）；成功 → 入像素库 landing_pixels（source=deploy，
+    绑 act_id 归属）并返回 pixel_id；失败（令牌缺写权限 / 账户归 BM 所有须 BM 侧建）→ 400 带
+    FB 原因 + 常见原因提示，write_log 留痕（成败都写）。
+    """
+    aid = act_id.replace("act_", "").replace("ACT_", "").strip()
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id,
+        Account.act_id == aid,
+        Account.is_managed == True,
+    ).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    if (acc.platform or "fb") == "tt":
+        raise HTTPException(400, "TikTok 账户不支持在此创建 FB 像素")
+    from ..core.fb_tokens import cred_for_account_op
+    cred = cred_for_account_op(db, user.tenant_id, aid, "write")
+    if not cred:
+        raise HTTPException(400, "该账户无可用写令牌，无法创建像素")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    name = f"Tova-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    tid = new_trace_id()
+    try:
+        res = fb.post(f"act_{aid}/adspixels", {"name": name})
+    except FbApiError as e:
+        # 权限/归属类失败给可操作指引（FB 原文保留在前——error_user_msg 是最准的诊断）
+        hint = ("常见原因：令牌缺 ads_management 写权限；或该广告账户归 BM 所有，"
+                "像素须在 BM 的数据源设置中创建"
+                if e.category in ("permissions", "permission_denied") else "")
+        write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
+                  actor_user_id=user.id, target_type="account", target_id=aid,
+                  action_type="create_pixel", source="user", result="fail",
+                  metadata={"cred_id": cred.id, "error": str(e.friendly)[:300]})
+        db.commit()
+        raise HTTPException(400, f"FB 创建像素失败：{e.friendly}。{hint}" if hint
+                            else f"FB 创建像素失败：{e.friendly}")
+    pid = str(res.get("id") or "")
+    if not pid:
+        raise HTTPException(502, f"FB 创建像素返回异常（无 pixel id）：{str(res)[:200]}")
+    # 入像素库：同 pixel_id 已在库则只补 act_id 归属，不重复插行（像素库按 pixel_id 去重展示）
+    from ..models.landing_lib import LandingPixel
+    exists = db.query(LandingPixel).filter(
+        LandingPixel.tenant_id == user.tenant_id, LandingPixel.pixel_id == pid,
+    ).first()
+    if exists:
+        if not exists.act_id:
+            exists.act_id = aid
+    else:
+        db.add(LandingPixel(tenant_id=user.tenant_id, created_by=user.id,
+                            pixel_id=pid, pixel_name=name, platform="fb",
+                            act_id=aid, source="deploy"))
+    write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
+              actor_user_id=user.id, target_type="account", target_id=aid,
+              action_type="create_pixel", source="user", result="success",
+              metadata={"pixel_id": pid, "cred_id": cred.id,
+                        "in_library": exists is None})
+    db.commit()
+    return {"pixel_id": pid, "pixel_name": name, "act_id": aid, "trace_id": tid,
+            "in_library": exists is None}
+
+
 # ── 数据健康诊断 / 脏数据清洗（超管，令牌页挂账项）──
 # 只读扫描列出令牌/账户/关联表的脏数据；data-clean 手动清理悬挂关联行（幂等，写 action_logs）。
 # 不自动跑：正常写路径（delete_credential/unmanage/import）已各自清理，这里兜历史遗留与中途失败残渣。

@@ -203,11 +203,22 @@ def pages_status(
                 row = by_page[pid]
                 row["can_manage"] = row["can_manage"] or _mg
                 row["can_advertise"] = row["can_advertise"] or _ad
+                # 令牌×主页权限面计数（部署抽屉「主页权限总览」用）：
+                # 每个看到该页的令牌各计入一个权限面（可管理 / 仅广告 / 只读）
+                if _mg:
+                    row["manage_tokens"] += 1
+                elif _ad:
+                    row["advertise_only_tokens"] += 1
+                else:
+                    row["read_only_tokens"] += 1
                 continue
             row = {"page_id": pid, "page_name": pname, "alias": alias,
                    "can_manage": any(t in ("MANAGE", "ADMINISTER", "MANAGE_PAGES",
                                            "MANAGE_JOBS") for t in tasks),
                    "can_advertise": "ADVERTISE" in tasks,
+                   "manage_tokens": 1 if _mg else 0,
+                   "advertise_only_tokens": 1 if (_ad and not _mg) else 0,
+                   "read_only_tokens": 0 if (_mg or _ad) else 1,
                    "tasks": [t for t in tasks if t not in ("ANALYZE",)][:6],
                    "subscribed": None}
             try:

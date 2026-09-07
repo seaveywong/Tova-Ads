@@ -63,6 +63,10 @@ ERROR_ZH_EN: dict[str, str] = {
     "未绑定有效 FB 凭证": "No valid Facebook credential is bound",
     "账户未纳管": "Account is not under management",
     "账户未纳管或已移除": "Account is not under management or has been removed",
+    "TikTok 账户不支持在此创建 FB 像素": "TikTok accounts cannot create Facebook pixels here",
+    "该账户无可用写令牌，无法创建像素": (
+        "This account has no usable write token; the pixel cannot be created"
+    ),
 
     # ---- ads.py / 广告操作 ----
     "批量操作上限 100 条": "Batch operations are limited to 100 items",
