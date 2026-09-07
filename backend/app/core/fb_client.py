@@ -26,6 +26,10 @@ FB_ERROR_MAP = {
     200:      ("permissions",    "权限不足"),
     10:       ("permission_denied", "权限被拒绝"),
     190:      ("token_expired",  "Token 已过期或失效，请重新绑定"),
+    # 安全检查点（生产实测 Roly-V21 #3858385：FB 风控锁定——异地登录(服务器IP≠号主常用地)
+    # 触发，广告管理器提示"验证你的账户之前广告不会投放"。只能号主本人登录 FB 完成验证
+    # （手机验证码/人脸/证件），代码无法绕过；账户列表如批量报此错=号被风控，找号商）
+    31:       ("account_checkpoint", "账户安全锁定：FB 检测到异常登录，需账户本人登录 Facebook 完成身份验证后广告才会投放(#3858385)"),
     # 竞价（1.0 三硬规矩对应）
     1815858:  ("bid_conflict",   "竞价策略与出价冲突（LOWEST_COST 不带 bid）"),
     2490487:  ("bid_required",   "此广告目标需明确竞价策略"),
@@ -68,7 +72,14 @@ def classify_fb_error(error_data: dict) -> tuple[str, str]:
         return FB_ERROR_MAP[code]
     if "non-discrimination" in msg.lower():
         return FB_ERROR_MAP[2859002]
-    return ("generic", f"Facebook 返回错误（code {code}）：{msg[:120]}")
+    # 未知错误：原始信息保留（error_user_title/user_msg 是 FB 自己的中文提示，
+    # 精确诊断全靠它——生产实测 #3858385 安全锁定的"验证你的账户"就只在 user_msg 里）
+    user_msg = (error_data.get("error_user_msg") or "").strip()
+    user_title = (error_data.get("error_user_title") or "").strip()
+    detail = user_msg or msg[:120]
+    if user_title:
+        detail = f"{user_title}：{detail}"
+    return ("generic", f"Facebook 返回错误（code {code}{'/' + str(sub) if sub else ''}）：{detail}")
 
 
 class FbApiError(Exception):
