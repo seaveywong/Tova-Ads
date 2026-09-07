@@ -795,6 +795,14 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         return SimpleNamespace(**d)
 
     tree_out, will_spend, abo_total_usd = [], [], 0.0
+    # 素材名映射（will_spend 按展开口径：素材组节点每素材一条，名字=素材名——与部署抽屉
+    # 「启用链路数」和真实建出的广告一一对应，前端两个数字不会对不上）
+    _asset_names = {}
+    _all_aids = {int(a) for s in adsets for an in (s.get("ads") or []) for a in (an.get("asset_ids") or [])}
+    if _all_aids:
+        for _a in db.query(Asset).filter(Asset.id.in_(_all_aids),
+                                         Asset.tenant_id == tenant_id).all():
+            _asset_names[_a.id] = ((_a.name or _a.filename or "") or f"素材{_a.id}")[:60]
     for si, snode in enumerate(adsets, 1):
         sname = (snode.get("name") or f"{campaign_name} 组{si}")[:100]
         s_enabled = bool(snode.get("enabled"))
@@ -815,7 +823,10 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             a_enabled = bool(anode.get("enabled")) and s_enabled
             asset_ids = anode.get("asset_ids") or []
             if a_enabled:
-                will_spend.append(f"{sname}/{anode.get('name') or (f'广告{ai}' if not asset_ids else '素材组')}")
+                _names = [_asset_names.get(int(x), f"素材{x}") for x in asset_ids] or \
+                         [anode.get("name") or f"广告{ai}"]
+                for _n in _names:
+                    will_spend.append(f"{sname}/{_n}")
             ads_out.append({
                 "name": anode.get("name") or "",
                 "enabled": a_enabled,
