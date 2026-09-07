@@ -473,7 +473,7 @@ class FbClient:
         """拉广告（全量分页）。effective_status=None 拉全状态(管理器)，默认仅 ACTIVE(巡检/哨兵)。"""
         params = {"fields": fields or (
             "id,name,status,effective_status,configured_status,adset_id,campaign_id,created_time,"
-            "creative{id,effective_object_story_id,object_story_spec,thumbnail_url},review_feedback")}
+            "creative{id,effective_object_story_id,object_story_spec,thumbnail_url,body,title},review_feedback")}
         if effective_status:
             params["filtering"] = f'[{{"field":"effective_status","operator":"IN","value":{effective_status}}}]'
         return self.get_paged(f"act_{act_id}/ads", params)

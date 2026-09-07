@@ -360,6 +360,14 @@ const batchStatus = async (status) => {
 }
 // 创意缩略图 + 拒审原因（/ads/list 透传 FB creative.thumbnail_url / review_feedback，纯前端展示）
 const thumbOf = (a) => a?.creative?.thumbnail_url || ''
+// 创意文案行：creative.body/title（v25 仍可读）优先，object_story_spec.link_data 兜底（spec 创建的）
+const adCopyLine = (a) => {
+  const c = a?.creative || {}
+  const oss = c.object_story_spec?.link_data || {}
+  const ti = c.title || oss.name || ''
+  const co = c.body || oss.message || ''
+  return (ti && co) ? `${ti} — ${co}` : (ti || co)
+}
 const showThumb = (a) => {
   const u = thumbOf(a)
   if (!u) return
@@ -626,7 +634,7 @@ const subscribeLeads = async () => {
         <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
         <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="a.effective_status === 'DISAPPROVED' && rfOf(a)" class="rf-flag" :title="t('adm.reviewFlagHint')" @click.stop="showReview(a)">⚠</span></div>
-          <div class="nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" />{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span><div class="sid"><span v-if="platChipByAct(a.act_id)" :class="['plat-chip', platChipByAct(a.act_id)]">{{ platChipByAct(a.act_id).toUpperCase() }}</span>{{ a.account_name }} · {{ a.id }}</div></div>
+          <div class="nm ad-nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" /><div class="txt"><div class="l1">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span></div><div v-if="adCopyLine(a)" class="cpy" :title="adCopyLine(a)">{{ adCopyLine(a) }}</div><div class="sid"><span v-if="platChipByAct(a.act_id)" :class="['plat-chip', platChipByAct(a.act_id)]">{{ platChipByAct(a.act_id).toUpperCase() }}</span>{{ a.account_name }} · {{ a.id }}</div></div></div>
           <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="t('adm.slugTitle', { slug: a.slug, pass: a.landing_pass||0 })">/a/{{ a.slug }}</code><span v-else class="muted" :title="t('adm.slugEmptyTitle')">{{ t('adm.slugEmpty') }}</span></div>
           <div>{{ fmtSpendCol(a) }}</div><div>{{ a.conversions || 0 }}</div><div>{{ fmtCpaCol(a) }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? Number(a.ctr).toFixed(2) + '%' : '-' }}</div>
           <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">📌 {{ t('adm.reuseThisPost') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
@@ -854,7 +862,12 @@ const subscribeLeads = async () => {
 .budget-input:focus { outline: none; border-color: var(--ac) }
 .quick-btns { display: flex; gap: 6px; margin-top: 4px }
 .rd-mark { font-size: 10px; color: var(--ac); background: rgba(10,132,255,.12); padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 400; vertical-align: middle }
-.ad-thumb { width: 24px; height: 24px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 6px; cursor: zoom-in }
+.ad-thumb { width: 72px; height: 40px; border-radius: 6px; object-fit: cover; cursor: zoom-in; flex: none }
+/* 广告名/创意文案/账户行 与缩略图并排（campaign/adset 的 .nm 保持原堆叠，不套 ad-nm） */
+.ad-nm { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.ad-nm .txt { min-width: 0; flex: 1 }
+.ad-nm .l1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ad-nm .cpy { font-size: 11px; font-weight: 400; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 1px 0 }
 .rf-flag { color: var(--error); cursor: pointer; font-size: 11px; margin-left: 2px }
 .rf-flag:hover { opacity: .8 }
 .cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
