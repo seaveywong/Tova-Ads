@@ -246,7 +246,7 @@ const submitMemberAdd = async () => {
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8 */;padding:20px}
 .head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:16px}
 .head-text{flex:1;min-width:0}
 .t{font-size:16px;font-weight:600;color:var(--t1);margin-bottom:5px}

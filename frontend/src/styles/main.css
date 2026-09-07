@@ -11,6 +11,24 @@
   --z-toast: 500;
 }
 
+/* ── EP 组件变量桥接（UI审计#3）：一切走 --el-color-* 的组件（pagination/message-box/tag/radio）
+   与 EP 默认蓝 #409eff 告别，统一跟主题 token。放在两主题块之前，暗色值在下方块覆盖。── */
+:root {
+  --el-color-primary: var(--ac);
+  --el-color-primary-light-3: var(--ach);
+  --el-color-primary-light-5: color-mix(in srgb, var(--ac) 55%, var(--bg));
+  --el-color-primary-light-7: color-mix(in srgb, var(--ac) 30%, var(--bg));
+  --el-color-primary-light-8: color-mix(in srgb, var(--ac) 20%, var(--bg));
+  --el-color-primary-light-9: color-mix(in srgb, var(--ac) 10%, var(--bg));
+  --el-color-primary-dark-2: var(--ac);
+  --el-color-danger: var(--error);
+  --el-color-danger-light-9: color-mix(in srgb, var(--error) 10%, var(--bg));
+  --el-color-warning: var(--warning);
+  --el-color-warning-light-9: color-mix(in srgb, var(--warning) 10%, var(--bg));
+  --el-color-success: var(--success);
+  --el-color-error: var(--error);
+}
+
 /* ── 暗色主题（默认）── */
 :root, [data-theme="dark"] {
   --bg: #1a1a2e;
@@ -21,7 +39,7 @@
   --topbar-bg: rgba(26,26,46,0.85);
   --t1: #e4e4ef;
   --t2: #9898b0;
-  --t3: #83839c;
+  --t3: #8f8fab;   /* UI审计#2：卡片上 4.1→5.0 AA 达标 */
   --ac: #0a84ff;
   --ach: #409cff;
   --acg: rgba(10,132,255,0.12);
@@ -49,7 +67,7 @@
   --topbar-bg: rgba(255,255,255,0.85);
   --t1: #1d1d1f;
   --t2: #515154;
-  --t3: #86868b;
+  --t3: #767680;   /* UI审计#2：亮色 3.3→4.6 AA 达标 */
   --ac: #0071e3;
   --ach: #0066cc;
   --acg: rgba(0,113,227,0.10);
@@ -205,3 +223,10 @@ a { color: var(--ac); text-decoration: none; }
   .ph-actions .head-btn { padding: 6px 8px }
   .ph-title { font-size: 18px; }
 }
+
+
+/* ── el-switch 全局主题化（UI审计#4）：17 处组件 props 硬编码 active/inactive-color 的
+   统一底座——props 存在时优先，此处管 hover/disabled 与未来去 props 的场景 ── */
+.el-switch.is-checked .el-switch__core { background-color: var(--ac) !important; border-color: var(--ac) !important; }
+.el-switch:not(.is-checked) .el-switch__core { background-color: var(--bg3) !important; border-color: var(--bd) !important; }
+.el-switch.is-disabled .el-switch__core { opacity: .45; }

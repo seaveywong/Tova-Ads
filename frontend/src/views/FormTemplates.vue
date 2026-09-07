@@ -423,7 +423,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1)}
 .card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap}
@@ -475,7 +475,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
 .pm-label{font-size:11px;color:var(--t2);font-weight:500}
 .pm-input-mock{background:var(--bg3);border:1px solid var(--bd);border-radius:4px;height:28px;display:flex;align-items:center;padding:0 8px;color:var(--t3);font-size:11px}
 .pm-options{display:flex;gap:4px;flex-wrap:wrap}
-.pm-option{font-size:10px;padding:2px 8px;background:var(--acg);color:var(--ac);border-radius:10px;border:1px solid var(--ac)}
+.pm-option{font-size:10px;padding:2px 8px;background:var(--acg);color:var(--ac);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;border:1px solid var(--ac)}
 .pm-submit{padding:10px;background:var(--ac);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:default;font-family:inherit}
 .pm-privacy{font-size:10px;color:var(--t3);text-align:center;margin-top:4px;cursor:pointer}
 .pm-thankyou{border-top:1px solid var(--bd);padding-top:8px;margin-top:4px}

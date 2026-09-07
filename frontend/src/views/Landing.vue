@@ -1171,7 +1171,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 /* 列表卡模式徽标 */
 .mode-chip{flex:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px}
 .mode-chip.display{background:rgba(10,132,255,.12);color:var(--ac)}
-.mode-chip.redirect{background:rgba(52,199,89,.14);color:#34c759}
+.mode-chip.redirect{background:rgba(52,199,89,.14);color:var(--success)   /* UI审计#10b */}
 /* 卡片统计数字块（替代原灰色 prose） */
 .lp-stats{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .stat-num b{font-size:16px;font-variant-numeric:tabular-nums;margin-right:4px}

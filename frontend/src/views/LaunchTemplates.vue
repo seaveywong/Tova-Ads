@@ -1774,7 +1774,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-obj{font-size:11px;color:var(--ac);white-space:nowrap}
@@ -1851,7 +1851,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .search-item .sz{color:var(--t3);font-size:10px;margin-left:auto}
 .search-item .add{color:var(--ac);font-weight:700}
 .interest-list{display:flex;gap:4px;flex-wrap:wrap}
-.interest-chip{font-size:11px;padding:3px 8px;background:var(--acg);color:var(--ac);border-radius:10px;display:flex;align-items:center;gap:4px}
+.interest-chip{font-size:11px;padding:3px 8px;background:var(--acg);color:var(--ac);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;display:flex;align-items:center;gap:4px}
 .interest-chip button{background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;padding:0}
 
 .asset-pick{display:flex;align-items:center;gap:10px}
@@ -1905,7 +1905,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .post-readonly-preview{display:flex;flex-direction:column;gap:8px;border:1px solid var(--bd);border-radius:8px;padding:12px;background:var(--bg2)}
 .post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 /* 跟帖预览：内容卡（缩略图+标题/域名 头部，文案，CTA）—— 宽敞不挤 */
-.ad-preview-card{border:1px solid var(--bd);border-radius:10px;background:var(--bg2);padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.ad-preview-card{border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;background:var(--bg2);padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .ad-preview-top{display:flex;gap:12px;align-items:flex-start}
 .ad-preview-thumb{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:none;background:var(--bg3)}
 .ad-preview-noimg{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--t3)}
@@ -1954,7 +1954,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 .prog-head{display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:13px}
 .prog-stat{color:var(--t2);font-variant-numeric:tabular-nums}
-.prog-status{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+.prog-status{font-size:11px;padding:2px 8px;border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;font-weight:600}
 .prog-status.completed{color:var(--success);background:rgba(52,199,89,.13)}
 .prog-status.partial_failed{color:var(--warning);background:rgba(255,159,10,.13)}
 .prog-status.running{color:var(--ac);background:rgba(10,132,255,.13)}
@@ -2012,14 +2012,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 /* #8 summary strip */
 .summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
-.ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:10px;cursor:pointer;transition:color .15s}
+.ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;cursor:pointer;transition:color .15s}
 .ss-chip:hover{color:var(--ac)}
 .ss-status{font-size:11px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:auto}
 .ss-status.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .ss-status.pending{color:var(--warning);background:rgba(255,159,10,.13)}
 
 /* Advantage+ 盒子 */
-.advantage-box{border:1px solid var(--ac);border-radius:10px;padding:10px 14px;margin:4px 0;background:rgba(10,132,255,.05)}
+.advantage-box{border:1px solid var(--ac);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:10px 14px;margin:4px 0;background:rgba(10,132,255,.05)}
 .adv-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .adv-info{display:flex;flex-direction:column;gap:2px;flex:1}
 .adv-title{font-size:13px;font-weight:600;color:var(--ac)}

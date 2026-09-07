@@ -1221,7 +1221,7 @@ const deleteToken = async (tk) => {
 .h-sample{font-size:10px;color:var(--t3);font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center}
-.modal{background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:var(--shadow-dropdown)}
+.modal{background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-dropdown)}   /* UI审计#6：长弹窗溢出视口 */
 .modal.wide{width:540px}
 .m-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:12px}
 .m-tabs{display:flex;margin-bottom:12px;border-bottom:1px solid var(--bd)}

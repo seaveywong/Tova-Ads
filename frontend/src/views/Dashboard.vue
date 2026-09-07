@@ -1622,7 +1622,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* sticky 基准是 .content 滚动区顶缘（平台上下文条在其外常驻），top:0 即紧贴平台条 */
 .tg-mgr-btn { position: relative; }
 .tg-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-danger, #f56c6c); box-shadow: 0 0 0 2px var(--bg, #fff); }
-.tg-banner { display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 10px; border: 1px solid var(--el-color-warning, #e6a23c); background: var(--el-color-warning-light-9, #fdf6ec); border-radius: 8px; font-size: 13px; }
+.tg-banner { display: flex; align-items: center; gap: 12px; padding: 8px 14px; margin-bottom: 10px; border: 1px solid var(--el-color-warning, #e6a23c); background: rgba(255, 214, 10, 0.08)   /* UI审计#1：EP 只注入亮色值，暗色下白字奶油底不可读 */; border-radius: 8px; font-size: 13px; }
 .tg-banner-txt { flex: 1; }
 .tg-banner-x { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--tx-3, #999); padding: 2px 6px; }
 /* 贴顶前后样式恒定（圆角/阴影/边框不变）——视觉切换=滚动抖动源，已彻底移除 stuck 态 */

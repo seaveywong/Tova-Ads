@@ -464,11 +464,11 @@ const doInspect = async (force = false) => {
 .pl-row { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--bd); border-radius: 10px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
 .pl-time { color: var(--tx-3, #999); font-size: 12px; white-space: nowrap; }
 .pl-tag { flex: none; padding: 2px 8px; border-radius: 6px; font-size: 12px; color: #fff; }
-.pl-tag.sent { background: #e6a23c; }
-.pl-tag.emg { background: #f56c6c; }
-.pl-tag.rule { background: #909399; }
+.pl-tag.sent { background: var(--warning); }   /* UI审计#10：EP 旧色→token */
+.pl-tag.emg { background: var(--error); }
+.pl-tag.rule { background: var(--t3); }
 .pl-target { flex: none; color: var(--tx-3, #999); font-size: 12px; }
 .pl-detail { flex: 1; min-width: 200px; word-break: break-all; }
-.pl-result { flex: none; font-size: 12px; color: #67c23a; }
-.pl-result.fail { color: #f56c6c; }
+.pl-result { flex: none; font-size: 12px; color: var(--success); }
+.pl-result.fail { color: var(--error); }
 </style>

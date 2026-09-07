@@ -224,7 +224,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8 */;padding:20px}
 .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}
 .tabs{display:flex;gap:3px;background:var(--bg3);padding:3px;border-radius:8px}
 .tab{padding:6px 15px;border:none;background:transparent;color:var(--t3);border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s;font-family:inherit;font-weight:500}

@@ -478,7 +478,13 @@ const openRedirectMgmt = async () => {
   try { redirectList.value = await GET('/ads/redirects') } catch (e) {}
   mgmtLoading.value = false
 }
-const removeRedirect = async (adId) => { try { await DELETE('/ads/redirects/' + adId); const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m; redirectList.value = redirectList.value.filter(r => r.ad_id !== adId); ElMessage.success(t('adm.redirectRestored')) } catch (e) {} }
+const removeRedirect = async (adId) => {
+  try { await ElMessageBox.confirm(t('adm.redirectRemoveConfirm'), t('common.confirm'), { type: 'warning' }) } catch { return }
+  opLoading.value = true
+  try { await DELETE('/ads/redirects/' + adId); const m = { ...redirectMap.value }; delete m[adId]; redirectMap.value = m; redirectList.value = redirectList.value.filter(r => r.ad_id !== adId); ElMessage.success(t('adm.redirectRestored')) }
+  catch (e) { ElMessage.error(e.message || t('common.fail')) }   // UI审计#5：曾静默吞错——删失败零反馈且可连点
+  opLoading.value = false
+}
 const resetRedirects = async () => {
   try { await ElMessageBox.confirm(t('adm.resetRedirectsMsg'), t('common.confirm'), { type: 'warning' })
     const r = await POST('/ads/redirects/reset', {}); redirectMap.value = {}; redirectList.value = []; ElMessage.success(t('adm.redirectsCleared', { n: r.cleared || 0 }))
@@ -820,7 +826,7 @@ const unsubscribeLeads = async () => {
         <div v-for="r in redirectList" :key="r.ad_id" class="rd-mgmt-row">
           <code class="rd-mid">{{ r.ad_id }}</code>
           <span class="rd-murl" :title="r.target_url">{{ r.target_url }}</span>
-          <button class="ctrl-btn sm" @click="removeRedirect(r.ad_id)">{{ t('common.remove') }}</button>
+          <button class="ctrl-btn sm" :disabled="opLoading" @click="removeRedirect(r.ad_id)">{{ t('common.remove') }}</button>
         </div>
         <div v-if="!redirectList.length" class="empty" style="padding:30px">{{ t('adm.redirectMgmtEmpty') }}</div>
       </div>

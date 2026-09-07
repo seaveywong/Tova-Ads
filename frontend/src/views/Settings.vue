@@ -815,7 +815,7 @@ const runKeepaliveNow = async () => {
 .anchor-btn.active{background:var(--ac);color:#fff}
 .card{scroll-margin-top:60px}
 .ep-input{flex:1}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:18px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:18px}
 .t{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:6px}
 .d{font-size:12px;color:var(--t3);line-height:1.6;margin-bottom:14px}
 .d b{color:var(--t2)}
@@ -917,7 +917,7 @@ const runKeepaliveNow = async () => {
 .wh-url-row{display:flex;align-items:center;gap:8px;margin:8px 0 12px}
 .wh-url{flex:1;font-family:monospace;font-size:12px;color:var(--ac);background:var(--bg3);padding:6px 10px;border-radius:6px;word-break:break-all}
 .wh-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
-.wh-chip{font-size:11px;padding:2px 10px;border-radius:10px;font-weight:600}
+.wh-chip{font-size:11px;padding:2px 10px;border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;font-weight:600}
 .wh-chip.ok{background:rgba(48,209,97,.12);color:var(--success)}
 .wh-chip.warn{background:rgba(255,159,10,.12);color:var(--warning)}
 .wh-app-names{font-size:11px;color:var(--t3)}
