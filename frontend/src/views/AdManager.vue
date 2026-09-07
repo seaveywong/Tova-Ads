@@ -545,8 +545,28 @@ const exportLeads = async () => {
 }
 const subscribeLeads = async () => {
   opLoading.value = true
-  try { const r = await POST('/leads/subscribe'); ElMessage.success(r.error ? t('adm.leadsErr', { msg: r.error }) : t('adm.leadsSubscribed', { ok: r.subscribed || 0, n: r.total_pages || 0 })) }
-  catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  try {
+    const r = await POST('/leads/subscribe')
+    if (r.error) { ElMessage.error(t('adm.leadsErr', { msg: r.error })) }
+    else {
+      // 部分失败时带第一条原因（0/N 时用户第一问就是"为什么"——FB 原文最有用）
+      const fail = (r.pages || []).find(p => p && p.ok === false && p.error)
+      const base = t('adm.leadsSubscribed', { ok: r.subscribed || 0, n: r.total_pages || 0 })
+      if ((r.subscribed || 0) < (r.total_pages || 0) && fail) ElMessage.warning(`${base} · ${fail.page_name || fail.page_id}: ${fail.error}`)
+      else ElMessage.success(base)
+    }
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  opLoading.value = false
+}
+const unsubscribeLeads = async () => {
+  try { await ElMessageBox.confirm(t('adm.leadsUnsubConfirm'), t('common.confirm'), { type: 'warning' }) }
+  catch { return }
+  opLoading.value = true
+  try {
+    const r = await POST('/leads/unsubscribe')
+    if (r.error) { ElMessage.error(t('adm.leadsErr', { msg: r.error })) }
+    else ElMessage.success(t('adm.leadsUnsubscribed', { ok: r.unsubscribed || 0, n: r.total_pages || 0 }))
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
   opLoading.value = false
 }
 </script>
@@ -656,6 +676,7 @@ const subscribeLeads = async () => {
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
         <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads">🔔 {{ t('adm.leadsSubscribe') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="unsubscribeLeads">🔕 {{ t('adm.leadsUnsubscribe') }}</button>
         <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
       </div>
       <div class="tbl" v-loading="leadsLoading">

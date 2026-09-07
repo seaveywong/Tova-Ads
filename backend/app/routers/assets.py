@@ -605,6 +605,12 @@ def delete_asset(aid: int, user: CurrentUser = Depends(require_permission("asset
     ).count()
     if _refs > 0:
         raise HTTPException(400, f"该素材被 {_refs} 个投放模板引用，请先移除引用")
+    # archived 模板的悬挂引用一并清（引用闸只拦活跃模板；归档模板不再部署，置空防悬挂）
+    db.query(LaunchTemplate).filter(
+        LaunchTemplate.tenant_id == user.tenant_id,
+        LaunchTemplate.asset_id == aid,
+        LaunchTemplate.status == "archived",
+    ).update({LaunchTemplate.asset_id: None}, synchronize_session="fetch")
     # 硬删本地文件
     try:
         os.remove(os.path.join(ASSET_DIR, a.storage_key))

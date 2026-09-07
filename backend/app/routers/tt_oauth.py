@@ -513,6 +513,12 @@ def delete_tt_credential(cred_id: int,
     ).delete(synchronize_session="fetch")
     db.delete(cred)
     db.commit()
+    # 删后即时重绑 TT 孤儿账户到其余可用令牌（对齐 FB delete_credential；内部自带 fb/tt 分支）
+    try:
+        from ..core.fb_tokens import reassociate_orphan_accounts
+        reassociate_orphan_accounts(db, user.tenant_id)
+    except Exception:
+        pass
     return {"deleted": True, "id": cred_id}
 
 

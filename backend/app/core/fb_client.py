@@ -401,6 +401,16 @@ class FbClient:
         page_fb.post(f"{page_id}/subscribed_apps", {"subscribed_fields": ",".join(desired)})
         return {"page_id": page_id, "subscribed_fields": desired}
 
+    def unsubscribe_page_webhook(self, page_id: str, page_token: str) -> dict:
+        """退订主页 webhook（page×App 级整体退订——FB 无按 field 退订，leadgen/feed 等一并停）。
+
+        需 page access token。手动放弃某页接收时用（删令牌/移除账户不自动退订：webhook 入库
+        按 page→租户映射，还在推就能收，退订是显式动作）。
+        """
+        page_fb = FbClient(page_token)
+        page_fb._request("DELETE", f"{page_id}/subscribed_apps")
+        return {"page_id": page_id}
+
     def delete_node(self, node_id: str) -> dict:
         """硬删节点（DELETE /{id}）。通常用 update_status(ARCHIVED) 软删更安全。"""
         return self._request("DELETE", node_id)

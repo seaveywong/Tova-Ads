@@ -14,7 +14,7 @@ from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..core.tt_client import TtApiError
-from ..models.fb import FbCredential, Account, AccountFbCredential
+from ..models.fb import FbCredential, Account, AccountFbCredential, TokenHealth
 from ..schemas.fb import StoreCredentialIn, FbCredentialOut, ImportAccountsIn
 
 router = APIRouter(prefix="/fb", tags=["fb"])
@@ -348,6 +348,11 @@ def delete_credential(
     # 删多令牌关联行（否则 FK 阻止删 FbCredential —— 这是"移除令牌不生效"的根因）
     db.query(AccountFbCredential).filter(
         AccountFbCredential.fb_credential_id == cred_id,
+    ).delete(synchronize_session="fetch")
+    # 删 token_health 行（同 FK 阻删 + 即时清悬挂——曾只能等超管 data-clean/30 天 retention 兜底；
+    # 有健康行的令牌此前删除直接 FK 500）
+    db.query(TokenHealth).filter(
+        TokenHealth.fb_credential_id == cred_id,
     ).delete(synchronize_session="fetch")
     db.delete(cred)
     db.commit()
@@ -1534,29 +1539,38 @@ def unmanage_account(
             AdsCache.platform == _plat).delete()
     except Exception:
         pass
-    # 清该账户的素材 FB image_hash/video_id 缓存：解除纳管后成死数据，
-    # 重导账户后旧值仍挂在素材上属脏数据（重新部署会自然重传，无需预热）。
-    # JSON 键是纯数字 act_id（ensure_image_hash_for_account 写入约定）。
+    # 解绑该账户的像素（landing_pixels.act_id=来源账户）：置 NULL 不删行——像素本体保留可
+    # 手动用；死 act_id 引用会让像素库归属失真（投放模板选像素时看不出账户已移除）。
+    # 按 platform 过滤：TT 广告主 id 是每广告主小整数，不过滤会误清 FB 同号像素的绑定。
+    try:
+        from ..models.landing_lib import LandingPixel
+        db.query(LandingPixel).filter(
+            LandingPixel.tenant_id == user.tenant_id, LandingPixel.act_id == aid,
+            LandingPixel.platform == _plat,
+        ).update({LandingPixel.act_id: None}, synchronize_session="fetch")
+    except Exception:
+        pass
+    # 清该账户的素材上传缓存：解除纳管后成死数据，重导账户后旧值仍挂在素材上属脏数据
+    # （重新部署会自然重传，无需预热）。JSON 键是纯数字 act_id（ensure_image_hash_for_account/
+    # TT 素材上传的写入约定）。FB 账户清 fb_image_hashes/fb_video_ids，TT 账户清 tt_file_ids
+    # （TT 对等性：曾只清 FB 两列，TT file_id 缓存成脏数据——file_id 绑广告主不可跨用）。
     try:
         from ..models.launch import Asset
-        _dirty = False
-        for col in (Asset.fb_image_hashes, Asset.fb_video_ids):
+        _cols = ((Asset.fb_image_hashes, Asset.fb_video_ids) if _plat == "fb"
+                 else (Asset.tt_file_ids,))
+        for col in _cols:
             for a in db.query(Asset).filter(
                 Asset.tenant_id == user.tenant_id,
                 col.isnot(None),
                 col.ilike(f'%"{aid}"%'),
             ).all():
                 try:
-                    cache = json.loads(a.fb_image_hashes if col is Asset.fb_image_hashes else a.fb_video_ids)
+                    cache = json.loads(getattr(a, col.name) or "{}")
                 except Exception:
                     cache = None
                 if isinstance(cache, dict) and aid in cache:
                     del cache[aid]
-                    if col is Asset.fb_image_hashes:
-                        a.fb_image_hashes = json.dumps(cache, ensure_ascii=False) if cache else None
-                    else:
-                        a.fb_video_ids = json.dumps(cache, ensure_ascii=False) if cache else None
-                    _dirty = True
+                    setattr(a, col.name, json.dumps(cache, ensure_ascii=False) if cache else None)
     except Exception:
         pass  # 清缓存失败不阻断取消纳管主流程
     # 留痕 + 告警（P0-7）：unmanage 必写 action_logs（审计）；有 ACTIVE 广告时告警——

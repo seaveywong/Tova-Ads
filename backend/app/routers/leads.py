@@ -161,11 +161,19 @@ def update_lead(
     return _lead_dict(lead)
 
 
-def _get_active_cred(db: Session, tenant_id: int):
-    """取租户活跃 FB 凭证（多令牌取首个活跃）。"""
-    return db.query(FbCredential).filter(
+def _tenant_fb_clients(db: Session, tenant_id: int) -> list:
+    """租户全部活跃令牌的 FbClient 列表 [(client, alias)]。
+    潜客链路（订阅/拉取）按页/表单走的是用户级权限（页管理/leads_retrieval），不同令牌权限面
+    不同——单取首个 active 曾令订阅全灭（首个是操作员令牌，无 pages_manage_metadata）。"""
+    out = []
+    for c in db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-    ).first()
+    ).all():
+        try:
+            out.append((FbClient(decrypt(c.access_token_enc)), c.alias or f"#{c.id}"))
+        except Exception:
+            continue
+    return out
 
 
 def _sync_leads_run(tenant_id: int, forms: list):
@@ -175,20 +183,29 @@ def _sync_leads_run(tenant_id: int, forms: list):
     from ..core.database import SuperSessionLocal
     db = SuperSessionLocal()
     try:
-        cred = _get_active_cred(db, tenant_id)
-        if not cred:
+        clients = _tenant_fb_clients(db, tenant_id)
+        if not clients:
             _log.warning("[LeadsSync] tenant=%s 无活跃令牌，后台同步跳过", tenant_id)
             return
-        fb = FbClient(decrypt(cred.access_token_enc))
         synced, enriched = 0, 0
         fb_errors = []
         for f in forms:
-            try:
-                leads_data = fb.get_leads(f["form_id"])
-            except FbApiError as e:
+            # 多令牌容灾：不同令牌权限面不同（leads_retrieval 按授权用户），单令牌权限不足/
+            # 失效时换下一个重试；全部失败才记错（记最后一个的报错原文）
+            leads_data = None
+            last_err = None
+            for fb, _alias in clients:
+                try:
+                    leads_data = fb.get_leads(f["form_id"])
+                    break
+                except FbApiError as e:
+                    last_err = e
+            if leads_data is None:
                 # 异步化后无同步响应可带错误——必须记日志（否则失败完全静默）
-                _log.warning("[LeadsSync] form=%s 拉取失败: %s", f["form_id"], e.friendly)
-                fb_errors.append({"form_id": f["form_id"], "error": e.friendly})
+                _log.warning("[LeadsSync] form=%s 拉取失败(已试 %d 个令牌): %s",
+                             f["form_id"], len(clients), getattr(last_err, "friendly", last_err))
+                fb_errors.append({"form_id": f["form_id"],
+                                  "error": str(getattr(last_err, "friendly", last_err))})
                 continue
             for ld in leads_data:
                 lid = ld.get("id")
@@ -302,27 +319,73 @@ def subscribe_webhook(
 ):
     """订阅该租户所有主页的 leadgen webhook（page-level subscription）。
 
-    遍历 me/accounts（含 access_token），逐页 POST /{page}/subscribed_apps + subscribed_fields=leadgen。
+    遍历全部活跃令牌的 me/accounts（含 access_token），逐页 POST /{page}/subscribed_apps +
+    subscribed_fields=leadgen；同页任一令牌订阅成功即成（不同令牌权限面不同——曾单取首个
+    active，令牌池轮换到操作员令牌时 13 页全灭 0/13，操作员无 pages_manage_metadata）。
     需 pages_manage_metadata scope。app-level 订阅是一次性手动步骤（FB App Dashboard 配 callback URL）。
     """
-    cred = _get_active_cred(db, user.tenant_id)
-    if not cred:
+    clients = _tenant_fb_clients(db, user.tenant_id)
+    if not clients:
         return {"subscribed": 0, "error": "no active FB credential"}
-    fb = FbClient(decrypt(cred.access_token_enc))
-    try:
-        pages = fb.get_paged("me/accounts", {"fields": "id,name,access_token"})
-    except FbApiError as e:
-        return {"subscribed": 0, "error": e.friendly}
-    results = []
-    ok = 0
-    for p in pages:
-        pid, ptoken, pname = p.get("id"), p.get("access_token"), p.get("name")
-        if not (pid and ptoken):
-            continue
+    by_page: dict = {}   # page_id -> 结果行（多令牌去重：成功后不再试）
+    total_pages = 0
+    for fb, alias in clients:
         try:
-            fb.subscribe_page_webhook(pid, ptoken, fields=["leadgen"])
-            results.append({"page_id": pid, "page_name": pname, "ok": True})
-            ok += 1
-        except FbApiError as e:
-            results.append({"page_id": pid, "page_name": pname, "ok": False, "error": e.friendly})
-    return {"subscribed": ok, "total_pages": len(pages), "pages": results}
+            pages = fb.get_paged("me/accounts", {"fields": "id,name,access_token"})
+        except FbApiError:
+            continue   # 该令牌拉不到页清单（无 pages_show_list/失效）→ 换下一个令牌
+        total_pages = max(total_pages, len(pages))
+        for p in pages:
+            pid, ptoken, pname = p.get("id"), p.get("access_token"), p.get("name")
+            if not (pid and ptoken):
+                continue
+            row = by_page.setdefault(pid, {"page_id": pid, "page_name": pname, "ok": False,
+                                           "error": ""})
+            if row["ok"]:
+                continue
+            try:
+                fb.subscribe_page_webhook(pid, ptoken, fields=["leadgen"])
+                row.update(ok=True, error="")
+            except FbApiError as e:
+                row["error"] = e.friendly   # 保留最新失败原因；后续令牌成功会覆盖
+    results = list(by_page.values())
+    ok = sum(1 for r in results if r["ok"])
+    return {"subscribed": ok, "total_pages": total_pages or len(results), "pages": results}
+
+
+@router.post("/unsubscribe")
+def unsubscribe_webhook(
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """手动退订该租户所有主页的 webhook（多令牌遍历同 subscribe）。
+
+    DELETE /{page}/subscribed_apps 是 page×App 级整体退订（FB 无按 field 退订，leadgen/feed
+    等一并停）。仅手动触发——删令牌/移除账户不自动退订（webhook 入库按 page→租户映射，
+    还在推就能收到潜客；退订=显式放弃接收）。
+    """
+    clients = _tenant_fb_clients(db, user.tenant_id)
+    if not clients:
+        return {"unsubscribed": 0, "error": "no active FB credential"}
+    by_page: dict = {}
+    for fb, alias in clients:
+        try:
+            pages = fb.get_paged("me/accounts", {"fields": "id,name,access_token"})
+        except FbApiError:
+            continue
+        for p in pages:
+            pid, ptoken, pname = p.get("id"), p.get("access_token"), p.get("name")
+            if not (pid and ptoken):
+                continue
+            row = by_page.setdefault(pid, {"page_id": pid, "page_name": pname, "ok": False,
+                                           "error": ""})
+            if row["ok"]:
+                continue
+            try:
+                fb.unsubscribe_page_webhook(pid, ptoken)
+                row.update(ok=True, error="")
+            except FbApiError as e:
+                row["error"] = e.friendly
+    results = list(by_page.values())
+    ok = sum(1 for r in results if r["ok"])
+    return {"unsubscribed": ok, "total_pages": len(results), "pages": results}

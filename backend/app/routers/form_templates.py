@@ -329,6 +329,15 @@ def delete_message(mid: int, user: CurrentUser = Depends(require_permission("ads
     t = db.query(MessageTemplate).filter(
         MessageTemplate.id == mid, MessageTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "消息模板不存在")
+    # 引用闸（对齐表单模板删：消息模板被投放模板引用时静默归档 → 部署时消息段悄悄丢失）
+    from ..models.launch_template import LaunchTemplate
+    _ref = db.query(LaunchTemplate.id).filter(
+        LaunchTemplate.tenant_id == user.tenant_id,
+        LaunchTemplate.message_template_id == mid,
+        LaunchTemplate.status != "archived",
+    ).count()
+    if _ref:
+        raise HTTPException(400, f"该消息模板仍被 {_ref} 个投放模板引用，请先在模板中移除引用再归档")
     t.status = "archived"; db.commit()
     return {"id": mid, "archived": True}
 
