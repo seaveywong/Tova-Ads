@@ -374,7 +374,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
+onMounted(async () => { loadFaApps(); loadIb(); await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -461,6 +461,8 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
     secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
+    secs.push({ id: 'sec-fbapps', label: t('settings.faTitle') })
+    secs.push({ id: 'sec-import', label: t('settings.ibTitle') })
     secs.push({ id: 'sec-retention', label: t('settings.retentionTitle') })
     secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
   }
