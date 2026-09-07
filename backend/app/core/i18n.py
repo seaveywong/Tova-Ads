@@ -75,8 +75,8 @@ NOTIFY = {
     "sync_stalled": {
         "title": {"zh": "数据同步已停 · 无可用令牌", "en": "Data Sync Stalled · No Usable Token"},
         "body": {
-            "zh": "{n} 个纳管账户无可用广告令牌，报表/广告缓存已停止更新。\n⚠️ 止损已失效：巡检读不到广告数据，止损规则/哨兵不会执行，广告将持续消耗。\n请到「令牌管理」重新授权，恢复后数据自动补齐。",
-            "en": "{n} managed ad accounts have no usable ad token; reports and ad cache have stopped updating.\n WARNING: stop-loss is inactive — the inspector cannot read ad data, so stop-loss rules/sentinel will not run and ads will keep spending.\nPlease re-authorize in Token Management. Data will resume automatically afterwards.",
+            "zh": "{n} 个纳管账户无可用广告令牌——止损已失效，广告将持续消耗。\n请到「令牌管理」重新授权，恢复后数据自动补齐。",
+            "en": "{n} managed accounts have no usable ad token — stop-loss is inactive and ads keep spending.\nRe-authorize in Token Management; data resumes automatically.",
         },
     },
     "account_permission_error": {
@@ -104,8 +104,8 @@ NOTIFY = {
     "inspection_stale_accounts": {
         "title": {"zh": "🔴 {n} 个账户超过30分钟未被巡检", "en": "🔴 {n} Accounts Not Inspected for 30+ Minutes"},
         "body": {
-            "zh": "以下账户超过 30 分钟无成功巡检记录（无令牌/insights 拉取失败/引擎异常），止损对其可能失效。名单：",
-            "en": "The accounts below have no successful inspection for over 30 minutes (no token / insights fetch failure / engine error); stop-loss may be inactive for them. List:",
+            "zh": "以下账户超 30 分钟未巡检，止损对其失效（详见日志中心原因）：",
+            "en": "Accounts below not inspected for 30+ minutes; stop-loss is inactive for them (see Log Center for reasons):",
         },
     },
     # 哨兵权限退避（写令牌 permissions=永久错误：BM 角色被收/账户被收回，重试必然再失败）
@@ -219,12 +219,12 @@ NOTIFY = {
             "en": "This round {n} ads with today's spend were excluded from inspection (active_ids fetch failed / ads_cache empty), stop-loss rules are inactive for them, please check token/sync.",
         },
     },
-    # 每轮整账户跳过聚合（无令牌/insights 失败的账户——止损对其失效但曾只留服务日志）
+    # 每轮整账户跳过聚合（无令牌/限流/权限类 insights 失败——token_expired 类由根因告警覆盖已剔除）
     "inspection_skipped": {
         "title": {"zh": "🟡 本轮 {n} 个账户未被巡检", "en": "🟡 {n} Accounts Skipped This Round"},
         "body": {
-            "zh": "本轮巡检跳过了以下账户（无令牌/insights 拉取失败），止损对其失效，请检查令牌与授权。名单：",
-            "en": "This inspection round skipped the following accounts (no token / insights fetch failure); stop-loss is inactive for them. Please check tokens and authorization. List:",
+            "zh": "本轮巡检跳过以下账户，止损对其失效（详见各行原因）：",
+            "en": "Inspection skipped the accounts below; stop-loss is inactive for them (see per-line reason):",
         },
     },
     # live /ads 拉取连续降级（连续多轮 cache 兜底——巡检覆盖降级为 15min 缓存口径）

@@ -1978,6 +1978,11 @@ def run_inspection(force: bool = False):
         # 失效但用户无感。按租户聚合一条 warning（6h 去重；token 三类白名单已有专项告警，
         # dedup 挡频不叠加 spam；明细 ≤5，全量见日志中心）。──
         for _tid, _sk_list in _tenant_skipped_accs.items():
+            # 同因抑制（2026-09-08 用户决策"维持两条"）：skip 原因为 token_expired 的账户已被
+            # 同轮根因告警（emit_token_expired_if_due，worker 置 expired 时已发）+ sync_stalled
+            # 接棒覆盖，从名单剔除——一次令牌故障只报根因与持续两条，不报中间态；其他原因
+            # （限流/权限/无令牌稳态）照报不吞
+            _sk_list = [s for s in _sk_list if "token_expired" not in s]
             if not _sk_list or dedup_recent(db, _tid, "inspection_skipped", "*", 360):
                 continue
             write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
@@ -2343,7 +2348,23 @@ def run_watchdog():
             _stale_by_tenant: dict = {}
             for _a in _stale:
                 _stale_by_tenant.setdefault(_a.tenant_id, []).append(_a.name or _a.act_id)
+            # 同因抑制（2026-09-08 用户决策"维持两条"）：租户 FB+TT 活跃凭证全为 0 时，账户
+            # 不进巡检是必然（主循环按活跃凭证建任务），该场景由 sync_stalled（critical，
+            # ads_cache_sync 同源发现）接棒——stale 是"有心跳但漏巡"的盲检兜底，不该为已知
+            # 无凭证状态叠报第三条。租户尚有活跃凭证时照发（真覆盖问题不吞）
+            _active_cred_tids = {
+                tid for (tid,) in db.query(FbCredential.tenant_id).filter(
+                    FbCredential.status == "active").distinct().all()}
+            try:
+                from ..models.fb import TtCredential
+                _active_cred_tids |= {
+                    tid for (tid,) in db.query(TtCredential.tenant_id).filter(
+                        TtCredential.status == "active").distinct().all()}
+            except Exception:
+                pass
             for _tid, _names in _stale_by_tenant.items():
+                if _tid not in _active_cred_tids:
+                    continue   # 全平台无活跃凭证 → sync_stalled 已接管，不叠报
                 # dedup 6h/租户（target_id="*" 与 write_log 同名配对，下轮查得到才不重发）
                 if dedup_recent(db, _tid, "inspection_stale_accounts", "*", 360):
                     continue
