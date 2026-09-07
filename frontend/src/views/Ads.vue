@@ -139,6 +139,11 @@ const boundTokenTitle = (a) => {
   const pool = a.pool_aliases ? ' · ' + t('ads.rotatingToken', { aliases: a.pool_aliases }) : ''
   return `${alias} · ${state}${pool}`
 }
+// 令牌限流副行（status 列）：限流中显示剩余分钟（读时计算，冷却到期自动消失=解除自动更新）
+const throttleInfo = (a) => (a.bound_cooldown_min > 0)
+  ? { label: t('ads.throttledLine', { n: a.bound_cooldown_min }), tone: 'warning' }
+  : ((a.bound_status === 'expired' || a.bound_status === 'invalid')
+      ? { label: t('ads.tokenDeadLine'), tone: 'danger' } : null)
 const cpa = (a) => (a.recent_conversions > 0) ? fmtMoney((a.recent_spend / a.recent_conversions), a.currency) : '-'
 
 const load = async () => {
@@ -310,6 +315,7 @@ onMounted(async () => {
         <div class="st-cell">
           <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span></div>
           <div v-if="drInfo(d.a)" class="dr-line" :class="drInfo(d.a).tone">{{ t('ads.drPrefix') }}{{ drInfo(d.a).label }}</div>
+          <div v-if="throttleInfo(d.a)" class="dr-line" :class="throttleInfo(d.a).tone">{{ throttleInfo(d.a).label }}</div>
         </div>
         <div class="acc">
           <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: d.a.act_id } })"><span v-if="platChip(d.a)" :class="['plat-chip', platChip(d.a)]">{{ platChip(d.a).toUpperCase() }}</span>{{ (d.a.name && d.a.name !== d.a.act_id) ? d.a.name : t('ads.unnamedAccount') }}</div>

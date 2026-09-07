@@ -17,6 +17,8 @@ export default {
     groupSaved: '已更新 {n} 个账户的分组',
     groupClearConfirm: '即将清除 {n} 个账户的分组标签（留空保存=清除）。确认清除？',
     drPrefix: '原因：',
+    throttledLine: '⏳ 令牌限流中 · 约 {n} 分钟后自动恢复',
+    tokenDeadLine: '⚠ 令牌已失效，重新授权',
   },
   en: {
     groupCol: 'Group',
@@ -31,5 +33,7 @@ export default {
     groupSaved: 'Group updated for {n} account(s)',
     groupClearConfirm: 'This will clear the group label of {n} account(s) (saving empty = clear). Confirm?',
     drPrefix: 'Reason: ',
+    throttledLine: '⏳ Token rate-limited · auto-recovers in ~{n} min',
+    tokenDeadLine: '⚠ Token expired, re-authorize',
   },
 }

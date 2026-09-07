@@ -3,6 +3,7 @@
 所有 FB 调用走 fb_client（总则4），凭证加密存（doc 01 D 节）。
 """
 import json
+import math
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -1257,6 +1258,12 @@ def list_accounts(
             "bound_alias": (cred.alias or cred.fb_user_name) if cred else None,
             "bound_status": cred.status if cred else "unbound",
             "bound_available": _is_cred_available(cred) if cred else False,
+            # 限流剩余分钟（读时计算：冷却到期即 0 → "解除限流自动更新"，无需后台写回；
+            # status 可能仍停在 rate_limited 但 cooldown 已过=实际可用，展示以本字段为准）
+            "bound_cooldown_min": (
+                max(1, math.ceil((cred.cooldown_until - datetime.now(timezone.utc)).total_seconds() / 60))
+                if cred and getattr(cred, "cooldown_until", None)
+                and cred.cooldown_until > datetime.now(timezone.utc) else 0),
             "pool_count": pool_map.get(a.id, 0),
             "pool_aliases": pool_alias_map.get(a.id, ""),
             "recent_spend": perf.get("spend", 0.0), "recent_conversions": perf.get("conversions", 0),
