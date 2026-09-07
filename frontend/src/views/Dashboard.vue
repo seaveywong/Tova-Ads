@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { GET, POST, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
@@ -1028,10 +1028,9 @@ const loadTgBanner = async () => {
 const dismissTgBanner = () => { tgBanner.value = false; localStorage.setItem('tova_tg_banner_off', '1') }
 const openTgMgr = () => tgMgr.value?.open()
 
-onMounted(() => {
-  loadDashboard()
-  loadTgBanner()
-  loadTrend()
+// 全库审查P2：本页被 KeepAlive 缓存（MainLayout exclude 不含 Dashboard）——失活后定时器不清会后台空转
+// （1s 巡检倒计时 + 60s 轮询），抽 start/stop 两函数，挂载/卸载/激活/失活四处复用
+const _startTimers = () => {
   updateCountdown()
   _timer = setInterval(updateCountdown, 1000)
   _refreshTimer = setInterval(() => {
@@ -1040,8 +1039,18 @@ onMounted(() => {
     if (selectedIds.value.size > 0 || kpiMode.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
     loadDashboard()
   }, 60000)
+}
+const _stopTimers = () => { if (_timer) { clearInterval(_timer); _timer = null } if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null } }
+onMounted(() => {
+  loadDashboard()
+  loadTgBanner()
+  loadTrend()
+  _startTimers()
 })
-onUnmounted(() => { if (_timer) clearInterval(_timer); if (_refreshTimer) clearInterval(_refreshTimer); _themeObserver.disconnect(); _ltThemeObserver.disconnect(); _charts.forEach(c => c?.destroy()); _ltCharts.forEach(c => c?.destroy()) })
+onUnmounted(() => { _stopTimers(); _themeObserver.disconnect(); _ltThemeObserver.disconnect(); _charts.forEach(c => c?.destroy()); _ltCharts.forEach(c => c?.destroy()) })
+// KeepAlive 失活暂停 / 激活重启（首次挂载 onMounted 已起，守卫防重复起两套 interval）
+onDeactivated(_stopTimers)
+onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 </script>
 
 <template>

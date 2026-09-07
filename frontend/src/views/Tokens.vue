@@ -409,7 +409,9 @@ const drawerPages = computed(() => {
   return [...list].sort((a, b) => (b.fan_count || 0) - (a.fan_count || 0))
 })
 
-const refreshAllLabel = ref(t('tokens.refreshAll'))
+// 全库审查P2：标签改 computed——原 ref 存一次性 t() 结果，切语言不刷新；逐个检查的进度状态单独存 ref
+const refreshProgress = ref(null)   // null=空闲；{done,total}=检查进行中
+const refreshAllLabel = computed(() => refreshProgress.value ? t('tokens.checkingProgress', refreshProgress.value) : t('tokens.refreshAll'))
 const refreshAllRunning = ref(false)
 const refreshAll = async () => {
   if (refreshAllRunning.value) return   // 串行 check 耗时长——防重复触发并发
@@ -417,12 +419,12 @@ const refreshAll = async () => {
   let ok = 0, fail = 0, done = 0
   const total = tokens.value.length
   for (const tk of tokens.value) {
-    refreshAllLabel.value = t('tokens.checkingProgress', { done, total })
+    refreshProgress.value = { done, total }
     try { const r = await POST(`/fb/credentials/${tk.id}/check`, {}); r.now_valid ? ok++ : fail++ }
     catch { fail++ }
     done++
   }
-  refreshAllLabel.value = t('tokens.refreshAll')
+  refreshProgress.value = null
   refreshAllRunning.value = false
   await load()
   await loadAtRisk()
@@ -664,7 +666,7 @@ const deleteToken = async (tk) => {
       </div>
       <div class="ph-actions">
         <template v-if="platform==='fb'">
-          <button class="head-btn primary" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
+          <button class="head-btn primary" @click="popOverlay(); importOpen = true">{{ t('tokens.connectFacebook') }}</button>   <!-- 全库审查P2：入口补 popOverlay 取 z-index -->
           <button class="head-btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
           <button class="head-btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
           <button v-if="isSuper" class="head-btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
@@ -813,7 +815,7 @@ const deleteToken = async (tk) => {
         <div class="empty-step">① {{ t('tokens.emptyStep1') }}</div>
         <div class="empty-step">② {{ t('tokens.emptyStep2') }}</div>
         <div class="empty-step">③ {{ t('tokens.emptyStep3') }}</div>
-        <button class="btn primary empty-cta-btn" @click="importOpen = true">{{ t('tokens.connectFacebook') }}</button>
+        <button class="btn primary empty-cta-btn" @click="popOverlay(); importOpen = true">{{ t('tokens.connectFacebook') }}</button>   <!-- 全库审查P2：入口补 popOverlay 取 z-index -->
       </div>
     </div>
     </div>

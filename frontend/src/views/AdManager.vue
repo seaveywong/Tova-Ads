@@ -33,6 +33,8 @@ const campNameOf = (s) => {
 }
 const loading = ref(false)
 const _loadGuard = useLatest()
+const _diagGuard = useLatest()    // 全库审查P2：诊断/潜客各自请求序列守卫（快速连点旧响应后到丢弃）
+const _leadsGuard = useLatest()
 const drillCampaign = ref('')
 const drillAdset = ref('')
 const statusFilter = ref('all')
@@ -369,10 +371,9 @@ const batchStatus = async (status) => {
   } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
-// 创意缩略图：大图源优先（adimages 原图 CDN / 本地素材），FB thumbnail_url(128px) 兜底
+// 创意缩略图：大图源优先（adimages 原图 CDN / 本地素材），FB thumbnail_url(128px) 兜底。
+// 行内缩略与点击放大弹窗共用（全库审查P2：删除优先级链完全相同的重复 bigThumbOf）
 const thumbOf = (a) => a?.big_thumb || a?.local_thumb || a?.creative?.thumbnail_url || ''
-// 弹窗大图（点开放大看：只要有比 128px 缩略图更好的源就用）
-const bigThumbOf = (a) => a?.big_thumb || a?.local_thumb || a?.creative?.thumbnail_url || ''
 // FB CTA 按钮文案（FB 官方中文叫法；en 原名本身即英文）
 const CTA_LABELS = {
   LEARN_MORE: '了解详情', SHOP_NOW: '立即购物', SIGN_UP: '注册', SUBSCRIBE: '订阅',
@@ -387,7 +388,7 @@ const ctaOf = (a) => {
   return ty ? { label: CTA_LABELS[ty] || ty, link: cta?.value?.link || '' } : null
 }
 const showThumb = (a) => {
-  const u = bigThumbOf(a)
+  const u = thumbOf(a)
   if (!u) return
   const ti = titleOf(a), co = copyOf(a), cta = ctaOf(a)
   ElMessageBox.alert(h('div', { class: 'cre-preview' }, [
@@ -448,10 +449,11 @@ const diagOpen = ref(false)
 const diagLoading = ref(false)
 const diagData = ref(null)
 const openDiagnose = async (item) => {
+  const isLatest = _diagGuard.next()   // 全库审查P2：连点不同广告诊断——旧响应后到丢弃，不覆盖新弹窗数据
   diagOpen.value = true; diagLoading.value = true; diagData.value = null
-  try { diagData.value = await GET('/ads/' + item.id + '/diagnose') }
-  catch (e) { ElMessage.error(t('adm.diagFail', { msg: e.message || '' })) }
-  diagLoading.value = false
+  try { const r = await GET('/ads/' + item.id + '/diagnose'); if (isLatest()) diagData.value = r }
+  catch (e) { if (isLatest()) ElMessage.error(t('adm.diagFail', { msg: e.message || '' })) }
+  if (isLatest()) diagLoading.value = false
 }
 const RULE_ZH = computed(() => ({ bleed_abs: t('adm.ruleBleedAbs'), cpa_exceed: t('adm.ruleCpaExceed'), consecutive_bad: t('adm.ruleConsecutiveBad'), click_no_conv: t('adm.ruleClickNoConv'), reach_no_conv: t('adm.ruleReachNoConv'), low_ctr_no_conv: t('adm.ruleLowCtrNoConv'), budget_burn_fast: t('adm.ruleBudgetBurnFast') }))
 const CS_ZH = computed(() => ({ fb: t('adm.csFb'), landing: t('adm.csLanding'), either: t('adm.csEither') }))
@@ -504,14 +506,16 @@ const leadStatusLabel = (s) => LEAD_STATUS_LABEL.value[s || 'new'] || s
 const leadStatusFilterLabel = (s) => s === 'all' ? t('common.all') : leadStatusLabel(s)
 const switchLeadTab = () => { tab.value = 'lead'; selected.value = new Set(); if (!leads.value.length) loadLeads() }
 const loadLeads = async () => {
+  const isLatest = _leadsGuard.next()   // 全库审查P2：快速切状态筛选连发——旧响应后到丢弃
   leadsLoading.value = true
   try {
     const q = leadStatusFilter.value !== 'all' ? '?status=' + encodeURIComponent(leadStatusFilter.value) : ''
     const r = await GET('/leads' + q)
+    if (!isLatest()) return
     leads.value = r.items || []
   }
-  catch (e) { ElMessage.error(e.message || t('common.fail')) }
-  leadsLoading.value = false
+  catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.fail')) }
+  if (isLatest()) leadsLoading.value = false
 }
 const setLeadStatus = async (l, status) => {
   if ((l.status || 'new') === status) return

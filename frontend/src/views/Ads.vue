@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
@@ -257,12 +257,14 @@ const drInfo = (a) => (Number(a.account_status) !== 1 && a.disable_reason != nul
   ? disableReason(a.disable_reason) : null
 
 const syncing = ref(false)
+let _syncRefreshTimer = null   // 全库审查P2：60s 自动刷新句柄留存，离开页面时清理防泄漏
 const syncCampaigns = async () => {
   syncing.value = true
   try {
     await POST('/ads/sync-cache')   // 后台异步采集（advisory lock 111，已在跑则自动跳过），立即返回
     ElMessage.success(t('ads.syncBgStarted'))
-    setTimeout(() => { load() }, 60000)   // 同步约 1-2 分钟，60s 后自动刷新一次
+    if (_syncRefreshTimer) clearTimeout(_syncRefreshTimer)
+    _syncRefreshTimer = setTimeout(() => { _syncRefreshTimer = null; load() }, 60000)   // 同步约 1-2 分钟，60s 后自动刷新一次
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   syncing.value = false
 }
@@ -271,6 +273,7 @@ onMounted(async () => {
   await load()
   try { const me = await GET('/auth/me'); isSuper.value = !!me.is_superadmin; localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0') } catch(e) {}
 })
+onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _syncRefreshTimer = null } })   // 全库审查P2
 </script>
 
 <template>

@@ -131,7 +131,7 @@ const unbind = async (b) => {
 const sendTest = async () => {
   try {
     const r = await POST('/notifications/tg/user-test')
-    ElMessage.success(t('tg.testSent', { n: r.sent ?? r.status === 'sent' ? 1 : 0 }))
+    ElMessage.success(t('tg.testSent', { n: r.sent ?? (r.status === 'sent' ? 1 : 0) }))   // 全库审查P2：?? 与三元优先级，括号显式化
   } catch (e) { ElMessage.error(e.message || t('tg.opFail')) }
 }
 
@@ -177,7 +177,7 @@ watch(tab, (v) => { if (v === 'team') loadTeam() })
 const open = () => { dlgOpen.value = true; tab.value = userB.value.bound ? 'mine' : 'add'; load() }
 const close = () => { dlgOpen.value = false; stopPoll() }
 defineExpose({ open, close, load })
-load()
+// 全库审查P2：删掉 setup 顶层 load()——弹窗没打开也白发 3 个请求；open() 打开时已带 load()
 </script>
 
 <template>

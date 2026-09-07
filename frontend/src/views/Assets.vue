@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { aiStatus } from '../composables/useStatus'
 import { countryName } from '../composables/useCountries'
+import { useLatest } from '../composables/useLatest'
 
 const { t } = useI18n()
 
@@ -97,16 +98,21 @@ const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'  // 读 
 const _ASSET_COUNTRY_CODES = ['US','VN','TH','ID','PH','MY','TW','HK','SG','CN','BR','MX','IN','JP','KR','GB','DE','FR']
 const COUNTRIES = _ASSET_COUNTRY_CODES.map(code => ({ code, get label() { return countryName(code) } }))
 
+// 全库审查P2：请求序列守卫（同 AdManager _loadGuard 模式）——筛选/搜索快速连发时旧响应后到丢弃
+const _loadGuard = useLatest()
 const load = async () => {
+  const isLatest = _loadGuard.next()
   loading.value = true
   try {
     const params = new URLSearchParams()
     if (fType.value) params.set('type', fType.value)
     if (fTag.value) params.set('tag', fTag.value)
     if (fSearch.value.trim()) params.set('search', fSearch.value.trim())
-    assets.value = await GET('/assets?' + params.toString())
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  loading.value = false
+    const r = await GET('/assets?' + params.toString())
+    if (!isLatest()) return
+    assets.value = r
+  } catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.opFail')) }
+  if (isLatest()) loading.value = false
 }
 onMounted(async () => {
   load()

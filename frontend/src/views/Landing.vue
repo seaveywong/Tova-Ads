@@ -549,7 +549,7 @@ const onTplInline = async (e) => {
     fd.append('name', tplName)
     fd.append('description', '')
     fd.append('file', file)
-    const BASE = (import.meta.env?.VITE_API_BASE || '/api')
+    const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'   // 全库审查P2：与下方 uploadLandingTpl/downloadTplRef 的 BASE 取法统一（原 '/api' 兜底打错端点）
     const r = await fetch(BASE + '/landing-lib/templates/upload', {
       method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') }, body: fd
     }).then(r => r.json())
