@@ -427,37 +427,30 @@ def subscribe_webhook(
     return {"subscribed": ok, "total_pages": total_pages or len(results), "pages": results}
 
 
-@router.post("/purge-stale-pages")
-def purge_stale_pages(
-    user: CurrentUser = Depends(require_permission("ads.create")),
-    db: Session = Depends(get_db),
-):
-    """清理旧主页残留（用户确认删除）：删「不属于任何活跃令牌页集合」的潜客 + 软删其表单模板。
+def _purge_stale_pages_core(db, tenant_id: int) -> dict | None:
+    """无主主页数据清理核心（手动端点与每日 cron 共用）。
 
-    背景：订阅是 page×App 级不随令牌失效——换号后旧主页事件仍会推来混入潜客列表。
-    webhook 已加页归属闸（新事件不再入库）；本端点清历史存量 + 归档旧页表单模板
-    （模板归档同时让 webhook 的 form→租户反查失效，双保险）。判定=当前活跃令牌
-    me/accounts 页集合，拉取失败（None）拒绝执行（避免误删全部）。
+    无主 = page 不在当前活跃令牌 me/accounts 集合（换号/弃号后的旧主页）。删其潜客 +
+    归档其表单模板（断掉 webhook form→租户反查）。集合拉取失败返 None（调用方跳过本轮，
+    绝不误删）。返回 {"leads_deleted", "templates_archived", "stale_pages"}。
     """
     from ..routers.fb_webhook import _active_page_ids
-    known = _active_page_ids(db, user.tenant_id)
+    known = _active_page_ids(db, tenant_id)
     if known is None:
-        raise HTTPException(503, "无法确认当前主页集合（令牌拉取失败），请稍后再试")
-    # 旧页潜客：page_id 非空且不在集合（page_id 空的 webhook stub 没有 FB 来源的留着）
+        return None
     _stale_leads = db.query(Lead).filter(
-        Lead.tenant_id == user.tenant_id,
+        Lead.tenant_id == tenant_id,
         Lead.page_id.isnot(None), Lead.page_id != "",
         ~Lead.page_id.in_(known),
     )
     _lead_n = _stale_leads.count()
     stale_pages = {r[0] for r in db.query(Lead.page_id).filter(
-        Lead.tenant_id == user.tenant_id, Lead.page_id.isnot(None), Lead.page_id != "",
+        Lead.tenant_id == tenant_id, Lead.page_id.isnot(None), Lead.page_id != "",
         ~Lead.page_id.in_(known)).distinct().all()}
     _stale_leads.delete(synchronize_session="fetch")
-    # 旧页表单模板软删（同时断掉 webhook form→租户反查）
     _tpl_n = 0
     for t in db.query(LeadFormTemplate).filter(
-        LeadFormTemplate.tenant_id == user.tenant_id,
+        LeadFormTemplate.tenant_id == tenant_id,
         LeadFormTemplate.fb_page_id.isnot(None),
         LeadFormTemplate.fb_page_id != "",
         ~LeadFormTemplate.fb_page_id.in_(known),
@@ -465,15 +458,84 @@ def purge_stale_pages(
     ).all():
         t.status = "archived"
         _tpl_n += 1
+    return {"leads_deleted": _lead_n, "templates_archived": _tpl_n,
+            "stale_pages": sorted(stale_pages)}
+
+
+def run_stale_page_cleanup():
+    """每日自动清理无主主页数据（用户决策：无用主页完全移除，不等手动）。
+
+    遍历有活跃 FB 凭证的租户 → 复用手动清理核心。只在删到东西时发一条 info 通知
+    （通常每天 0 条，不刷屏）；审计 action_log 每租户必写。advisory lock 117。
+    """
+    from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+    from ..core.log_utils import write_log, new_trace_id
+    from ..core.notify_utils import emit_notification
+    from ..core.i18n import tenant_locale, notify_text
+    from ..models.fb import FbCredential
+    lock = acquire_run_lock(117)
+    if not lock:
+        return {"skipped": "lock_busy"}
+    db = SuperSessionLocal()
+    trace_id = new_trace_id()
+    try:
+        tids = [tid for (tid,) in db.query(FbCredential.tenant_id).filter(
+            FbCredential.status == "active").distinct().all()]
+        total_leads = total_tpls = 0
+        for tid in tids:
+            try:
+                res = _purge_stale_pages_core(db, tid)
+            except Exception as e:
+                continue   # 单租户失败不阻断其余
+            if res is None:
+                continue   # 页集合拉取失败，跳过（防误删）
+            if res["leads_deleted"] or res["templates_archived"]:
+                write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="system",
+                          target_type="page", target_id="*",
+                          action_type="purge_stale_pages", source="scheduled",
+                          result="success",
+                          trigger_detail=f"leads={res['leads_deleted']} "
+                                         f"templates={res['templates_archived']}")
+                _loc = tenant_locale(db, tid)
+                _t, _b = notify_text(_loc, "stale_pages_cleaned",
+                                     leads=res["leads_deleted"],
+                                     tpls=res["templates_archived"])
+                emit_notification(db, tenant_id=tid, level="info",
+                                  event_type="stale_pages_cleaned",
+                                  trace_id=trace_id, title=_t, body=_b, platform="fb")
+                total_leads += res["leads_deleted"]
+                total_tpls += res["templates_archived"]
+        db.commit()
+        return {"tenants": len(tids), "leads_deleted": total_leads,
+                "templates_archived": total_tpls}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+        release_run_lock(lock, 117)
+
+
+@router.post("/purge-stale-pages")
+def purge_stale_pages(
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """清理旧主页残留（手动入口；每日 cron 自动跑同款）：删「不属于任何活跃令牌页集合」的
+    潜客 + 软删其表单模板。webhook 已加页归属闸（新事件不再入库）；模板归档同时让
+    form→租户反查失效，双保险。拉取失败（None）拒绝执行（避免误删全部）。
+    """
+    res = _purge_stale_pages_core(db, user.tenant_id)
+    if res is None:
+        raise HTTPException(503, "无法确认当前主页集合（令牌拉取失败），请稍后再试")
     from ..core.log_utils import write_log, new_trace_id
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="page", target_id="*",
               action_type="purge_stale_pages", source="user", result="success",
-              trigger_detail=f"leads={_lead_n} templates={_tpl_n} "
-                             f"stale_pages={';'.join(sorted(stale_pages)[:10])}")
+              trigger_detail=f"leads={res['leads_deleted']} templates={res['templates_archived']} "
+                             f"stale_pages={';'.join(res['stale_pages'][:10])}")
     db.commit()
-    return {"leads_deleted": _lead_n, "templates_archived": _tpl_n,
-            "stale_pages": sorted(stale_pages)}
+    return res
 
 
 @router.post("/unsubscribe")

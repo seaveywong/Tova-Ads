@@ -215,6 +215,10 @@ def _start_scheduler():
     # 汇率同步：每日 3:07 拉实时汇率（止损 to_usd 用，避免 VND/IDR 漂移致阈值误判）
     from .services.fx_sync import run_fx_sync
     _scheduler.add_job(run_fx_sync, "cron", hour=3, minute=7, id="fx_sync")
+    # 无主主页自动清理：每日 5:17 删「不在当前活跃令牌页集合」的潜客/表单模板
+    # （换号/弃号后旧主页数据完全移除，用户决策自动化；页集合拉取失败跳过防误删）
+    from .routers.leads import run_stale_page_cleanup
+    _scheduler.add_job(run_stale_page_cleanup, "cron", hour=5, minute=17, id="stale_page_cleanup")
     # TikTok 令牌自动续期：access_token 24h 过期，每 6h 刷剩 <12h 的凭证（refresh 即轮换，原子写回）
     from .services.tt_token_refresh import run_tt_token_refresh
     _scheduler.add_job(run_tt_token_refresh, "interval", hours=6, id="tt_token_refresh")

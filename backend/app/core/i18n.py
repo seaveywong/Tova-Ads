@@ -79,6 +79,14 @@ NOTIFY = {
             "en": "{n} managed accounts have no usable ad token — stop-loss is inactive and ads keep spending.\nRe-authorize in Token Management; data resumes automatically.",
         },
     },
+    # 无主主页自动清理（每日 cron：换号/弃号后的旧主页数据完全移除，删到东西才发）
+    "stale_pages_cleaned": {
+        "title": {"zh": "🧹 已自动清理无主主页数据", "en": "🧹 Stale Page Data Cleaned"},
+        "body": {
+            "zh": "不属于当前任何令牌的主页：潜客已删 {leads} 条、表单模板已归档 {tpls} 个（明细见日志中心 purge_stale_pages）。",
+            "en": "Pages no longer covered by any active token: {leads} leads deleted, {tpls} form templates archived (see Log Center purge_stale_pages).",
+        },
+    },
     "account_permission_error": {
         "title": {"zh": "权限不足 · {name}", "en": "Permission Denied · {name}"},
         "body": {
