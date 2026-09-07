@@ -369,17 +369,39 @@ const batchStatus = async (status) => {
   } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
-// 创意缩略图 + 拒审原因（FB thumbnail_url 优先；FB 没给的用本地素材原图兜底 local_thumb——
-// image_hash 链路建的广告 FB 常不返回 thumbnail_url，OSS 反查本地 Asset 直链）
-const thumbOf = (a) => a?.creative?.thumbnail_url || a?.local_thumb || ''
+// 创意缩略图：大图源优先（adimages 原图 CDN / 本地素材），FB thumbnail_url(128px) 兜底
+const thumbOf = (a) => a?.big_thumb || a?.local_thumb || a?.creative?.thumbnail_url || ''
+// 弹窗大图（点开放大看：只要有比 128px 缩略图更好的源就用）
+const bigThumbOf = (a) => a?.big_thumb || a?.local_thumb || a?.creative?.thumbnail_url || ''
+// FB CTA 按钮文案（FB 官方中文叫法；en 原名本身即英文）
+const CTA_LABELS = {
+  LEARN_MORE: '了解详情', SHOP_NOW: '立即购物', SIGN_UP: '注册', SUBSCRIBE: '订阅',
+  CONTACT_US: '联系我们', DOWNLOAD: '下载应用', BOOK_TRAVEL: '预订', BOOK_NOW: '立即预订',
+  GET_OFFER: '领取优惠', ORDER_NOW: '立即订购', CALL_NOW: '立即致电', WATCH_MORE: '观看更多',
+  LISTEN_NOW: '立即收听', REQUEST_TIME: '预约时间', GET_QUOTE: '获取报价', LINK_CLICK: '点击链接',
+  LIKE_PAGE: '赞主页', FOLLOW_PAGE: '关注主页', NO_BUTTON: '无按钮',
+}
+const ctaOf = (a) => {
+  const cta = a?.creative?.object_story_spec?.link_data?.call_to_action
+  const ty = cta?.type || ''
+  return ty ? { label: CTA_LABELS[ty] || ty, link: cta?.value?.link || '' } : null
+}
+const showThumb = (a) => {
+  const u = bigThumbOf(a)
+  if (!u) return
+  const ti = titleOf(a), co = copyOf(a), cta = ctaOf(a)
+  ElMessageBox.alert(h('div', { class: 'cre-preview' }, [
+    h('img', { src: u, style: 'width:100%;border-radius:8px;display:block' }),
+    ti ? h('div', { style: 'font-weight:600;margin:10px 2px 2px;font-size:14px' }, ti) : null,
+    co ? h('div', { style: 'color:var(--t3);margin:2px;font-size:12.5px;line-height:1.5;white-space:pre-wrap' }, co) : null,
+    cta ? h('div', { style: 'margin:10px 2px 2px' }, [
+      h('span', { style: 'display:inline-block;background:#0a84ff;color:#fff;border-radius:6px;padding:6px 14px;font-size:12.5px', title: cta.link || '' }, `▶ ${cta.label}`),
+    ]) : null,
+  ]), t('adm.thumbTitle'), { confirmButtonText: t('common.confirm'), customStyle: { maxWidth: '520px' } })
+}
 // 创意文案：creative.body/title（v25 仍可读）优先，object_story_spec.link_data 兜底（spec 创建的）
 const titleOf = (a) => a?.creative?.title || a?.creative?.object_story_spec?.link_data?.name || ''
 const copyOf = (a) => a?.creative?.body || a?.creative?.object_story_spec?.link_data?.message || ''
-const showThumb = (a) => {
-  const u = thumbOf(a)
-  if (!u) return
-  ElMessageBox.alert(h('img', { src: u, style: 'width:100%;border-radius:8px;display:block' }), t('adm.thumbTitle'), { confirmButtonText: t('common.confirm') })
-}
 // FB review_feedback 结构不固定——递归收集字符串（跳过纯数字 id），逐行展示
 const rfText = (rf) => {
   if (!rf) return ''

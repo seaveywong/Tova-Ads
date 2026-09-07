@@ -412,20 +412,44 @@ def list_ads(
             _cache_ages[c.act_id] = _age
     _curs = {cur_map.get(c.act_id, "USD") for c in caches}
     mixed_currency = len(_curs) > 1
-    # 缺预览图兜底（FB 对部分 creative 不返回 thumbnail_url，如 image_hash 链路建的广告）：
-    # OSS.link_data.image_hash 反查本地素材（Asset.fb_image_hashes 建 hash→storage_key 映射），
-    # 原图直链零 FB 调用——素材库 static-assets 静态服务。
+    # 大图与缺图兜底：creative.image_hash → 原图直链（big_thumb）。
+    # ①FB adimages 图片库反查（hash→原尺寸 CDN URL，账户级 1h 缓存）——覆盖系统/FB 侧建的
+    #   全部广告；②本地素材兜底（Asset.fb_image_hashes → static-assets）。前端列表缩略图与
+    #   点开大图统一用 big_thumb（thumbnail_url 只有 128px，弹窗放大是糊图）。
     try:
-        from ..models.launch import Asset
-        from ..routers.assets import PUBLIC_BASE as _ASSET_BASE
-        _need = {}
+        import time as _time
+        _ih_ads = []
         for ad in all_ads:
             _cr = ad.get("creative") or {}
             _ih = ((_cr.get("object_story_spec") or {}).get("link_data") or {}).get("image_hash")
-            if _ih and not _cr.get("thumbnail_url"):
-                _need[str(_ih)] = ad
-        if _need:
-            _hash_map = {}
+            if _ih:
+                ad["_ih"] = str(_ih)
+                _ih_ads.append(ad)
+        if _ih_ads:
+            from ..models.launch import Asset
+            from ..routers.assets import PUBLIC_BASE as _ASSET_BASE
+            _urls: dict = {}
+            # ① adimages（有缓存就 0 API；FB 调用失败静默走本地兜底）
+            for _act in {a.get("act_id") for a in _ih_ads if a.get("act_id")}:
+                _key = f"adimg:{user.tenant_id}:{_act}"
+                _ent = _AGG_CACHE.get(_key)
+                if _ent and _time.time() - _ent[0] < 3600:
+                    _urls.update(_ent[1])
+                    continue
+                try:
+                    _fb2 = client_for_account(db, user.tenant_id, _act, "read")
+                    if _fb2:
+                        _rows = _fb2.get_paged(f"act_{_act}/adimages",
+                                               {"fields": "hash,url", "limit": "200"})
+                        _m = {str(r.get("hash")): r.get("url")
+                              for r in _rows if r.get("hash") and r.get("url")}
+                        if _m:
+                            _AGG_CACHE[_key] = (_time.time(), _m)
+                            _urls.update(_m)
+                except Exception:
+                    continue
+            # ② 本地素材兜底
+            _local = {}
             for _ar in db.query(Asset).filter(
                 Asset.tenant_id == user.tenant_id,
                 Asset.fb_image_hashes.isnot(None),
@@ -435,13 +459,17 @@ def list_ads(
                 except Exception:
                     continue
                 for _h in (_m or {}).values():
-                    _hash_map[str(_h)] = _ar.storage_key
-            for _h, ad in _need.items():
-                _sk = _hash_map.get(_h)
-                if _sk:
-                    ad["local_thumb"] = f"{_ASSET_BASE}/static-assets/{_sk}"
+                    _local[str(_h)] = f"{_ASSET_BASE}/static-assets/{_ar.storage_key}"
+            for ad in _ih_ads:
+                _u = _urls.get(ad["_ih"]) or _local.get(ad["_ih"])
+                if _u:
+                    ad["big_thumb"] = _u
+                    if not (ad.get("creative") or {}).get("thumbnail_url"):
+                        ad["local_thumb"] = _u   # 兼容旧字段（前端 thumbOf 兜底链）
+                ad.pop("_ih", None)
     except Exception:
-        pass
+        for ad in all_ads:
+            ad.pop("_ih", None)
     # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
     # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）。
     # 按 platform 分发：FB 走 cred_for_account_op；TT 走 tt_client_for_account（FB 版对
