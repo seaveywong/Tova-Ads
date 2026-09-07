@@ -401,11 +401,21 @@ def list_ads(
             _cache_ages[c.act_id] = _age
     _curs = {cur_map.get(c.act_id, "USD") for c in caches}
     mixed_currency = len(_curs) > 1
+    # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
+    # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）
+    from ..core.fb_tokens import cred_for_account_op as _cred_ok
+    _token_status = {}
+    for _a in _acc_rows:
+        try:
+            _token_status[_a.act_id] = bool(_cred_ok(db, user.tenant_id, _a.act_id, "read"))
+        except Exception:
+            _token_status[_a.act_id] = True   # 查询失败按可用（不误标快照）
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",
         "last_sync": max(_cached_ats).isoformat() if _cached_ats else "",
         "cache_ages": _cache_ages,
+        "token_status": _token_status,
         "refreshing": refreshing,
         "mixed_currency": mixed_currency,
         "currency": "USD" if mixed_currency else (next(iter(_curs)) if _curs else "USD"),
