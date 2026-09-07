@@ -353,6 +353,7 @@ onMounted(() => {
     form.value.reuse_post_ref = String(rp)
     form.value.page_id = String(rp).split('_')[0]  // {page}_{post} → page
     fetchReusePreview(String(rp))  // 拉帖子内容预览
+    _synthTreeFromFlat()   // 平铺模式已移除：预填值合成结构树（首广告节点=跟帖）
     snapshotForm()  // 重新快照（含预填值，避免一开就标 dirty）
     ElMessage.info(t('launch.reusePrefilled'))
   }
@@ -928,6 +929,17 @@ const flatFromTree = () => {
     form.value.post_source = 'reuse'; form.value.reuse_post_ref = a.reuse_post_ref
   }
 }
+const _synthTreeFromFlat = () => {
+  const s = blankTreeAdset()
+  s.audience_id = form.value.audience_id || 0
+  s.optimization_goal = form.value.optimization_goal || ''
+  s.billing_event = form.value.billing_event || ''
+  s.ads = [adFromFlat()]
+  tree.value = { adsets: [s] }
+  expandAllTree(); ensureTreeAssets()
+  expandedAdKeys.value = new Set(tree.value.adsets.flatMap(x => (x.ads || []).map(a => a.key)))
+  editMode.value = 'tree'
+}
 const onModeSwitch = async (nv) => {
   if (nv === 'tree') {
     if (!tree.value.adsets.length) {
@@ -968,8 +980,10 @@ const _cleanTreeForSave = () => tree.value.adsets.map(s => ({
 // 模板级预算校验（批G）：日预算恒必填（部署守卫口径）；lifetime 另需金额与上限；出价额/ROAS 正数
 const _budgetErrors = () => {
   const errs = []
-  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
-  if (Number(form.value.budget_usd) > 5000) errs.push(t('launch.fieldBudgetCap', { n: 5000 }))
+  if (form.value.budget_type !== 'lifetime') {
+    if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
+    if (Number(form.value.budget_usd) > 5000) errs.push(t('launch.fieldBudgetCap', { n: 5000 }))
+  }
   if (form.value.budget_type === 'lifetime') {
     if (!(Number(form.value.lifetime_budget_usd) > 0)) errs.push(t('launch.fieldLifetimeBudget'))
     if (Number(form.value.lifetime_budget_usd) > 50000) errs.push(t('launch.fieldLifetimeBudgetCap', { n: 50000 }))
@@ -1235,6 +1249,8 @@ const openEdit = async (tpl) => {
     } catch {}
   }
   resetSecOpen()
+  // FB 模板一律结构模式（平铺模式已移除；无 structure 的旧模板自动合成 1 组 1 广告视图，保存即升级）
+  if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
@@ -1800,14 +1816,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? 'TikTok' : 'Facebook' }}</span>
 </div>
       <div v-if="isTt" class="tt-hint">ℹ {{ t('launch.ttSwitchNote') }}</div>
-      <!-- 编辑模式：平铺（单广告，旧路径）/ 结构（1:1 三层树；FB 专属——后端拒 TT 结构） -->
-      <div v-if="!isTt" class="tpl-mode-row">
-        <label>{{ t('launch.tplMode') }}</label>
-        <el-radio-group v-model="editMode" size="small" @change="onModeSwitch">
-          <el-radio-button value="flat">{{ t('launch.modeFlat') }}</el-radio-button>
-          <el-radio-button value="tree">{{ t('launch.modeTree') }}</el-radio-button>
-</el-radio-group>
-</div>
       <!-- 顶部：面包屑（系列 › 组 › 广告）+ 模板名/完备状态（FB 创建流单页三段） -->
       <div class="fb-top">
         <div class="fb-crumb">

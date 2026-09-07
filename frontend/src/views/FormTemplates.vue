@@ -113,6 +113,16 @@ const saveForm = async () => {
   } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
 }
+const hardDelete = async (item, kind) => {
+  const tip = kind === 'form' ? t('formtpl.delConfirm', { name: item.name }) : t('formtpl.delMsgConfirm', { name: item.name })
+  try { await ElMessageBox.confirm(tip, t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) } catch { return }
+  try {
+    await DELETE(kind === 'form' ? '/form-templates/forms/' + item.id : '/form-templates/messages/' + item.id)
+    ElMessage.success(t('common.savedOk'))
+    if (kind === 'form') { forms.value = forms.value.filter(x => x.id !== item.id) }
+    else { msgs.value = msgs.value.filter(x => x.id !== item.id) }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
 const removeForm = async (item) => {   // 参数曾用 t 遮蔽 i18n 导致归档坏死（全库审查 P0）
   try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: item.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/forms/' + item.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }   // 被引用等真报错要提示
@@ -197,7 +207,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
       </div>
       <div class="ph-actions">
         <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
-        <button v-if="tab==='form'" class="head-btn primary" @click="formPlatDialog = true">+ {{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }}</button>
+        <button v-if="tab==='form'" class="head-btn primary" @click="formPlatDialog = true">{{ t('formtpl.newBtn', { kind: t('formtpl.formUnit') }) }}</button>
         <button v-else class="head-btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
       </div>
     </header>
@@ -230,7 +240,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         <div class="card-ops">
           <button class="op" @click="previewForm(item)">{{ t('common.preview') }}</button>
           <button class="op" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
-          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button>
+          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button><button class="op sm" style="color:var(--error)" @click="hardDelete(item, 'form')">{{ t('common.delete') }}</button>
         </div>
       </div>
       <div v-if="!filteredForms.length && !loading" class="empty">{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
@@ -245,7 +255,7 @@ const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; pr
         <div class="card-ops">
           <button class="op" @click="previewMsg(item)">{{ t('common.preview') }}</button>
           <button class="op" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
-          <button class="op danger" @click="removeMsg(item)">{{ t('formtpl.archive') }}</button>
+          <button class="op danger" @click="removeMsg(item)">{{ t('formtpl.archive') }}</button><button class="op sm" style="color:var(--error)" @click="hardDelete(m, 'msg')">{{ t('common.delete') }}</button>
         </div>
       </div>
       <div v-if="!messages.length && !loading" class="empty">{{ t('formtpl.noMessages') }}</div>

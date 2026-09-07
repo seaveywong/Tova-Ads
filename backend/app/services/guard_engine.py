@@ -1058,7 +1058,18 @@ def _inspect_account_worker(ctx: dict) -> dict:
             _alias = (_cred.alias if _cred else "") or ""
             # 三类白名单已有专项告警（token_expired/permissions/rate_limited），其余只 logger.warning
             # ——跳过原因全记回传主循环聚合告警（聚合侧 dedup 6h 挡频，不与专项告警叠加成 spam）
-            res["skip_reasons"].append(f"{acc.name}({acc.act_id}): insights失败-{e.category or '未知'}")
+            # 原因人话化（用户反馈：insights失败-permissions 看不懂为什么没巡检）。
+            # 保留 "insights失败-" 前缀——主循环按它统计 fetch_fail 数量，别动标记。
+            _HUMAN = {
+                "permissions": "令牌权限不足（该账户绑定的令牌已移除或未授权读取，请到令牌页核查/重新授权）",
+                "token_expired": "令牌已失效（请到令牌页重新授权）",
+                "rate_limited": "令牌限流（自动恢复）",
+                "no_id": "无可用令牌（该账户未绑定任何令牌）",
+                "network": "网络错误",
+                "account_checkpoint": "账户安全锁定（需号主本人验证）",
+            }
+            _why = _HUMAN.get(e.category or "", e.category or "未知")
+            res["skip_reasons"].append(f"{acc.name}({acc.act_id}): insights失败-{_why}")
             if e.category == "token_expired":
                 if _cred:
                     _cred.status = "expired"
