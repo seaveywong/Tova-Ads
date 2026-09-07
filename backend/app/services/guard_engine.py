@@ -1907,7 +1907,7 @@ def run_inspection(force: bool = False):
             if _n_armed == len(tasks):
                 _why = "（哨兵armed-全部跳过）"
             else:
-                _why = "（live广告清单为空-可能全部已暂停或拉取失败-见兜底计数）"
+                _why = "（live广告清单为空-可能全部已暂停或拉取失败）"
         if _all_skip:
             _why += f" · 跳过{len(_all_skip)}账户({_n_no_token}无令牌,{_n_fetch_fail}拉取失败)"
         if _n_fallback:
@@ -1922,17 +1922,21 @@ def run_inspection(force: bool = False):
         # ── live 拉取降级 streak：连续 ≥3 轮有账户 cache 兜底 → 降级告警（1h/tenant1，与
         # watchdog 同口径——平台级基础设施问题）。偶发一轮抖动不告。
         # 跨进程计数（复审R1-P2）：从 inspection_heartbeat 的 trigger_detail 数连续「兜底」
-        # 后缀——进程内计数在 gunicorn 多 worker 轮流抢 lock 时会把非连续轮拼成 streak 误报。──
+        # 后缀——进程内计数在 gunicorn 多 worker 轮流抢 lock 时会把非连续轮拼成 streak 误报。
+        # 匹配串必须用兜底后缀独有的「cache顶替live」而非「兜底」二字——曾用"兜底"误命中
+        # evaluated=0 的解释文案「…见兜底计数」（广告无今日消耗是正常态），连续 3 轮假兜底
+        # → n=0 的自相矛盾误告警（2026-09-08 生产）。──
         _hb_rows = db.query(ActionLog.trigger_detail).filter(
             ActionLog.action_type == "inspection_heartbeat").order_by(
             ActionLog.id.desc()).limit(_LIVE_FALLBACK_ALERT_STREAK).all()
         _streak = 0
         for (_d,) in _hb_rows:
-            if "兜底" in (_d or ""):
+            if "cache顶替live" in (_d or ""):
                 _streak += 1
             else:
                 break
         _degraded = (_streak >= _LIVE_FALLBACK_ALERT_STREAK
+                     and _n_fallback > 0
                      and not dedup_recent(db, 1, "live_fetch_degraded", "*", 60))
         if _degraded:
             _loc = tenant_locale(db, 1)
