@@ -694,6 +694,50 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
+    <div v-if="activeSection==='sec-fbapps'" id="sec-fbapps" class="card">
+      <div class="t">{{ t('settings.faTitle') }}</div>
+      <div class="d" style="margin-bottom:10px">{{ t('settings.faDesc') }}</div>
+      <div v-loading="faLoading" class="fa-list">
+        <div v-for="a in faApps" :key="a.id" class="fa-row">
+          <div class="fa-info">
+            <span class="fa-name">{{ a.name || a.app_id }}</span>
+            <code class="fa-id">{{ a.app_id }}</code>
+            <span v-if="a.is_system" class="st-tag off">{{ t('settings.faSystem') }}</span>
+          </div>
+          <div class="fa-ops">
+            <button class="ctrl-btn sm" @click="faOpenEdit(a)">{{ t('common.edit') }}</button>
+            <button class="ctrl-btn sm" style="color: var(--error)" @click="faDelete(a)">{{ t('common.delete') }}</button>
+          </div>
+        </div>
+        <div v-if="!faApps.length && !faLoading" class="empty">{{ t('settings.faEmpty') }}</div>
+      </div>
+      <button class="btn primary" @click="faOpenNew()">{{ t('settings.faAdd') }}</button>
+      <el-dialog v-model="faDialog" :title="faEditId ? t('common.edit') : t('settings.faAdd')" width="420px" append-to-body>
+        <div class="rd-form">
+          <label>{{ t('settings.faName') }}</label>
+          <input v-model.trim="faForm.name" class="budget-input" :placeholder="t('settings.faNamePh')" />
+          <label>{{ t('settings.faAppId') }}</label>
+          <input v-model.trim="faForm.app_id" class="budget-input" placeholder="1234567890" />
+          <label>{{ t('settings.faSecret') }}</label>
+          <input v-model.trim="faForm.app_secret" type="password" class="budget-input" :placeholder="faEditId ? t('settings.faSecretKeep') : 'app_secret'" />
+          <label v-if="isSuper" class="fa-sys"><input type="checkbox" v-model="faForm.is_system" /> {{ t('settings.faSystemOpt') }}</label>
+        </div>
+        <template #footer>
+          <button class="ctrl-btn" @click="faDialog = false">{{ t('common.cancel') }}</button>
+          <button class="ctrl-btn primary" :disabled="faSaving" @click="faSave">{{ faSaving ? t('common.saving') : t('common.save') }}</button>
+        </template>
+      </el-dialog>
+    </div>
+
+    <div v-if="isSuper && activeSection==='sec-import'" id="sec-import" class="card">
+      <div class="t">{{ t('settings.ibTitle') }}</div>
+      <div class="d" style="margin-bottom:10px">{{ t('settings.ibDesc') }}</div>
+      <label class="ib-row"><input type="checkbox" v-model="ibAll" /> {{ t('settings.ibAllLabel') }}</label>
+      <label class="ib-row" style="margin-top:10px">{{ t('settings.ibCapLabel') }}<input v-model.trim="ibCapInput" class="budget-input ib-cap" :placeholder="t('settings.ibCapPh')" /></label>
+      <div class="d" style="margin-top:6px">{{ t('settings.ibCapNote') }}</div>
+      <button class="btn primary" style="margin-top:12px" :disabled="ibSaving" @click="saveIb">{{ ibSaving ? t('common.saving') : t('common.save') }}</button>
+    </div>
+
     <div v-if="isSuper && activeSection==='sec-webhook'" id="sec-webhook" class="card">
       <div class="t">{{ t('settings.whTitle') }}</div>
       <div class="d">{{ t('settings.whDesc') }}</div>
@@ -941,3 +985,14 @@ const runKeepaliveNow = async () => {
 .em-domain{color:var(--t3);font-size:12px;flex-shrink:0}
 @media (max-width:768px){.em-add-row{flex-wrap:wrap}.em-alias-input{flex:1 1 100%;max-width:none}.em-domain{order:2}.em-add-row .el-select{order:3;flex:1 1 100%}}
 </style>
+
+/* FB App 配置行 + 导入行为表单 */
+.fa-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px }
+.fa-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--bd); border-radius: var(--rs) }
+.fa-info { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.fa-name { font-weight: 600; font-size: 13px }
+.fa-id { font-size: 10px; color: var(--t3) }
+.fa-ops { display: flex; gap: 6px; flex: none }
+.fa-sys { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--t2) }
+.ib-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--t2) }
+.ib-cap { width: 90px }

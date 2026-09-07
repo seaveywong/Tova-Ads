@@ -1127,7 +1127,16 @@ def get_assets(
         except (FbApiError, TtApiError):
             # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合
             continue
-    return {"ad_accounts": accounts, "pages": pages}
+    # 导入行为配置（超管在设置页统一配）：true=前端载入弹窗默认全选未导入账户
+    _default_all = False
+    try:
+        from ..models.system import SystemSetting as _SS
+        _row = db.query(_SS).filter(_SS.key == "import_default_all").first()
+        if _row and _row.value:
+            _default_all = bool(json.loads(_row.value))
+    except Exception:
+        pass
+    return {"ad_accounts": accounts, "pages": pages, "import_default_all": _default_all}
 
 
 @router.get("/credentials/loadable-accounts")

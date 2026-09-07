@@ -175,12 +175,23 @@ def oauth_callback(request: Request):
             existing.consecutive_fails = 0
             existing.last_verified_at = datetime.now(timezone.utc)
         else:
+            # 导入保护（0087）：新建 operate 令牌按全局默认上限建行（超管可在设置改默认值；
+            # 令牌菜单可逐令牌调整）。manage 型/未配置=不限
+            _cap = None
+            try:
+                from ..models.system import SystemSetting as _SS
+                _row = db.query(_SS).filter(_SS.key == "import_default_cap").first()
+                if _row and _row.value:
+                    _cap = max(0, min(int(json.loads(_row.value)), 10000)) or None
+            except Exception:
+                _cap = None
             db.add(FbCredential(
                 tenant_id=tenant_id, type="user_token", alias=me.get("name"),
                 access_token_enc=encrypt(long_tok), fb_user_id=me.get("id"),
                 fb_user_name=me.get("name"), status="active", token_type="operate",
                 token_source="oauth", permission_snapshot=perm_snapshot,
                 consecutive_fails=0, last_verified_at=datetime.now(timezone.utc),
+                max_accounts=_cap,
             ))
         db.commit()
         # SET LOCAL app.tenant_id（SuperSessionLocal bypass RLS 但 reassociate 需要）

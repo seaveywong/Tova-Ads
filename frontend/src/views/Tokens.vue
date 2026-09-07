@@ -587,7 +587,16 @@ const openLoad = async () => {
   loadIdText.value = ''
   loadSelected.value = {}
   loadLoading.value = true
-  try { loadableAccounts.value = await GET('/fb/credentials/loadable-accounts') }
+  try {
+    const r = await GET('/fb/credentials/loadable-accounts')
+    loadableAccounts.value = r.ad_accounts || []
+    // 导入行为配置（超管在设置页统一配）：true=默认全选未导入账户（>50 提交时仍有确认弹窗）
+    if (r.import_default_all) {
+      const sel = {}
+      for (const a of loadableAccounts.value) if (!a.imported) sel[a.account_id] = true
+      loadSelected.value = sel
+    }
+  }
   catch (e) { ElMessage.error(t('tokens.fetchFail')+(e.message||'')); loadableAccounts.value = [] }
   loadLoading.value = false
 }

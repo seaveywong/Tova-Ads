@@ -401,6 +401,50 @@ def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ad
     return save_keepalive_config(db, user.tenant_id, body)
 
 
+# ── 账户导入行为（超管，system_settings）──
+# import_default_all: 载入账户弹窗是否默认全选未导入账户（true=授权后一键全导入）
+# import_default_cap: 新 operate 令牌的默认绑定上限（建令牌时写入 max_accounts；0=不限）
+class ImportBehaviorIn(BaseModel):
+    import_default_all: bool = False
+    import_default_cap: int = 100
+
+
+def _get_import_cfg(db) -> dict:
+    out = {"import_default_all": False, "import_default_cap": 100}
+    for k in out:
+        row = db.query(SystemSetting).filter(SystemSetting.key == k).first()
+        if row and row.value not in (None, ""):
+            try:
+                v = json.loads(row.value)
+                if k == "import_default_all":
+                    out[k] = bool(v)
+                else:
+                    out[k] = max(0, min(int(v), 10000))
+            except Exception:
+                pass
+    return out
+
+
+@router.get("/import-behavior")
+def get_import_behavior(user: CurrentUser = Depends(require_superadmin),
+                        db: Session = Depends(get_db)):
+    return _get_import_cfg(db)
+
+
+@router.put("/import-behavior")
+def set_import_behavior(body: ImportBehaviorIn, user: CurrentUser = Depends(require_superadmin),
+                        db: Session = Depends(get_db)):
+    for k, v in {"import_default_all": bool(body.import_default_all),
+                 "import_default_cap": max(0, min(int(body.import_default_cap), 10000))}.items():
+        row = db.query(SystemSetting).filter(SystemSetting.key == k).first()
+        if row:
+            row.value = json.dumps(v)
+        else:
+            db.add(SystemSetting(key=k, value=json.dumps(v)))
+    db.commit()
+    return _get_import_cfg(db)
+
+
 # ── FB Webhook 配置（超管）── verify_token 存 system_settings，App Secret 复用 fb_apps 表
 class WebhookIn(BaseModel):
     verify_token: str = ""
