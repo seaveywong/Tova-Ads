@@ -1502,25 +1502,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div class="ph-left">
         <h1 class="ph-title">{{ t('launch.title') }}</h1>
         <span class="ph-fresh">{{ t('launch.tplCount', { n: filteredList.length }) }}</span>
-      </div>
+</div>
       <div class="ph-actions">
         <div class="seg plat-filter">
           <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
           <button class="pf-fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="pf-dot fb"></span>Facebook</button>
           <button class="pf-tt" :class="{on:platFilter==='tt'}" @click="platFilter='tt'"><span class="pf-dot tt"></span>TikTok</button>
-        </div>
+</div>
         <button class="head-btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
         <el-dropdown trigger="click" @command="p => openNew(p)">
           <button class="head-btn primary">+ {{ t('launch.newTemplate') }} ▾</button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="fb">📘 {{ t('launch.newTplFb') }}</el-dropdown-item>
-              <el-dropdown-item command="tt">🎵 {{ t('launch.newTplTt') }}</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </header>
+              <el-dropdown-item command="fb">{{ t('launch.newTplFb') }}</el-dropdown-item>
+              <el-dropdown-item command="tt">{{ t('launch.newTplTt') }}</el-dropdown-item>
+</el-dropdown-menu>
+</template>
+</el-dropdown>
+</div>
+</header>
     <div class="d">{{ t('launch.subtitle') }}</div>
 
     <div class="grid" v-loading="loading">
@@ -1529,13 +1529,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <span class="card-name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
           <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
             {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
-          </span>
-        </div>
+</span>
+</div>
         <div class="card-meta">
           <span class="card-obj">{{ objLabel(tpl.objective) }}</span>
           <span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span>
-          <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">🚀 {{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
-        </div>
+          <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
+</div>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
@@ -1547,36 +1547,36 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
                 <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
                 <el-dropdown-item command="archive" divided class="danger">{{ t('launch.archive') }}</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
+</el-dropdown-menu>
+</template>
+</el-dropdown>
+</div>
+</div>
       <div v-if="!filteredList.length && !loading" class="empty">{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</div>
-    </div>
+</div>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
     <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="edit-body">
       <!-- 平台（建模板时已定，编辑器内只读展示——FB/TT 三件套链路不同，不可中途切） -->
       <div class="plat-ro-row">
-        <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? '🎵 TikTok' : '📘 Facebook' }}</span>
-      </div>
-      <div v-if="isTt" class="tt-hint">ℹ️ {{ t('launch.ttSwitchNote') }}</div>
+        <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? 'TikTok' : 'Facebook' }}</span>
+</div>
+      <div v-if="isTt" class="tt-hint">ℹ {{ t('launch.ttSwitchNote') }}</div>
       <!-- 编辑模式：平铺（单广告，旧路径）/ 结构（1:1 三层树；FB 专属——后端拒 TT 结构） -->
       <div v-if="!isTt" class="tpl-mode-row">
         <label>{{ t('launch.tplMode') }}</label>
         <el-radio-group v-model="editMode" size="small" @change="onModeSwitch">
           <el-radio-button value="flat">{{ t('launch.modeFlat') }}</el-radio-button>
           <el-radio-button value="tree">{{ t('launch.modeTree') }}</el-radio-button>
-        </el-radio-group>
-      </div>
+</el-radio-group>
+</div>
       <div :class="{ 'tree-cols': editMode === 'tree' }">
       <!-- 结构模式左侧：结构树（系列固定根 → 广告组 → 广告） -->
       <aside v-if="editMode === 'tree'" class="tree-side">
         <div :class="['tnode', 'root', { sel: treeSel.type === 'campaign' }]" @click="selectTreeNode('campaign')">
           <span class="tnode-name">{{ t('launch.treeRoot') }}</span>
-        </div>
+</div>
         <template v-for="(s, si) in tree.adsets" :key="s.key">
           <div :class="['tnode', 'adset', { sel: treeSel.type === 'adset' && treeSel.si === si }]" @click="selectTreeNode('adset', si)">
             <span class="t-arrow" :class="{ open: expandedTreeKeys.has(s.key) }" @click.stop="toggleTreeExpand(s.key)">▶</span>
@@ -1587,8 +1587,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <button class="t-op" :title="t('launch.treeAddAd')" @click.stop="addTreeAd(si)"><el-icon><Plus /></el-icon></button>
               <button class="t-op" :title="t('launch.treeCopyNode')" @click.stop="copyTreeAdset(si)"><el-icon><CopyDocument /></el-icon></button>
               <button class="t-op danger" :title="t('launch.treeDelNode')" @click.stop="removeTreeAdset(si)"><el-icon><Delete /></el-icon></button>
-            </span>
-          </div>
+</span>
+</div>
           <template v-if="expandedTreeKeys.has(s.key)">
             <div v-for="(a, ai) in s.ads" :key="a.key" :class="['tnode', 'ad', { sel: treeSel.type === 'ad' && treeSel.si === si && treeSel.ai === ai }]" @click="selectTreeNode('ad', si, ai)">
               <span @click.stop><el-switch v-model="a.enabled" size="small" /></span>
@@ -1597,19 +1597,19 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span class="tnode-ops">
                 <button class="t-op" :title="t('launch.treeCopyNode')" @click.stop="copyTreeAd(si, ai)"><el-icon><CopyDocument /></el-icon></button>
                 <button class="t-op danger" :title="t('launch.treeDelNode')" @click.stop="removeTreeAd(si, ai)"><el-icon><Delete /></el-icon></button>
-              </span>
-            </div>
-          </template>
-        </template>
+</span>
+</div>
+</template>
+</template>
         <button class="t-add-adset" @click="addTreeAdset">{{ t('launch.treeAddGroup') }}</button>
-      </aside>
+</aside>
       <div class="edit-main">
       <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶（FB 专属：TT 无主页帖） -->
       <template v-if="editMode === 'flat'">
       <div v-if="!isTt" class="post-mode-seg">
-        <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">📝 {{ t('launch.postSourceNew') }}</button>
-        <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">📌 {{ t('launch.postSourceReuse') }}</button>
-      </div>
+        <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">{{ t('launch.postSourceNew') }}</button>
+        <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">{{ t('launch.postSourceReuse') }}</button>
+</div>
       <!-- 跟帖：置顶选帖卡（解决"不知在哪输入帖子ID"的发现性；FB 专属） -->
       <div v-if="!isTt && form.post_source==='reuse'" class="reuse-select-card">
         <div class="reuse-card-hint">{{ t('launch.reuseCardHint') }}</div>
@@ -1617,36 +1617,36 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
           <button class="btn sm primary" :disabled="postResolving || !manualPostId.trim()" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
           <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
-        </div>
+</div>
         <!-- 识别失败 → 手选主页兜底 -->
         <div v-if="reuseNeedManualPage" class="reuse-manual-page">
-          <span class="hint">⚠ {{ t('launch.resolveFailManual') }}</span>
+          <span class="hint">{{ t('launch.resolveFailManual') }}</span>
           <el-select v-model="manualPageForPost" filterable size="small" style="flex:1;min-width:160px" :placeholder="t('launch.pageIdPh')">
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
-          </el-select>
+</el-select>
           <button class="btn sm primary" :disabled="!manualPageForPost" @click="confirmManualPostWithPage">{{ t('common.confirm') }}</button>
-        </div>
+</div>
         <!-- 已选帖 + 内容预览（让用户看到选的是啥） -->
         <div v-if="form.reuse_post_ref" class="reuse-selected-block">
           <div class="reuse-selected">
-            📌 <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
+            <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
             <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
-          </div>
+</div>
           <div v-if="reusePreviewAvailable" class="reuse-mini-preview">
             <img v-if="reusePostPreview.picture" :src="reusePostPreview.picture" class="reuse-mini-thumb" />
             <div class="reuse-mini-text">{{ (reusePostPreview.message || '').slice(0,120) || t('launch.noPostText') }}</div>
-          </div>
-          <div v-else-if="reusePostPreview" class="hint">⚠ {{ t('launch.postContentUnavailable') }}</div>
+</div>
+          <div v-else-if="reusePostPreview" class="hint">{{ t('launch.postContentUnavailable') }}</div>
           <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
-        </div>
+</div>
         <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
-      </div>
+</div>
 
       <div class="level-tabs">
         <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① {{ t('launch.levelCampaign') }}</button>
         <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</button>
         <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ {{ t('launch.levelAd') }}</button>
-      </div>
+</div>
       <!-- #8 summary strip：跨级概览 -->
       <div class="summary-strip">
         <span class="ss-chip" @click="editLevel='campaign'" :title="t('launch.gotoCampaign')">{{ t('launch.objColon') }}{{ t(OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective) }}</span>
@@ -1655,9 +1655,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.sourceColon') }}{{ form.post_source==='reuse' ? t('launch.postSourceReuse') : t('launch.postSourceNew') }}</span>
         <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
           {{ completionStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + completionStatus.missing.join('、') }}
-        </span>
-      </div>
-      </template>
+</span>
+</div>
+</template>
 
       <!-- ① 系列（平铺=①Tab；结构模式=选中「系列」节点；v-show 保持挂载不丢值） -->
       <div v-show="editMode === 'flat' ? editLevel === 'campaign' : treeSel.type === 'campaign'" class="form">
@@ -1666,21 +1666,21 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row" v-if="convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
             <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
-          </el-select>
-        </div>
+</el-select>
+</div>
         <div class="row"><label>{{ t('launch.budgetMode') }}</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">{{ t('launch.abo') }}</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">{{ t('launch.cbo') }}</button></div>
           <span v-if="form.budget_mode==='CBO'" class="hint">{{ t('launch.cboHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
         <div v-if="!isTt" class="row"><label>{{ t('launch.pageId') }}</label>
           <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="editMode === 'flat' && form.post_source==='reuse'" :title="editMode === 'flat' && form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
-        </div>
-      </div>
+</div>
+</div>
 
       <!-- ② 广告组（平铺路径专属——结构模式的组设置在各节点表单） -->
       <div v-if="editMode === 'flat' && editLevel==='adset'" class="form">
@@ -1693,8 +1693,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.cpaGoalLabel') }}</label>
           <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.cpaGoalPlaceholder')" />
           <span class="hint">{{ t('launch.cpaGoalHint') }}</span>
-        </div>
-        </template>
+</div>
+</template>
         <div v-else class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
@@ -1704,20 +1704,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-option :value="0" :label="t('launch.audienceCustom')" />
             <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
               :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.audienceSourceHint') }}</span>
-        </div>
+</div>
         <div v-if="selectedSavedAud" class="saved-aud-card">
           <div class="sa-head">
             <span class="sa-name">{{ selectedSavedAud.name }}</span>
-            <span v-if="selectedSavedAud.status !== 'active'" class="sa-warn">⚠ {{ t('launch.audInactiveWarn') }}</span>
-          </div>
+            <span v-if="selectedSavedAud.status !== 'active'" class="sa-warn">{{ t('launch.audInactiveWarn') }}</span>
+</div>
           <div v-if="selectedSavedAud.note" class="sa-note">{{ selectedSavedAud.note }}</div>
           <div class="sa-meta">{{ (selectedSavedAud.countries||[]).join(',') || t('launch.defaultAudience') }} · {{ selectedSavedAud.age_min }}-{{ selectedSavedAud.age_max }} · {{ t('launch.interestCount', { n: (selectedSavedAud.interests||[]).length }) }}</div>
-        </div>
+</div>
         <div v-else class="aud-actions-row">
           <button class="btn sm ghost" :disabled="!hasManualAudience" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ t('launch.saveAsAudience') }}</button>
-        </div>
+</div>
         <template v-if="!form.audience_id">
         <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为；FB 专属） -->
         <div v-if="!isTt" class="advantage-box">
@@ -1725,31 +1725,31 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <div class="adv-info">
               <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
               <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
-            </div>
+</div>
             <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
-        </div>
+</div>
+</div>
         <div class="row"><label>{{ t('launch.countries') }}</label>
           <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
             :placeholder="t('launch.countriesPlaceholder')" style="width:100%" size="small">
             <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
-          </el-select>
-        </div>
+</el-select>
+</div>
         <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" /></div></div>
         <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
         <div v-if="isTt" class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttAudienceHint') }}</div>
         <div v-if="!isTt" class="row"><label>{{ t('launch.languageLabel') }}</label>
           <el-select v-model="form.audience_language" filterable clearable :placeholder="t('launch.langAny')" style="width:100%" size="small">
             <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
-          </el-select>
-        </div>
+</el-select>
+</div>
         <template v-if="!advantage_audience && !isTt">
         <div class="row"><label>{{ t('launch.interestLabel') }}</label>
           <div class="interest-search">
             <input v-model="interestQ" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterests" />
             <button class="btn sm" :disabled="interestSearching" @click="searchInterests">{{ interestSearching ? '…' : t('common.search') }}</button>
             <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">{{ t('launch.importFromAssetAi') }}</button>
-          </div>
+</div>
           <div v-if="interestSearching" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
           <div v-else-if="interestResults.length" class="search-results">
             <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearInterestSearch">{{ t('launch.clear') }} ✕</button></div>
@@ -1758,17 +1758,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
               <span class="add" v-if="!isInterestAdded(r.id)">+</span>
               <span class="added-mark" v-else>✓</span>
-            </div>
-          </div>
-        </div>
+</div>
+</div>
+</div>
         <div class="row"><label>{{ t('launch.selectedInterests', { n: form.audience_interests.length }) }}</label>
           <div class="interest-list">
             <span v-for="(it,i) in form.audience_interests" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeInterest(i)">✕</button></span>
             <span v-if="!form.audience_interests.length" class="hint">{{ t('launch.addViaSearch') }}</span>
-          </div>
-        </div>
-        </template>
-        </template>
+</div>
+</div>
+</template>
+</template>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.placement') }}</div>
         <div v-if="isTt" class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttPlacementHint') }}</div>
@@ -1777,16 +1777,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <div class="seg">
             <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">{{ t('launch.advPlusPlacement') }}</button>
             <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">{{ t('launch.manualSelect') }}</button>
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="form.manual_placement">
           <div class="row"><label>{{ t('launch.device') }}</label>
             <div class="placement-chips">
               <label v-for="d in DEVICES" :key="d.v" class="placement-chip" :class="{on:(form.placement_devices||[]).includes(d.v)}">
                 <input type="checkbox" :checked="(form.placement_devices||[]).includes(d.v)" @change="toggleDevice(d.v)" /> {{ t(d.l) }}
-              </label>
-            </div>
-          </div>
+</label>
+</div>
+</div>
           <div class="row"><label>{{ t('launch.platformsAndPlacements') }}</label>
             <div class="placement-tree">
               <div v-for="p in PLATFORMS" :key="p.v" class="pt-node">
@@ -1794,18 +1794,18 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <span class="pt-arrow" :class="{open:expandedPlatforms.has(p.v)}">▶</span>
                   <label class="pt-label" :class="{on:isPlatformOn(p.v)}" @click.stop="togglePlatformSel(p.v)">
                     <input type="checkbox" :checked="isPlatformOn(p.v)" @change="togglePlatformSel(p.v)" /> {{ p.l }}
-                  </label>
-                </div>
+</label>
+</div>
                 <div v-if="expandedPlatforms.has(p.v) && isPlatformOn(p.v)" class="pt-positions">
                   <label v-for="pos in p.positions" :key="pos.v" class="pos-chip" :class="{on:isPosOn(p.v,pos.v)}">
                     <input type="checkbox" :checked="isPosOn(p.v,pos.v)" @change="togglePos(p.v,pos.v)" /> {{ t(pos.l) }}
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        </template>
+</label>
+</div>
+</div>
+</div>
+</div>
+</div>
+</template>
         <template v-if="!isTt">
         <div class="sec-title">{{ t('launch.disclosure') }}</div>
         <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
@@ -1816,21 +1816,21 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.attributionWindow') }}</label>
           <el-select v-model="form.attribution_preset" style="width:100%" size="small" clearable :placeholder="t('launch.attr_default')">
             <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="t(a.l)" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.attributionHint') }}</span>
-        </div>
+</div>
         <div class="row" style="flex-direction:column;align-items:stretch">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <label style="margin:0">{{ t('launch.daypartLabel') }}</label>
             <el-switch v-model="form.daypart_enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
+</div>
           <template v-if="form.daypart_enabled">
             <div class="dpa-tools">
               <button type="button" class="op sm" @click="dpaFillAll">{{ t('launch.daypartAllDay') }}</button>
               <button type="button" class="op sm" @click="dpaFillWorkhours">{{ t('launch.daypartWorkhours') }}</button>
               <button type="button" class="op sm" @click="dpaClearAll">{{ t('launch.clear') }}</button>
               <span class="hint">{{ t('launch.daypartHint') }}</span>
-            </div>
+</div>
             <div class="dpa-grid">
               <div class="dpa-corner"></div>
               <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 {{ t('launch.hour') }}</span></div>
@@ -1841,22 +1841,22 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                        :class="['dpa-cell', form.daypart_cells[di-1][h-1] ? 'on' : '']"
                        :title="t(DPA_DAYS[di-1]) + ' ' + (h-1) + ':00'"
                        @click="toggleCell(di-1, h-1)"></div>
-                </div>
-              </template>
-            </div>
-          </template>
-        </div>
+</div>
+</template>
+</div>
+</template>
+</div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.advancedFieldsTitle') }}</div>
         <div class="row"><label>{{ t('launch.advancedSettings') }}</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" :placeholder='t(&apos;launch.advancedPlaceholder&apos;)'></textarea><span class="hint">{{ t('launch.advancedHint') }}</span></div>
-        </template>
-      </div>
+</template>
+</div>
 
       <!-- ③ 广告（平铺路径专属——结构模式的广告设置在各节点表单） -->
       <div v-if="editMode === 'flat' && editLevel==='ad'" class="form">
         <!-- 跟帖：帖子内容只读预览（图/标题/文案/链接/CTA 全锁，来自帖子）-->
         <template v-if="form.post_source==='reuse'">
-          <div class="reuse-preview-banner">🔒 {{ t('launch.reuseLockedHint') }}</div>
+          <div class="reuse-preview-banner">{{ t('launch.reuseLockedHint') }}</div>
           <div v-if="form.reuse_post_ref && reusePreviewAvailable" class="ad-preview-card">
             <div class="ad-preview-top">
               <img v-if="reusePostPreview?.picture" :src="reusePostPreview.picture" class="ad-preview-thumb" />
@@ -1864,20 +1864,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <div class="ad-preview-topright">
                 <div v-if="reusePostPreview?.headline" class="ad-preview-headline">{{ reusePostPreview.headline }}</div>
                 <div v-if="linkDomain(reusePostPreview?.link)" class="ad-preview-domain" :title="reusePostPreview?.link">{{ linkDomain(reusePostPreview.link) }}</div>
-              </div>
-            </div>
+</div>
+</div>
             <div class="ad-preview-text">{{ (reusePostPreview?.message || '').slice(0,300) || t('launch.noPostText') }}</div>
             <div class="ad-preview-actions">
               <span v-if="reusePostPreview?.cta_type" class="ad-preview-cta">{{ ctaLabel(reusePostPreview.cta_type) }}</span>
               <a v-if="reusePostPreview?.permalink" :href="reusePostPreview.permalink" target="_blank" rel="noopener" class="ad-preview-link">{{ t('launch.viewOnFb') }} →</a>
-            </div>
-          </div>
+</div>
+</div>
           <div v-else-if="form.reuse_post_ref && reusePostPreview" class="post-readonly-preview">
-            <div class="post-preview-text muted">⚠ {{ t('launch.postContentUnavailable') }}<br><code>{{ form.reuse_post_ref }}</code></div>
-          </div>
+            <div class="post-preview-text muted">{{ t('launch.postContentUnavailable') }}<br><code>{{ form.reuse_post_ref }}</code></div>
+</div>
           <div v-else-if="form.reuse_post_ref" class="hint">{{ t('launch.loadingPreview') }}</div>
           <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
-        </template>
+</template>
         <!-- 新建帖：创意字段（asset/文案/CTA/落地页/子码）-->
         <template v-else>
         <div class="row"><label>{{ t('launch.asset') }}</label>
@@ -1886,25 +1886,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <img v-if="editingAsset.type==='image'" :src="editingAsset.public_url" class="asset-thumb" />
               <video v-else :src="editingAsset.public_url" class="asset-thumb" preload="metadata" />
               <span class="asset-name">{{ editingAsset.name }}（{{ t('launch.clickToPreview') }}）<template v-if="editingAsset.type==='video' && editingAsset.duration_sec"> · {{ t('launch.durationLabel') }} {{ editingAsset.duration_sec }}s</template></span>
-            </div>
+</div>
             <button class="btn sm" :disabled="form.post_source==='reuse'" @click="openAssetPicker">{{ editingAsset ? t('launch.change') : t('launch.selectAsset') }}</button>
-          </div>
-        </div>
+</div>
+</div>
         <!-- Advantage+ 创意（对齐 FB Ads Manager；FB 专属） -->
         <div v-if="!isTt" class="advantage-box">
           <div class="adv-row">
             <div class="adv-info">
               <span class="adv-title">{{ t('launch.advPlusCreative') }}</span>
               <span class="adv-desc">{{ t('launch.advPlusCreativeDesc') }}</span>
-            </div>
+</div>
             <el-switch v-model="advantage_creative" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="editingAsset && (editingAsset.ai_copy?.headlines||[]).length" class="ai-copy">
           <div class="ai-copy-t">{{ t('launch.aiCopyHint') }}</div>
           <div v-for="(h,i) in (editingAsset.ai_copy?.headlines||[])" :key="'h'+i" class="ai-pick" @click="form.headline=h"><span class="ai-tag">{{ t('launch.headlineN', { n: i+1 }) }}</span> {{ h }}</div>
           <div v-for="(b,i) in (editingAsset.ai_copy?.bodies||[])" :key="'b'+i" class="ai-pick" @click="form.body=b"><span class="ai-tag">{{ t('launch.bodyN', { n: i+1 }) }}</span> {{ b }}</div>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" :disabled="form.post_source==='reuse'" /></div>
         <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3" :disabled="form.post_source==='reuse'"></textarea></div>
         <div class="row"><label>{{ t('launch.ctaLabel') }}</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" /></el-select></div>
@@ -1913,55 +1913,55 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <select v-model="form.landing_page_id" class="inp" @change="onLandingChange">
             <option :value="null">{{ t('launch.manualUrl') }}</option>
             <option v-for="p in landingPages" :key="p.id" :value="p.id">{{ p.title }}（{{ p.public_url || t('launch.noUrl') }}）</option>
-          </select>
-        </div>
+</select>
+</div>
         <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="form.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
         <div class="row"><label></label><span class="hint">{{ t('launch.urlPhHint') }}</span></div>
         <div class="row"><label>{{ t('launch.subcode') }}</label>
           <el-select v-model="form.subcode_slug" filterable clearable :placeholder="t('launch.subcodePlaceholder')" style="width:100%" size="small">
             <el-option v-for="s in subcodesForLanding" :key="s.slug" :value="s.slug" :label="s.slug + ' (' + subcodeStatus(s.status).label + ')'" />
-          </el-select>
+</el-select>
           <span v-if="form.landing_page_id && !subcodesForLanding.length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
-        </div>
+</div>
         <!-- 消息类（ENGAGEMENT + 消息目标；FB Messenger 专属） -->
         <template v-if="form.objective === 'OUTCOME_ENGAGEMENT' && !isTt">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">{{ t('launch.messageAd') }}</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageMsgTpl') }} →</router-link>
-          </div>
+</div>
           <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
             <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="onMsgTplChange">
               <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
-            </el-select>
-          </div>
+</el-select>
+</div>
           <div v-if="selectedMsgTpl" class="tpl-preview-bar" @click="msgPreviewOpen = true">
             <span>{{ (selectedMsgTpl.welcome_text||'').slice(0,50) }}…</span>
             <span class="preview-link">{{ t('common.preview') }}</span>
-          </div>
-        </template>
+</div>
+</template>
         <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建） -->
         <template v-if="form.objective === 'OUTCOME_LEADS' && !isTt">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
-          </div>
+</div>
           <div class="row"><label>{{ t('launch.formTemplate') }}</label>
             <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
               <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
-            </el-select>
+</el-select>
             <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
-          </div>
+</div>
           <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
             <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
             <span class="preview-link">{{ t('common.preview') }}</span>
-          </div>
-        </template>
-        </template>
+</div>
+</template>
+</template>
         <!-- 像素（新建帖/跟帖都要——转化追踪依赖；原在①系列，现与落地页/子码同区） -->
         <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
           <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
           <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
           <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
-        </div>
-      </div>
+</div>
+</div>
 
       <!-- 结构模式：系列节点补充（像素/披露——平铺在②③Tab，结构模式收进系列层） -->
       <div v-if="editMode === 'tree' && treeSel.type === 'campaign'" class="form tree-node-form">
@@ -1970,10 +1970,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.pixelId') }}</label>
           <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
           <span class="hint">{{ t('launch.pixelIdHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
         <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
-      </div>
+</div>
 
       <!-- 结构模式：广告组节点表单（空值=回退系列层默认） -->
       <div v-if="editMode === 'tree' && treeSel.type === 'adset' && selAdset" class="form tree-node-form">
@@ -1982,28 +1982,28 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <div class="adv-row">
             <div class="adv-info"><span class="hint">{{ t('launch.treeEnableHint') }}</span></div>
             <el-switch v-model="selAdset.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="form.budget_mode === 'ABO'" class="row"><label>{{ t('launch.treeBudgetOverride') }}</label>
           <input v-model.number="selAdset.budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.treeBudgetPh')" />
           <span class="hint">{{ t('launch.budgetConvertHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.treeAudienceOverride') }}</label>
           <el-select v-model="selAdset.audience_id" filterable size="small" style="width:100%">
             <el-option :value="0" :label="t('launch.treeAudienceDefault')" />
             <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
               :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
           <el-select v-model="selAdset.optimization_goal" style="width:100%" size="small" filterable>
             <el-option value="" :label="t('launch.autoByObj')" />
             <el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-        </div>
-      </div>
+</div>
+</div>
 
       <!-- 结构模式：广告节点表单 -->
       <div v-if="editMode === 'tree' && treeSel.type === 'ad' && selAd" class="form tree-node-form">
@@ -2012,14 +2012,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <div class="adv-row">
             <div class="adv-info"><span class="hint">{{ t('launch.treeEnableHint') }}</span></div>
             <el-switch v-model="selAd.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
-        </div>
+</div>
+</div>
         <div class="row"><label>{{ t('launch.treePostSource') }}</label>
           <el-radio-group :model-value="selAd.post_source" size="small" @change="v => setNodePostSource(selAd, v)">
             <el-radio-button value="new">{{ t('launch.postSourceNew') }}</el-radio-button>
             <el-radio-button value="reuse">{{ t('launch.postSourceReuse') }}</el-radio-button>
-          </el-radio-group>
-        </div>
+</el-radio-group>
+</div>
         <!-- 跟帖：帖子引用 + 内容预览（创意来自帖，素材/文案区隐藏） -->
         <template v-if="selAd.post_source === 'reuse'">
           <div class="row"><label>{{ t('launch.postSourceReuse') }}</label>
@@ -2027,102 +2027,102 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <input v-model="nodeReuseInput" class="inp" :disabled="nodeResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmNodePost(selAd)" />
               <button class="btn sm primary" :disabled="nodeResolving || !nodeReuseInput.trim()" @click="confirmNodePost(selAd)">{{ nodeResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
               <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
-            </div>
-          </div>
+</div>
+</div>
           <div v-if="selAd.reuse_post_ref" class="reuse-selected-block">
             <div class="reuse-selected">
               <span class="reuse-post-id" :title="selAd.reuse_post_ref">{{ selAd.reuse_post_ref }}</span>
               <button class="btn sm ghost" @click="clearNodePost(selAd)">{{ t('common.remove') }}</button>
-            </div>
+</div>
             <div v-if="nodePostPreviews[selAd.key]?.picture || nodePostPreviews[selAd.key]?.message" class="reuse-mini-preview">
               <img v-if="nodePostPreviews[selAd.key].picture" :src="nodePostPreviews[selAd.key].picture" class="reuse-mini-thumb" />
               <div class="reuse-mini-text">{{ (nodePostPreviews[selAd.key].message || '').slice(0,120) || t('launch.noPostText') }}</div>
-            </div>
+</div>
             <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
-          </div>
+</div>
           <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
-        </template>
+</template>
         <!-- 新建帖：素材 / 文案 / 落地页 / 模板绑定 -->
         <template v-else>
         <div class="row"><label>{{ t('launch.treeMultiAsset') }}</label>
           <div class="adv-row">
             <div class="adv-info"><span class="hint">{{ t('launch.treeMultiAssetHint') }}</span></div>
             <el-switch v-model="adMulti" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="adMulti" class="row">
           <el-select v-model="selAd.asset_ids" multiple filterable collapse-tags collapse-tags-tooltip size="small" style="width:100%" :placeholder="t('launch.selectAsset')">
             <el-option v-for="a in treeAssets" :key="a.id" :value="a.id" :label="a.name" />
-          </el-select>
-        </div>
+</el-select>
+</div>
         <div v-else class="row"><label>{{ t('launch.asset') }}</label>
           <div class="asset-pick">
             <div v-if="selAdAsset0" class="asset-chosen" style="cursor:pointer" @click="openPreview(selAdAsset0)">
               <img v-if="selAdAsset0.type==='image'" :src="selAdAsset0.public_url" class="asset-thumb" />
               <video v-else :src="selAdAsset0.public_url" class="asset-thumb" preload="metadata" />
               <span class="asset-name">{{ selAdAsset0.name }}</span>
-            </div>
+</div>
             <span v-else-if="selAd.asset_ids.length" class="asset-name">#{{ selAd.asset_ids[0] }}</span>
             <button class="btn sm" @click="openAssetPicker">{{ selAd.asset_ids.length ? t('launch.change') : t('launch.selectAsset') }}</button>
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="selAd.asset_ids.length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: selAd.asset_ids.length }) }}</div>
         <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="selAd.headline" class="inp" /></div>
         <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="selAd.body" class="inp ta" rows="3"></textarea></div>
         <div class="row"><label>{{ t('launch.ctaLabel') }}</label>
           <el-select v-model="selAd.cta_type" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
             <el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.treeAdLang') }}</label>
           <el-select v-model="selAd.ad_language" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
             <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
-          </el-select>
+</el-select>
           <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-        </div>
+</div>
         <div class="row"><label>{{ t('launch.landing') }}</label>
           <el-select :model-value="selAd.landing_page_id || 0" size="small" style="width:100%" @change="v => { selAd.landing_page_id = v || 0; onNodeLandingChange(selAd) }">
             <el-option :value="0" :label="t('launch.manualUrl')" />
             <el-option v-for="p in landingPages" :key="p.id" :value="p.id" :label="p.title + '（' + (p.public_url || t('launch.noUrl')) + '）'" />
-          </el-select>
-        </div>
+</el-select>
+</div>
         <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="selAd.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
         <div class="row"><label>{{ t('launch.subcode') }}</label>
           <el-select v-model="selAd.subcode_slug" filterable clearable size="small" style="width:100%" :placeholder="t('launch.subcodePlaceholder')">
             <el-option v-for="s in subcodesForNode(selAd)" :key="s.slug" :value="s.slug" :label="s.slug + ' (' + subcodeStatus(s.status).label + ')'" />
-          </el-select>
+</el-select>
           <span v-if="selAd.landing_page_id && !subcodesForNode(selAd).length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
-        </div>
+</div>
         <!-- 消息类（ENGAGEMENT；Messenger 专属） -->
         <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
           <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
           <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
             <el-select :model-value="selAd.message_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="v => setNodeMsgTpl(selAd, v)">
               <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
-            </el-select>
-          </div>
-        </template>
+</el-select>
+</div>
+</template>
         <!-- 表单类（LEADS + Instant Forms） -->
         <template v-if="form.objective === 'OUTCOME_LEADS'">
           <hr class="sep" /><div class="sec-title">Instant Form</div>
           <div class="row"><label>{{ t('launch.formTemplate') }}</label>
             <el-select :model-value="selAd.lead_form_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="v => setNodeFormTpl(selAd, v)">
               <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
-            </el-select>
-          </div>
-        </template>
-        </template>
-      </div>
-      </div><!-- /edit-main -->
-      </div><!-- /tree-cols -->
-      </div><!-- /edit-body -->
+</el-select>
+</div>
+</template>
+</template>
+</div>
+</div><!-- /edit-main -->
+</div><!-- /tree-cols -->
+</div><!-- /edit-body -->
 
       <template #footer>
         <button class="btn" @click="onEditBeforeClose(() => { editOpen = false })">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="saving" @click="saveTpl">{{ saving ? t('launch.saving') : t('common.save') }}</button>
-      </template>
-    </el-drawer>
+</template>
+</el-drawer>
 
     <!-- 素材选择器 -->
     <el-drawer v-model="assetPickerOpen" :title="t('launch.selectAsset')" direction="rtl" size="560px" append-to-body>
@@ -2131,9 +2131,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
           <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
           <span class="picker-name">{{ a.name }}<template v-if="a.type==='video' && a.duration_sec"> · {{ a.duration_sec }}s</template></span>
-        </div>
-      </div>
-    </el-drawer>
+</div>
+</div>
+</el-drawer>
 
     <!-- Post Picker（选已有主页帖 → 跟帖） -->
     <el-drawer v-model="postPickerOpen" :title="t('launch.postPickerTitle')" direction="rtl" size="560px" append-to-body>
@@ -2143,18 +2143,18 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <img v-if="p.picture" :src="p.picture" class="picker-thumb" />
           <div v-else class="picker-thumb picker-no-img">{{ t('launch.noImage') }}</div>
           <span class="picker-name">{{ (p.message||'').slice(0,60) || p.id }}</span>
-        </div>
+</div>
         <div v-if="!pickerPosts.length && !postPickerLoading" class="drawer-empty">{{ t('launch.noPosts') }}</div>
-      </div>
-    </el-drawer>
+</div>
+</el-drawer>
 
     <!-- 素材预览 -->
     <el-dialog v-model="previewOpen" :title="previewAsset?.name" width="700px" append-to-body>
       <div v-if="previewAsset" style="text-align:center">
         <img v-if="previewAsset.type==='image'" :src="previewAsset.public_url" style="max-width:100%;max-height:65vh;border-radius:8px" />
         <video v-else :src="previewAsset.public_url" controls style="max-width:100%;max-height:65vh;border-radius:8px" />
-      </div>
-    </el-dialog>
+</div>
+</el-dialog>
 
     <!-- 部署抽屉 -->
     <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
@@ -2165,44 +2165,44 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="dtc-line">{{ t('launch.treeOverviewLine', { n: deployTreeStats.n, m: deployTreeStats.m }) }}</div>
         <div class="dtc-line">{{ deployTreeStats.isCbo ? t('launch.treeCboBudget') : t('launch.treeAboTotal') }}：${{ deployTreeStats.perAcc }}/{{ t('launch.perDay') }}</div>
         <div class="dtc-line" :class="{ warn: deployTreeStats.chains > 0 }">{{ deployTreeStats.chains > 0 ? t('launch.treeEnabledChains') + '：' + deployTreeStats.chains : t('launch.treeAllPaused') }}</div>
-      </div>
+</div>
       <div v-if="!deployTreeStats" class="deploy-mode-row">
         <label class="dm-label">{{ t('launch.deployMode') }}</label>
         <div class="seg dm-seg">
           <button :class="{on:deployMode==='single'}" @click="deployMode='single'">{{ t('launch.modeSingle') }}</button>
           <button :class="{on:deployMode==='batch'}" @click="switchDeployMode('batch')">{{ t('launch.modeBatch') }}</button>
-        </div>
-      </div>
+</div>
+</div>
       <template v-if="deployMode==='batch' && !deployTreeStats">
-        <div class="deploy-reuse-hint batch-hint">🎬 {{ t('launch.batchHint') }}</div>
+        <div class="deploy-reuse-hint batch-hint">{{ t('launch.batchHint') }}</div>
         <div class="batch-bar">
           <span class="batch-count">{{ t('launch.batchAssetCount', { n: batchAssetIds.size }) }}</span>
           <button class="op sm" @click="batchSelectAllAssets">{{ t('launch.batchSelectAll') }}</button>
           <button class="op sm" @click="batchClearAssets">{{ t('launch.deployClear') }}</button>
           <button class="op sm" :disabled="batchPreflighting" @click="batchPreflight">{{ t('launch.preflight') }}</button>
-        </div>
+</div>
         <div class="picker-grid batch-grid" v-loading="batchAssetsLoading">
           <div v-for="a in batchSelectable" :key="a.id" :class="['picker-card','batch-card',{on:batchAssetIds.has(a.id)}]" @click="toggleBatchAsset(a.id)">
             <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
             <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />
             <span class="picker-name">{{ a.name }}<template v-if="a.type==='video' && a.duration_sec"> · {{ a.duration_sec }}s</template></span>
             <span class="batch-check">{{ batchAssetIds.has(a.id) ? '✓' : '' }}</span>
-          </div>
+</div>
           <div v-if="!batchSelectable.length && !batchAssetsLoading" class="empty-sm">{{ t('launch.batchNoAssets') }}</div>
-        </div>
+</div>
         <div v-if="batchPreview.n && batchPreview.m" class="batch-preview">{{ t('launch.batchPreview', { n: batchPreview.n, m: batchPreview.m, total: batchPreview.total }) }}</div>
-      </template>
-      <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">⚠ {{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
+</template>
+      <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">{{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
       <div v-if="deployMode==='single' && deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
       <div class="deploy-search-row">
         <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
-      </div>
+</div>
       <div class="acc-batch-row">
         <button class="op sm" @click="deploySelectAll">{{ t('launch.deploySelectAll') }}</button>
         <button class="op sm" @click="deploySelectActive">{{ t('launch.deploySelectActive') }}</button>
         <button class="op sm" @click="deployClearSel">{{ t('launch.deployClear') }}</button>
-      </div>
+</div>
       <div v-if="deployTpl?.platform === 'tt' && !accLoading && !accounts.length" class="empty-sm">{{ t('launch.deployNoTtAccounts') }}</div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
@@ -2211,40 +2211,40 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="acc-name">{{ a.name || a.act_id }}</span>
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
             <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
-            <span v-if="reuseDeployPage && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')">🔒</span>
-          </label>
+            <span v-if="reuseDeployPage && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
+</label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
               <span class="config-loading">{{ t('launch.loadingPagePixel') }}</span>
-            </template>
+</template>
             <template v-else-if="deployTpl?.platform === 'tt'">
               <label>{{ t('launch.ttPixelLabel') }}</label>
               <el-select v-model="deployItems[a.act_id].pixel_id" size="small" filterable style="width:100%">
                 <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.autoPick') })" />
                 <el-option v-for="p in ttPixels" :key="p.id" :value="p.pixel_id" :label="(p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')'" />
-              </el-select>
-            </template>
+</el-select>
+</template>
             <template v-else>
               <label>{{ t('launch.page') }}</label>
               <el-select v-model="deployItems[a.act_id].page_id" size="small" filterable style="width:100%">
                 <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') })" />
                 <el-option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id" :label="p.name + ' (' + p.id + ')'" />
-              </el-select>
+</el-select>
               <label>{{ t('launch.pixel') }}</label>
               <el-select v-model="deployItems[a.act_id].pixel_id" size="small" filterable style="width:100%">
                 <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.pixel_id || t('launch.none') })" />
                 <el-option v-for="p in (accPixels[a.act_id]||[])" :key="p.id" :value="p.id" :label="p.name + ' (' + p.id + ')'" />
-              </el-select>
-            </template>
-          </div>
-        </div>
-      </div>
+</el-select>
+</template>
+</div>
+</div>
+</div>
       <template #footer>
         <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl && deployMode==='single'"> · {{ t('launch.totalBudgetHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) }}</template><template v-else-if="selectedAccs.size && deployTpl && deployMode==='batch' && batchAssetIds.size"> · {{ t('launch.batchBudgetHint', { total: (selectedAccs.size * batchAssetIds.size * Number(deployTpl.budget_usd || 0)).toFixed(0), n: selectedAccs.size, m: batchAssetIds.size, per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
         <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="deploying||!selectedAccs.size||(deployMode==='batch'&&!batchAssetIds.size)" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
-      </template>
-    </el-drawer>
+</template>
+</el-drawer>
 
     <!-- 进度 -->
     <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearTimeout(pollTimer);pollTimer=null}">
@@ -2253,7 +2253,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <span>{{ activeJob.template_name }}</span>
           <span class="prog-stat">{{ activeJob.succeeded }}✓ / {{ activeJob.failed }}✗ / {{ activeJob.total }}</span>
           <span :class="['prog-status',activeJob.status]">{{ jobText(activeJob.status) }}</span>
-        </div>
+</div>
         <div class="prog-items">
           <div v-for="it in activeJob.items" :key="it.id" class="prog-item">
             <span class="dot" :style="{background:statusColor(it.status)}"></span>
@@ -2262,16 +2262,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
             <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 60) }}</span>
             <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
-          </div>
-        </div>
-      </div>
-    </el-dialog>
+</div>
+</div>
+</div>
+</el-dialog>
     <!-- 预检结果（结构化展示） -->
     <el-dialog v-model="preflightVisible" :title="preflightResult?.platform === 'tt' ? t('launch.ttPreflightTitle') : t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
         <!-- 树模式：将消耗横幅 + 概览 + 结构树表（payload 样例沿用下方三段折叠渲染） -->
         <template v-if="preflightResult.mode === 'tree'">
-          <div v-if="preflightResult.will_spend?.length" class="pf-banner warn">⚠ {{ t('launch.pfWillSpendBanner', { n: preflightResult.will_spend.length }) }}：{{ willSpendPreview }}</div>
+          <div v-if="preflightResult.will_spend?.length" class="pf-banner warn">{{ t('launch.pfWillSpendBanner', { n: preflightResult.will_spend.length }) }}：{{ willSpendPreview }}</div>
           <div v-else class="pf-banner ok">{{ t('launch.pfAllPausedBanner') }}</div>
           <div class="pf-summary">
             <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
@@ -2279,7 +2279,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span>{{ t('launch.modeColon') }}{{ preflightResult.budget_mode }}</span>
             <span>{{ t('launch.pfAdsetCount') }}：<b>{{ preflightResult.adset_count }}</b> · {{ t('launch.pfAdTotal') }}：<b>{{ preflightResult.ad_total }}</b></span>
             <span>{{ t('launch.budgetColon') }}<b v-if="preflightResult.abo_total_usd != null">${{ preflightResult.abo_total_usd }}/{{ t('launch.perDay') }}（{{ t('launch.pfAboTotal') }}）</b><b v-else>${{ preflightResult.budget_usd }} → {{ preflightResult.camp_budget_fb }}（{{ t('launch.minorUnitHint') }}）</b></span>
-          </div>
+</div>
           <div class="pf-section">
             <div class="pf-title">{{ t('launch.pfTreeTitle') }}</div>
             <div class="pf-tree">
@@ -2288,46 +2288,46 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <span :class="['pft-state', s.enabled ? 'on' : 'off']">{{ s.enabled ? t('launch.treeStateOn') : t('launch.treeStatePaused') }}</span>
                   <span class="pft-name">{{ s.name }}</span>
                   <span class="pft-budget">${{ s.budget_usd ?? '—' }} → {{ s.budget_local_fb }}</span>
-                </div>
+</div>
                 <div v-for="(a, ai) in s.ads" :key="ai" class="pft-ad">
                   <span :class="['pft-state', a.enabled ? 'on' : 'off']">{{ a.enabled ? t('launch.treeStateOn') : t('launch.treeStatePaused') }}</span>
                   <span class="pft-name">{{ a.name || (a.asset_count > 1 ? t('launch.treeAssetGroupN', { n: a.asset_count }) : t('launch.treeAdN', { n: ai + 1 })) }}</span>
                   <span v-if="a.asset_count" class="pft-meta">{{ t('launch.treeAssetCount', { n: a.asset_count }) }}</span>
                   <span v-if="a.post_source === 'reuse'" class="pft-meta">{{ t('launch.postSourceReuse') }}</span>
                   <span v-if="treeBindingsText(a.bindings)" class="pft-meta">{{ treeBindingsText(a.bindings) }}</span>
-                </div>
-              </template>
-            </div>
-          </div>
-        </template>
+</div>
+</template>
+</div>
+</div>
+</template>
         <template v-else>
-        <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">⚠ {{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
-        <div v-if="preflightResult.series_count" class="pf-series-count">🎬 {{ t('launch.batchSeriesCount', { n: preflightResult.series_count }) }}</div>
+        <div v-if="preflightResult.subcode_warn_slug" style="color:var(--warning);padding:8px 0;font-size:13px">{{ t('launch.subcodeWarn', { slug: preflightResult.subcode_warn_slug }) }}</div>
+        <div v-if="preflightResult.series_count" class="pf-series-count">{{ t('launch.batchSeriesCount', { n: preflightResult.series_count }) }}</div>
         <div v-if="preflightResult.asset?.type === 'video'" style="padding:4px 0;font-size:13px">{{ t('launch.videoAsset') }}：{{ preflightResult.asset.name || preflightResult.asset.filename }}<template v-if="preflightResult.asset.duration_sec"> · {{ t('launch.durationLabel') }} {{ preflightResult.asset.duration_sec }}s</template></div>
         <div class="pf-summary">
           <span>{{ t('launch.pfCurrency') }}：<b>{{ preflightResult.currency }}</b></span>
           <span>{{ t('launch.budgetColon') }}${{ preflightResult.budget_usd }} → <b>{{ preflightResult.daily_budget_fb }}</b>（{{ preflightResult.platform === 'tt' ? t('launch.ttUnitHint') : t('launch.minorUnitHint') }}）</span>
           <span>{{ t('launch.fxRate') }}：{{ preflightResult.fx_rate || t('launch.none') }}</span>
           <span>{{ t('launch.modeColon') }}{{ preflightResult.budget_mode }}</span>
-        </div>
-        </template>
+</div>
+</template>
         <div class="pf-section">
           <div class="pf-title">{{ t('launch.pfCampaign') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.campaign" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
-        </div>
+</div>
         <div class="pf-section">
           <div class="pf-title">{{ preflightResult.platform === 'tt' ? t('launch.levelAdGroup') : t('launch.pfAdSet') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.adset" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
-        </div>
+</div>
         <div class="pf-section">
           <div class="pf-title">{{ t('launch.pfCreative') }}</div>
           <div class="pf-fields"><div v-for="(v,k) in preflightResult.creative" :key="k" class="pf-field"><span class="pf-k">{{ k }}</span><span class="pf-v">{{ pfVal(k, v) }}</span></div></div>
-        </div>
+</div>
         <div v-if="preflightResult.notes" class="pf-notes">
           <div v-for="n in preflightResult.notes" :key="n" class="pf-note">· {{ n }}</div>
-        </div>
-      </div>
-    </el-dialog>
+</div>
+</div>
+</el-dialog>
 
     <!-- 部署历史 -->
     <el-dialog v-model="historyOpen" :title="t('launch.deployHistory')" width="600px" append-to-body>
@@ -2336,12 +2336,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <div class="hi-main">
             <span class="hi-name">{{ j.template_name }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
-          </div>
+</div>
           <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ fmtTime(j.created_at) }}</div>
-        </div>
+</div>
         <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
-      </div>
-    </el-dialog>
+</div>
+</el-dialog>
 
     <!-- 模板已部署清单（卡片「已部署 N」入口；展开单次看明细+广告当前状态） -->
     <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="640px">
@@ -2352,7 +2352,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
             <span class="dep-job-counts">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
             <span class="dep-arrow" :class="{open: depJobDetail?.id === j.id}">▶</span>
-          </div>
+</div>
           <div v-if="depJobDetail?.id === j.id" class="dep-items" v-loading="depItemsLoading">
             <div v-for="it in (depJobDetail.items||[])" :key="it.id" class="dep-item">
               <span class="dot" :style="{background:statusColor(it.status)}"></span>
@@ -2361,16 +2361,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span v-if="it.ad_id" class="dep-ad-id" :title="t('launch.clickCopyAdId')" @click="copyAdId(it.ad_id)">{{ it.ad_id }}</span>
               <span v-if="it.status === 'success'" class="dep-live" :style="{color: liveStatusColor(it.live_status)}" :title="t('launch.liveStatusHint')">
                 {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
-              </span>
+</span>
               <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(depJobDetail?.platform) }}→</a>
               <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 40) }}</span>
-            </div>
+</div>
             <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
-          </div>
-        </div>
+</div>
+</div>
         <div v-if="!depJobs.length && !depLoading" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
-      </div>
-    </el-drawer>
+</div>
+</el-drawer>
     <!-- 表单预览 -->
     <el-dialog v-model="formPreviewOpen" :title="t('launch.formPreview')" width="400px" append-to-body>
       <div v-if="selectedFormTpl" class="phone-mockup">
@@ -2381,20 +2381,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="pm-label">{{ q.label }}</span>
             <div v-if="q.options&&q.options.length" class="pm-options"><span v-for="(o,oi) in q.options" :key="oi" class="pm-option">{{ o.value }}</span></div>
             <div v-else class="pm-input-mock">—</div>
-          </div>
-        </div>
-      </div>
-    </el-dialog>
+</div>
+</div>
+</div>
+</el-dialog>
     <!-- 消息预览 -->
     <el-dialog v-model="msgPreviewOpen" :title="t('launch.msgPreview')" width="380px" append-to-body>
       <div v-if="selectedMsgTpl" class="messenger-mockup">
         <div class="mm-bubble">{{ selectedMsgTpl.welcome_text }}</div>
         <div v-if="(selectedMsgTpl.ice_breakers||[]).length" class="mm-quick-replies">
           <span v-for="(ib,i) in selectedMsgTpl.ice_breakers" :key="i" class="mm-qr">{{ ib.title }}</span>
-        </div>
-      </div>
-    </el-dialog>
-  </div>
+</div>
+</div>
+</el-dialog>
+</div>
 </template>
 
 <style scoped>
