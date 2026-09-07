@@ -183,6 +183,11 @@ const ttLoadSelectedCount = computed(() => Object.values(ttLoadSelected.value).f
 const commitTtLoad = async () => {
   const ids = Object.keys(ttLoadSelected.value).filter(k => ttLoadSelected.value[k])
   if (!ids.length) { ElMessage.warning(t('tokens.selectUnimported')); return }
+  if (ids.length > 50) {
+    try {
+      await ElMessageBox.confirm(t('tokens.importBigBatchConfirm', { n: ids.length }), t('common.confirm'), { type: 'warning' })
+    } catch { return }
+  }
   ttLoadImporting.value = true
   try {
     const r = await POST('/tt/import', { act_ids: ids })
@@ -444,6 +449,7 @@ const handleAction = (cmd, tk) => {
   else if (cmd === 'delete') deleteToken(tk)
   else if (cmd === 'update_token') updateToken(tk)
   else if (cmd === 'change_type') changeTokenType(tk)
+  else if (cmd === 'max_accounts') changeMaxAccounts(tk)
 }
 const handleAccountCmd = async (cmd, a) => {
   if (cmd === 'unmanage') {
@@ -499,6 +505,35 @@ const renamePage = async (tk, p) => {
     await POST(`/fb/credentials/${tk.id}/pages/rename`, { page_id: p.id, name: nv })
     ElMessage.success(t('tokens.pageRenamed'))
     delete assetCache.value[tk.id]; await loadDrawerAssets(tk)   // 主页名即刻刷新
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+}
+const ttTypeLabel = (ty) => {
+  const k = ty || 'manage'
+  return t(`tokens.type${k[0].toUpperCase() + k.slice(1)}`)
+}
+const setPageCategory = async (tk, p) => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      t('tokens.pageCategoryPrompt'), t('tokens.categoryBtn'),
+      { inputValue: p.category || '', inputPattern: /^.{1,120}$/, inputErrorMessage: t('tokens.pageCategoryLimit'),
+        confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+    await POST(`/fb/credentials/${tk.id}/pages/category`, { page_id: p.id, category: value.trim() })
+    ElMessage.success(t('tokens.pageCategorySaved'))
+    if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+}
+const changeMaxAccounts = async (tk) => {
+  try {
+    const cur = tk.max_accounts == null ? '' : String(tk.max_accounts)
+    const { value } = await ElMessageBox.prompt(
+      t('tokens.maxAccountsPrompt', { cur: tk.max_accounts == null ? t('tokens.maxAccountsUnlimited') : tk.max_accounts, n: tk.account_count ?? 0 }),
+      t('tokens.maxAccountsBtn'),
+      { inputValue: cur, inputPattern: /^$|^\d{1,5}$/, inputErrorMessage: t('tokens.maxAccountsLimit'),
+        confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
+    const v = value.trim() === '' ? null : parseInt(value.trim(), 10)
+    await PUT(`/fb/credentials/${tk.id}/max-accounts`, { max_accounts: v })
+    ElMessage.success(t('common.savedOk'))
+    await load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const changeTokenType = async (tk) => {
@@ -565,6 +600,12 @@ const filteredLoadable = computed(() => {
 })
 const loadSelectedCount = computed(() => Object.values(loadSelected.value).filter(Boolean).length)
 const doImport = async (ids) => {
+  // 导入保护（>50 确认一次——几千账户一次进来炸巡检/同步）
+  if (ids.length > 50) {
+    try {
+      await ElMessageBox.confirm(t('tokens.importBigBatchConfirm', { n: ids.length }), t('common.confirm'), { type: 'warning' })
+    } catch { return }
+  }
   loadImporting.value = true
   try {
     const r = await POST('/fb/import', { account_ids: ids })
@@ -802,7 +843,8 @@ const deleteToken = async (tk) => {
                 <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
                 <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
                 <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
-                <el-dropdown-item command="change_type" divided>{{ t('tokens.changeTypeBtn') }}（{{ t(`tokens.tt${tk.token_type || 'manage'}`) }} → {{ t(`tokens.tt${(tk.token_type || 'manage') === 'operate' ? 'manage' : 'operate'}`) }}）</el-dropdown-item>
+                <el-dropdown-item command="max_accounts">📊 {{ t('tokens.maxAccountsBtn') }}</el-dropdown-item>
+                <el-dropdown-item command="change_type" divided>{{ t('tokens.changeTypeBtn') }}（{{ ttTypeLabel(tk.token_type) }} → {{ ttTypeLabel((tk.token_type || 'manage') === 'operate' ? 'manage' : 'operate') }}）</el-dropdown-item>
                 <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -878,6 +920,7 @@ const deleteToken = async (tk) => {
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item @click="renamePage(drawerToken, p)">{{ t('tokens.renameBtn') }}</el-dropdown-item>
+                    <el-dropdown-item @click="setPageCategory(drawerToken, p)">{{ t('tokens.categoryBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>

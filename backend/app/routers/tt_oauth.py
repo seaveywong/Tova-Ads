@@ -445,6 +445,8 @@ def tt_import(body: TtImportIn, user: CurrentUser = Depends(require_permission("
         if v:
             cleaned.append(v)
     cleaned = list(dict.fromkeys(cleaned))  # 去重保序
+    if len(cleaned) > 200:
+        raise HTTPException(400, f"单批最多导入 200 个账户（收到 {len(cleaned)}）——请分批（导入保护）")
     imported, skipped, not_found = [], 0, []
     for aid in cleaned:
         acc = db.query(Account).filter(

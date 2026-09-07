@@ -23,6 +23,8 @@ class FbCredential(Base):
     consecutive_fails = Column(Integer, default=0)      # 连续失败计数（限流/瞬时错误）
     last_verified_at = Column(DateTime(timezone=True))  # 最近检测时间
     cooldown_until = Column(DateTime(timezone=True))     # 限流冷却到期时间（code=17 后 30min）
+    max_accounts = Column(BigInteger)                   # 令牌级账户绑定上限（0087；operate 默认 100，NULL=不限）
+    max_accounts = Column(BigInteger)                   # 令牌级账户绑定上限（0087；operate 默认 100，NULL=不限）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
