@@ -53,6 +53,13 @@ class LaunchTemplate(Base):
     post_source = Column(Text, default="new")
     reuse_post_ref = Column(Text)   # 跟帖引用的 post_id
     platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（模板按平台隔离字段集）
+    # 1:1 FB 三层结构（0088）：{adsets:[{key,name,enabled,budget_usd?,audience_id?,
+    # audience_json?,optimization_goal?,billing_event?,advanced_config?,ads:[{key,name,
+    # enabled,asset_ids[],headline,body,cta_type,ad_language,landing_page_id,landing_url,
+    # subcode_slug,message_template_id,lead_form_template_id,pixel_id,post_source,
+    # reuse_post_ref}]}]}。空 = 平铺模式（旧行为）；节点字段空 = 回退模板默认。
+    # 保存时第一组第一广告回写平铺列（旧读方不炸）。
+    structure = Column(Text)
     status = Column(Text, default="draft")             # draft/active/archived
     deploy_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

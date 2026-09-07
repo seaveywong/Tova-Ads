@@ -18,7 +18,7 @@ from ..core.fb_tokens import client_for_account, client_for_account_page
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
-                           ensure_video_id_for_account, usd_to_fb_amount)
+                           ensure_video_id_for_account, usd_to_fb_amount, pick_cta)
 from ..core.tt_client import TtApiError
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink, LandingPage
@@ -59,9 +59,160 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "message_template_id": t.message_template_id or 0,
         "beneficiary": t.beneficiary or "", "payer": t.payer or "",
         "post_source": t.post_source or "new", "reuse_post_ref": t.reuse_post_ref or "",
+        "structure": t.structure or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
+
+
+# ── 1:1 三层结构（0088）：校验/解析/平铺双写 ──
+# 规模上限：防一次部署失控（10 组 × 20 节点 × 50 素材理论上限远超 FB 单账户健康度；
+# 展开总数另有部署门 _TREE_ADS_MAX 兜底）
+_TREE_ADSETS_MAX = 10
+_TREE_ADS_PER_ADSET_MAX = 20
+_TREE_ASSETS_PER_NODE_MAX = 50
+# 每账户展开广告总数硬顶（素材组节点展开计入；超 = 400 快失败——FB 单账户上百条
+# 新广告既炸账户结构也炸部署时长/reap 心跳窗口）
+_TREE_ADS_MAX = 200
+
+
+def _validate_structure(raw) -> tuple[dict, str]:
+    """结构 JSON 形状校验 + 规范化。返 (规范化 dict, 错误信息)。错误信息空 = 通过。
+
+    规范化：补默认值（enabled=False 等安全默认）、素材去重保序、名字截断、
+    未知键丢弃（存库的是干净形状——下游部署/前端渲染不用处处防脏键）。
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("adsets"), list) or not raw["adsets"]:
+        return {}, "结构需为 {\"adsets\": [...]} 且至少含 1 个广告组"
+    if len(raw["adsets"]) > _TREE_ADSETS_MAX:
+        return {}, f"广告组最多 {_TREE_ADSETS_MAX} 个"
+    out_adsets = []
+    for si, adset in enumerate(raw["adsets"], 1):
+        if not isinstance(adset, dict):
+            return {}, f"广告组 #{si} 形状错误"
+        name = str(adset.get("name") or "").strip()[:100]
+        budget = adset.get("budget_usd")
+        if budget is not None:
+            try:
+                budget = float(budget)
+            except (TypeError, ValueError):
+                return {}, f"广告组「{name or si}」预算需为数字"
+            if not (0 < budget <= _BUDGET_MAX_USD):
+                return {}, f"广告组「{name or si}」预算需在 0-{_BUDGET_MAX_USD:.0f} USD"
+        ads_raw = adset.get("ads")
+        if not isinstance(ads_raw, list) or not ads_raw:
+            return {}, f"广告组「{name or si}」至少含 1 个广告"
+        if len(ads_raw) > _TREE_ADS_PER_ADSET_MAX:
+            return {}, f"广告组「{name or si}」广告节点最多 {_TREE_ADS_PER_ADSET_MAX} 个"
+        out_ads = []
+        for ai, ad in enumerate(ads_raw, 1):
+            if not isinstance(ad, dict):
+                return {}, f"广告组「{name or si}」广告 #{ai} 形状错误"
+            # 素材清单：去重保序 + 全 int（素材组节点 = 部署时每素材展开一个广告）
+            asset_ids, seen = [], set()
+            for a in (ad.get("asset_ids") or []):
+                try:
+                    aid = int(a)
+                except (TypeError, ValueError):
+                    return {}, f"广告 #{ai} 素材 ID 非法：{a!r}"
+                if aid not in seen:
+                    seen.add(aid); asset_ids.append(aid)
+            if len(asset_ids) > _TREE_ASSETS_PER_NODE_MAX:
+                return {}, f"广告「{str(ad.get('name') or ai)[:30]}」素材最多 {_TREE_ASSETS_PER_NODE_MAX} 个"
+            post_source = "reuse" if ad.get("post_source") == "reuse" else "new"
+            reuse_ref = str(ad.get("reuse_post_ref") or "").strip()
+            if post_source == "reuse":
+                if not reuse_ref:
+                    return {}, f"广告 #{ai} 跟帖模式必须填帖子引用（page_id_post_id）"
+                if len(asset_ids) > 1:
+                    return {}, f"广告 #{ai} 跟帖模式不支持多素材（多素材会全部指向同一条帖子）"
+            ad_url = str(ad.get("landing_url") or "")
+            try:
+                _check_url_placeholders(ad_url)
+            except ValueError as e:
+                return {}, f"广告 #{ai}：{e}"
+            out_ads.append({
+                "key": str(ad.get("key") or f"ad_{si}_{ai}")[:40],
+                "name": str(ad.get("name") or "").strip()[:100],
+                "enabled": bool(ad.get("enabled")),
+                "asset_ids": asset_ids,
+                "headline": str(ad.get("headline") or "")[:200],
+                "body": str(ad.get("body") or "")[:600],
+                "cta_type": str(ad.get("cta_type") or ""),
+                "ad_language": str(ad.get("ad_language") or ""),
+                "landing_page_id": int(ad.get("landing_page_id") or 0),
+                "landing_url": ad_url,
+                "subcode_slug": str(ad.get("subcode_slug") or ""),
+                "message_template_id": int(ad.get("message_template_id") or 0),
+                "lead_form_template_id": int(ad.get("lead_form_template_id") or 0),
+                "pixel_id": str(ad.get("pixel_id") or ""),
+                "post_source": post_source,
+                "reuse_post_ref": reuse_ref,
+            })
+        aud_id = adset.get("audience_id")
+        out_adsets.append({
+            "key": str(adset.get("key") or f"as_{si}")[:40],
+            "name": name,
+            "enabled": bool(adset.get("enabled")),
+            "budget_usd": budget,
+            "audience_id": int(aud_id) if aud_id else 0,
+            "audience_json": str(adset.get("audience_json") or ""),
+            "optimization_goal": str(adset.get("optimization_goal") or ""),
+            "billing_event": str(adset.get("billing_event") or ""),
+            "advanced_config": str(adset.get("advanced_config") or ""),
+            "ads": out_ads,
+        })
+    # 展开总数（每账户）硬顶：素材组节点按 len(asset_ids) 计，无素材节点按 1 计
+    expanded = sum(max(len(a["asset_ids"]), 1) for s in out_adsets for a in s["ads"])
+    if expanded > _TREE_ADS_MAX:
+        return {}, f"展开后广告总数 {expanded} 超上限 {_TREE_ADS_MAX}（素材组节点按素材数展开计入）"
+    return {"adsets": out_adsets}, ""
+
+
+def _parse_structure(t: LaunchTemplate) -> list[dict]:
+    """模板 → 结构节点列表（部署/预检共用）。空/损坏 → []（平铺模式 / 容错降级）。"""
+    if not t.structure:
+        return []
+    try:
+        data = json.loads(t.structure)
+        return data.get("adsets") or []
+    except Exception:
+        return []
+
+
+def _sync_flat_from_structure(t: LaunchTemplate) -> None:
+    """平铺双写（0088）：结构模式保存时把「第一组第一广告」回写平铺列——
+    旧读方（部署清单/保活/批量母版视图）不感知 structure 也能拿到合理值。
+    节点空值 = 回退模板级（覆盖只发生在节点显式配置时）。"""
+    adsets = _parse_structure(t)
+    if not adsets:
+        return
+    first_adset, ads = adsets[0], (adsets[0].get("ads") or [])
+    if first_adset.get("budget_usd"):
+        t.budget_usd = float(first_adset["budget_usd"])
+    if first_adset.get("audience_id"):
+        t.audience_id = int(first_adset["audience_id"])
+    if first_adset.get("audience_json"):
+        t.audience_json = first_adset["audience_json"]
+    if first_adset.get("optimization_goal"):
+        t.optimization_goal = first_adset["optimization_goal"]
+    if first_adset.get("billing_event"):
+        t.billing_event = first_adset["billing_event"]
+    if not ads:
+        return
+    ad = ads[0]
+    if ad.get("asset_ids"):
+        t.asset_id = int(ad["asset_ids"][0])
+    for col in ("headline", "body", "cta_type", "ad_language", "landing_url",
+                "subcode_slug", "pixel_id"):
+        if ad.get(col):
+            setattr(t, col, ad[col])
+    for col in ("landing_page_id", "message_template_id", "lead_form_template_id"):
+        if ad.get(col):
+            setattr(t, col, int(ad[col]))
+    if ad.get("post_source") == "reuse" and ad.get("reuse_post_ref"):
+        t.post_source = "reuse"
+        t.reuse_post_ref = ad["reuse_post_ref"]
 
 
 # ── 模板 CRUD ──
@@ -100,6 +251,23 @@ class TemplateIn(BaseModel):
     payer: str = ""
     post_source: str = "new"
     reuse_post_ref: str = ""
+    structure: str = ""   # 1:1 三层结构 JSON（空 = 平铺模式；校验/规范化见 _validate_structure）
+
+    @field_validator("structure")
+    @classmethod
+    def _norm_structure(cls, v: str) -> str:
+        """结构 JSON 门卫：非法形状在保存时就 400（不能等部署时才炸）。
+        通过则返规范化 JSON 串（补默认值/去重素材/截断名字）。"""
+        v = (v or "").strip()
+        if not v:
+            return ""
+        try:
+            parsed, err = _validate_structure(json.loads(v))
+        except Exception:
+            raise ValueError("结构(JSON) 解析失败")
+        if err:
+            raise ValueError(err)
+        return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
 
     @field_validator("platform")
     @classmethod
@@ -136,6 +304,7 @@ def create_template(body: TemplateIn,
     except ValueError as e:
         raise HTTPException(400, str(e))
     t = LaunchTemplate(tenant_id=user.tenant_id, created_by=user.id, status="draft", **body.model_dump())
+    _sync_flat_from_structure(t)   # 结构模式 → 平铺列双写（旧读方不炸）
     db.add(t)
     db.flush()
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
@@ -158,6 +327,7 @@ def update_template(tid: int, body: TemplateIn,
         raise HTTPException(400, str(e))
     for k, v in body.model_dump().items():
         setattr(t, k, v)
+    _sync_flat_from_structure(t)   # 结构模式 → 平铺列双写（旧读方不炸）
     db.commit()
     return _tpl_dict(t)
 
@@ -182,7 +352,7 @@ _COPY_COLS = [
     "headline", "body", "page_id", "pixel_id", "landing_url", "cta_type", "subcode_slug",
     "ad_language", "message_template", "landing_page_id",
     "lead_form_template_id", "message_template_id", "beneficiary", "payer",
-    "post_source", "reuse_post_ref",
+    "post_source", "reuse_post_ref", "structure",
 ]
 
 
@@ -239,6 +409,13 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
         raise HTTPException(400, "至少选一个账户")
     if t.status == "archived":
         raise HTTPException(400, "模板已归档")
+    # 结构模式守卫（0088）：树内自带素材组节点/组预算，与平铺批量互斥；TT 链路本期不支持
+    _is_tree = bool(_parse_structure(t))
+    if _is_tree:
+        if (t.platform or "fb") == "tt":
+            raise HTTPException(400, "结构模式暂不支持 TikTok 模板（TT 仍用平铺模式部署）")
+        if body.asset_ids:
+            raise HTTPException(400, "结构模板的素材已在树内按广告节点配置，不支持再叠加「按素材批量生成系列」")
     _budget_guard_400(t)
     # 账户归属 + managed 校验 + 去重（保序）
     seen, clean_items = set(), []
@@ -311,9 +488,14 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     finally:
         release_run_lock(_dlock, 115)
     bg.add_task(_run_deploy_job, job.id, user.tenant_id, t.id)
-    # series_total = 账户数 × 素材数（仅批量模式带；单模板模式响应形状与原来完全一致）
+    # series_total = 账户数 × 素材数（仅批量模式带）；结构模式带树统计（每账户 1 系列
+    # N 组 M 广告，ad_total 为展开后广告数 × 账户数）；单模板模式响应形状与原来完全一致
+    _tree = _parse_structure(t)
     return {"job_id": job.id, "total": len(body.items),
-            **({"series_total": len(body.items) * len(batch_assets)} if batch_assets else {})}
+            **({"series_total": len(body.items) * len(batch_assets)} if batch_assets else {}),
+            **({"tree": {"adsets": len(_tree),
+                         "ad_total": len(body.items) * _tree_expanded_count(_tree)}}
+               if _tree else {})}
 
 
 def _validate_batch_assets(db, asset_ids: list[int], tenant_id: int) -> list:
@@ -382,13 +564,16 @@ def _check_url_placeholders(url: str):
 
 def _interp_landing_url(url: str, *, campaign_name: str = "", account_name: str = "",
                         account_id: str = "", asset_name: str = "",
-                        template_name: str = "", platform: str = "fb") -> str:
+                        template_name: str = "", platform: str = "fb",
+                        adset_name: str = "") -> str:
     """把白名单占位符替换为部署时实值（URL 编码——名字含空格/中文/& 不会打断 query）。
-    adset 名与 campaign 同源（部署链恒为 `{系列名} 组`）；无占位符原样返回（旧模板零开销）。"""
+    adset 名与 campaign 同源（平铺部署链恒为 `{系列名} 组`）；结构模式传真实组名
+    （adset_name 非空优先）。无占位符原样返回（旧模板零开销）。"""
     if not url or "{{" not in url:
         return url
     from urllib.parse import quote
-    adset_name = f"{campaign_name} 组" if campaign_name else ""
+    if not adset_name:
+        adset_name = f"{campaign_name} 组" if campaign_name else ""
     vals = {"campaign.name": campaign_name, "adset.name": adset_name,
             "account.name": account_name, "account.id": account_id,
             "asset.name": asset_name, "template.name": template_name, "platform": platform}
@@ -454,6 +639,14 @@ def preflight_deploy(tid: int, body: PreflightIn,
     if not t:
         raise HTTPException(404, "模板不存在")
     _budget_guard_400(t)
+    # 结构模式预检（0088）：整树概览 + 逐组预算本币换算 + 将消耗节点横幅（FBInsider 同款）
+    _tree = _parse_structure(t)
+    if _tree:
+        if (t.platform or "fb") == "tt":
+            raise HTTPException(400, "结构模式暂不支持 TikTok 模板（TT 仍用平铺模式部署）")
+        if body.asset_ids:
+            raise HTTPException(400, "结构模板的素材已在树内按广告节点配置，不支持叠加批量生成")
+        return _preflight_tree_fb(db, t, _tree, body, user.tenant_id)
     # 批量模式：先校验选中素材（与 deploy 同口径），示例 payload 改用第一个素材
     batch_assets = _validate_batch_assets(db, body.asset_ids, user.tenant_id) if body.asset_ids else []
     # TikTok 模板走 TT 预检（TK P3）：payload 构建器/预算单位/像素解析全不同
@@ -558,6 +751,132 @@ def preflight_deploy(tid: int, body: PreflightIn,
     return out
 
 
+def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn", tenant_id: int) -> dict:
+    """结构模式预检（0088）：整树概览（组/广告/开关/绑定）+ 逐组预算按目标账户本币换算
+    + 将消耗节点清单（FBInsider 预检横幅同款）+ 首组首广告 payload 样例。不调 FB、不花钱。"""
+    from types import SimpleNamespace
+    acc = db.query(Account).filter(Account.tenant_id == tenant_id,
+                                   Account.act_id == body.act_id).first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    try:
+        camp_budget_fb = _resolve_budget_fb(db, body.act_id, t, tenant_id)
+    except ValueError as e:
+        raise HTTPException(400, f"预算换算失败：{e}")
+    is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
+    campaign_name = (t.name_prefix or t.name or "Tova Ads")[:100]
+
+    def _view(**ov):
+        d = {c.name: getattr(t, c.name) for c in t.__table__.columns}
+        d.update(ov)
+        return SimpleNamespace(**d)
+
+    tree_out, will_spend, abo_total_usd = [], [], 0.0
+    for si, snode in enumerate(adsets, 1):
+        sname = (snode.get("name") or f"{campaign_name} 组{si}")[:100]
+        s_enabled = bool(snode.get("enabled"))
+        # 逐组预算：节点 USD → 该账户本币 minor units（与部署 runner 同管道）
+        node_b = snode.get("budget_usd")
+        try:
+            adset_budget_fb = _resolve_budget_fb(
+                db, body.act_id,
+                _view(budget_usd=float(node_b) if node_b else t.budget_usd,
+                      daily_budget=t.daily_budget if not node_b else 0),
+                tenant_id) if not is_cbo else camp_budget_fb
+        except ValueError as e:
+            raise HTTPException(400, f"组「{sname}」预算换算失败：{e}")
+        if not is_cbo and s_enabled:
+            abo_total_usd += float(node_b or t.budget_usd or 0)
+        ads_out = []
+        for ai, anode in enumerate(snode.get("ads") or [], 1):
+            a_enabled = bool(anode.get("enabled")) and s_enabled
+            asset_ids = anode.get("asset_ids") or []
+            if a_enabled:
+                will_spend.append(f"{sname}/{anode.get('name') or (f'广告{ai}' if not asset_ids else '素材组')}")
+            ads_out.append({
+                "name": anode.get("name") or "",
+                "enabled": a_enabled,
+                "asset_count": len(asset_ids),
+                "post_source": anode.get("post_source") or "new",
+                "landing_url": anode.get("landing_url") or "",
+                "bindings": {
+                    "message_template_id": anode.get("message_template_id") or 0,
+                    "lead_form_template_id": anode.get("lead_form_template_id") or 0,
+                    "landing_page_id": anode.get("landing_page_id") or 0,
+                    "subcode_slug": anode.get("subcode_slug") or "",
+                },
+            })
+        tree_out.append({
+            "name": sname, "enabled": s_enabled,
+            "budget_usd": float(node_b) if node_b else (t.budget_usd if not is_cbo else None),
+            "budget_local_fb": adset_budget_fb,
+            "audience_id": snode.get("audience_id") or 0,
+            "optimization_goal": snode.get("optimization_goal") or "",
+            "ads": ads_out,
+        })
+    # 首组首广告 payload 样例（与部署 runner 同构；占位符在保存时已校验）
+    first_ad = (adsets[0].get("ads") or [{}])[0]
+    first_asset = None
+    if first_ad.get("asset_ids"):
+        first_asset = db.query(Asset).filter(
+            Asset.id == int(first_ad["asset_ids"][0]), Asset.tenant_id == tenant_id).first()
+    try:
+        _lp_url = _interp_landing_url(
+            (first_ad.get("landing_url") or t.landing_url or ""), campaign_name=campaign_name,
+            adset_name=tree_out[0]["name"], account_name=(acc.name if acc else ""),
+            account_id=body.act_id,
+            asset_name=((first_asset.name or first_asset.filename or "") if first_asset else ""),
+            template_name=t.name or "", platform="fb")
+        campaign_payload = build_campaign(
+            name=campaign_name, objective=t.objective,
+            daily_budget=camp_budget_fb if is_cbo else None,
+            budget_mode=t.budget_mode, bid_strategy=t.bid_strategy)
+        adset_payload = build_adset(
+            name=tree_out[0]["name"], campaign_id="<FB 创建 campaign 后返回>",
+            daily_budget=tree_out[0]["budget_local_fb"], objective=t.objective,
+            conversion_goal=t.conversion_goal, page_id=(body.page_id or t.page_id or ""),
+            pixel_id=(body.pixel_id or t.pixel_id or ""), landing_url=_lp_url,
+            bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
+            targeting=_resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
+                                         (adsets[0].get("audience_json") or t.audience_json or "")),
+            dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
+            optimization_goal=(adsets[0].get("optimization_goal") or t.optimization_goal or ""),
+            billing_event=(adsets[0].get("billing_event") or t.billing_event or ""),
+            destination_type_override=t.destination_type or "", extra=_parse_advanced(t))
+        creative_payload = build_creative(
+            page_id=(body.page_id or t.page_id or ""), objective=t.objective,
+            conversion_goal=t.conversion_goal, landing_url=_lp_url,
+            headline=(first_ad.get("headline") or t.headline or ""),
+            body=(first_ad.get("body") or t.body or ""),
+            cta_type=(first_ad.get("cta_type") or t.cta_type or ""),
+            video_id="<部署时按账户上传缓存>" if (first_asset and first_asset.type == "video")
+                    else None,
+            image_hash=None if (first_asset and first_asset.type == "video")
+                    else "<部署时按账户上传缓存>")
+    except ValueError as e:
+        raise HTTPException(400, f"参数校验失败：{e}")
+    return {
+        "act_id": body.act_id, "platform": "fb", "mode": "tree",
+        "currency": currency, "fx_rate": (cr.rate if cr else None),
+        "budget_mode": t.budget_mode,
+        "budget_usd": t.budget_usd,
+        "camp_budget_fb": camp_budget_fb,
+        "abo_total_usd": (round(abo_total_usd, 2) if not is_cbo else None),
+        "adset_count": len(adsets),
+        "ad_total": _tree_expanded_count(adsets),
+        "account_count": max(body.account_count or 0, 1),
+        "tree": tree_out,
+        "will_spend": will_spend,   # 整链开启（部署后立即消耗）的节点；空 = 全部暂停建好待开
+        "objective": t.objective, "conversion_goal": t.conversion_goal or "",
+        "campaign": campaign_payload, "adset": adset_payload, "creative": creative_payload,
+        "notes": [
+            "结构模式：每账户建 1 系列 → N 广告组 → M 广告（素材组节点按素材数展开）",
+            "开关关闭的组/广告照建但为 PAUSED（整链开启才开始消耗）",
+            "image_hash/video_id 部署时按目标账户上传并缓存",
+        ],
+    }
+
+
 def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0):
     """解析受众 → targeting dict。优先 audience_json（内联编辑），其次 SavedAudience，None=FB 默认。
     SuperSession（BYPASSRLS）路径必须传 sdb_tenant_id 做 SavedAudience 归属过滤。"""
@@ -606,11 +925,28 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
 def _budget_guard_400(t: LaunchTemplate) -> None:
     """预算守卫（端点层，P0-10/P1-3）：未配置预算 / budget_usd 超安全上限 → 400。
     与 _resolve_budget_fb/_resolve_budget_tt 的 ValueError 同口径（那是后台 runner 兜底，
-    这里给部署/预检端点即时 400，避免整 job 建出来全 item fail）。"""
+    这里给部署/预检端点即时 400，避免整 job 建出来全 item fail）。
+    结构模式（0088）：CBO 校系列预算（上方两查已覆盖）；ABO 求和所有启用组的日预算
+    （组无覆盖用模板默认值；停用组不建不花不算）——N 组各 $X 部署 = 每账户日烧 N×X。"""
     if not ((t.budget_usd or 0) > 0 or (t.daily_budget or 0) > 0):
         raise HTTPException(400, "模板未配置预算，请先在模板编辑器填写日预算再部署")
     if (t.budget_usd or 0) > _BUDGET_MAX_USD:
         raise HTTPException(400, f"模板日预算 ${t.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
+    if (t.budget_mode or "ABO").upper() != "ABO":
+        return
+    adsets = _parse_structure(t)
+    if not adsets:
+        return
+    _def = float(t.budget_usd or 0)
+    total = 0.0
+    for s in adsets:
+        if not s.get("enabled"):
+            continue
+        total += float(s.get("budget_usd") or _def)
+    if total > _BUDGET_MAX_USD:
+        raise HTTPException(
+            400, f"结构模式 ABO 求和日预算 ${total:.0f}（{len([s for s in adsets if s.get('enabled')])} 个启用组）"
+                 f"超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低组预算或停用部分组")
 
 
 def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0) -> int:
@@ -1216,12 +1552,13 @@ def _job_batch_assets(sdb, job_id: int, tenant_id: int) -> list:
 
 
 def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: list,
-                        last: Optional[dict], is_retry: bool = False) -> None:
-    """批量 item（=账户）汇总落账：全部系列成功 = success/error=None；任一失败 = fail +
-    error_code="partial" + 汇总文案（成功 X/Y 系列 + 前 3 条「素材名:原因」，300 字内）。
-    item 的 campaign/adset/ad id 存最后一个成功系列——已部署清单的跳转/live_status 至少
-    能对账一个，全量明细看 error 汇总与平台后台（200 系列塞 item 字段既没列也不可读）。
-    计数口径与单模板模式一致：item 是计数单位（成功+1 / 失败+1），不是按系列计。"""
+                        last: Optional[dict], is_retry: bool = False, unit: str = "系列") -> None:
+    """批量 item（=账户）汇总落账：全部成功 = success/error=None；任一失败 = fail +
+    error_code="partial" + 汇总文案（成功 X/Y + 前 3 条「名字:原因」，300 字内）。
+    item 的 campaign/adset/ad id 存最后一个成功对象——已部署清单的跳转/live_status 至少
+    能对账一个，全量明细看 error 汇总与平台后台（200 个塞 item 字段既没列也不可读）。
+    计数口径与单模板模式一致：item 是计数单位（成功+1 / 失败+1），不是按对象计。
+    unit：批量生成=系列（默认）；结构模式=广告。"""
     if last:
         item.campaign_id = str(last.get("campaign_id") or "")
         item.adset_id = str(last.get("adset_id") or "")
@@ -1237,7 +1574,7 @@ def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: li
         return
     item.status = "fail"; item.error_code = "partial"
     shown = "；".join(fails[:3]) + ("…" if len(fails) > 3 else "")
-    item.error = f"成功 {ok}/{total} 系列：{shown}"[:300]
+    item.error = f"成功 {ok}/{total} {unit}：{shown}"[:300]
     if job and not is_retry:
         job.failed = (job.failed or 0) + 1  # 重试仍失败：原 fail 已计过，不重复加
 
@@ -1359,6 +1696,318 @@ def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
     _apply_batch_result(job, item, len(assets), ok, fails, last, is_retry=is_retry)
 
 
+def _tree_expanded_count(adsets: list) -> int:
+    """树展开后广告总数（每账户）：素材组节点按 len(asset_ids) 计，无素材节点按 1 计。"""
+    return sum(max(len(a.get("asset_ids") or []), 1) for s in adsets for a in (s.get("ads") or []))
+
+
+def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, adsets: list,
+                         tenant_id: int, fb, is_retry: bool = False) -> None:
+    """结构模式 FB 部署（0088）：1 系列 → N 广告组 → M 广告（素材组节点逐素材展开为多个广告）。
+
+    粒度与失败语义（对齐批量模式 partial）：系列建失败 = 整 item 失败（外抛）；组级失败
+    （预算/受众/参数被 FB 拒）= 该组全部广告记失败后继续下一组；单广告失败不中断。
+    预算：节点存 USD，逐账户经 _resolve_budget_fb 按目标账户 currency + 当日汇率换算本币
+    （与平铺链完全同一管道——多货币账户自动转换）。
+    激活语义（用户决策 2026-09-08）：campaign 恒 ACTIVE；组开关 → adset ACTIVE/PAUSED；
+    广告开关且所属组开 → ad ACTIVE/PAUSED；整链开启才消耗。
+    心跳：每广告 touch job（素材上传/建广告序列长，防 reap 误判孤儿）。"""
+    from types import SimpleNamespace
+
+    def _view(**ov):
+        """节点视图：拷贝模板全部列 + 节点覆盖——_resolve_* 系 helper 只读属性，
+        SimpleNamespace 保证兼容（不用改名函数签名，平铺链零改动）。"""
+        d = {c.name: getattr(tpl, c.name) for c in tpl.__table__.columns}
+        d.update(ov)
+        return SimpleNamespace(**d)
+
+    campaign_name = (tpl.name_prefix or tpl.name or "Tova Ads")[:100]
+    is_cbo = (tpl.budget_mode or "ABO").upper() == "CBO"
+    camp_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+    camp_payload = build_campaign(
+        name=campaign_name, objective=tpl.objective,
+        daily_budget=camp_budget_fb if is_cbo else None,
+        budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy)
+    camp = fb.post(f"act_{item.act_id}/campaigns", camp_payload)
+    campaign_id = camp.get("id")
+    if not campaign_id:
+        raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
+
+    ok, fails, last = 0, [], None
+    _acc = sdb.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id == item.act_id).first()
+    _acc_name = (_acc.name if _acc else "") or ""
+    _tpl_adv = _parse_advanced(tpl) or {}
+    _subcode_cache: dict = {}
+    _page_id = item.page_id or tpl.page_id or ""
+
+    def _fail_group(sname: str, snode: dict, msg: str):
+        nonlocal fails
+        for ai, anode in enumerate(snode.get("ads") or [], 1):
+            aname = anode.get("name") or f"广告{ai}"
+            for k in range(max(len(anode.get("asset_ids") or []), 1)):
+                fails.append(f"{sname}/{aname}: {msg[:110]}")
+
+    for si, snode in enumerate(adsets, 1):
+        sname = ((snode.get("name") or f"{campaign_name} 组{si}"))[:100]
+        s_enabled = bool(snode.get("enabled"))
+        # 组预算（ABO）：节点 USD 覆盖 > 模板默认；CBO 组不带预算（系列级）
+        if is_cbo:
+            adset_budget_fb = camp_budget_fb
+        else:
+            node_b = snode.get("budget_usd")
+            try:
+                adset_budget_fb = _resolve_budget_fb(
+                    sdb, item.act_id,
+                    _view(budget_usd=float(node_b) if node_b else tpl.budget_usd,
+                          daily_budget=tpl.daily_budget if not node_b else 0),
+                    tenant_id)
+            except ValueError as e:
+                _fail_group(sname, snode, f"预算换算失败：{e}")
+                continue
+        try:
+            targeting = _resolve_targeting(
+                sdb, snode.get("audience_id") or tpl.audience_id,
+                (snode.get("audience_json") or tpl.audience_json or ""),
+                sdb_tenant_id=tenant_id)
+        except Exception as e:
+            _fail_group(sname, snode, f"受众解析失败：{e}")
+            continue
+        adv_node = {}
+        if snode.get("advanced_config"):
+            try:
+                adv_node = json.loads(snode["advanced_config"]) or {}
+            except Exception:
+                adv_node = {}
+        merged_adv = {**_tpl_adv, **adv_node}
+        # 组 landing_url 取第一广告节点的（build_adset 的 WEBSITE 类 promoted_object 用；
+        # 真正逐广告的链接在创意层覆盖）——占位符此时无组名上下文，用稳定插值
+        _first_ad = (snode.get("ads") or [{}])[0]
+        adset_payload = build_adset(
+            name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
+            objective=tpl.objective, conversion_goal=tpl.conversion_goal,
+            page_id=_page_id, pixel_id=(item.pixel_id or tpl.pixel_id or ""),
+            landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
+                                            tpl.name or "", "fb"),
+            bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
+            targeting=targeting, dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
+            optimization_goal=(snode.get("optimization_goal") or tpl.optimization_goal or ""),
+            billing_event=(snode.get("billing_event") or tpl.billing_event or ""),
+            destination_type_override=tpl.destination_type or "",
+            extra=merged_adv or None)
+        adset_payload["status"] = "ACTIVE" if s_enabled else "PAUSED"
+        try:
+            adset = fb.post(f"act_{item.act_id}/adsets", adset_payload)
+        except FbApiError as e:
+            _fail_group(sname, snode, (e.friendly or str(e)))
+            continue
+        adset_id = adset.get("id")
+        if not adset_id:
+            _fail_group(sname, snode, f"FB 创建 adset 未返回 id（{str(adset)[:120]}）")
+            continue
+
+        for ai, anode in enumerate(snode.get("ads") or [], 1):
+            a_enabled = bool(anode.get("enabled")) and s_enabled   # 整链开启才消耗
+            node_post = "reuse" if anode.get("post_source") == "reuse" else "new"
+            # 素材清单：素材组节点逐素材展开（无素材=跟帖/AI 兜底场景单广告）
+            assets = [None]
+            if anode.get("asset_ids"):
+                assets = [sdb.query(Asset).filter(
+                    Asset.id == int(a), Asset.tenant_id == tenant_id).first()
+                    for a in anode["asset_ids"]]
+            post_content = {}
+            if node_post == "reuse" and anode.get("reuse_post_ref"):
+                try:
+                    from ..routers.fb import _fetch_post_content
+                    post_content = _fetch_post_content(sdb, tenant_id, anode["reuse_post_ref"]) or {}
+                except Exception:
+                    post_content = {}
+            # 节点级子码链接（缓存复用；无效 slug = link None = 静默丢追踪，预检已拦）
+            node_slug = anode.get("subcode_slug") or ""
+            node_link = None
+            if node_slug:
+                if node_slug not in _subcode_cache:
+                    _subcode_cache[node_slug] = sdb.query(LandingAdLink).filter(
+                        LandingAdLink.slug == node_slug,
+                        LandingAdLink.tenant_id == tenant_id).first()
+                node_link = _subcode_cache[node_slug]
+            aname_base = (anode.get("name") or "").strip()
+
+            for asset in assets:
+                from sqlalchemy import text as _t2
+                sdb.execute(_t2("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
+                            {"jid": item.job_id})
+                sdb.commit()  # 心跳即提交（素材上传耗时 > reap 窗口，理由同批量模式）
+                # 广告名：节点名 > 素材名（素材组展开的每个广告用素材名，对齐批量生成命名）
+                if aname_base:
+                    ad_name = aname_base
+                else:
+                    ad_name = ((asset.name or asset.filename or "") if asset else "") or f"{sname} 广告{ai}"
+                ad_name = ad_name[:100]
+                try:
+                    if asset is None and not (node_post == "reuse" and anode.get("reuse_post_ref")):
+                        raise FbApiError("no_id", "广告节点未选素材（跟帖模式可无素材）")
+                    if asset is not None and (asset.type or "image") not in ("image", "video"):
+                        raise FbApiError("no_id", f"素材「{asset.name or asset.id}」不是图片/视频")
+                    # 素材上传缓存（FB image_hash / video_id 按账户隔离）
+                    image_hash, video_id = "", ""
+                    if asset is not None:
+                        filepath = os.path.join(ASSET_DIR, asset.storage_key)
+                        if not os.path.exists(filepath):
+                            raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
+                        if asset.type == "image":
+                            image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
+                        else:
+                            video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
+                        sdb.commit()
+                    # 节点视图（表单/消息/跟帖/落地按节点覆盖，空 = 回退模板级）
+                    vtpl = _view(
+                        lead_form_template_id=int(anode.get("lead_form_template_id") or 0),
+                        lead_form_id="",
+                        landing_url=(anode.get("landing_url") or tpl.landing_url or ""),
+                        post_source=node_post,
+                        reuse_post_ref=(anode.get("reuse_post_ref") or ""),
+                        message_template="",
+                    )
+                    # Instant Form（LEADS）：节点表单模板 > 模板级 > AI 自动生成
+                    lead_form_id = ""
+                    if tpl.objective == "OUTCOME_LEADS" and _page_id:
+                        try:
+                            lead_form_id = _resolve_lead_form(
+                                fb, sdb, vtpl, asset, _page_id,
+                                _stable_landing_url(vtpl.landing_url or "", tpl.name or ""),
+                                post_content=post_content)
+                        except Exception:
+                            pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
+                    # 消息模板：节点选的 MessageTemplate > AI 从素材文案生成（消息类目标）
+                    message_template = ""
+                    _mt_id = int(anode.get("message_template_id") or 0)
+                    if _mt_id:
+                        from ..models.lead_form_template import MessageTemplate
+                        mt = sdb.query(MessageTemplate).filter(
+                            MessageTemplate.id == _mt_id,
+                            MessageTemplate.tenant_id == tenant_id).first()
+                        if mt:
+                            try:
+                                _ibs = json.loads(mt.ice_breakers_json or "[]")
+                            except Exception:
+                                _ibs = []
+                            message_template = json.dumps(
+                                {"text": mt.welcome_text or "", "ice_breakers": _ibs},
+                                ensure_ascii=False)
+                    if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
+                        _msg_body = ""
+                        if asset is not None:
+                            try:
+                                ai_copy = json.loads(asset.ai_copy_json or "{}") if asset.ai_copy_json else {}
+                                _msg_body = (ai_copy.get("bodies") or [""])[0]
+                            except Exception:
+                                pass
+                        elif post_content.get("message"):
+                            _msg_body = post_content["message"]
+                        if _msg_body:
+                            message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
+                    # 文案：素材 AI 文案随机组合 > 节点文案 > 模板文案
+                    from ..core.ad_ops import pick_random_copy
+                    _rh, _rb = pick_random_copy(asset)
+                    _headline = _rh or (anode.get("headline") or "") or (tpl.headline or "")
+                    _body = _rb or (anode.get("body") or "") or (tpl.body or "")
+                    # 主页帖（new=每素材建 / reuse=节点引用帖）
+                    page_post_id = _resolve_page_post(sdb, fb, tenant_id, vtpl, asset, _page_id, body=_body)
+                    if page_post_id:
+                        sdb.commit()
+                    # 落地 URL：节点占位符逐组/逐账户解值（组名真实传入）
+                    _lp_url = _interp_landing_url(
+                        vtpl.landing_url or "", campaign_name=campaign_name,
+                        adset_name=sname, account_name=_acc_name, account_id=item.act_id,
+                        asset_name=((asset.name or asset.filename or "") if asset is not None else ""),
+                        template_name=tpl.name or "", platform="fb")
+                    # 子码 effective_url（与 deploy_one_account 同构）
+                    effective_url = _lp_url
+                    if node_slug and node_link is not None:
+                        base = _lp_url or "https://tovaads.com"
+                        effective_url = f"{base}/a/{node_slug}?ad=" + "{ad.id}"
+                    # Messenger 欢迎语 + 主页 messaging 能力检查（deploy_one_account 同构）
+                    from ..core.ad_builder import parse_message_template
+                    welcome_msg = None
+                    is_messaging = (tpl.objective.upper() in ("OUTCOME_ENGAGEMENT", "OUTCOME_MESSAGES", "MESSAGES")
+                                    and tpl.conversion_goal.lower() in ("conversations", "messaging_purchase_conversion",
+                                                                        "messaging_appointment_conversion"))
+                    if is_messaging and _page_id:
+                        try:
+                            pf = fb.get(_page_id, {"fields": "messaging_feature_status"})
+                            mfs = (pf.get("messaging_feature_status") or {})
+                            if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
+                                raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
+                        except FbApiError:
+                            raise
+                        except Exception:
+                            pass
+                        welcome_msg = parse_message_template(message_template, allow_cjk=True)
+                    creative = build_creative(
+                        page_id=_page_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
+                        landing_url=effective_url, headline=_headline, body=_body,
+                        cta_type=(anode.get("cta_type") or tpl.cta_type or ""),
+                        image_hash=image_hash, video_id=video_id,
+                        lead_form_id=lead_form_id, welcome_message=welcome_msg)
+                    if page_post_id:
+                        _cta_t = (anode.get("cta_type") or tpl.cta_type or "") or pick_cta(_body, tpl.objective)
+                        _cta_val = ({"page": _page_id} if _cta_t == "LIKE_PAGE"
+                                    else {"link": effective_url or f"https://facebook.com/{_page_id}"})
+                        cr = fb.post(f"act_{item.act_id}/adcreatives", {
+                            "name": f"{ad_name} creative", "object_story_id": page_post_id,
+                            "call_to_action": json.dumps({"type": _cta_t, "value": _cta_val}),
+                        })
+                        creative_id = cr.get("id")
+                        if not creative_id:
+                            raise FbApiError("no_id", f"建 creative(object_story_id) 未返回 id：{str(cr)[:150]}")
+                        ad = fb.post(f"act_{item.act_id}/ads", {
+                            "name": ad_name, "adset_id": adset_id,
+                            "status": "ACTIVE" if a_enabled else "PAUSED",
+                            "creative": {"creative_id": creative_id}})
+                    else:
+                        ad = fb.post(f"act_{item.act_id}/ads", {
+                            "name": ad_name, "adset_id": adset_id,
+                            "status": "ACTIVE" if a_enabled else "PAUSED",
+                            "creative": creative})
+                    ad_id = ad.get("id")
+                    if not ad_id:
+                        raise FbApiError("no_id", f"FB 创建 ad 未返回 id（响应：{str(ad)[:150]}）")
+                    # 子码标注广告名 + 回绑 ad_id（deploy_one_account 同构）
+                    if node_slug and node_link is not None:
+                        try:
+                            fb.post(ad_id, {"name": f"[子码:{node_slug}] {ad_name}"})
+                        except Exception:
+                            pass
+                        node_link.ad_id = ad_id
+                        node_link.status = "active"
+                    ok += 1
+                    last = {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id,
+                            "page_post_id": page_post_id}
+                    write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                              target_type="ad", target_id=str(ad_id),
+                              action_type="deploy", source="launch", result="success",
+                              metadata={"act_id": item.act_id, "campaign_id": campaign_id,
+                                        "adset_id": adset_id, "template_id": tpl.id,
+                                        "tree": f"{sname}/{ad_name}"})
+                except FbApiError as e:
+                    fails.append(f"{sname}/{ad_name}: {(e.friendly or str(e))[:110]}")
+                    write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                              target_type="ad", target_id="", action_type="deploy", source="launch",
+                              result="fail", friendly_error=(e.friendly or str(e))[:200],
+                              metadata={"act_id": item.act_id, "template_id": tpl.id,
+                                        "tree": f"{sname}/{ad_name}"})
+                except Exception as e:
+                    fails.append(f"{sname}/{ad_name}: {str(e)[:110]}")
+                    write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                              target_type="ad", target_id="", action_type="deploy", source="launch",
+                              result="fail", friendly_error=str(e)[:200],
+                              metadata={"act_id": item.act_id, "template_id": tpl.id,
+                                        "tree": f"{sname}/{ad_name}"})
+    _apply_batch_result(job, item, _tree_expanded_count(adsets), ok, fails, last,
+                        is_retry=is_retry, unit="广告")
+
+
 def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
                           tenant_id: int, link, is_retry: bool = False) -> None:
     """批量模式 TT：item 内逐素材克隆系列。_deploy_item_tt 当「单系列执行器」用——
@@ -1460,6 +2109,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 if batch_assets:
                     _deploy_item_fb_batch(sdb, job, item, tpl, batch_assets, tenant_id, link,
                                           targeting, advanced, post_content, fb)
+                    sdb.commit()
+                    continue
+                # 结构模式（0088）：1 系列 → N 组 → M 广告（整树克隆到该账户；
+                # 素材组节点逐素材展开。上方 batch_assets/单模板分支都不适用）
+                tree_adsets = _parse_structure(tpl)
+                if tree_adsets:
+                    _deploy_item_fb_tree(sdb, job, item, tpl, tree_adsets, tenant_id, fb)
                     sdb.commit()
                     continue
                 # 单模板模式：一个系列（原内联块抽为 _deploy_series_fb，行为不变）
@@ -1653,6 +2309,10 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         raise HTTPException(404, "item 不存在")
     if it.status != "fail":
         raise HTTPException(400, f"只能重试失败的 item（当前 {it.status}）")
+    # 结构模式部分成功守卫（0088）：item 已建出系列（部分广告失败）时整树重试 =
+    # 已成功的广告再建一份双份预算。全败（系列未建成，campaign_id 空）才允许整树重跑。
+    if _parse_structure(_tpl) and (it.campaign_id or ""):
+        raise HTTPException(400, "该账户已建出系列（部分广告失败）——整树重试会重复已成功的广告。请到广告管理器核查已建内容；需要补投请复制模板裁剪后再部署")
     # 账户纳管守卫（与 deploy_template 同款）——retry 原先没有：账户移除后重试，
     # cred 兜底会走全租户 RR 令牌，只要令牌还能管该 act_id 就真建广告花钱且无止损覆盖
     from ..models.fb import Account as _Acc
@@ -1797,6 +2457,24 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 fb = client_for_account(sdb, tenant_id, it.act_id, "write")
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
+            # 结构模式重试（0088）：整树重跑（仅全败 item——部分成功在端点层已拒）；
+            # 不走 _find_existing_campaign 幂等捷径（树有多组多名，同名命中无法确认归属）
+            tree_adsets = _parse_structure(tpl)
+            if tree_adsets:
+                _deploy_item_fb_tree(sdb, job, it, tpl, tree_adsets, tenant_id, fb, is_retry=True)
+                if it.status == "fail" and job:
+                    job.status = "partial_failed"   # 仍 fail → 必落 partial_failed
+                    job.finished_at = datetime.now(timezone.utc)
+                elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
+                    job.status = "partial_failed" if job.failed else "completed"
+                    job.finished_at = datetime.now(timezone.utc)
+                sdb.commit()
+                if it.status == "success" and it.ad_id:
+                    try:
+                        _refresh_ads_cache_after_deploy(tenant_id, [it.act_id])
+                    except Exception:
+                        pass
+                return
             # 批量模式重试 = 整个 item 重跑（全部素材重建）。不走下方 _find_existing_campaign
             # 同名幂等捷径——它只对单模板模式可靠：批量系列名=素材名，与账户里既有的同名
             # campaign 无法区分是否本次 job 所建（素材名撞已有系列名时误命中=假成功漏建系列）。
