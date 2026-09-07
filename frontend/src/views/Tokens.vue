@@ -854,7 +854,7 @@ const deleteToken = async (tk) => {
                 <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
                 <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
                 <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
-                <el-dropdown-item command="max_accounts">📊 {{ t('tokens.maxAccountsBtn') }}</el-dropdown-item>
+                <el-dropdown-item command="max_accounts">{{ t('tokens.maxAccountsBtn') }}</el-dropdown-item>
                 <el-dropdown-item command="change_type" divided>{{ t('tokens.changeTypeBtn') }}（{{ ttTypeLabel(tk.token_type) }} → {{ ttTypeLabel((tk.token_type || 'manage') === 'operate' ? 'manage' : 'operate') }}）</el-dropdown-item>
                 <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
               </el-dropdown-menu>
