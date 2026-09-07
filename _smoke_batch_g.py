@@ -80,6 +80,12 @@ check("pf adset bid_amount", (pf.get("adset") or {}).get("bid_amount") == str(pf
 check("pf adset minimum_roas", (pf.get("adset") or {}).get("minimum_roas") == "1.2")
 check("pf campaign special cats", (pf.get("campaign") or {}).get("special_ad_categories") == ["CREDIT"])
 
+# ---- 3b. lifetime 无日预算也可部署（免 budget_usd）----
+r = httpx.put(f"{BASE}/launch-templates/{TID}", headers=H, json={**base, "budget_usd": 0}, timeout=30)
+check("lifetime zero daily budget ok", r.status_code == 200, r.text[:100])
+r = httpx.post(f"{BASE}/launch-templates/{TID}/preflight", headers=H, json={"act_id": ACT}, timeout=60)
+check("preflight lifetime without daily budget 200", r.status_code == 200 and (r.json().get("lifetime_budget_fb") or 0) > 0, r.text[:120])
+
 # ---- 4. lifetime 无排期 → 部署/预检 400 ----
 r = httpx.put(f"{BASE}/launch-templates/{TID}", headers=H,
               json={**base, "schedule_start": "", "schedule_end": ""}, timeout=30)

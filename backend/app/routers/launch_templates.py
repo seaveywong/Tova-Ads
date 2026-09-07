@@ -771,7 +771,8 @@ def preflight_deploy(tid: int, body: PreflightIn,
     # 汇率预检：非 USD 账户缺汇率时 _resolve_budget_fb 抛 ValueError——
     # 原在 try 之外直接 500，预检该给友好 400（部署 runner 同异常是 fail item）
     try:
-        daily_budget_fb = _resolve_budget_fb(db, body.act_id, t, user.tenant_id)
+        daily_budget_fb = (0 if (t.budget_type or "daily") == "lifetime"
+                           else _resolve_budget_fb(db, body.act_id, t, user.tenant_id))
     except ValueError as e:
         logging.getLogger("toveads.launch").warning(f"preflight budget resolve failed: {e}")
         raise HTTPException(400, "预算换算失败：账户币种缺少汇率，请在系统设置配置汇率或改用 USD 模板")
@@ -1073,8 +1074,11 @@ def _budget_guard_400(t: LaunchTemplate) -> None:
     这里给部署/预检端点即时 400，避免整 job 建出来全 item fail）。
     结构模式（0088）：CBO 校系列预算（上方两查已覆盖）；ABO 求和所有启用组的日预算
     （组无覆盖用模板默认值；停用组不建不花不算）——N 组各 $X 部署 = 每账户日烧 N×X。"""
-    if not ((t.budget_usd or 0) > 0 or (t.daily_budget or 0) > 0):
+    _lt_mode = (t.budget_type or "daily") == "lifetime"
+    if not _lt_mode and not ((t.budget_usd or 0) > 0 or (t.daily_budget or 0) > 0):
         raise HTTPException(400, "模板未配置预算，请先在模板编辑器填写日预算再部署")
+    if _lt_mode and not ((t.lifetime_budget_usd or 0) > 0 or (t.budget_usd or 0) > 0):
+        raise HTTPException(400, "总预算模式未填写总预算金额")
     if (t.budget_usd or 0) > _BUDGET_MAX_USD:
         raise HTTPException(400, f"模板日预算 ${t.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
     # lifetime（总预算）口径：必须有排期 + 上限 $50000（TemplateIn 已拦保存，此处兜底直改库的行）
@@ -1765,7 +1769,9 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
     pixel_id = item.pixel_id or tpl.pixel_id
-    daily_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+    # lifetime 模式不解析日预算（无 budget_usd 也能部署；总预算在下方换算）
+    daily_budget_fb = (0 if (tpl.budget_type or "daily") == "lifetime"
+                       else _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id))
     # 解析 Instant Form ID：表单模板 > 已建 form_id > AI 自动生成（LEADS 目标）
     lead_form_id = ""
     if tpl.objective == "OUTCOME_LEADS" and page_id:
