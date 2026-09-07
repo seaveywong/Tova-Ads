@@ -131,13 +131,22 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
 
     # 优先：account_fb_credentials 候选池（多令牌同账户）
     if acc:
+        # 写路径 tiebreaker（2026-09-07 生产实测抓出）：同 priority 时 manage 型按 id 恒排前，
+        # 写操作全撞管理号（O337 池 21-MGT/22-Fausto 同 priority=0 → 写永远走 21 →
+        # "权限不足"）。同优先级时 operate（操作号）先于 manage（管理号）——
+        # 显式 priority 仍是最高裁决（用户在令牌页手动设的顺序不被覆盖）。
+        from sqlalchemy import case as _case
+        _order = [AccountFbCredential.priority]
+        if op_kind in ("write", "pause"):
+            _order.insert(1, _case((FbCredential.token_type == "operate", 0), else_=1))
+        _order.append(FbCredential.id)
         pool_creds = db.query(FbCredential).join(
             AccountFbCredential, AccountFbCredential.fb_credential_id == FbCredential.id
         ).filter(
             AccountFbCredential.account_id == acc.id,
             AccountFbCredential.status == "active",
             FbCredential.status == "active",
-        ).order_by(AccountFbCredential.priority, FbCredential.id).all()
+        ).order_by(*_order).all()
         pool_avail = [c for c in pool_creds if _is_cred_available(c) and _op_ok(c, op_kind)]
         if pool_avail:
             if op_kind in ("write", "pause"):
