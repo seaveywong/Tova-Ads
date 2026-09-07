@@ -1885,12 +1885,13 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         sdb.commit()
                     # 节点视图（表单/消息/跟帖/落地按节点覆盖，空 = 回退模板级）
                     vtpl = _view(
-                        lead_form_template_id=int(anode.get("lead_form_template_id") or 0),
-                        lead_form_id="",
+                        lead_form_template_id=(int(anode.get("lead_form_template_id") or 0)
+                                               or (tpl.lead_form_template_id or 0)),
+                        lead_form_id=(tpl.lead_form_id or ""),
                         landing_url=(anode.get("landing_url") or tpl.landing_url or ""),
                         post_source=node_post,
                         reuse_post_ref=(anode.get("reuse_post_ref") or ""),
-                        message_template="",
+                        message_template=(tpl.message_template or ""),
                     )
                     # Instant Form（LEADS）：节点表单模板 > 模板级 > AI 自动生成
                     lead_form_id = ""
@@ -1902,7 +1903,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                                 post_content=post_content)
                         except Exception:
                             pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
-                    # 消息模板：节点选的 MessageTemplate > AI 从素材文案生成（消息类目标）
+                    # 消息模板：节点选的 MessageTemplate > 模板级 raw JSON > AI 从素材文案生成
                     message_template = ""
                     _mt_id = int(anode.get("message_template_id") or 0)
                     if _mt_id:
@@ -1918,6 +1919,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             message_template = json.dumps(
                                 {"text": mt.welcome_text or "", "ice_breakers": _ibs},
                                 ensure_ascii=False)
+                    if not message_template:
+                        message_template = (tpl.message_template or "")
                     if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
                         _msg_body = ""
                         if asset is not None:
