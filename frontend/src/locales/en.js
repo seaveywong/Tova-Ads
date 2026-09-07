@@ -973,6 +973,7 @@ export default {
     batchActivateConfirm: 'About to resume delivery of {n} ads', batchActivateTitle: 'Confirm Batch Activate',
     budgetBigJumpTitle: 'Confirm Large Budget Increase', budgetBigJumpConfirm: 'Large budget change: {change}. Apply?',
     reviewFlagTitle: 'Rejection Reason', reviewFlagHint: 'Click to view rejection reason', thumbTitle: 'Creative Thumbnail',
+    thumbNoneShort: 'No preview', thumbArchivedShort: 'Archived', thumbNone: 'The platform did not return a preview image for this ad', thumbArchived: 'Archived ad: creative expired, the platform no longer provides a preview',
     rename: 'Rename', renameTitle: 'Rename · {name}', renamePrompt: 'New name',
     renameEmpty: 'Name cannot be empty', renameTooLong: 'Name must be 200 characters or fewer', renamed: 'Renamed',
     filterAbnormal: 'Issues', scopeAccounts: '{n} accounts', totalRow: 'Total ({n})',
