@@ -660,7 +660,7 @@ const unsubscribeLeads = async () => {
           <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       </template>
-      <div v-if="!curList.length && !loading" class="empty">{{ tab === 'lead' ? t('common.noData') : t('adm.emptyAdsHint') }}</div>
+      <div v-if="!curList.length && !loading" class="empty">{{ t('adm.emptyAdsHint') }}</div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
       <div class="leads-bar">
@@ -781,7 +781,7 @@ const unsubscribeLeads = async () => {
           <div class="diag-sec" v-if="diagData.cooldown">
             <div class="diag-sec-title">{{ t('adm.diagCooldown') }}</div>
             <div class="diag-cooldown">
-              🔒 {{ t('adm.diagCooldownMsg', { rule: diagData.cooldown.rule, ago: Math.max(0, 60 - diagData.cooldown.remaining_min), left: diagData.cooldown.remaining_min }) }}
+              🔒 {{ t('adm.diagCooldownMsg', { rule: diagData.cooldown.rule, ago: Math.max(0, Math.round((Date.now() - new Date(diagData.cooldown.paused_at).getTime()) / 60000)), left: diagData.cooldown.remaining_min }) }}
             </div>
           </div>
           <div class="diag-sec" v-if="diagData.whitelisted">
