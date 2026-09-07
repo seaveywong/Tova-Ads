@@ -1,8 +1,10 @@
-"""广告实体缓存同步（定时拉 campaigns/adsets/ads → ads_cache，广告管理器读缓存跨账户汇总，0 FB）。
+"""广告实体缓存同步（定时拉 campaigns/adsets → ads_cache，广告管理器读缓存跨账户汇总，0 FB）。
 
 独立 job（15min），不进巡检 5min 主循环（广告实体变化慢，降频省 API）。
 FB/TT 都同步（P1-5）：TT 走同一 _sync_one 平台分发——归一 FB 形状后 upsert platform='tt' 行，
 两份实现不漂移。
+FB 的 ads 层由巡检独家供数（巡检每 5min 拉全状态 /ads 后回写 ads_json——省 API：本 cron
+不再重复拉同 edge；campaigns/adsets 巡检不拉，仍由本 job 供数）。TT 无巡检回写，本 job 恒拉三层。
 """
 import logging
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
@@ -34,7 +36,8 @@ def run_ads_cache_sync():
                 continue
             try:
                 if _sync_one(db, acc.tenant_id, acc.act_id, client,
-                             platform=platform, currency=(acc.currency or "USD")):
+                             platform=platform, currency=(acc.currency or "USD"),
+                             include_ads=False):
                     updated += 1
                 else:
                     logger.warning(f"[AdsCache] 账户 {acc.act_id}（{platform}）拉取失败")

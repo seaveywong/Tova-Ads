@@ -5,6 +5,7 @@
 dedup：action_logs(action_type=budget_progress_alert, target_id=adset_id, trigger_detail=tier=N, 今日)。
 纯告警，不自动改预算（v1 与"不做自动调预算"一致）。
 """
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
@@ -39,6 +40,26 @@ def _local_day_start_utc(acc: Account) -> datetime:
             hour=0, minute=0, second=0, microsecond=0)
 
 
+def _active_adsets_from_cache(db, tenant_id: int, act_id: str) -> list | None:
+    """ACTIVE adsets 读 ads_cache（0 API）：15min cron 已同步全状态 adsets，本 job 只需
+    ACTIVE 名单 + 日预算字段，本地过滤即可——不再 live 拉 /adsets（省 1 调用/轮·账户）。
+    行缺失/数据空/JSON 损坏 → None，由调用方 live 拉兜底（新纳管首 15min、异常自愈）。"""
+    try:
+        from ..models.ads_cache import AdsCache
+        row = db.query(AdsCache).filter(
+            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+            AdsCache.platform == "fb").first()
+        if not row or not row.adsets_json:
+            return None
+        items = json.loads(row.adsets_json)
+        if not isinstance(items, list):
+            return None
+        return [a for a in items
+                if (a.get("effective_status") or "").upper() == "ACTIVE"]
+    except Exception:
+        return None
+
+
 def check_account_budget_progress(
     db: Session, tenant_id: int, fb: FbClient, acc: Account, trace_id: str
 ) -> list[dict]:
@@ -48,7 +69,11 @@ def check_account_budget_progress(
     today_start_utc = _local_day_start_utc(acc)
 
     try:
-        adsets = fb.get_adsets(acc.act_id)
+        # adsets 走 ads_cache（0 API，cron 已同步全状态；本 job 只需 ACTIVE+日预算，本地过滤）；
+        # adset 维度今日消耗是本 job 独有数据（巡检只拉 ad 维度 insights），保留 live 拉
+        adsets = _active_adsets_from_cache(db, tenant_id, acc.act_id)
+        if adsets is None:
+            adsets = fb.get_adsets(acc.act_id)   # cache 未建行/异常 → live 兜底（保可用性）
         spend_map = {i.get("adset_id"): float(i.get("spend", 0))
                      for i in fb.get_adset_insights(acc.act_id, "today")}
     except FbApiError as e:

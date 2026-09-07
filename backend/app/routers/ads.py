@@ -213,24 +213,30 @@ def _attach_perf(items: list, perf_map: dict) -> list:
 
 
 def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb",
-              currency: str = "USD") -> bool:
-    """拉单账户 campaigns/adsets/ads → upsert ads_cache。返回是否成功。
+              currency: str = "USD", include_ads: bool = True) -> bool:
+    """拉单账户 campaigns/adsets[/ads] → upsert ads_cache。返回是否成功。
 
     platform='tt'：TtClient duck-type 同方法面拉原生行 → tt_to_fb_* 归一成 FB 形状
     （键名/状态/预算单位）再 upsert（platform='tt' 行）——/ads/list 与前端零平台分支。
     client_for_account 已按账户 platform 分发返回 FbClient/TtClient，这里只按参归一。
+    include_ads=False（15min cron FB 路径）：不拉 /ads、不覆盖 ads_json——FB 广告层由
+    巡检独家供数（每 5min 回写全状态，同 edge 重复拉是冗余）；TT 无巡检回写恒拉；
+    手动刷新（refresh/live-status）走默认 True 保全量。
     """
     try:
         campaigns = fb.get_campaigns(act_id)
         adsets = fb.get_adsets(act_id, effective_status=None)
-        ads = fb.get_ads(act_id, effective_status=None)
+        ads = None
+        if include_ads or platform == "tt":
+            ads = fb.get_ads(act_id, effective_status=None)
     except (FbApiError, Exception):
         return False
     if platform == "tt":
         from ..core.tt_client import tt_to_fb_campaign, tt_to_fb_adset, tt_to_fb_ad
         campaigns = [tt_to_fb_campaign(c, currency) for c in campaigns]
         adsets = [tt_to_fb_adset(a, currency) for a in adsets]
-        ads = [tt_to_fb_ad(a, currency) for a in ads]
+        if ads is not None:
+            ads = [tt_to_fb_ad(a, currency) for a in ads]
     row = db.query(AdsCache).filter(
         AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
         AdsCache.platform == platform).first()
@@ -239,7 +245,8 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
         db.add(row)
     row.campaigns_json = json.dumps(campaigns)
     row.adsets_json = json.dumps(adsets)
-    row.ads_json = json.dumps(ads)
+    if ads is not None:
+        row.ads_json = json.dumps(ads)
     row.updated_at = datetime.now(timezone.utc)
     return True
 

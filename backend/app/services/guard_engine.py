@@ -211,6 +211,31 @@ def _patch_cache_after_pause(db, tenant_id: int, act_id: str, platform: str,
                        f"act={act_id} node={node_id} level={level}: {e}")
 
 
+def _writeback_ads_cache(db, tenant_id: int, act_id: str, ads: list) -> None:
+    """巡检把 FB 全状态 /ads 结果回写 ads_cache.ads_json（广告管理器广告层的唯一数据源）。
+
+    全量替换 + 刷 updated_at（广告层新鲜度 5min；campaigns/adsets 两层仍由 15min cron 供数
+    ——updated_at 语义=广告层同步时间，管理器「数据更新至」随巡检走）。行不存在（新纳管
+    首巡）建行，campaigns/adsets 由 15min cron 补齐。失败不阻断巡检（warning，15min cron 自愈）。
+    与手动全量刷新并发时双方写的都是全量数据，后写赢无害。"""
+    try:
+        row = db.query(AdsCache).filter(
+            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+            AdsCache.platform == "fb").first()
+        if not row:
+            row = AdsCache(tenant_id=tenant_id, act_id=act_id, platform="fb")
+            db.add(row)
+        row.ads_json = json.dumps(ads, ensure_ascii=False)
+        row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.warning(f"[Guard] 巡检回写 ads_cache 失败 act={act_id}: {e}")
+
+
 def _ad_id_of(a: dict) -> str:
     """广告行 id 归一（FB 对象=id / TT 对象=ad_id）。"""
     return str(a.get("ad_id") or a.get("id") or "")
@@ -954,15 +979,21 @@ def _inspect_account_worker(ctx: dict) -> dict:
         active_ids = None
         created_map: dict = {}
         try:
-            active_ads = fb.get_active_ads(acc.act_id)
             if platform == "tt":
                 # TT ad/get 字段：ad_id / create_time（FB 是 id / created_time），归一成 FB 形状
+                active_ads = fb.get_active_ads(acc.act_id)
                 active_ids = {_ad_id_of(a) for a in active_ads}
                 created_map = {_ad_id_of(a): _norm_created(a.get("create_time"))
                                for a in active_ads}
             else:
-                active_ids = {a.get("id") for a in active_ads}
+                # FB 拉全状态（不加 effective_status 过滤）：同一次调用既出 ACTIVE 集（本地
+                # 过滤，_ad_is_active 与原服务端过滤同判 ACTIVE，语义等价）又回写
+                # ads_cache.ads_json——广告管理器广告层由巡检独家供数（5min），15min cache
+                # cron 不再重复拉 /ads（省 4 调用/h·账户，巡检的 live 拉取本身是止损刚需）
+                active_ads = fb.get_ads(acc.act_id, effective_status=None)
+                active_ids = {a.get("id") for a in active_ads if _ad_is_active(a, "fb")}
                 created_map = {a.get("id"): a.get("created_time") for a in active_ads}
+                _writeback_ads_cache(db, tenant_id, acc.act_id, active_ads)
         except FbApiError as e:
             # 限流统一冷却（复审R1）：曾只在 insights 分支冷却令牌——get_active_ads 撞限流
             # 不冷却，同轮其余 worker/下轮继续选同一令牌撞墙。DB 级冷却对后续 worker 立即可见
