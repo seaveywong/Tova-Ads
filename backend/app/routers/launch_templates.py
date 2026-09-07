@@ -60,6 +60,11 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "beneficiary": t.beneficiary or "", "payer": t.payer or "",
         "post_source": t.post_source or "new", "reuse_post_ref": t.reuse_post_ref or "",
         "structure": t.structure or "",
+        "budget_type": t.budget_type or "daily", "lifetime_budget_usd": t.lifetime_budget_usd,
+        "schedule_start": t.schedule_start or "", "schedule_end": t.schedule_end or "",
+        "pacing": t.pacing or "", "bid_amount_usd": t.bid_amount_usd,
+        "minimum_roas": t.minimum_roas, "special_ad_categories": t.special_ad_categories or "",
+        "link_description": t.link_description or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -148,6 +153,7 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 "pixel_id": str(ad.get("pixel_id") or ""),
                 "post_source": post_source,
                 "reuse_post_ref": reuse_ref,
+                "link_description": str(ad.get("link_description") or "")[:200],
             })
         aud_id = adset.get("audience_id")
         out_adsets.append({
@@ -160,8 +166,25 @@ def _validate_structure(raw) -> tuple[dict, str]:
             "optimization_goal": str(adset.get("optimization_goal") or ""),
             "billing_event": str(adset.get("billing_event") or ""),
             "advanced_config": str(adset.get("advanced_config") or ""),
+            "budget_type": ("lifetime" if str(adset.get("budget_type") or "").lower() == "lifetime" else "daily"),
+            "lifetime_budget_usd": (float(adset["lifetime_budget_usd"])
+                                    if adset.get("lifetime_budget_usd") not in (None, "", 0) else None),
+            "schedule_start": str(adset.get("schedule_start") or "")[:25],
+            "schedule_end": str(adset.get("schedule_end") or "")[:25],
+            "pacing": ("accelerated" if str(adset.get("pacing") or "").lower() == "accelerated" else ""),
+            "bid_amount_usd": (float(adset["bid_amount_usd"])
+                               if adset.get("bid_amount_usd") not in (None, "", 0) else None),
+            "minimum_roas": (float(adset["minimum_roas"])
+                             if adset.get("minimum_roas") not in (None, "", 0) else None),
             "ads": out_ads,
         })
+        # 组级总预算必须配排期（FB 硬约束：lifetime_budget 需 start/end）；排期格式粗校验
+        if out_adsets[-1]["budget_type"] == "lifetime":
+            _ss, _se = out_adsets[-1]["schedule_start"], out_adsets[-1]["schedule_end"]
+            if not (_ss and _se):
+                return {}, f"广告组「{name or len(out_adsets)}」总预算必须设置排期（开始+结束时间）"
+            if _ss > _se:
+                return {}, f"广告组「{name or len(out_adsets)}」排期开始晚于结束"
     # 展开总数（每账户）硬顶：素材组节点按 len(asset_ids) 计，无素材节点按 1 计
     expanded = sum(max(len(a["asset_ids"]), 1) for s in out_adsets for a in s["ads"])
     if expanded > _TREE_ADS_MAX:
@@ -273,6 +296,62 @@ class TemplateIn(BaseModel):
     post_source: str = "new"
     reuse_post_ref: str = ""
     structure: str = ""   # 1:1 三层结构 JSON（空 = 平铺模式；校验/规范化见 _validate_structure）
+    # FB 创建流程 1:1（0089 批G）
+    budget_type: str = "daily"          # daily / lifetime
+    lifetime_budget_usd: Optional[float] = None
+    schedule_start: str = ""
+    schedule_end: str = ""
+    pacing: str = ""                    # ''=匀速 / accelerated
+    bid_amount_usd: Optional[float] = None
+    minimum_roas: Optional[float] = None
+    special_ad_categories: str = ""     # JSON 数组串（CREDIT/EMPLOYMENT/HOUSING/...）
+    link_description: str = ""
+
+    _SPECIAL_CATS = {"CREDIT", "EMPLOYMENT", "HOUSING",
+                     "SOCIAL_ISSUES_ELECTIONS_POLITICS", "FINANCIAL_PRODUCTS"}
+    _BUDGET_MAX_LIFETIME_USD = 50000.0  # 总预算上限（多日累积，口径高于日预算 $5000）
+    _DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$")
+
+    @field_validator("budget_type")
+    @classmethod
+    def _norm_budget_type(cls, v: str) -> str:
+        v = (v or "daily").strip().lower()
+        return v if v in ("daily", "lifetime") else "daily"
+
+    @field_validator("pacing")
+    @classmethod
+    def _norm_pacing(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        return v if v in ("", "accelerated") else ""
+
+    @field_validator("lifetime_budget_usd")
+    @classmethod
+    def _cap_lifetime(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v > cls._BUDGET_MAX_LIFETIME_USD:
+            raise ValueError(f"总预算超安全上限 ${cls._BUDGET_MAX_LIFETIME_USD:.0f}，请分系列分步投放")
+        return v
+
+    @field_validator("schedule_start", "schedule_end")
+    @classmethod
+    def _check_dt(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not cls._DT_RE.match(v):
+            raise ValueError("排期时间格式应为 YYYY-MM-DD 或 YYYY-MM-DD HH:mm")
+        return v
+
+    @field_validator("special_ad_categories")
+    @classmethod
+    def _check_cats(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            return ""
+        try:
+            cats = json.loads(v)
+        except Exception:
+            raise ValueError("特殊广告类别需为 JSON 数组（如 [\"CREDIT\"]）")
+        if not isinstance(cats, list) or any(c not in cls._SPECIAL_CATS for c in cats):
+            raise ValueError(f"特殊广告类别仅支持：{sorted(cls._SPECIAL_CATS)}")
+        return json.dumps(sorted(set(cats)))
 
     @field_validator("structure")
     @classmethod
@@ -374,6 +453,8 @@ _COPY_COLS = [
     "ad_language", "message_template", "landing_page_id",
     "lead_form_template_id", "message_template_id", "beneficiary", "payer",
     "post_source", "reuse_post_ref", "structure",
+    "budget_type", "lifetime_budget_usd", "schedule_start", "schedule_end", "pacing",
+    "bid_amount_usd", "minimum_roas", "special_ad_categories", "link_description",
 ]
 
 
@@ -716,10 +797,21 @@ def preflight_deploy(tid: int, body: PreflightIn,
         asset_name=((asset.name or asset.filename or "") if asset else ""),
         template_name=t.name, platform="fb")
     try:
+        _p_btype = (t.budget_type or "daily").lower()
+        _p_lifetime_fb = (usd_to_fb_amount(float(t.lifetime_budget_usd), currency, cr.rate if cr else 1.0)
+                          if (_p_btype == "lifetime" and t.lifetime_budget_usd) else None)
+        _p_bid_fb = (usd_to_fb_amount(float(t.bid_amount_usd), currency, cr.rate if cr else 1.0)
+                     if t.bid_amount_usd else None)
+        try:
+            _p_cats = json.loads(t.special_ad_categories or "[]")
+        except Exception:
+            _p_cats = []
         campaign_payload = build_campaign(
             name=_prefix, objective=t.objective,
-            daily_budget=daily_budget_fb if t.budget_mode.upper() == "CBO" else None,
+            daily_budget=(daily_budget_fb if (t.budget_mode.upper() == "CBO" and not _p_lifetime_fb) else None),
+            lifetime_budget=_p_lifetime_fb,
             budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
+            special_ad_categories=_p_cats,
         )
         adset_payload = build_adset(
             name=f"{_prefix} 组", campaign_id="<FB 创建 campaign 后返回>",
@@ -729,6 +821,10 @@ def preflight_deploy(tid: int, body: PreflightIn,
             targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
             destination_type_override=t.destination_type or "", extra=advanced,
+            budget_type=_p_btype, lifetime_budget=_p_lifetime_fb,
+            start_time=(t.schedule_start or ""), end_time=(t.schedule_end or ""),
+            pacing=(t.pacing or ""), bid_amount=_p_bid_fb,
+            minimum_roas=(t.minimum_roas if t.minimum_roas else None),
         )
         if asset and asset.type == "video":
             creative_payload = build_creative(
@@ -750,6 +846,12 @@ def preflight_deploy(tid: int, body: PreflightIn,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
         "subcode_warn_slug": subcode_warn_slug,
+        "budget_type": (t.budget_type or "daily"),
+        "lifetime_budget_usd": t.lifetime_budget_usd, "lifetime_budget_fb": _p_lifetime_fb,
+        "schedule_start": (t.schedule_start or ""), "schedule_end": (t.schedule_end or ""),
+        "pacing": (t.pacing or ""), "bid_amount_usd": t.bid_amount_usd,
+        "bid_amount_fb": _p_bid_fb, "minimum_roas": t.minimum_roas,
+        "special_ad_categories": _p_cats, "link_description": (t.link_description or ""),
         "asset": {
             "type": (asset.type if asset else ""),
             "name": (asset.name or asset.filename or "") if asset else "",
@@ -844,6 +946,13 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             "name": sname, "enabled": s_enabled,
             "budget_usd": float(node_b) if node_b else (t.budget_usd if not is_cbo else None),
             "budget_local_fb": adset_budget_fb,
+            "budget_type": (snode.get("budget_type") or t.budget_type or "daily"),
+            "lifetime_budget_usd": (snode.get("lifetime_budget_usd") or t.lifetime_budget_usd),
+            "schedule_start": (snode.get("schedule_start") or t.schedule_start or ""),
+            "schedule_end": (snode.get("schedule_end") or t.schedule_end or ""),
+            "pacing": (snode.get("pacing") or t.pacing or ""),
+            "bid_amount_usd": (snode.get("bid_amount_usd") or t.bid_amount_usd),
+            "minimum_roas": (snode.get("minimum_roas") or t.minimum_roas),
             "audience_id": snode.get("audience_id") or 0,
             "optimization_goal": snode.get("optimization_goal") or "",
             "ads": ads_out,
@@ -966,6 +1075,14 @@ def _budget_guard_400(t: LaunchTemplate) -> None:
         raise HTTPException(400, "模板未配置预算，请先在模板编辑器填写日预算再部署")
     if (t.budget_usd or 0) > _BUDGET_MAX_USD:
         raise HTTPException(400, f"模板日预算 ${t.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
+    # lifetime（总预算）口径：必须有排期 + 上限 $50000（TemplateIn 已拦保存，此处兜底直改库的行）
+    if (t.budget_type or "daily") == "lifetime":
+        if not ((t.lifetime_budget_usd or 0) > 0):
+            raise HTTPException(400, "总预算模式必须填写总预算金额")
+        if not (t.schedule_start and t.schedule_end):
+            raise HTTPException(400, "总预算必须设置排期（开始+结束时间）——FB 硬约束")
+        if t.lifetime_budget_usd > 50000:
+            raise HTTPException(400, "总预算超安全上限 $50000")
     if (t.budget_mode or "ABO").upper() != "ABO":
         return
     adsets = _parse_structure(t)
@@ -1008,6 +1125,18 @@ def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
     if _usd_eq > _BUDGET_MAX_USD:
         raise ValueError(f"模板 legacy 日预算约 ${_usd_eq:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请改用预算(USD)字段并调低")
     return tpl.daily_budget
+
+
+def _usd_to_account_minor(sdb, act_id: str, usd: float, tenant_id: int) -> int:
+    """USD 金额 → 该账户本币最小单位（预算/出价额换算共用——与 _resolve_budget_fb 同汇率管道）。
+    缺汇率抛 ValueError（调用方消化为组级/广告级失败）。"""
+    acc = sdb.query(Account).filter(Account.tenant_id == tenant_id,
+                                    Account.act_id == act_id).first()
+    currency = (acc.currency if acc else "USD") or "USD"
+    cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
+    if not cr and currency.upper() != "USD":
+        raise ValueError(f"缺少 {currency} 汇率（fx_sync 未同步该币种）")
+    return usd_to_fb_amount(float(usd), currency, cr.rate if cr else 1.0)
 
 
 # ── TikTok 分支 helper（TK P3；platform='tt' 才会走到，FB 路径零改动）──
@@ -1675,6 +1804,16 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         account_name=(_acc.name if _acc else ""), account_id=item.act_id,
         asset_name=((asset.name or asset.filename or "") if asset else ""),
         template_name=tpl.name, platform="fb")
+    # 批G 新字段：总预算/出价额按账户本币换算（排期/投放方式/ROAS/类别/描述直传）
+    _btype = (tpl.budget_type or "daily").lower()
+    _lifetime_fb = (_usd_to_account_minor(sdb, item.act_id, float(tpl.lifetime_budget_usd), tenant_id)
+                    if _btype == "lifetime" and tpl.lifetime_budget_usd else None)
+    _bid_fb = (_usd_to_account_minor(sdb, item.act_id, float(tpl.bid_amount_usd), tenant_id)
+               if tpl.bid_amount_usd else None)
+    try:
+        _cats = json.loads(tpl.special_ad_categories or "[]")
+    except Exception:
+        _cats = []
     return deploy_one_account(
         fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
         page_id=page_id, pixel_id=pixel_id, landing_url=_lp_url,
@@ -1689,6 +1828,11 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         page_post_id=page_post_id,
         advanced_config=advanced,
         lead_form_id=lead_form_id, message_template=message_template,
+        budget_type=_btype, lifetime_budget=_lifetime_fb,
+        start_time=(tpl.schedule_start or ""), end_time=(tpl.schedule_end or ""),
+        pacing=(tpl.pacing or ""), bid_amount=_bid_fb,
+        minimum_roas=(tpl.minimum_roas if tpl.minimum_roas else None),
+        special_ad_categories=_cats, description=(tpl.link_description or ""),
     )
 
 
@@ -1757,11 +1901,27 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
 
     campaign_name = (tpl.name_prefix or tpl.name or "Tova Ads")[:100]
     is_cbo = (tpl.budget_mode or "ABO").upper() == "CBO"
-    camp_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
+    _cats = []
+    try:
+        _cats = json.loads(tpl.special_ad_categories or "[]")
+    except Exception:
+        pass
+    # 系列预算：CBO lifetime 用总预算（换算本币），否则日预算管道
+    _tpl_btype = (tpl.budget_type or "daily").lower()
+    if is_cbo and _tpl_btype == "lifetime":
+        if not tpl.lifetime_budget_usd:
+            raise FbApiError("no_id", "CBO 总预算模式未填总预算金额")
+        _camp_lifetime_fb = _usd_to_account_minor(sdb, item.act_id, float(tpl.lifetime_budget_usd), tenant_id)
+        camp_budget_fb = _camp_lifetime_fb
+    else:
+        _camp_lifetime_fb = None
+        camp_budget_fb = _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id)
     camp_payload = build_campaign(
         name=campaign_name, objective=tpl.objective,
-        daily_budget=camp_budget_fb if is_cbo else None,
-        budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy)
+        daily_budget=(camp_budget_fb if (is_cbo and not _camp_lifetime_fb) else None),
+        lifetime_budget=_camp_lifetime_fb,
+        budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
+        special_ad_categories=_cats)
     camp = fb.post(f"act_{item.act_id}/campaigns", camp_payload)
     campaign_id = camp.get("id")
     if not campaign_id:
@@ -1785,20 +1945,46 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     for si, snode in enumerate(adsets, 1):
         sname = ((snode.get("name") or f"{campaign_name} 组{si}"))[:100]
         s_enabled = bool(snode.get("enabled"))
-        # 组预算（ABO）：节点 USD 覆盖 > 模板默认；CBO 组不带预算（系列级）
-        if is_cbo:
-            adset_budget_fb = camp_budget_fb
-        else:
-            node_b = snode.get("budget_usd")
-            try:
+        # 组预算（ABO）：节点 USD 覆盖 > 模板默认；节点/模板可选 lifetime（总预算须排期，
+        # 保存端已校验节点级；模板级 lifetime 在 _budget_guard_400 已拦无排期）。
+        # CBO 组不带预算（系列级）。排期/投放方式/出价额/ROAS 节点覆盖 > 模板默认。
+        node_btype = (snode.get("budget_type") or tpl.budget_type or "daily").lower()
+        node_lt_usd = snode.get("lifetime_budget_usd") or tpl.lifetime_budget_usd
+        adset_lifetime_fb = None
+        try:
+            if is_cbo:
+                adset_budget_fb = camp_budget_fb
+            elif node_btype == "lifetime":
+                if not node_lt_usd:
+                    _fail_group(sname, snode, "总预算模式未填总预算金额")
+                    continue
+                adset_lifetime_fb = _usd_to_account_minor(sdb, item.act_id, float(node_lt_usd), tenant_id)
+                adset_budget_fb = 0
+            else:
+                node_b = snode.get("budget_usd")
                 adset_budget_fb = _resolve_budget_fb(
                     sdb, item.act_id,
                     _view(budget_usd=float(node_b) if node_b else tpl.budget_usd,
                           daily_budget=tpl.daily_budget if not node_b else 0),
                     tenant_id)
-            except ValueError as e:
-                _fail_group(sname, snode, f"预算换算失败：{e}")
-                continue
+        except ValueError as e:
+            _fail_group(sname, snode, f"预算换算失败：{e}")
+            continue
+        s_sched_start = snode.get("schedule_start") or tpl.schedule_start or ""
+        s_sched_end = snode.get("schedule_end") or tpl.schedule_end or ""
+        s_pacing = snode.get("pacing") or tpl.pacing or ""
+        _bid_usd = snode.get("bid_amount_usd")
+        if _bid_usd in (None, ""):
+            _bid_usd = tpl.bid_amount_usd
+        try:
+            s_bid_fb = (_usd_to_account_minor(sdb, item.act_id, float(_bid_usd), tenant_id)
+                        if _bid_usd else None)
+        except ValueError as e:
+            _fail_group(sname, snode, f"出价额换算失败：{e}")
+            continue
+        s_min_roas = snode.get("minimum_roas")
+        if s_min_roas in (None, ""):
+            s_min_roas = tpl.minimum_roas
         try:
             targeting = _resolve_targeting(
                 sdb, snode.get("audience_id") or tpl.audience_id,
@@ -1828,7 +2014,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             optimization_goal=(snode.get("optimization_goal") or tpl.optimization_goal or ""),
             billing_event=(snode.get("billing_event") or tpl.billing_event or ""),
             destination_type_override=tpl.destination_type or "",
-            extra=merged_adv or None)
+            extra=merged_adv or None,
+            budget_type=node_btype, lifetime_budget=adset_lifetime_fb,
+            start_time=s_sched_start, end_time=s_sched_end, pacing=s_pacing,
+            bid_amount=s_bid_fb,
+            minimum_roas=(float(s_min_roas) if s_min_roas else None))
         adset_payload["status"] = "ACTIVE" if s_enabled else "PAUSED"
         try:
             adset = fb.post(f"act_{item.act_id}/adsets", adset_payload)
@@ -1986,7 +2176,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         landing_url=effective_url, headline=_headline, body=_body,
                         cta_type=(anode.get("cta_type") or tpl.cta_type or ""),
                         image_hash=image_hash, video_id=video_id,
-                        lead_form_id=lead_form_id, welcome_message=welcome_msg)
+                        lead_form_id=lead_form_id, welcome_message=welcome_msg,
+                        description=(anode.get("link_description") or tpl.link_description or ""))
                     if page_post_id:
                         _cta_t = (anode.get("cta_type") or tpl.cta_type or "") or pick_cta(_body, tpl.objective)
                         _cta_val = ({"page": _page_id} if _cta_t == "LIKE_PAGE"

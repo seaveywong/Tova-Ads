@@ -108,25 +108,35 @@ def build_campaign(
     budget_mode: str = "ABO",
     bid_strategy: str = "LOWEST_COST_WITHOUT_CAP",
     target_cpa: float | None = None,
+    lifetime_budget: int | None = None,
+    special_ad_categories: list | None = None,
+    minimum_roas: float | None = None,
 ) -> dict:
     obj = normalize_objective(objective)
     payload: dict[str, Any] = {
         "name": name,
         "objective": obj,
         "status": "ACTIVE",
-        "special_ad_categories": [],
+        # 特殊广告类别（信贷/就业/住房/社会议题选举——投放对应行业广告是 FB 合规硬要求，
+        # 声明后定向选项会被强制收窄，由用户显式选择，默认空）
+        "special_ad_categories": special_ad_categories or [],
         "buying_type": "AUCTION",
     }
 
     if budget_mode.upper() == "CBO":
-        if not daily_budget or daily_budget <= 0:
-            raise ValueError("CBO 模式必须配置系列日预算")
-        payload["daily_budget"] = str(daily_budget)
-        # CBO: bid_strategy 在系列级
+        # CBO 预算在系列级：日预算/总预算二选一（总预算必须配排期，调用方校验）
+        if lifetime_budget:
+            payload["lifetime_budget"] = str(lifetime_budget)
+        elif daily_budget and daily_budget > 0:
+            payload["daily_budget"] = str(daily_budget)
+        else:
+            raise ValueError("CBO 模式必须配置系列预算（日预算或总预算）")
+        # CBO: bid_strategy 在系列级（最低成本/成本上限/竞价上限/最小ROAS）
+        payload["bid_strategy"] = bid_strategy if bid_strategy in (
+            "LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "BID_CAP",
+            "MIN_ROAS_WITHOUT_CAP", "LOWEST_COST_WITH_MIN_ROAS") else "LOWEST_COST_WITHOUT_CAP"
         if target_cpa and float(target_cpa) > 0 and bid_strategy in ("COST_CAP", "BID_CAP"):
             payload["bid_strategy"] = "COST_CAP"
-        else:
-            payload["bid_strategy"] = "LOWEST_COST_WITHOUT_CAP"
     else:
         # ABO: 广告组级预算
         payload["is_adset_budget_sharing_enabled"] = False
@@ -155,6 +165,13 @@ def build_adset(
     billing_event: str = "",                # 显式覆盖（空=IMPRESSIONS）
     destination_type_override: str = "",    # 显式覆盖 destination_type
     extra: dict | None = None,              # 高级字段（advanced_config JSON），深合并进 payload
+    budget_type: str = "daily",             # daily / lifetime（总预算必须配排期——端点守卫先拦）
+    lifetime_budget: int | None = None,     # budget_type=lifetime 时用（本币 minor units）
+    start_time: str = "",                   # 排期开始（'YYYY-MM-DD HH:mm' 或 ISO；空=不传=立即）
+    end_time: str = "",                     # 排期结束
+    pacing: str = "",                       # ""=standard 匀速 / accelerated 加速投放
+    bid_amount: int | None = None,          # COST_CAP/BID_CAP 出价额（本币 minor units）
+    minimum_roas: float | None = None,      # 最小 ROAS（SALES 用）
 ) -> dict:
     obj = normalize_objective(objective)
     opt_goal = optimization_goal.strip() if optimization_goal and optimization_goal.strip() else get_optimization_goal(obj, conversion_goal)
@@ -176,9 +193,28 @@ def build_adset(
     if dsa_payor:
         payload["dsa_payor"] = dsa_payor
 
-    # ABO: 广告组级预算
+    # ABO: 广告组级预算（日/总二选一；lifetime 必须配排期——端点守卫先拦）
     if budget_mode.upper() != "CBO":
-        payload["daily_budget"] = str(daily_budget)
+        if budget_type.lower() == "lifetime" and lifetime_budget:
+            payload["lifetime_budget"] = str(lifetime_budget)
+        else:
+            payload["daily_budget"] = str(daily_budget)
+
+    # 排期（ISO 化：'YYYY-MM-DD HH:mm' → 'T'；带时区偏移的原样透传——FB 用广告账户时区解释无偏移时间）
+    if start_time:
+        payload["start_time"] = start_time.strip().replace(" ", "T")
+    if end_time:
+        payload["end_time"] = end_time.strip().replace(" ", "T")
+
+    # 投放方式：匀速（FB 默认，不传即 standard）/ 加速（no_pacing）
+    if pacing.strip().lower() == "accelerated":
+        payload["pacing_type"] = ["no_pacing"]
+
+    # 出价额与最小 ROAS（COST_CAP/BID_CAP/MIN_ROAS 系列配套；金额由调用方按账户本币换算好）
+    if bid_amount is not None and int(bid_amount) > 0:
+        payload["bid_amount"] = str(int(bid_amount))
+    if minimum_roas is not None and float(minimum_roas) > 0:
+        payload["minimum_roas"] = str(minimum_roas)
 
     # COST_CAP 需要 bid_amount（v1 简化：不设 COST_CAP，默认 LOWEST_COST_WITHOUT_CAP）
     # 后续完善：if bid_strategy == "COST_CAP" and target_cpa: payload["bid_amount"] = ...
@@ -298,6 +334,7 @@ def build_creative(
     video_id: str = "",
     lead_form_id: str = "",
     welcome_message: dict | None = None,
+    description: str = "",                  # 链接描述（正文下方灰色小字，FB「描述」字段）
 ) -> dict:
     """构造广告创意（object_story_spec）。
 
@@ -329,6 +366,8 @@ def build_creative(
     }
     if hd:
         link_data["name"] = hd
+    if description and description.strip():
+        link_data["description"] = description.strip()
     if image_hash:
         link_data["image_hash"] = image_hash
     # Messenger 欢迎语注入到 link_data（02_附录 §2.1）

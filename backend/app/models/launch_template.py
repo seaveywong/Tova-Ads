@@ -52,6 +52,18 @@ class LaunchTemplate(Base):
     # 跟帖模式（Phase 2 UI）：new=每素材建帖 / reuse=复用已有帖
     post_source = Column(Text, default="new")
     reuse_post_ref = Column(Text)   # 跟帖引用的 post_id
+    # FB 创建流程 1:1（0089 批G）：预算与排期/投放方式/出价/特殊类别/描述。
+    # 模板级 = 树模式默认值；组节点可在 structure 覆盖（budget_type/lifetime_budget_usd/
+    # schedule_start/schedule_end/pacing/bid_amount_usd/minimum_roas）。
+    budget_type = Column(Text, default="daily")        # daily / lifetime
+    lifetime_budget_usd = Column(Float)                # 总预算（USD；lifetime 必须配排期）
+    schedule_start = Column(Text)                      # 'YYYY-MM-DD HH:mm' / ISO
+    schedule_end = Column(Text)
+    pacing = Column(Text)                              # ''=匀速 / accelerated
+    bid_amount_usd = Column(Float)                     # COST_CAP/BID_CAP 出价额（USD）
+    minimum_roas = Column(Float)                       # 最小 ROAS（SALES）
+    special_ad_categories = Column(Text)               # JSON 数组：CREDIT/EMPLOYMENT/HOUSING/...
+    link_description = Column(Text)                    # 创意描述（正文下灰色小字）
     platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（模板按平台隔离字段集）
     # 1:1 FB 三层结构（0088）：{adsets:[{key,name,enabled,budget_usd?,audience_id?,
     # audience_json?,optimization_goal?,billing_event?,advanced_config?,ads:[{key,name,

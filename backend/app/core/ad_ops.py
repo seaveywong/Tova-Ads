@@ -162,7 +162,16 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        optimization_goal: str = "", billing_event: str = "",
                        destination_type_override: str = "",
                        page_post_id: str = "",
-                       advanced_config: dict | None = None) -> dict:
+                       advanced_config: dict | None = None,
+                       budget_type: str = "daily",
+                       lifetime_budget: int | None = None,
+                       start_time: str = "",
+                       end_time: str = "",
+                       pacing: str = "",
+                       bid_amount: int | None = None,
+                       minimum_roas: float | None = None,
+                       special_ad_categories: list | None = None,
+                       description: str = "") -> dict:
     """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id, page_post_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
@@ -174,8 +183,12 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     # 1. Campaign（目标感知）
     camp_payload = build_campaign(
         name=name_prefix, objective=objective,
-        daily_budget=daily_budget if budget_mode.upper() == "CBO" else None,
+        daily_budget=(daily_budget if (budget_mode.upper() == "CBO"
+                                       and budget_type.lower() != "lifetime") else None),
+        lifetime_budget=(lifetime_budget if (budget_mode.upper() == "CBO"
+                                             and budget_type.lower() == "lifetime") else None),
         budget_mode=budget_mode, bid_strategy=bid_strategy,
+        special_ad_categories=special_ad_categories,
     )
     camp = fb.post(f"{act}/campaigns", camp_payload)
     campaign_id = camp.get("id")
@@ -194,6 +207,9 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         optimization_goal=optimization_goal, billing_event=billing_event,
         destination_type_override=destination_type_override,
         extra=advanced_config,
+        budget_type=budget_type, lifetime_budget=lifetime_budget,
+        start_time=start_time, end_time=end_time, pacing=pacing,
+        bid_amount=bid_amount, minimum_roas=minimum_roas,
     )
     adset = fb.post(f"{act}/adsets", adset_payload)
     adset_id = adset.get("id")
@@ -229,6 +245,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         landing_url=effective_url, headline=headline, body=body,
         image_hash=image_hash, cta_type=cta_type, video_id=video_id,
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
+        description=description,
     )
     if page_post_id:
         # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id
