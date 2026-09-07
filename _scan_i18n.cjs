@@ -29,9 +29,8 @@ let problems = 0;
 const results = {};
 for (const f of ['zh.js', 'en.js']) {
   let raw = fs.readFileSync(path.join(dir, f), 'utf8');
-  // 扫描副本容错：修复 f48bbd7 引入的两类语法错误（缺逗号 + 单引号串里的 {'@'}）
+  // 扫描副本容错：修复 f48bbd7 引入的缺逗号（{'@'} 串法源码已修正为合法形式，无需再改写）
   raw = raw.replace(/platformKey: '([^']*)'(\r?\n)/, "platformKey: '$1',$2");
-  raw = raw.split("dev{'@'}{domain}").join('dev{"@"}{domain}');
   const converted = raw.replace(
     /import\s+(\w+)\s+from\s+'\.\/views\/(\w+)'/g,
     (m, name, frag) => `const ${name} = ${JSON.stringify(frags[frag].exp)}`

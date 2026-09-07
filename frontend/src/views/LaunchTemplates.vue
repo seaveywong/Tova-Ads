@@ -554,6 +554,8 @@ const loadFormMsgTemplates = async () => {
   try { formTemplates.value = await GET('/form-templates/forms') } catch {}
   try { msgTemplates.value = await GET('/form-templates/messages') } catch {}
 }
+// 消息模板下拉 label：带类型 chip（Messenger/WhatsApp，产品名不译）；不做类型过滤（WHATSAPP 相关目标也允许复用任一模板文案）
+const msgTplLabel = (m) => '[' + ((m.type || 'messenger') === 'whatsapp' ? 'WhatsApp' : 'Messenger') + '] ' + m.name + ' · ' + (m.welcome_text || '').slice(0, 20)
 const onFormTplChange = (id) => {
   if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; form.value.lead_form_template_id = 0; return }
   const t = formTemplates.value.find(f => f.id === id)
@@ -2473,7 +2475,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
           <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
             <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="onMsgTplChange">
-              <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
+              <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="msgTplLabel(m)" />
 </el-select>
 </div>
           <div v-if="selectedMsgTpl" class="tpl-preview-bar" @click="msgPreviewOpen = true">
@@ -2614,7 +2616,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
                 <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
                   <el-select :model-value="a.message_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="v => setNodeMsgTpl(a, v)">
-                    <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
+                    <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="msgTplLabel(m)" />
                   </el-select>
 </div>
                 </template>

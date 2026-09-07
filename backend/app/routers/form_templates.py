@@ -63,7 +63,7 @@ def _msg_dict(t: MessageTemplate) -> dict:
         try: ib = json.loads(t.ice_breakers_json)
         except: ib = []
     return {
-        "id": t.id, "name": t.name,
+        "id": t.id, "name": t.name, "type": t.type or "messenger",
         "welcome_text": t.welcome_text or "", "ice_breakers": ib,
         "status": t.status, "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -227,6 +227,10 @@ def deploy_form(fid: int, body: dict,
         except: cfg = {}
     fb = first_client(db, user.tenant_id)
     if not fb: raise HTTPException(400, "未绑定 FB 凭证")
+    # 感谢页按钮：显式选了 website 才带按钮字段；whatsapp/none 是本地配置，不进 FB payload
+    # （无 thank_you_button_type 的存量 config 保持旧行为：文字+URL 齐即带）。见 0090 批。
+    _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()
+    _btn_website = (_ty_btn_type == "website") if _ty_btn_type else True
     payload = build_lead_form_payload(
         form_title=cfg.get("form_title", t.name),
         privacy_url=cfg.get("privacy_url", ""),
@@ -238,8 +242,8 @@ def deploy_form(fid: int, body: dict,
         privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
         thank_you_title=cfg.get("thank_you_title", ""),
         thank_you_body=cfg.get("thank_you_body", ""),
-        thank_you_button_text=cfg.get("thank_you_button_text", ""),
-        thank_you_website_url=cfg.get("thank_you_website_url", ""),
+        thank_you_button_text=cfg.get("thank_you_button_text", "") if _btn_website else "",
+        thank_you_website_url=cfg.get("thank_you_website_url", "") if _btn_website else "",
         follow_up_url=cfg.get("follow_up_url", ""),
         context_card_title=cfg.get("context_card_title", ""),
         name_prefix="Tova",
@@ -276,11 +280,19 @@ def deploy_form(fid: int, body: dict,
     return {"form_id": form_id, "reused": False}
 
 
-# ── Messenger 消息 CRUD ──
+# ── Messenger/WhatsApp 消息 CRUD ──
 class MsgTemplateIn(BaseModel):
     name: str
+    type: str = "messenger"  # messenger / whatsapp（编辑器按类型切换文案，结构相同）
     welcome_text: str = ""
     ice_breakers: list = []  # [{title, response}, ...]
+
+    @field_validator("type")
+    @classmethod
+    def _norm_type(cls, v: str) -> str:
+        """类型白名单：只接受 messenger/whatsapp（脏值回落 messenger——存量语义安全侧）。"""
+        v = (v or "messenger").strip().lower()
+        return v if v in ("messenger", "whatsapp") else "messenger"
 
 
 @router.get("/messages")
@@ -298,7 +310,7 @@ def save_message(body: MsgTemplateIn,
                  db: Session = Depends(get_db)):
     t = MessageTemplate(
         tenant_id=user.tenant_id, created_by=user.id,
-        name=body.name, welcome_text=body.welcome_text,
+        name=body.name, type=body.type, welcome_text=body.welcome_text,
         ice_breakers_json=json.dumps(body.ice_breakers, ensure_ascii=False) if body.ice_breakers else None,
         status="active",
     )
@@ -317,7 +329,7 @@ def update_message(mid: int, body: MsgTemplateIn,
     t = db.query(MessageTemplate).filter(
         MessageTemplate.id == mid, MessageTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "消息模板不存在")
-    t.name = body.name; t.welcome_text = body.welcome_text
+    t.name = body.name; t.type = body.type; t.welcome_text = body.welcome_text
     t.ice_breakers_json = json.dumps(body.ice_breakers, ensure_ascii=False) if body.ice_breakers else None
     db.commit()
     return _msg_dict(t)

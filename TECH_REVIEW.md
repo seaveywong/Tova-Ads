@@ -1196,3 +1196,42 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - **前端（fb71c47，LaunchTemplates.vue +726 行 / launch.js +62 键×2）**：编辑器平铺/结构 radio 切换（TT 隐藏；平铺↔结构双向合成+确认防丢数据；新建 FB 模板默认结构模式，跟帖预填流保持平铺）；左树（220px sticky，<768px 堆叠：启用小开关/完备度圆点绿黄灰/复制删除/+组+广告/选中高亮）右表单（系列=现有区块 v-show 复用；组=名称/启用/ABO预算覆盖/受众库/优化目标覆盖；广告=素材单选+多选开关（≥2 素材组提示，reuse 强制单素材）/文案/落地页联动子码过滤/消息·表单模板按 objective 显隐/跟帖浏览选帖）；保存客户端预校验同后端口径+组预算 '' 净化为 null；部署抽屉树概览卡（N组×M展开/ABO 启用组合计/启用链路数/两口径确认弹窗）；预检 mode:'tree' 渲染（will_spend 红横幅/树表含预算 USD→本币/payload 样例复用）。
 - **smoke（`_smoke_tree_tpl.py`，29 断言生产全 PASS）**：迁移列+GRANT(has_table_privilege 口径)/合法结构规范化回显（素材去重保序）/平铺双写/6 类非法拒绝/复制带树/ABO 求和 $5010 拦截/叠加批量拦/TT 拦/树预检（mode/adset_count/展开数=6/will_spend 空/本币换算 20→2000 minor/abo_total 停用组不计）/启用链路横幅列出。真部署（花钱）待用户授权后实测。
 - **遗留（如实）**：组级 billing_event/audience_json/advanced_config 数据形状透传但无编辑 UI（空=回退模板级）；结构模板+首节点跟帖时部署抽屉按该帖主页预过滤账户（偏保守）；TT 结构模式未做（后续单独立项）。
+
+---
+
+## 2026-09-08 — 表单模板页 1:1 FB Instant Form 编辑器 + WhatsApp 消息模板类型（迁移 0090）
+
+### 概述
+用户需求两条：①表单编辑器重做为「左侧手机壳实时预览 + 右侧设置分区」的 1:1 FB 形态（预览按 config 实时渲染，FB Instant Form 视觉顺序）；②消息模板支持 type=messenger|whatsapp（WhatsApp 开场白+快捷回复），投放模板消息下拉透出类型 chip。未部署（本地 commit）。
+
+### 变更表
+| 文件 | 变更 | 验证 |
+|---|---|---|
+| `frontend/src/views/FormTemplates.vue` | 编辑器重构：左 342px sticky 手机壳（标题/描述/联系字段 chip 列（镜像 payload 顺序+「自动」标注）/逐题卡片（选择题=选项 pill、开放式=输入 mock）/提交钮/隐私链/感谢页区块（website/whatsapp 按钮 mockup））；右分区=基本信息/内容（提问方式 radio=新问题默认题型）/联系信息（姓名固定+电话/邮箱/城市+「更多字段」折叠）/自定义问题卡（题型切换+↑↓排序+增删）/隐私政策/感谢页（按钮类型三态 none/website/whatsapp，whatsapp=号码+消息模板下拉+「FB 侧后续接入」旁注）/高级（FB 专属：可见性/欢迎语/仅目标国家）；存量 config 无 button_type 时按旧语义推导 website；保存净化空问题/空选项；顺手修 2 个存量 bug（消息卡硬删按钮引用未定义 `m` + `msgs.value` 未定义） | build ✓；142 key 半接线自查 ✓ |
+| `frontend/src/locales/views/formtpl.js` | 重写：+40 键×2（分区/题型/按钮类型/whatsapp/消息类型/预览），删 addOptionMakeChoice；zh/en 严格成对 | 运行时 vue-i18n 编译 284/284 PASS；en 零 CJK；键差集 0/0 |
+| `frontend/src/views/LaunchTemplates.vue` | 消息模板下拉 label 加 [WhatsApp]/[Messenger] chip（模板级+树广告节点两处；不过滤类型——最小实现） | build ✓ |
+| `backend/app/models/lead_form_template.py` | MessageTemplate + `type` 列（server_default 'messenger'） | py_compile ✓ |
+| `backend/alembic/versions/0090_message_templates_type.py` | 迁移 0090：message_templates.type + GRANT 两角色 | py_compile ✓（链 0089→0090→0091 线性，0091 为并行会话所建） |
+| `backend/app/routers/form_templates.py` | MsgTemplateIn +type 白名单校验（脏值回落 messenger）；_msg_dict/save/update 透传 type；deploy_form 感谢页按钮门（显式 website 才带按钮字段，存量 config 保持旧语义） | py_compile ✓ |
+| `backend/app/routers/launch_templates.py` | 树 runner `_resolve_lead_form` 同款按钮门（防 landing_url 兜底把 whatsapp 选择变成 FB VIEW_WEBSITE） | 随并行会话 c9f7a36 入库；py_compile ✓ |
+| `_scan_i18n.cjs` | 删过时 fixup（源码已修正为合法 `{'@'}` 串法，旧 fixup 反把扫描副本改出语法错） | 全量扫描恢复可用 |
+
+### 部署链语义（如实）
+- WhatsApp 感谢页按钮（thank_you_button_type/whatsapp_number/whatsapp_msg_tpl_id）**仅本地存储+预览**——FB leadgen_forms payload 不带（FB 侧需额外 API 字段，UI 旁注明后续接入）。两处 payload 构建点都加了门：显式选 website 才带按钮，whatsapp/none 不带（launch runner 的 landing_url 兜底也会被门拦下）。
+- config 变更（含 whatsapp 字段）会变 config_hash → 下次部署重建 FB 表单（复用机制既有语义，按钮 NONE 时实际内容不变也会重建，可接受）。
+- whatsapp 型消息模板现有消费者只有表单编辑器下拉；Messenger 投放链不区分 type（welcome_text/ice_breakers 结构相同，混用不炸但语义由用户自己把关——下拉有 chip 提示）。
+
+### 生产环境变更
+无（未部署、未跑迁移）。上线需：迁移 0090（注意 0091 由并行会话引入，alembic head 应为 0091）→ 后端 3 文件 → 前端 build+Pages。
+
+### 复审结论（已知限制/风险）
+- 表单编辑器双 mockup（抽屉实时预览/列表预览弹窗）为同构重复模板，改一处需同步另一处（模板内有注释标记）。
+- 预览联系字段按本地镜像的 phone-first 国家表推导主联系字段，与后端 `_PHONE_FIRST_COUNTRIES` 是两份拷贝（后端改国家表预览会漂移）。
+- 感谢页 WhatsApp 按钮是显式半接线（旁注声明），复审时勿当假实现清剿——是用户拍板的最小实现。
+- target_countries 仍无编辑 UI（预览「自动」chip 依赖 config 既有值，通常来自 AI 生成时的 country 入参）。
+
+### commit
+- 本批：表单模板 1:1 FB 编辑器 + WhatsApp 消息类型（0090）
+- launch_templates.py 按钮门随并行会话 `c9f7a36` 入库（并行会话宽 add 捎带，代码归属本批）
+
+关联：[[form-templates-module]] [[tech-review-format]] [[i18n-system]]

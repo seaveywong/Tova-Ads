@@ -28,12 +28,15 @@ class LeadFormTemplate(Base):
 
 
 class MessageTemplate(Base):
-    """Messenger 欢迎语模板：welcome_text + ice_breakers。部署时 parse_message_template → 传创意。"""
+    """消息模板（messenger=FB Messenger 欢迎语 / whatsapp=WhatsApp 开场白）：
+    welcome_text + ice_breakers。Messenger 部署时 parse_message_template → 传创意；
+    whatsapp 供 Instant Form 感谢页按钮等场景引用（本地配置）。"""
     __tablename__ = "message_templates"
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
     created_by = Column(BigInteger, ForeignKey("users.id"))
     name = Column(Text, nullable=False)
+    type = Column(Text, server_default="messenger")  # messenger / whatsapp（文案语义不同，结构同）
     welcome_text = Column(Text)
     ice_breakers_json = Column(Text)  # [{title, response}, ...]
     status = Column(Text, default="active")
