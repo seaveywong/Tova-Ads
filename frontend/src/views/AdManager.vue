@@ -369,8 +369,9 @@ const batchStatus = async (status) => {
   } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
-// 创意缩略图 + 拒审原因（/ads/list 透传 FB creative.thumbnail_url / review_feedback，纯前端展示）
-const thumbOf = (a) => a?.creative?.thumbnail_url || ''
+// 创意缩略图 + 拒审原因（FB thumbnail_url 优先；FB 没给的用本地素材原图兜底 local_thumb——
+// image_hash 链路建的广告 FB 常不返回 thumbnail_url，OSS 反查本地 Asset 直链）
+const thumbOf = (a) => a?.creative?.thumbnail_url || a?.local_thumb || ''
 // 创意文案：creative.body/title（v25 仍可读）优先，object_story_spec.link_data 兜底（spec 创建的）
 const titleOf = (a) => a?.creative?.title || a?.creative?.object_story_spec?.link_data?.name || ''
 const copyOf = (a) => a?.creative?.body || a?.creative?.object_story_spec?.link_data?.message || ''
