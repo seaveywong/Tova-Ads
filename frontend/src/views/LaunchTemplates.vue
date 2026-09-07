@@ -352,6 +352,7 @@ const validateTemplate = () => {
   if (!isReuse && !form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
   if (isReuse && !form.value.reuse_post_ref) errs.push(t('launch.fieldReusePost'))
   if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
+  if (Number(form.value.budget_usd) > 5000) errs.push(t('launch.treeErrBudgetCap', { name: form.value.name || '', n: 5000 }))
   if (!isReuse && !form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
     errs.push(t('launch.fieldLandingPickOrUrl'))
   return errs
@@ -869,6 +870,8 @@ const validateTree = () => {
     if ((s.ads || []).length > TREE_ADS_PER_ADSET_MAX) errs.push(t('launch.treeErrAdsMax', { n: TREE_ADS_PER_ADSET_MAX }))
     if (s.budget_usd !== null && s.budget_usd !== '' && !(Number(s.budget_usd) > 0))
       errs.push(t('launch.treeErrBudget', { name: adsetNodeLabel(s, si) }))
+    if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
+      errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
     ;(s.ads || []).forEach(a => {
       if ((a.asset_ids || []).length > TREE_ASSETS_PER_NODE_MAX) errs.push(t('launch.treeErrAssetsMax', { n: TREE_ASSETS_PER_NODE_MAX }))
       total += Math.max((a.asset_ids || []).length, 1)
@@ -1324,10 +1327,12 @@ const openDeploy = async (tpl) => {
 }
 // 选中账户后拉该账户可用的主页/像素（deployItems 填模板默认值）
 const ensureAccConfig = async (id) => {
+  // 默认值先行（accPages 早退在后）——openDeploy 每次重置 deployItems 但不清 accPages，
+  // 二开抽屉再勾选已加载过主页的账户时若先早退，deployItems[id] 缺失 → 模板 v-model 直接崩
+  deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
   if (accPages.value[id]) return
   const acc = accounts.value.find(a => a.act_id === id)
   const credId = acc?.fb_credential_id
-  deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
   if (deployTpl.value?.platform === 'tt') {
     accPages.value[id] = []   // TT 无主页概念；像素下拉用共享 ttPixels（无 per-account 差异）
     return
@@ -1435,7 +1440,8 @@ const startDeploy = async () => {
     const r = await POST('/launch-templates/' + deployTpl.value.id + '/deploy', body)
     deployOpen.value = false
     ElMessage.success(r.tree
-      ? t('launch.submittedTree', { n: r.total, g: r.tree.adsets, m: r.tree.ad_total })
+      ? t('launch.submittedTree', { n: r.total, g: r.tree.adsets,
+          m: Math.max(1, Math.round((r.tree.ad_total || 0) / Math.max(r.total || 1, 1))) })
       : isBatch
       ? t('launch.batchSubmitted', { n: r.total, m, total: r.series_total ?? total })
       : t('launch.submitted', { n: r.total }))
@@ -1444,6 +1450,7 @@ const startDeploy = async () => {
   deploying.value = false
 }
 // 进度
+const onProgressClose = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
 const openProgress = async (jobId) => {
   progressOpen.value = true; activeJob.value = null
   await pollJob(jobId)
@@ -2247,7 +2254,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-drawer>
 
     <!-- 进度 -->
-    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="if(pollTimer){clearTimeout(pollTimer);pollTimer=null}">
+    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="onProgressClose">
       <div v-if="activeJob" class="prog">
         <div class="prog-head">
           <span>{{ activeJob.template_name }}</span>
