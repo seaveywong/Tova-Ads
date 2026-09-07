@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { GET, POST, PUT, DELETE } from '../api'
@@ -23,7 +23,6 @@ const editOpen = ref(false)
 const editing = ref(null)
 const form = ref({})
 const saving = ref(false)
-const editLevel = ref('campaign')  // 3 Tab: campaign / adset / ad
 const tplPages = ref([])  // 模板编辑器主页下拉选项（从 FB 拉）
 // Advantage+ 开关（对齐 FB Ads Manager 2025）
 const advantage_audience = ref(true)   // Advantage+ 受众（开=只设国家+AI扩展；关=手动定向）
@@ -94,6 +93,32 @@ const OBJECTIVES = [
   { v: 'OUTCOME_ENGAGEMENT', l: 'launch.obj_engagement' },
   { v: 'OUTCOME_AWARENESS', l: 'launch.obj_awareness' },
   { v: 'OUTCOME_APP_PROMOTION', l: 'launch.obj_app_promotion' },
+]
+// 目标选择弹窗排列序（对齐 FB Objective Picker：知名度 → 销量 从上到下）
+const OBJ_PICKER = [
+  OBJECTIVES.find(o => o.v === 'OUTCOME_AWARENESS'),
+  OBJECTIVES.find(o => o.v === 'OUTCOME_TRAFFIC'),
+  OBJECTIVES.find(o => o.v === 'OUTCOME_ENGAGEMENT'),
+  OBJECTIVES.find(o => o.v === 'OUTCOME_LEADS'),
+  OBJECTIVES.find(o => o.v === 'OUTCOME_APP_PROMOTION'),
+  OBJECTIVES.find(o => o.v === 'OUTCOME_SALES'),
+].filter(Boolean)
+// 每目标一句场景说明（右侧面板）
+const OBJ_SCENES = {
+  OUTCOME_AWARENESS: 'launch.obj_desc_awareness',
+  OUTCOME_TRAFFIC: 'launch.obj_desc_traffic',
+  OUTCOME_ENGAGEMENT: 'launch.obj_desc_engagement',
+  OUTCOME_LEADS: 'launch.obj_desc_leads',
+  OUTCOME_APP_PROMOTION: 'launch.obj_desc_app_promotion',
+  OUTCOME_SALES: 'launch.obj_desc_sales',
+}
+// 特殊广告类别白名单（后端 _SPECIAL_CATS 同枚举）
+const SPECIAL_CATS = [
+  { v: 'CREDIT', l: 'launch.scat_credit' },
+  { v: 'EMPLOYMENT', l: 'launch.scat_employment' },
+  { v: 'HOUSING', l: 'launch.scat_housing' },
+  { v: 'SOCIAL_ISSUES_ELECTIONS_POLITICS', l: 'launch.scat_politics' },
+  { v: 'FINANCIAL_PRODUCTS', l: 'launch.scat_financial' },
 ]
 const OPT_GOALS = [
   {v:'LINK_CLICKS',l:'launch.opt_link_clicks'},{v:'LANDING_PAGE_VIEWS',l:'launch.opt_landing_page_views'},{v:'REACH',l:'launch.opt_reach'},
@@ -215,9 +240,14 @@ const toggleDevice = (dv) => {
 }
 const BID_STRATEGIES = [
   { v: 'LOWEST_COST_WITHOUT_CAP', l: 'launch.bid_lowest_without_cap' },
-  { v: 'LOWEST_COST_WITH_BID_CAP', l: 'launch.bid_lowest_with_cap' },
   { v: 'COST_CAP', l: 'launch.bid_cost_cap' },
+  { v: 'BID_CAP', l: 'launch.bid_cap' },
+  { v: 'MIN_ROAS_WITHOUT_CAP', l: 'launch.bid_min_roas' },
+  { v: 'LOWEST_COST_WITH_BID_CAP', l: 'launch.bid_lowest_with_cap' },
 ]
+// 出价额类策略（显示 bid_amount_usd 输入）/ ROAS 类（显示 minimum_roas 输入）
+const BID_NEEDS_AMOUNT = ['COST_CAP', 'BID_CAP', 'LOWEST_COST_WITH_BID_CAP']
+const BID_NEEDS_ROAS = ['MIN_ROAS_WITHOUT_CAP']
 const CTAS = [
   { v: 'SHOP_NOW', l: 'launch.cta_shop_now' },{ v: 'SIGN_UP', l: 'launch.cta_sign_up' },{ v: 'SUBSCRIBE', l: 'launch.cta_subscribe' },
   { v: 'LEARN_MORE', l: 'launch.cta_learn_more' },{ v: 'DOWNLOAD', l: 'launch.cta_download' },{ v: 'CONTACT_US', l: 'launch.cta_contact_us' },
@@ -323,7 +353,6 @@ onMounted(() => {
     form.value.reuse_post_ref = String(rp)
     form.value.page_id = String(rp).split('_')[0]  // {page}_{post} → page
     fetchReusePreview(String(rp))  // 拉帖子内容预览
-    editLevel.value = 'ad'  // 直达广告 Tab 显示跟帖锁卡
     snapshotForm()  // 重新快照（含预填值，避免一开就标 dirty）
     ElMessage.info(t('launch.reusePrefilled'))
   }
@@ -351,17 +380,25 @@ const validateTemplate = () => {
   if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
   if (!isReuse && !form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
   if (isReuse && !form.value.reuse_post_ref) errs.push(t('launch.fieldReusePost'))
-  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
-  if (Number(form.value.budget_usd) > 5000) errs.push(t('launch.treeErrBudgetCap', { name: form.value.name || '', n: 5000 }))
+  errs.push(..._budgetErrors())
   if (!isReuse && !form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
     errs.push(t('launch.fieldLandingPickOrUrl'))
   return errs
 }
-// 完整性状态（UI 显示用）
-const completionStatus = computed(() => {
-  const errs = validateTemplate()
-  if (!errs.length) return { ready: true, label: t('launch.ready'), missing: [] }
-  return { ready: false, label: t('launch.pending'), missing: errs }
+// 完整性状态（编辑器顶栏 chip：按当前模式取平铺/树口径校验）
+const editStatus = computed(() => {
+  const errs = editMode.value === 'tree' ? validateTree() : validateTemplate()
+  return errs.length ? { ready: false, missing: errs } : { ready: true, missing: [] }
+})
+// CBO 开关（budget_mode 语义映射：开=CBO 系列预算；关=ABO 组预算）
+const cboOn = computed({
+  get: () => (form.value.budget_mode || 'ABO').toUpperCase() === 'CBO',
+  set: (v) => { form.value.budget_mode = v ? 'CBO' : 'ABO' },
+})
+// 转化位置（按目标自动，只读展示）：显式 destination_type 优先，否则目标推荐值
+const convLocationText = computed(() => {
+  const d = form.value.destination_type || OBJ_DEFAULTS[form.value.objective]?.dest || ''
+  return d ? (t(DEST_TYPES.find(x => x.v === d)?.l || '') || d) : t('launch.autoOpt')
 })
 
 // #5 部署历史
@@ -463,6 +500,31 @@ const treeBindingsText = (b) => {
   if (b.lead_form_template_id) parts.push(t('launch.pfBindForm') + ' ' + b.lead_form_template_id)
   return parts.join(' · ')
 }
+// 预检「预算与排期」行（批G）：日/总预算（本币换算）+ 排期区间 + 投放方式 + 出价 + ROAS + 特殊类别 + 描述
+// 平铺用模板级键；树模式每组行传 tree[] 组对象（同名键）
+const pfBudgetSegments = (r) => {
+  const seg = []
+  if (!r) return seg
+  if ((r.budget_type || 'daily') === 'lifetime') {
+    if (r.lifetime_budget_usd != null)
+      seg.push(t('launch.pfLifetime', { v: r.lifetime_budget_usd }) + (r.lifetime_budget_fb != null ? ' → ' + r.lifetime_budget_fb : ''))
+  } else if (r.budget_usd != null) {
+    seg.push('$' + r.budget_usd + '/' + t('launch.perDay'))
+  }
+  if (r.schedule_start || r.schedule_end)
+    seg.push((r.schedule_start || '—') + ' ~ ' + (r.schedule_end || '—'))
+  if (r.pacing === 'accelerated') seg.push(t('launch.pacingAccelerated'))
+  if (r.bid_amount_usd != null)
+    seg.push(t('launch.pfBid', { v: r.bid_amount_usd }) + (r.bid_amount_fb != null ? ' → ' + r.bid_amount_fb : ''))
+  if (r.minimum_roas != null) seg.push(t('launch.pfRoas', { v: r.minimum_roas }))
+  const cats = Array.isArray(r.special_ad_categories) ? r.special_ad_categories : []
+  if (cats.length) {
+    const labels = cats.map(c => { const hit = SPECIAL_CATS.find(x => x.v === c); return hit ? t(hit.l) : c })
+    seg.push(labels.join('/'))
+  }
+  if (r.link_description) seg.push(t('launch.pfDesc', { v: r.link_description }))
+  return seg
+}
 // #4 per-account page/pixel loading
 const accLoadingConfig = ref(new Set())
 // 表单/消息模板
@@ -504,6 +566,11 @@ const blankForm = () => ({
   // 系列 Campaign
   objective: 'OUTCOME_TRAFFIC', conversion_goal: '', budget_mode: 'ABO',
   bid_strategy: 'LOWEST_COST_WITHOUT_CAP', budget_usd: 5, name_prefix: 'Tova Ads',
+  // FB 创建流程 1:1（批G）：预算类型/总预算/排期/投放方式/出价额/最小ROAS/特殊类别/描述
+  budget_type: 'daily', lifetime_budget_usd: null,
+  schedule_start: '', schedule_end: '', pacing: '',
+  bid_amount_usd: null, minimum_roas: null,
+  special_ad_categories: '', link_description: '',
   // 组 AdSet
   optimization_goal: '', billing_event: 'IMPRESSIONS', destination_type: '',
   audience_id: 0,
@@ -565,7 +632,7 @@ const pickPost = (p) => {
     const n = selAd.value
     n.post_source = 'reuse'; n.reuse_post_ref = p.id
     if (pg) form.value.page_id = pg
-    if ((n.asset_ids || []).length > 1) { n.asset_ids = n.asset_ids.slice(0, 1); adMulti.value = false }
+    if ((n.asset_ids || []).length > 1) { n.asset_ids = n.asset_ids.slice(0, 1); n.multi = false }
     applyNodePostPreview(n, { message: p.message, picture: p.picture, permalink_url: p.permalink_url })
     postPickerOpen.value = false; ElMessage.success(t('launch.postSelected'))
     return
@@ -674,11 +741,30 @@ const editMode = ref('flat')   // flat=平铺（旧路径，绑定不动）/ tre
 let _keySeq = 0
 const _nk = (p) => `${p}_${++_keySeq}`
 const tree = ref({ adsets: [] })
-const treeSel = ref({ type: 'campaign', si: -1, ai: -1 })   // campaign / adset / ad
+const treeSel = ref({ type: 'campaign', si: -1, ai: -1 })   // campaign / adset / ad（现仅作选择器目标锚点）
 const expandedTreeKeys = ref(new Set())
+// FB 创建流三段手风琴（campaign/adset/ad 各段可折叠，默认全展）
+const secOpen = ref({ campaign: true, adset: true, ad: true })
+const resetSecOpen = () => { secOpen.value = { campaign: true, adset: true, ad: true } }
+const toggleSec = (k) => { secOpen.value = { ...secOpen.value, [k]: !secOpen.value[k] } }
+// 广告小卡展开态（key=节点 key）；跟帖输入框按节点存（nodeReuseInputs）
+const expandedAdKeys = ref(new Set())
+const toggleAdExpand = (key) => {
+  const s = new Set(expandedAdKeys.value)
+  s.has(key) ? s.delete(key) : s.add(key)
+  expandedAdKeys.value = s
+}
+const nodeReuseInputs = ref({})
+// 特殊广告类别：表单存 JSON 数组串（后端口径），多选下拉双向映射
+const specialCatsSel = computed({
+  get: () => { try { const v = JSON.parse(form.value.special_ad_categories || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } },
+  set: (v) => { form.value.special_ad_categories = (v && v.length) ? JSON.stringify([...v].sort()) : '' },
+})
 const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
+  budget_type: 'daily', lifetime_budget_usd: null, schedule_start: '', schedule_end: '', pacing: '',
+  bid_amount_usd: null, minimum_roas: null,
   ads: [],
 })
 const blankTreeAd = () => ({
@@ -687,13 +773,21 @@ const blankTreeAd = () => ({
   landing_page_id: 0, landing_url: '', subcode_slug: '',
   message_template_id: 0, lead_form_template_id: 0, pixel_id: '',
   post_source: 'new', reuse_post_ref: '',
+  link_description: '', multi: false,
 })
 // 存库 structure 回读时补默认值（后端保存已规范化，此处兜底脏数据）
+const _numOrNull = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v)
 const normalizeTree = (adsets) => adsets.map(s => ({
   ...blankTreeAdset(), ...s,
   key: s.key || _nk('as'),
   enabled: !!s.enabled,
   budget_usd: s.budget_usd ?? null,
+  lifetime_budget_usd: _numOrNull(s.lifetime_budget_usd),
+  bid_amount_usd: _numOrNull(s.bid_amount_usd),
+  minimum_roas: _numOrNull(s.minimum_roas),
+  schedule_start: s.schedule_start || '', schedule_end: s.schedule_end || '',
+  pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
+  budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
   audience_id: s.audience_id || 0,
   ads: (s.ads || []).map(a => ({
     ...blankTreeAd(), ...a,
@@ -704,6 +798,8 @@ const normalizeTree = (adsets) => adsets.map(s => ({
     message_template_id: a.message_template_id || 0,
     lead_form_template_id: a.lead_form_template_id || 0,
     post_source: a.post_source === 'reuse' ? 'reuse' : 'new',
+    link_description: a.link_description || '',
+    multi: (a.asset_ids || []).length > 1,
   })),
 }))
 // 素材库（结构模式多选/预览用；懒加载一次）
@@ -718,8 +814,7 @@ const selAdset = computed(() => (treeSel.value.type === 'adset' || treeSel.value
   ? (tree.value.adsets[treeSel.value.si] || null) : null)
 const selAd = computed(() => (treeSel.value.type === 'ad' && selAdset.value)
   ? ((selAdset.value.ads || [])[treeSel.value.ai] || null) : null)
-const selAdAsset0 = computed(() => (selAd.value && (selAd.value.asset_ids || []).length)
-  ? treeAssetById(selAd.value.asset_ids[0]) : null)
+const adAsset0 = (a) => ((a && (a.asset_ids || []).length) ? treeAssetById(a.asset_ids[0]) : null)
 const adsetNodeLabel = (s, si) => s.name || t('launch.treeGroupN', { n: si + 1 })
 const adNodeLabel = (a, ai) => a.name || ((a.asset_ids || []).length > 1
   ? t('launch.treeAssetGroupN', { n: a.asset_ids.length }) : t('launch.treeAdN', { n: ai + 1 }))
@@ -753,7 +848,9 @@ const addTreeAd = (si) => {
   const s = tree.value.adsets[si]; if (!s) return
   if ((s.ads || []).length >= TREE_ADS_PER_ADSET_MAX) return ElMessage.warning(t('launch.treeErrAdsMax', { n: TREE_ADS_PER_ADSET_MAX }))
   if (treeExpandedTotal() >= TREE_ADS_MAX) return ElMessage.warning(t('launch.treeErrAdsTotalMax', { n: TREE_ADS_MAX }))
-  s.ads = [...(s.ads || []), blankTreeAd()]
+  const ad = blankTreeAd()
+  s.ads = [...(s.ads || []), ad]
+  expandedAdKeys.value = new Set([...expandedAdKeys.value, ad.key])
   selectTreeNode('ad', si, s.ads.length - 1)
 }
 const copyTreeAdset = (si) => {
@@ -774,6 +871,7 @@ const copyTreeAd = (si, ai) => {
   if (treeExpandedTotal() + Math.max((a.asset_ids || []).length, 1) > TREE_ADS_MAX) return ElMessage.warning(t('launch.treeErrAdsTotalMax', { n: TREE_ADS_MAX }))
   const c = { ...JSON.parse(JSON.stringify(a)), key: _nk('ad') }
   s.ads.splice(ai + 1, 0, c)
+  expandedAdKeys.value = new Set([...expandedAdKeys.value, c.key])
   selectTreeNode('ad', si, ai + 1)
 }
 const removeTreeAdset = async (si) => {
@@ -799,6 +897,7 @@ const adFromFlat = () => ({
   ...blankTreeAd(),
   asset_ids: form.value.asset_id ? [form.value.asset_id] : [],
   headline: form.value.headline || '', body: form.value.body || '', cta_type: form.value.cta_type || '',
+  link_description: form.value.link_description || '',
   ad_language: form.value.ad_language || '',
   landing_page_id: form.value.landing_page_id || 0, landing_url: form.value.landing_url || '',
   subcode_slug: form.value.subcode_slug || '',
@@ -817,6 +916,7 @@ const flatFromTree = () => {
   if (a.headline) form.value.headline = a.headline
   if (a.body) form.value.body = a.body
   if (a.cta_type) form.value.cta_type = a.cta_type
+  if (a.link_description) form.value.link_description = a.link_description
   if (a.ad_language) form.value.ad_language = a.ad_language
   if (a.landing_page_id) form.value.landing_page_id = a.landing_page_id
   if (a.landing_url) form.value.landing_url = a.landing_url
@@ -850,17 +950,41 @@ const onModeSwitch = async (nv) => {
     selectTreeNode('campaign')
   }
 }
-// 保存前树净化：清空输入的组预算 '' → null（后端 float('') 会 400）+ 浅拷贝防中途变更
+// 保存前树净化：空输入的数字字段 '' → null（后端 float('') 会 400）+ 浅拷贝防中途变更
 const _cleanTreeForSave = () => tree.value.adsets.map(s => ({
   ...s,
   budget_usd: (s.budget_usd === '' || s.budget_usd === undefined) ? null : s.budget_usd,
-  ads: (s.ads || []).map(a => ({ ...a, asset_ids: [...(a.asset_ids || [])] })),
+  lifetime_budget_usd: _numOrNull(s.lifetime_budget_usd),
+  bid_amount_usd: _numOrNull(s.bid_amount_usd),
+  minimum_roas: _numOrNull(s.minimum_roas),
+  schedule_start: s.schedule_start || '', schedule_end: s.schedule_end || '',
+  pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
+  budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
+  ads: (s.ads || []).map(a => {
+    const { multi, ...rest } = a   // multi 是 UI 态，不入 structure
+    return { ...rest, asset_ids: [...(a.asset_ids || [])] }
+  }),
 }))
+// 模板级预算校验（批G）：日预算恒必填（部署守卫口径）；lifetime 另需金额与上限；出价额/ROAS 正数
+const _budgetErrors = () => {
+  const errs = []
+  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
+  if (Number(form.value.budget_usd) > 5000) errs.push(t('launch.fieldBudgetCap', { n: 5000 }))
+  if (form.value.budget_type === 'lifetime') {
+    if (!(Number(form.value.lifetime_budget_usd) > 0)) errs.push(t('launch.fieldLifetimeBudget'))
+    if (Number(form.value.lifetime_budget_usd) > 50000) errs.push(t('launch.fieldLifetimeBudgetCap', { n: 50000 }))
+  }
+  if (form.value.bid_amount_usd !== null && form.value.bid_amount_usd !== '' && !(Number(form.value.bid_amount_usd) > 0))
+    errs.push(t('launch.fieldBidAmount'))
+  if (form.value.minimum_roas !== null && form.value.minimum_roas !== '' && !(Number(form.value.minimum_roas) > 0))
+    errs.push(t('launch.fieldMinRoas'))
+  return errs
+}
 // 结构模式保存前校验（与后端 _validate_structure 同口径，提前给清晰提示）
 const validateTree = () => {
   const errs = []
   if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
-  if (!form.value.budget_usd || Number(form.value.budget_usd) <= 0) errs.push(t('launch.fieldDailyBudget'))
+  errs.push(..._budgetErrors())
   const adsets = tree.value.adsets
   if (!adsets.length) { errs.push(t('launch.treeErrNoAdset')); return errs }
   if (adsets.length > TREE_ADSETS_MAX) errs.push(t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }))
@@ -870,6 +994,20 @@ const validateTree = () => {
     if ((s.ads || []).length > TREE_ADS_PER_ADSET_MAX) errs.push(t('launch.treeErrAdsMax', { n: TREE_ADS_PER_ADSET_MAX }))
     if (s.budget_usd !== null && s.budget_usd !== '' && !(Number(s.budget_usd) > 0))
       errs.push(t('launch.treeErrBudget', { name: adsetNodeLabel(s, si) }))
+    if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
+      errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
+    // 批G组节点：lifetime 必须带组级排期（后端保存 422 同口径）；出价额/ROAS 正数
+    if (s.budget_type === 'lifetime') {
+      if (!(s.schedule_start && s.schedule_end)) errs.push(t('launch.treeErrLifetimeSchedule', { name: adsetNodeLabel(s, si) }))
+      if (s.lifetime_budget_usd !== null && s.lifetime_budget_usd !== '' && !(Number(s.lifetime_budget_usd) > 0))
+        errs.push(t('launch.treeErrBudget', { name: adsetNodeLabel(s, si) }))
+      if (Number(s.lifetime_budget_usd) > 50000)
+        errs.push(t('launch.treeErrLifetimeCap', { name: adsetNodeLabel(s, si), n: 50000 }))
+    }
+    if (s.bid_amount_usd !== null && s.bid_amount_usd !== '' && !(Number(s.bid_amount_usd) > 0))
+      errs.push(t('launch.treeErrBidAmount', { name: adsetNodeLabel(s, si) }))
+    if (s.minimum_roas !== null && s.minimum_roas !== '' && !(Number(s.minimum_roas) > 0))
+      errs.push(t('launch.treeErrMinRoas', { name: adsetNodeLabel(s, si) }))
     if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
       errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
     ;(s.ads || []).forEach(a => {
@@ -907,12 +1045,11 @@ const setNodePostSource = (node, src) => {
   node.post_source = src === 'reuse' ? 'reuse' : 'new'
   if (node.post_source === 'reuse' && (node.asset_ids || []).length > 1) {
     node.asset_ids = node.asset_ids.slice(0, 1)
-    adMulti.value = false
+    node.multi = false
     ElMessage.info(t('launch.treeReuseTruncated'))
   }
 }
-const adMulti = ref(false)          // 广告节点「多选素材」开关
-const nodeReuseInput = ref('')
+// 广告节点「多选素材」开关=节点字段 multi（UI 态，保存时剔除）；跟帖输入按节点存
 const nodeResolving = ref(false)
 const nodePostPreviews = ref({})    // {nodeKey: {message,picture,permalink}}
 const applyNodePostPreview = (node, r) => {
@@ -923,14 +1060,14 @@ const fetchNodePostPreview = async (node) => {
   try { applyNodePostPreview(node, await POST('/fb/resolve-post', { q: node.reuse_post_ref })) } catch {}
 }
 const confirmNodePost = async (node) => {
-  const raw = nodeReuseInput.value.trim()
+  const raw = (nodeReuseInputs.value[node.key] || '').trim()
   if (!raw) return
   const m1 = raw.match(/(\d+_\d+)/)
   if (m1) {
     node.reuse_post_ref = m1[1]
     if (!form.value.page_id) form.value.page_id = m1[1].split('_')[0]
     fetchNodePostPreview(node)
-    ElMessage.success(t('launch.postSelected')); nodeReuseInput.value = ''
+    ElMessage.success(t('launch.postSelected')); nodeReuseInputs.value = { ...nodeReuseInputs.value, [node.key]: '' }
     return
   }
   nodeResolving.value = true
@@ -939,7 +1076,7 @@ const confirmNodePost = async (node) => {
     node.reuse_post_ref = r.post_id
     if (r.page_id) form.value.page_id = r.page_id
     applyNodePostPreview(node, r)
-    ElMessage.success(t('launch.postSelected')); nodeReuseInput.value = ''
+    ElMessage.success(t('launch.postSelected')); nodeReuseInputs.value = { ...nodeReuseInputs.value, [node.key]: '' }
   } catch { ElMessage.warning(t('launch.resolveFailManual')) }
   nodeResolving.value = false
 }
@@ -947,19 +1084,32 @@ const clearNodePost = (node) => {
   node.reuse_post_ref = ''
   const m = { ...nodePostPreviews.value }; delete m[node.key]; nodePostPreviews.value = m
 }
-// 选中节点切换：重置输入态 / 多选开关按已选素材数推 / 补拉跟帖预览
-watch(treeSel, () => {
-  nodeReuseInput.value = ''
-  const a = selAd.value
-  adMulti.value = !!(a && (a.asset_ids || []).length > 1)
-  if (a && a.post_source === 'reuse' && a.reuse_post_ref && !nodePostPreviews.value[a.key]) fetchNodePostPreview(a)
-})
+// 小卡内打开选择器：先把 treeSel 锚到该节点（pickAsset/pickPost 写 selAd）
+const openAssetPickerForAd = (si, ai) => { selectTreeNode('ad', si, ai); openAssetPicker() }
+const openPostPickerForAd = (si, ai) => { selectTreeNode('ad', si, ai); openPostPicker() }
 
-// 编辑（openNew(p)：p='fb'/'tt' 建模板时定平台；缺省 fb）
-// 新建 FB 模板默认直接进结构模式（预建 1 空组 + 1 空广告节点）；TT 无结构链路 → 平铺
-const openNew = (p) => { editing.value = null; form.value = blankForm();
+// 编辑（openNew(p)：p='fb'/'tt' 建模板时定平台；缺省 fb=跟帖预填流用，不弹目标选择）
+// 新建 FB 模板先弹目标选择（对齐 FB Objective Picker）；TT 新建与跟帖预填直接进编辑器
+// 新建 FB 模板默认进结构模式（预建 1 空组 + 1 空广告节点）；TT 无结构链路 → 平铺
+const objPickerOpen = ref(false)
+const objPickSel = ref('OUTCOME_AWARENESS')
+const objPickName = ref('')
+const objNameShow = ref(false)
+const objPickerFromEditor = ref(false)   // true=编辑器内点目标 chip 重开（不重开编辑器，只换目标）
+const openNew = (p) => {
+  if (p === 'fb') {   // 下拉显式建 FB → 先选目标（跟帖预填 openNew() 无参不进这里）
+    objPickSel.value = 'OUTCOME_AWARENESS'
+    objPickName.value = ''; objNameShow.value = false
+    objPickerFromEditor.value = false
+    objPickerOpen.value = true
+    return
+  }
+  _startNew(p)
+}
+const _startNew = (p) => { editing.value = null; form.value = blankForm();
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：游离ref重置，防跨模板污染出价策略
-  if (p) form.value.platform = p; editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true
+  if (p) form.value.platform = p; editingAsset.value = null; validationErrors.value = []; editOpen.value = true
+  expandedAdKeys.value = new Set()
   if ((p || 'fb') === 'tt') {
     editMode.value = 'flat'; tree.value = { adsets: [] }; expandedTreeKeys.value = new Set()
     selectTreeNode('campaign')
@@ -967,9 +1117,31 @@ const openNew = (p) => { editing.value = null; form.value = blankForm();
     editMode.value = 'tree'
     const s = blankTreeAdset(); s.ads = [blankTreeAd()]
     tree.value = { adsets: [s] }; expandAllTree(); selectTreeNode('campaign')
+    expandedAdKeys.value = new Set([s.ads[0].key])
     ensureTreeAssets()
   }
+  resetSecOpen()
   snapshotForm() }
+const objPickerContinue = async () => {
+  if (!objPickSel.value) return
+  objPickerOpen.value = false
+  form.value.objective = objPickSel.value
+  if (objPickName.value.trim()) form.value.name = objPickName.value.trim()
+  objPickName.value = ''
+  if (!objPickerFromEditor.value) {
+    _startNew('fb')
+    form.value.objective = objPickSel.value
+    if (objPickName.value.trim()) form.value.name = objPickName.value.trim()
+    await nextTick()
+    snapshotForm()   // 目标弹窗带入值不标 dirty（objective watcher 默认填充在 nextTick 后落地）
+  }
+}
+const objOpenFromEditor = () => {
+  objPickSel.value = form.value.objective || 'OUTCOME_AWARENESS'
+  objPickName.value = ''; objNameShow.value = false
+  objPickerFromEditor.value = true
+  objPickerOpen.value = true
+}
 const openEdit = async (tpl) => {
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：无条件归零（原仅在有配置时恢复，缺失时残留上一模板）
   editing.value = tpl
@@ -1037,6 +1209,7 @@ const openEdit = async (tpl) => {
   }
   // 结构模式模板：structure（JSON 串）→ 解析进树 + 进结构模式（TT 模板不支持结构，强制平铺）
   tree.value = { adsets: [] }; expandedTreeKeys.value = new Set(); selectTreeNode('campaign')
+  expandedAdKeys.value = new Set(); nodeReuseInputs.value = {}
   editMode.value = 'flat'
   if (tpl.structure && !isTt.value) {
     try {
@@ -1045,6 +1218,7 @@ const openEdit = async (tpl) => {
         tree.value = { adsets: normalizeTree(parsed.adsets) }
         editMode.value = 'tree'
         expandAllTree(); ensureTreeAssets()
+        expandedAdKeys.value = new Set(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.key)))
         // 预拉各广告节点绑定落地页的子码（填充节点子码下拉）
         for (const pid of [...new Set(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.landing_page_id).filter(Boolean)))]) {
           try {
@@ -1053,16 +1227,21 @@ const openEdit = async (tpl) => {
             allSubcodes.value = [...others, ...(r.items || [])]
           } catch {}
         }
+        // 跟帖节点内容预览（卡内展示用；本地缓存优先，取不到不阻断）
+        for (const n of tree.value.adsets.flatMap(s => (s.ads || []))) {
+          if (n.post_source === 'reuse' && n.reuse_post_ref) fetchNodePostPreview(n)
+        }
       }
     } catch {}
   }
+  resetSecOpen()
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
 const pickAsset = async (a) => {
   // 结构模式：素材写入当前选中的广告节点（单选=替换；多选开=追加；跟帖强制单素材）
   if (editMode.value === 'tree' && treeSel.value.type === 'ad' && selAd.value) {
     const n = selAd.value
-    n.asset_ids = (n.post_source === 'reuse' || !adMulti.value)
+    n.asset_ids = (n.post_source === 'reuse' || !n.multi)
       ? [a.id] : [...new Set([...(n.asset_ids || []), a.id])]
     if (!n.headline && a.ai_copy?.headlines?.[0]) n.headline = a.ai_copy.headlines[0]
     if (!n.body && a.ai_copy?.bodies?.[0]) n.body = a.ai_copy.bodies[0]
@@ -1143,6 +1322,15 @@ const saveTpl = async () => {
       objective: form.value.objective, conversion_goal: form.value.conversion_goal,
       budget_mode: form.value.budget_mode, bid_strategy: form.value.bid_strategy,
       budget_usd: Number(form.value.budget_usd), name_prefix: form.value.name_prefix,
+      // FB 创建流程 1:1（批G）：预算类型/总预算/排期/投放方式/出价额/最小ROAS/特殊类别/描述
+      budget_type: form.value.budget_type === 'lifetime' ? 'lifetime' : 'daily',
+      lifetime_budget_usd: _numOrNull(form.value.lifetime_budget_usd),
+      schedule_start: form.value.schedule_start || '', schedule_end: form.value.schedule_end || '',
+      pacing: form.value.pacing === 'accelerated' ? 'accelerated' : '',
+      bid_amount_usd: _numOrNull(form.value.bid_amount_usd),
+      minimum_roas: _numOrNull(form.value.minimum_roas),
+      special_ad_categories: form.value.special_ad_categories || '',
+      link_description: form.value.link_description || '',
       optimization_goal: form.value.optimization_goal, billing_event: form.value.billing_event,
       destination_type: form.value.destination_type, audience_id: form.value.audience_id || 0,
       // 选了保存受众 → 清内联 audience_json，部署走 SavedAudience 分支（内联非空会优先生效）
@@ -1297,11 +1485,22 @@ const deployTreeStats = computed(() => {
     if (!isCbo && s.enabled) aboTotal += Number(s.budget_usd || deployTpl.value.budget_usd || 0)
   }
   return { n: deployTree.value.length, m, chains, isCbo,
-           perAcc: isCbo ? Number(deployTpl.value.budget_usd || 0) : Math.round(aboTotal * 100) / 100 }
+           isLifetime: isCbo && (deployTpl.value.budget_type || 'daily') === 'lifetime',
+           perAcc: isCbo
+             ? Number((deployTpl.value.budget_type === 'lifetime'
+                 ? deployTpl.value.lifetime_budget_usd : deployTpl.value.budget_usd) || 0)
+             : Math.round(aboTotal * 100) / 100 }
 })
-// 单模式每账户日预算口径（结构模板=启用组合计/CBO 系列预算；平铺=模板预算）
-const singlePerAcc = computed(() => deployTreeStats.value
-  ? deployTreeStats.value.perAcc : Number(deployTpl.value?.budget_usd || 0))
+// 单模式每账户日预算口径（结构模板=启用组合计/CBO 系列预算；平铺=模板预算；lifetime 用总预算额）
+const singlePerAcc = computed(() => {
+  if (deployTreeStats.value) return deployTreeStats.value.perAcc
+  const t0 = deployTpl.value
+  if (!t0) return 0
+  return Number((t0.budget_type === 'lifetime' ? t0.lifetime_budget_usd : t0.budget_usd) || 0)
+})
+const singleIsLifetime = computed(() =>
+  (deployTpl.value?.budget_type || 'daily') === 'lifetime'
+  && (deployTreeStats.value ? deployTreeStats.value.isCbo : true))
 const openDeploy = async (tpl) => {
   deployTpl.value = tpl; deployOpen.value = true; selectedAccs.value = new Set(); deployItems.value = {}
   reuseEligibleActs.value = new Set()
@@ -1411,6 +1610,11 @@ const batchPreflight = async () => {
 }
 const startDeploy = async () => {
   if (!selectedAccs.value.size) return ElMessage.warning(t('launch.selectAccFirst'))
+  // lifetime 总预算必须配排期才能部署（后端 _budget_guard_400 同口径，提前给出明确提示）
+  if ((deployTpl.value?.platform || 'fb') !== 'tt'
+    && deployTpl.value?.budget_type === 'lifetime'
+    && !(deployTpl.value?.schedule_start && deployTpl.value?.schedule_end))
+    return ElMessage.warning(t('launch.deployLifetimeNeedSchedule'))
   const isBatch = deployMode.value === 'batch'
   if (isBatch && !batchAssetIds.value.size) return ElMessage.warning(t('launch.batchNeedAssets'))
   // 批量部署直接产生花费——提交前二次确认（单模式列账户数；批量模式额外列系列总数与合计日预算；
@@ -1540,7 +1744,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
         <div class="card-meta">
           <span class="card-obj">{{ objLabel(tpl.objective) }}</span>
-          <span>{{ fmtUsd(tpl.budget_usd) }}/{{ t('launch.perDay') }}</span>
+          <span>{{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}</span>
           <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
 </div>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
@@ -1562,6 +1766,32 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-if="!filteredList.length && !loading" class="empty">{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</div>
 </div>
 
+    <!-- 新建 FB 模板第一步：目标选择（对齐 FB Objective Picker；TT/跟帖预填不经过此弹窗） -->
+    <el-dialog v-model="objPickerOpen" :title="t('launch.objpTitle')" width="620px" append-to-body :close-on-click-modal="false">
+      <div class="objp">
+        <div class="objp-list">
+          <button v-for="o in OBJ_PICKER" :key="o.v" type="button" :class="['objp-item',{on:objPickSel===o.v}]" @click="objPickSel=o.v">
+            <span class="objp-radio"></span>
+            <span class="objp-name">{{ t(o.l) }}</span>
+          </button>
+        </div>
+        <div class="objp-detail">
+          <div class="objp-detail-name">{{ t(OBJECTIVES.find(o=>o.v===objPickSel)?.l || '') }}</div>
+          <div class="objp-detail-desc">{{ t(OBJ_SCENES[objPickSel] || '') }}</div>
+        </div>
+      </div>
+      <div class="objp-naming">
+        <button type="button" class="objp-fold" @click="objNameShow=!objNameShow">
+          <span class="t-arrow" :class="{open:objNameShow}">▶</span>{{ t('launch.objpNameOptional') }}
+        </button>
+        <input v-if="objNameShow" v-model="objPickName" class="inp" :placeholder="t('launch.objpNamePh')" />
+      </div>
+      <template #footer>
+        <button class="btn" @click="objPickerOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="!objPickSel" @click="objPickerContinue">{{ t('launch.objpContinue') }}</button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑抽屉：系列/组/广告 三级 -->
     <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="edit-body">
@@ -1578,119 +1808,229 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <el-radio-button value="tree">{{ t('launch.modeTree') }}</el-radio-button>
 </el-radio-group>
 </div>
-      <div :class="{ 'tree-cols': editMode === 'tree' }">
-      <!-- 结构模式左侧：结构树（系列固定根 → 广告组 → 广告） -->
-      <aside v-if="editMode === 'tree'" class="tree-side">
-        <div :class="['tnode', 'root', { sel: treeSel.type === 'campaign' }]" @click="selectTreeNode('campaign')">
-          <span class="tnode-name">{{ t('launch.treeRoot') }}</span>
+      <!-- 顶部：面包屑（系列 › 组 › 广告）+ 模板名/完备状态（FB 创建流单页三段） -->
+      <div class="fb-top">
+        <div class="fb-crumb">
+          <span class="crumb-item">{{ t('launch.levelCampaign') }}</span>
+          <span class="crumb-sep">›</span>
+          <span class="crumb-item">{{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</span>
+          <span class="crumb-sep">›</span>
+          <span class="crumb-item">{{ t('launch.levelAd') }}</span>
+        </div>
+        <span :class="['ss-status', editStatus.ready ? 'ready' : 'pending']" :title="editStatus.ready ? '' : editStatus.missing.join('、')">
+          {{ editStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + editStatus.missing.length }}
+        </span>
+      </div>
+      <!-- 段1 广告系列（FB 创建流：目标/特殊类别/购买类型/CBO 预算/出价策略/前缀/主页） -->
+      <div class="fb-sec">
+        <div class="fb-sec-head" @click="toggleSec('campaign')">
+          <span class="fb-sec-arrow" :class="{open:secOpen.campaign}">▶</span>
+          <span class="fb-sec-title">{{ t('launch.levelCampaign') }}</span>
+          <span class="fb-sec-meta">{{ form.name || t('launch.notSelected') }}</span>
 </div>
-        <template v-for="(s, si) in tree.adsets" :key="s.key">
-          <div :class="['tnode', 'adset', { sel: treeSel.type === 'adset' && treeSel.si === si }]" @click="selectTreeNode('adset', si)">
-            <span class="t-arrow" :class="{ open: expandedTreeKeys.has(s.key) }" @click.stop="toggleTreeExpand(s.key)">▶</span>
-            <span @click.stop><el-switch v-model="s.enabled" size="small" /></span>
-            <span :class="['tdot', adsetDot(s)]"></span>
-            <span class="tnode-name">{{ adsetNodeLabel(s, si) }}</span>
-            <span class="tnode-ops">
-              <button class="t-op" :title="t('launch.treeAddAd')" @click.stop="addTreeAd(si)"><el-icon><Plus /></el-icon></button>
-              <button class="t-op" :title="t('launch.treeCopyNode')" @click.stop="copyTreeAdset(si)"><el-icon><CopyDocument /></el-icon></button>
-              <button class="t-op danger" :title="t('launch.treeDelNode')" @click.stop="removeTreeAdset(si)"><el-icon><Delete /></el-icon></button>
-</span>
-</div>
-          <template v-if="expandedTreeKeys.has(s.key)">
-            <div v-for="(a, ai) in s.ads" :key="a.key" :class="['tnode', 'ad', { sel: treeSel.type === 'ad' && treeSel.si === si && treeSel.ai === ai }]" @click="selectTreeNode('ad', si, ai)">
-              <span @click.stop><el-switch v-model="a.enabled" size="small" /></span>
-              <span :class="['tdot', adDot(a)]"></span>
-              <span class="tnode-name">{{ adNodeLabel(a, ai) }}</span>
-              <span class="tnode-ops">
-                <button class="t-op" :title="t('launch.treeCopyNode')" @click.stop="copyTreeAd(si, ai)"><el-icon><CopyDocument /></el-icon></button>
-                <button class="t-op danger" :title="t('launch.treeDelNode')" @click.stop="removeTreeAd(si, ai)"><el-icon><Delete /></el-icon></button>
-</span>
-</div>
-</template>
-</template>
-        <button class="t-add-adset" @click="addTreeAdset">{{ t('launch.treeAddGroup') }}</button>
-</aside>
-      <div class="edit-main">
-      <!-- 顶层模式切换：新建帖 / 跟帖(复用已有帖) —— 决定 ③ 广告 Tab 含义，故置顶（FB 专属：TT 无主页帖） -->
-      <template v-if="editMode === 'flat'">
-      <div v-if="!isTt" class="post-mode-seg">
-        <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">{{ t('launch.postSourceNew') }}</button>
-        <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">{{ t('launch.postSourceReuse') }}</button>
-</div>
-      <!-- 跟帖：置顶选帖卡（解决"不知在哪输入帖子ID"的发现性；FB 专属） -->
-      <div v-if="!isTt && form.post_source==='reuse'" class="reuse-select-card">
-        <div class="reuse-card-hint">{{ t('launch.reuseCardHint') }}</div>
-        <div class="reuse-input-row">
-          <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
-          <button class="btn sm primary" :disabled="postResolving || !manualPostId.trim()" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
-          <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
-</div>
-        <!-- 识别失败 → 手选主页兜底 -->
-        <div v-if="reuseNeedManualPage" class="reuse-manual-page">
-          <span class="hint">{{ t('launch.resolveFailManual') }}</span>
-          <el-select v-model="manualPageForPost" filterable size="small" style="flex:1;min-width:160px" :placeholder="t('launch.pageIdPh')">
-            <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
-</el-select>
-          <button class="btn sm primary" :disabled="!manualPageForPost" @click="confirmManualPostWithPage">{{ t('common.confirm') }}</button>
-</div>
-        <!-- 已选帖 + 内容预览（让用户看到选的是啥） -->
-        <div v-if="form.reuse_post_ref" class="reuse-selected-block">
-          <div class="reuse-selected">
-            <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
-            <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
-</div>
-          <div v-if="reusePreviewAvailable" class="reuse-mini-preview">
-            <img v-if="reusePostPreview.picture" :src="reusePostPreview.picture" class="reuse-mini-thumb" />
-            <div class="reuse-mini-text">{{ (reusePostPreview.message || '').slice(0,120) || t('launch.noPostText') }}</div>
-</div>
-          <div v-else-if="reusePostPreview" class="hint">{{ t('launch.postContentUnavailable') }}</div>
-          <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
-</div>
-        <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
-</div>
+        <div v-show="secOpen.campaign" class="fb-sec-body">
 
-      <div class="level-tabs">
-        <button :class="['ltab',{on:editLevel==='campaign'}]" @click="editLevel='campaign'">① {{ t('launch.levelCampaign') }}</button>
-        <button :class="['ltab',{on:editLevel==='adset'}]" @click="editLevel='adset'">② {{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</button>
-        <button :class="['ltab',{on:editLevel==='ad'}]" @click="editLevel='ad'">③ {{ t('launch.levelAd') }}</button>
-</div>
-      <!-- #8 summary strip：跨级概览 -->
-      <div class="summary-strip">
-        <span class="ss-chip" @click="editLevel='campaign'" :title="t('launch.gotoCampaign')">{{ t('launch.objColon') }}{{ t(OBJECTIVES.find(o=>o.v===form.objective)?.l || form.objective) }}</span>
-        <span class="ss-chip" @click="editLevel='adset'" :title="t('launch.gotoAdSet')">{{ t('launch.audienceColon') }}{{ audienceChip }}</span>
-        <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.assetColon') }}{{ editingAsset?.name || t('launch.notSelected') }}</span>
-        <span class="ss-chip" @click="editLevel='ad'" :title="t('launch.gotoAd')">{{ t('launch.sourceColon') }}{{ form.post_source==='reuse' ? t('launch.postSourceReuse') : t('launch.postSourceNew') }}</span>
-        <span :class="['ss-status', completionStatus.ready ? 'ready' : 'pending']" :title="completionStatus.missing.join('、')">
-          {{ completionStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + completionStatus.missing.join('、') }}
-</span>
-</div>
-</template>
-
-      <!-- ① 系列（平铺=①Tab；结构模式=选中「系列」节点；v-show 保持挂载不丢值） -->
-      <div v-show="editMode === 'flat' ? editLevel === 'campaign' : treeSel.type === 'campaign'" class="form">
+      <div class="form">
         <div class="row"><label>{{ t('launch.fieldTplName') }}</label><input v-model="form.name" class="inp" :placeholder="t('launch.tplNamePlaceholder')" /></div>
-        <div class="row"><label>{{ t('launch.objective') }}</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" /></el-select></div>
+        <!-- objective: FB = read-only chip (click reopens the objective picker); TT = dropdown -->
+        <div v-if="!isTt" class="row"><label>{{ t('launch.objective') }}</label>
+          <button type="button" class="obj-chip" :title="t('launch.objpChange')" @click="objOpenFromEditor()">
+            {{ objLabel(form.objective) }}<span class="obj-chip-edit">{{ t('launch.objpChange') }}</span>
+          </button>
+</div>
+        <div v-else class="row"><label>{{ t('launch.objective') }}</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" /></el-select></div>
         <div class="row" v-if="convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
             <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
-</el-select>
+          </el-select>
 </div>
-        <div class="row"><label>{{ t('launch.budgetMode') }}</label><div class="seg"><button :class="{on:form.budget_mode==='ABO'}" @click="form.budget_mode='ABO'">{{ t('launch.abo') }}</button><button :class="{on:form.budget_mode==='CBO'}" @click="form.budget_mode='CBO'">{{ t('launch.cbo') }}</button></div>
-          <span v-if="form.budget_mode==='CBO'" class="hint">{{ t('launch.cboHint') }}</span>
+        <template v-if="!isTt">
+        <!-- special ad categories (multi, empty = none) + buying type (read-only: auction) -->
+        <div class="row"><label>{{ t('launch.specialAdCategory') }}</label>
+          <el-select v-model="specialCatsSel" multiple filterable size="small" style="width:100%" :placeholder="t('launch.scat_none')">
+            <el-option v-for="c in SPECIAL_CATS" :key="c.v" :value="c.v" :label="t(c.l)" />
+          </el-select>
+          <span class="hint">{{ t('launch.scatHint') }}</span>
 </div>
-        <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+        <div class="row"><label>{{ t('launch.buyType') }}</label><div class="ro-field">{{ t('launch.buyTypeAuction') }}</div></div>
+        </template>
+        <!-- CBO toggle: on = campaign-level budget below; off = budget lives on ad sets (section 2) -->
+        <div class="row"><label>{{ t('launch.budgetMode') }}</label>
+          <div class="cbo-row">
+            <div class="seg cbo-seg">
+              <button :class="{on:!cboOn}" @click="form.budget_mode='ABO'">{{ t('launch.abo') }}</button>
+              <button :class="{on:cboOn}" @click="form.budget_mode='CBO'">{{ t('launch.cbo') }}</button>
+            </div>
+            <span v-if="cboOn" class="hint">{{ t('launch.cboHint') }}</span>
+          </div>
+</div>
+        <div v-if="isTt" class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+        <template v-else>
+        <!-- FB CBO: campaign budget (type daily/lifetime + amount); lifetime keeps a valid daily budget for the deploy guard -->
+        <template v-if="cboOn">
+          <div class="row"><label>{{ t('launch.budgetType') }}</label>
+            <div class="seg">
+              <button :class="{on:form.budget_type!=='lifetime'}" @click="form.budget_type='daily'">{{ t('launch.btDaily') }}</button>
+              <button :class="{on:form.budget_type==='lifetime'}" @click="form.budget_type='lifetime'">{{ t('launch.btLifetime') }}</button>
+            </div>
+</div>
+          <div v-if="form.budget_type!=='lifetime'" class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+          <template v-else>
+          <div class="row"><label>{{ t('launch.lifetimeBudgetUsd') }}<span class="req-mark">*</span></label><input v-model.number="form.lifetime_budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.lifetimeBudgetPh')" /><span class="hint">{{ t('launch.lifetimeScheduleHint') }}</span></div>
+          <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" max="5000" step="0.5" class="inp" :placeholder="t('launch.lifetimeDailyKeepPh')" /><span class="hint">{{ t('launch.lifetimeDailyKeepHint') }}</span></div>
+          </template>
+        </template>
+        <!-- FB ABO structure mode: template default daily budget (nodes fall back to it) -->
+        <div v-else-if="editMode==='tree'" class="row"><label>{{ t('launch.treeDefaultDailyBudget') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.treeBudgetPh') }}</span></div>
+        <!-- bid strategy + bid amount / minimum ROAS (FB) -->
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
+        <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.bidAmountUsd') }}</label><input v-model.number="form.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.bidAmountPh')" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+        <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.minimumRoas') }}</label><input v-model.number="form.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.minRoasPh')" /></div>
+        </template>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
         <div v-if="!isTt" class="row"><label>{{ t('launch.pageId') }}</label>
           <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="editMode === 'flat' && form.post_source==='reuse'" :title="editMode === 'flat' && form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">
             <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
-</el-select>
+          </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
 </div>
+        <!-- structure mode campaign extras: pixel & disclosure (flat keeps pixel in the ad section) -->
+        <template v-if="editMode === 'tree'">
+        <hr class="sep" />
+        <div class="sec-title">{{ t('launch.treeCampaignExtra') }}</div>
+        <div class="row"><label>{{ t('launch.pixelId') }}</label>
+          <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+          <span class="hint">{{ t('launch.pixelIdHint') }}</span>
 </div>
+        <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
+        <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
+        </template>
+</div>
+</div>
+</div><!-- /sec1 -->
 
-      <!-- ② 广告组（平铺路径专属——结构模式的组设置在各节点表单） -->
-      <div v-if="editMode === 'flat' && editLevel==='adset'" class="form">
+      <!-- section 2: ad sets -->
+      <div class="fb-sec">
+        <div class="fb-sec-head" @click="toggleSec('adset')">
+          <span class="fb-sec-arrow" :class="{open:secOpen.adset}">▶</span>
+          <span class="fb-sec-title">{{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</span>
+          <span v-if="editMode === 'tree'" class="fb-sec-meta">{{ t('launch.treeOverviewLine', { n: tree.adsets.length, m: treeExpandedTotal() }) }}</span>
+</div>
+        <div v-show="secOpen.adset" class="fb-sec-body">
+          <!-- structure mode: one collapsible card per ad set -->
+          <template v-if="editMode === 'tree'">
+            <div v-for="(s, si) in tree.adsets" :key="s.key" class="as-card">
+              <div class="as-card-head" @click="toggleTreeExpand(s.key)">
+                <span class="t-arrow" :class="{ open: expandedTreeKeys.has(s.key) }">▶</span>
+                <span @click.stop><el-switch v-model="s.enabled" size="small" /></span>
+                <span :class="['tdot', adsetDot(s)]"></span>
+                <span class="as-card-name">{{ adsetNodeLabel(s, si) }}</span>
+                <span class="as-card-ops" @click.stop>
+                  <button class="t-op" :title="t('launch.treeCopyNode')" @click="copyTreeAdset(si)"><el-icon><CopyDocument /></el-icon></button>
+                  <button class="t-op danger" :title="t('launch.treeDelNode')" @click="removeTreeAdset(si)"><el-icon><Delete /></el-icon></button>
+                </span>
+              </div>
+              <div v-if="expandedTreeKeys.has(s.key)" class="as-card-body form">
+                <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="s.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
+                <!-- conversion location: auto by objective (read-only) -->
+                <div class="row"><label>{{ t('launch.convLocation') }}</label>
+                  <div class="ro-field">{{ convLocationText }}</div>
+                  <span class="hint">{{ t('launch.convLocationHint') }}</span>
+</div>
+                <!-- budget & schedule (ABO: per-set; CBO: budget sits on the campaign) -->
+                <template v-if="!cboOn">
+                <div class="row"><label>{{ t('launch.budgetType') }}</label>
+                  <div class="seg">
+                    <button :class="{on:s.budget_type!=='lifetime'}" @click="s.budget_type='daily'">{{ t('launch.btDaily') }}</button>
+                    <button :class="{on:s.budget_type==='lifetime'}" @click="s.budget_type='lifetime'">{{ t('launch.btLifetime') }}</button>
+                  </div>
+</div>
+                <div v-if="s.budget_type!=='lifetime'" class="row"><label>{{ t('launch.treeBudgetOverride') }}</label>
+                  <input v-model.number="s.budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.treeBudgetPh')" />
+                  <span class="hint">{{ t('launch.budgetConvertHint') }}</span>
+</div>
+                <div v-else class="row"><label>{{ t('launch.treeLifetimeOverride') }}<span class="req-mark">*</span></label>
+                  <input v-model.number="s.lifetime_budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+                  <span class="hint">{{ t('launch.lifetimeScheduleHint') }}</span>
+</div>
+                </template>
+                <div class="row"><label>{{ t('launch.scheduleLabel') }}<span v-if="s.budget_type==='lifetime' && !cboOn" class="req-mark">*</span></label>
+                  <div class="sched-row">
+                    <el-date-picker v-model="s.schedule_start" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.treeUseDefault')" />
+                    <span class="sched-sep">—</span>
+                    <el-date-picker v-model="s.schedule_end" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.treeUseDefault')" />
+                  </div>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+</div>
+                <div class="row"><label>{{ t('launch.pacingMode') }}</label>
+                  <div class="seg">
+                    <button :class="{on:s.pacing!=='accelerated'}" @click="s.pacing=''">{{ t('launch.pacingStandard') }}</button>
+                    <button :class="{on:s.pacing==='accelerated'}" @click="s.pacing='accelerated'">{{ t('launch.pacingAccelerated') }}</button>
+                  </div>
+</div>
+                <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeBidOverride') }}</label>
+                  <input v-model.number="s.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+</div>
+                <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeRoasOverride') }}</label>
+                  <input v-model.number="s.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+</div>
+                <div class="row"><label>{{ t('launch.treeAudienceOverride') }}</label>
+                  <el-select v-model="s.audience_id" filterable size="small" style="width:100%">
+                    <el-option :value="0" :label="t('launch.treeAudienceDefault')" />
+                    <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
+                      :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+</div>
+                <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
+                  <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
+                    <el-option value="" :label="t('launch.autoByObj')" />
+                    <el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+</div>
+              </div>
+            </div>
+            <button class="t-add-adset" @click="addTreeAdset">{{ t('launch.treeAddGroup') }}</button>
+          </template>
+          <!-- flat mode: single card, no add/remove -->
+          <div v-else class="as-card">
+            <div class="as-card-body form">
+              <!-- budget & schedule + pacing (FB only; TT budget sits on the campaign section) -->
+              <template v-if="!isTt">
+              <div class="row"><label>{{ t('launch.convLocation') }}</label>
+                <div class="ro-field">{{ convLocationText }}</div>
+                <span class="hint">{{ t('launch.convLocationHint') }}</span>
+</div>
+              <template v-if="!cboOn">
+              <div class="row"><label>{{ t('launch.budgetType') }}</label>
+                <div class="seg">
+                  <button :class="{on:form.budget_type!=='lifetime'}" @click="form.budget_type='daily'">{{ t('launch.btDaily') }}</button>
+                  <button :class="{on:form.budget_type==='lifetime'}" @click="form.budget_type='lifetime'">{{ t('launch.btLifetime') }}</button>
+                </div>
+</div>
+              <div v-if="form.budget_type!=='lifetime'" class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
+              <template v-else>
+              <div class="row"><label>{{ t('launch.lifetimeBudgetUsd') }}<span class="req-mark">*</span></label><input v-model.number="form.lifetime_budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.lifetimeBudgetPh')" /><span class="hint">{{ t('launch.lifetimeScheduleHint') }}</span></div>
+              <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" max="5000" step="0.5" class="inp" :placeholder="t('launch.lifetimeDailyKeepPh')" /><span class="hint">{{ t('launch.lifetimeDailyKeepHint') }}</span></div>
+              </template>
+              </template>
+              <div class="row"><label>{{ t('launch.scheduleLabel') }}<span v-if="form.budget_type==='lifetime' && !cboOn" class="req-mark">*</span></label>
+                <div class="sched-row">
+                  <el-date-picker v-model="form.schedule_start" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.scheduleStartPh')" />
+                  <span class="sched-sep">—</span>
+                  <el-date-picker v-model="form.schedule_end" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.scheduleEndPh')" />
+                </div>
+                <span class="hint">{{ form.budget_type==='lifetime' ? t('launch.scheduleLifetimeHint') : t('launch.scheduleHint') }}</span>
+</div>
+              <div class="row"><label>{{ t('launch.pacingMode') }}</label>
+                <div class="seg">
+                  <button :class="{on:form.pacing!=='accelerated'}" @click="form.pacing=''">{{ t('launch.pacingStandard') }}</button>
+                  <button :class="{on:form.pacing==='accelerated'}" @click="form.pacing='accelerated'">{{ t('launch.pacingAccelerated') }}</button>
+                </div>
+</div>
+              </template>
+              <!-- existing flat ad-set form below (optimization / audience / placements / disclosure / pacing / advanced) -->
         <template v-if="!isTt">
         <div class="row"><label>{{ t('launch.optimizationGoal') }}</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoByObj')" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" /></el-select></div>
         <div class="row"><label>{{ t('launch.billingEvent') }}</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
@@ -1858,9 +2198,53 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div class="row"><label>{{ t('launch.advancedSettings') }}</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" :placeholder='t(&apos;launch.advancedPlaceholder&apos;)'></textarea><span class="hint">{{ t('launch.advancedHint') }}</span></div>
 </template>
 </div>
+</div>
+</div>
+</div><!-- /sec2 -->
 
-      <!-- ③ 广告（平铺路径专属——结构模式的广告设置在各节点表单） -->
-      <div v-if="editMode === 'flat' && editLevel==='ad'" class="form">
+      <!-- section 3: ads -->
+      <div class="fb-sec">
+        <div class="fb-sec-head" @click="toggleSec('ad')">
+          <span class="fb-sec-arrow" :class="{open:secOpen.ad}">▶</span>
+          <span class="fb-sec-title">{{ t('launch.levelAd') }}</span>
+</div>
+        <div v-show="secOpen.ad" class="fb-sec-body">
+        <!-- flat mode: creative source seg + follow-post card + single ad form -->
+        <template v-if="editMode === 'flat'">
+      <div v-if="!isTt" class="post-mode-seg">
+        <button :class="['ps-btn',{on:form.post_source==='new'}]" @click="setPostSource('new')">{{ t('launch.postSourceNew') }}</button>
+        <button :class="['ps-btn',{on:form.post_source==='reuse'}]" @click="setPostSource('reuse')">{{ t('launch.postSourceReuse') }}</button>
+</div>
+      <div v-if="!isTt && form.post_source==='reuse'" class="reuse-select-card">
+        <div class="reuse-card-hint">{{ t('launch.reuseCardHint') }}</div>
+        <div class="reuse-input-row">
+          <input v-model="manualPostId" class="inp" :disabled="postResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmManualPost" />
+          <button class="btn sm primary" :disabled="postResolving || !manualPostId.trim()" @click="confirmManualPost">{{ postResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
+          <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
+</div>
+        <div v-if="reuseNeedManualPage" class="reuse-manual-page">
+          <span class="hint">{{ t('launch.resolveFailManual') }}</span>
+          <el-select v-model="manualPageForPost" filterable size="small" style="flex:1;min-width:160px" :placeholder="t('launch.pageIdPh')">
+            <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
+          </el-select>
+          <button class="btn sm primary" :disabled="!manualPageForPost" @click="confirmManualPostWithPage">{{ t('common.confirm') }}</button>
+</div>
+        <div v-if="form.reuse_post_ref" class="reuse-selected-block">
+          <div class="reuse-selected">
+            <span class="reuse-post-id" :title="form.reuse_post_ref">{{ form.reuse_post_ref }}</span>
+            <button class="btn sm ghost" @click="clearReusePost">{{ t('common.remove') }}</button>
+</div>
+          <div v-if="reusePreviewAvailable" class="reuse-mini-preview">
+            <img v-if="reusePostPreview.picture" :src="reusePostPreview.picture" class="reuse-mini-thumb" />
+            <div class="reuse-mini-text">{{ (reusePostPreview.message || '').slice(0,120) || t('launch.noPostText') }}</div>
+</div>
+          <div v-else-if="reusePostPreview" class="hint">{{ t('launch.postContentUnavailable') }}</div>
+          <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
+</div>
+        <div v-else-if="!form.page_id" class="hint">{{ t('launch.reuseNoPageHint') }}</div>
+</div>
+
+      <div class="form">
         <!-- 跟帖：帖子内容只读预览（图/标题/文案/链接/CTA 全锁，来自帖子）-->
         <template v-if="form.post_source==='reuse'">
           <div class="reuse-preview-banner">{{ t('launch.reuseLockedHint') }}</div>
@@ -1914,6 +2298,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
         <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" :disabled="form.post_source==='reuse'" /></div>
         <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3" :disabled="form.post_source==='reuse'"></textarea></div>
+        <div class="row"><label>{{ t('launch.descLabel') }}</label>
+          <input v-model="form.link_description" class="inp" :disabled="form.post_source==='reuse'" :placeholder="t('launch.descPh')" />
+          <span class="hint">{{ t('launch.descHint') }}</span>
+</div>
         <div class="row"><label>{{ t('launch.ctaLabel') }}</label><el-select v-model="form.cta_type" style="width:100%" size="small" filterable><el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" /></el-select></div>
         <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.pagePixelHint') }}</div>
         <div class="row"><label>{{ t('launch.landing') }}</label>
@@ -1969,160 +2357,134 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
 </div>
 </div>
-
-      <!-- 结构模式：系列节点补充（像素/披露——平铺在②③Tab，结构模式收进系列层） -->
-      <div v-if="editMode === 'tree' && treeSel.type === 'campaign'" class="form tree-node-form">
-        <hr class="sep" />
-        <div class="sec-title">{{ t('launch.treeCampaignExtra') }}</div>
-        <div class="row"><label>{{ t('launch.pixelId') }}</label>
-          <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ t('launch.pixelIdHint') }}</span>
-</div>
-        <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
-        <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
-</div>
-
-      <!-- 结构模式：广告组节点表单（空值=回退系列层默认） -->
-      <div v-if="editMode === 'tree' && treeSel.type === 'adset' && selAdset" class="form tree-node-form">
-        <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="selAdset.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
-        <div class="row"><label>{{ t('launch.treeEnable') }}</label>
-          <div class="adv-row">
-            <div class="adv-info"><span class="hint">{{ t('launch.treeEnableHint') }}</span></div>
-            <el-switch v-model="selAdset.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-</div>
-</div>
-        <div v-if="form.budget_mode === 'ABO'" class="row"><label>{{ t('launch.treeBudgetOverride') }}</label>
-          <input v-model.number="selAdset.budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.treeBudgetPh')" />
-          <span class="hint">{{ t('launch.budgetConvertHint') }}</span>
-</div>
-        <div class="row"><label>{{ t('launch.treeAudienceOverride') }}</label>
-          <el-select v-model="selAdset.audience_id" filterable size="small" style="width:100%">
-            <el-option :value="0" :label="t('launch.treeAudienceDefault')" />
-            <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
-              :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
-</el-select>
-          <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-</div>
-        <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
-          <el-select v-model="selAdset.optimization_goal" style="width:100%" size="small" filterable>
-            <el-option value="" :label="t('launch.autoByObj')" />
-            <el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" />
-</el-select>
-          <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-</div>
-</div>
-
-      <!-- 结构模式：广告节点表单 -->
-      <div v-if="editMode === 'tree' && treeSel.type === 'ad' && selAd" class="form tree-node-form">
-        <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="selAd.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
-        <div class="row"><label>{{ t('launch.treeEnable') }}</label>
-          <div class="adv-row">
-            <div class="adv-info"><span class="hint">{{ t('launch.treeEnableHint') }}</span></div>
-            <el-switch v-model="selAd.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-</div>
-</div>
-        <div class="row"><label>{{ t('launch.treePostSource') }}</label>
-          <el-radio-group :model-value="selAd.post_source" size="small" @change="v => setNodePostSource(selAd, v)">
-            <el-radio-button value="new">{{ t('launch.postSourceNew') }}</el-radio-button>
-            <el-radio-button value="reuse">{{ t('launch.postSourceReuse') }}</el-radio-button>
-</el-radio-group>
-</div>
-        <!-- 跟帖：帖子引用 + 内容预览（创意来自帖，素材/文案区隐藏） -->
-        <template v-if="selAd.post_source === 'reuse'">
-          <div class="row"><label>{{ t('launch.postSourceReuse') }}</label>
-            <div class="reuse-input-row">
-              <input v-model="nodeReuseInput" class="inp" :disabled="nodeResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmNodePost(selAd)" />
-              <button class="btn sm primary" :disabled="nodeResolving || !nodeReuseInput.trim()" @click="confirmNodePost(selAd)">{{ nodeResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
-              <button class="btn sm" :disabled="!form.page_id" @click="openPostPicker">{{ t('launch.browsePosts') }}</button>
-</div>
-</div>
-          <div v-if="selAd.reuse_post_ref" class="reuse-selected-block">
-            <div class="reuse-selected">
-              <span class="reuse-post-id" :title="selAd.reuse_post_ref">{{ selAd.reuse_post_ref }}</span>
-              <button class="btn sm ghost" @click="clearNodePost(selAd)">{{ t('common.remove') }}</button>
-</div>
-            <div v-if="nodePostPreviews[selAd.key]?.picture || nodePostPreviews[selAd.key]?.message" class="reuse-mini-preview">
-              <img v-if="nodePostPreviews[selAd.key].picture" :src="nodePostPreviews[selAd.key].picture" class="reuse-mini-thumb" />
-              <div class="reuse-mini-text">{{ (nodePostPreviews[selAd.key].message || '').slice(0,120) || t('launch.noPostText') }}</div>
-</div>
-            <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
-</div>
-          <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
 </template>
-        <!-- 新建帖：素材 / 文案 / 落地页 / 模板绑定 -->
+        <!-- structure mode: ad groups -> one collapsible mini-card per ad -->
         <template v-else>
-        <div class="row"><label>{{ t('launch.treeMultiAsset') }}</label>
-          <div class="adv-row">
-            <div class="adv-info"><span class="hint">{{ t('launch.treeMultiAssetHint') }}</span></div>
-            <el-switch v-model="adMulti" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+          <template v-for="(s, si) in tree.adsets" :key="'grp'+s.key">
+            <div class="ad-group-head">
+              <span class="ad-group-name">{{ adsetNodeLabel(s, si) }}</span>
+              <button class="op sm" @click="addTreeAd(si)">+ {{ t('launch.treeAddAd') }}</button>
+            </div>
+            <div v-for="(a, ai) in s.ads" :key="a.key" class="ad-card">
+              <div class="ad-card-head" @click="toggleAdExpand(a.key)">
+                <span class="t-arrow" :class="{ open: expandedAdKeys.has(a.key) }">▶</span>
+                <span @click.stop><el-switch v-model="a.enabled" size="small" /></span>
+                <span :class="['tdot', adDot(a)]"></span>
+                <span class="ad-card-name">{{ adNodeLabel(a, ai) }}</span>
+                <span class="as-card-ops" @click.stop>
+                  <button class="t-op" :title="t('launch.treeCopyNode')" @click="copyTreeAd(si, ai)"><el-icon><CopyDocument /></el-icon></button>
+                  <button class="t-op danger" :title="t('launch.treeDelNode')" @click="removeTreeAd(si, ai)"><el-icon><Delete /></el-icon></button>
+                </span>
+              </div>
+              <div v-if="expandedAdKeys.has(a.key)" class="ad-card-body form">
+                <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="a.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
+                <div class="row"><label>{{ t('launch.treePostSource') }}</label>
+                  <el-radio-group :model-value="a.post_source" size="small" @change="v => setNodePostSource(a, v)">
+                    <el-radio-button value="new">{{ t('launch.postSourceNew') }}</el-radio-button>
+                    <el-radio-button value="reuse">{{ t('launch.postSourceReuse') }}</el-radio-button>
+                  </el-radio-group>
+</div>
+                <!-- follow-post: post ref + content preview (creative from the post) -->
+                <template v-if="a.post_source === 'reuse'">
+                <div class="row"><label>{{ t('launch.postSourceReuse') }}</label>
+                  <div class="reuse-input-row">
+                    <input v-model="nodeReuseInputs[a.key]" class="inp" :disabled="nodeResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmNodePost(a)" />
+                    <button class="btn sm primary" :disabled="nodeResolving || !(nodeReuseInputs[a.key]||'').trim()" @click="confirmNodePost(a)">{{ nodeResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
+                    <button class="btn sm" :disabled="!form.page_id" @click="openPostPickerForAd(si, ai)">{{ t('launch.browsePosts') }}</button>
+                  </div>
+</div>
+                <div v-if="a.reuse_post_ref" class="reuse-selected-block">
+                  <div class="reuse-selected">
+                    <span class="reuse-post-id" :title="a.reuse_post_ref">{{ a.reuse_post_ref }}</span>
+                    <button class="btn sm ghost" @click="clearNodePost(a)">{{ t('common.remove') }}</button>
+</div>
+                  <div v-if="nodePostPreviews[a.key]?.picture || nodePostPreviews[a.key]?.message" class="reuse-mini-preview">
+                    <img v-if="nodePostPreviews[a.key].picture" :src="nodePostPreviews[a.key].picture" class="reuse-mini-thumb" />
+                    <div class="reuse-mini-text">{{ (nodePostPreviews[a.key].message || '').slice(0,120) || t('launch.noPostText') }}</div>
+</div>
+                  <div v-else class="hint">{{ t('launch.loadingPreview') }}</div>
+</div>
+                <div v-else class="hint">{{ t('launch.reusePreviewEmpty') }}</div>
+                </template>
+                <!-- new post: assets / copy / landing / template bindings -->
+                <template v-else>
+                <div class="row"><label>{{ t('launch.treeMultiAsset') }}</label>
+                  <div class="adv-row">
+                    <div class="adv-info"><span class="hint">{{ t('launch.treeMultiAssetHint') }}</span></div>
+                    <el-switch v-model="a.multi" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
 </div>
 </div>
-        <div v-if="adMulti" class="row">
-          <el-select v-model="selAd.asset_ids" multiple filterable collapse-tags collapse-tags-tooltip size="small" style="width:100%" :placeholder="t('launch.selectAsset')">
-            <el-option v-for="a in treeAssets" :key="a.id" :value="a.id" :label="a.name" />
-</el-select>
+                <div v-if="a.multi" class="row">
+                  <el-select v-model="a.asset_ids" multiple filterable collapse-tags collapse-tags-tooltip size="small" style="width:100%" :placeholder="t('launch.selectAsset')">
+                    <el-option v-for="x in treeAssets" :key="x.id" :value="x.id" :label="x.name" />
+                  </el-select>
 </div>
-        <div v-else class="row"><label>{{ t('launch.asset') }}</label>
-          <div class="asset-pick">
-            <div v-if="selAdAsset0" class="asset-chosen" style="cursor:pointer" @click="openPreview(selAdAsset0)">
-              <img v-if="selAdAsset0.type==='image'" :src="selAdAsset0.public_url" class="asset-thumb" />
-              <video v-else :src="selAdAsset0.public_url" class="asset-thumb" preload="metadata" />
-              <span class="asset-name">{{ selAdAsset0.name }}</span>
+                <div v-else class="row"><label>{{ t('launch.asset') }}</label>
+                  <div class="asset-pick">
+                    <div v-if="adAsset0(a)" class="asset-chosen" style="cursor:pointer" @click="openPreview(adAsset0(a))">
+                      <img v-if="adAsset0(a).type==='image'" :src="adAsset0(a).public_url" class="asset-thumb" />
+                      <video v-else :src="adAsset0(a).public_url" class="asset-thumb" preload="metadata" />
+                      <span class="asset-name">{{ adAsset0(a).name }}</span>
 </div>
-            <span v-else-if="selAd.asset_ids.length" class="asset-name">#{{ selAd.asset_ids[0] }}</span>
-            <button class="btn sm" @click="openAssetPicker">{{ selAd.asset_ids.length ? t('launch.change') : t('launch.selectAsset') }}</button>
+                    <span v-else-if="(a.asset_ids||[]).length" class="asset-name">#{{ a.asset_ids[0] }}</span>
+                    <button class="btn sm" @click="openAssetPickerForAd(si, ai)">{{ (a.asset_ids||[]).length ? t('launch.change') : t('launch.selectAsset') }}</button>
 </div>
 </div>
-        <div v-if="selAd.asset_ids.length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: selAd.asset_ids.length }) }}</div>
-        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="selAd.headline" class="inp" /></div>
-        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="selAd.body" class="inp ta" rows="3"></textarea></div>
-        <div class="row"><label>{{ t('launch.ctaLabel') }}</label>
-          <el-select v-model="selAd.cta_type" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
-            <el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" />
-</el-select>
-          <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+                <div v-if="(a.asset_ids||[]).length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: a.asset_ids.length }) }}</div>
+                <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="a.headline" class="inp" /></div>
+                <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="a.body" class="inp ta" rows="3"></textarea></div>
+                <div class="row"><label>{{ t('launch.descLabel') }}</label>
+                  <input v-model="a.link_description" class="inp" :placeholder="t('launch.descPh')" />
+                  <span class="hint">{{ t('launch.descHint') }}</span>
 </div>
-        <div class="row"><label>{{ t('launch.treeAdLang') }}</label>
-          <el-select v-model="selAd.ad_language" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
-            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
-</el-select>
-          <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+                <div class="row"><label>{{ t('launch.ctaLabel') }}</label>
+                  <el-select v-model="a.cta_type" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
+                    <el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
-        <div class="row"><label>{{ t('launch.landing') }}</label>
-          <el-select :model-value="selAd.landing_page_id || 0" size="small" style="width:100%" @change="v => { selAd.landing_page_id = v || 0; onNodeLandingChange(selAd) }">
-            <el-option :value="0" :label="t('launch.manualUrl')" />
-            <el-option v-for="p in landingPages" :key="p.id" :value="p.id" :label="p.title + '（' + (p.public_url || t('launch.noUrl')) + '）'" />
-</el-select>
+                <div class="row"><label>{{ t('launch.treeAdLang') }}</label>
+                  <el-select v-model="a.ad_language" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
+                    <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
-        <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="selAd.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
-        <div class="row"><label>{{ t('launch.subcode') }}</label>
-          <el-select v-model="selAd.subcode_slug" filterable clearable size="small" style="width:100%" :placeholder="t('launch.subcodePlaceholder')">
-            <el-option v-for="s in subcodesForNode(selAd)" :key="s.slug" :value="s.slug" :label="s.slug + ' (' + subcodeStatus(s.status).label + ')'" />
-</el-select>
-          <span v-if="selAd.landing_page_id && !subcodesForNode(selAd).length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
+                <div class="row"><label>{{ t('launch.landing') }}</label>
+                  <el-select :model-value="a.landing_page_id || 0" size="small" style="width:100%" @change="v => { a.landing_page_id = v || 0; onNodeLandingChange(a) }">
+                    <el-option :value="0" :label="t('launch.manualUrl')" />
+                    <el-option v-for="pg in landingPages" :key="pg.id" :value="pg.id" :label="pg.title + '（' + (pg.public_url || t('launch.noUrl')) + '）'" />
+                  </el-select>
 </div>
-        <!-- 消息类（ENGAGEMENT；Messenger 专属） -->
-        <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
-          <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
-          <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
-            <el-select :model-value="selAd.message_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="v => setNodeMsgTpl(selAd, v)">
-              <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
-</el-select>
+                <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="a.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
+                <div class="row"><label>{{ t('launch.subcode') }}</label>
+                  <el-select v-model="a.subcode_slug" filterable clearable size="small" style="width:100%" :placeholder="t('launch.subcodePlaceholder')">
+                    <el-option v-for="sd in subcodesForNode(a)" :key="sd.slug" :value="sd.slug" :label="sd.slug + ' (' + subcodeStatus(sd.status).label + ')'" />
+                  </el-select>
+                  <span v-if="a.landing_page_id && !subcodesForNode(a).length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
 </div>
-</template>
-        <!-- 表单类（LEADS + Instant Forms） -->
-        <template v-if="form.objective === 'OUTCOME_LEADS'">
-          <hr class="sep" /><div class="sec-title">Instant Form</div>
-          <div class="row"><label>{{ t('launch.formTemplate') }}</label>
-            <el-select :model-value="selAd.lead_form_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="v => setNodeFormTpl(selAd, v)">
-              <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
-</el-select>
+                <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
+                <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
+                <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
+                  <el-select :model-value="a.message_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="v => setNodeMsgTpl(a, v)">
+                    <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="m.name + ' · ' + (m.welcome_text||'').slice(0,20)" />
+                  </el-select>
 </div>
-</template>
-</template>
+                </template>
+                <template v-if="form.objective === 'OUTCOME_LEADS'">
+                <hr class="sep" /><div class="sec-title">Instant Form</div>
+                <div class="row"><label>{{ t('launch.formTemplate') }}</label>
+                  <el-select :model-value="a.lead_form_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="v => setNodeFormTpl(a, v)">
+                    <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
+                  </el-select>
 </div>
-</div><!-- /edit-main -->
-</div><!-- /tree-cols -->
+                </template>
+                </template>
+              </div>
+            </div>
+          </template>
+        </template>
+        </div><!-- /sec3-body -->
+      </div><!-- /sec3 -->
 </div><!-- /edit-body -->
 
       <template #footer>
@@ -2170,7 +2532,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-if="deployTreeStats" class="deploy-tree-card">
         <div class="dtc-title">{{ t('launch.treeOverview') }}</div>
         <div class="dtc-line">{{ t('launch.treeOverviewLine', { n: deployTreeStats.n, m: deployTreeStats.m }) }}</div>
-        <div class="dtc-line">{{ deployTreeStats.isCbo ? t('launch.treeCboBudget') : t('launch.treeAboTotal') }}：${{ deployTreeStats.perAcc }}/{{ t('launch.perDay') }}</div>
+        <div class="dtc-line">{{ deployTreeStats.isCbo ? t(deployTreeStats.isLifetime ? 'launch.treeCboLifetimeBudget' : 'launch.treeCboBudget') : t('launch.treeAboTotal') }}：${{ deployTreeStats.perAcc }}<template v-if="!deployTreeStats.isLifetime">/{{ t('launch.perDay') }}</template></div>
         <div class="dtc-line" :class="{ warn: deployTreeStats.chains > 0 }">{{ deployTreeStats.chains > 0 ? t('launch.treeEnabledChains') + '：' + deployTreeStats.chains : t('launch.treeAllPaused') }}</div>
 </div>
       <div v-if="!deployTreeStats" class="deploy-mode-row">
@@ -2247,7 +2609,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
       <template #footer>
-        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl && deployMode==='single'"> · {{ t('launch.totalBudgetHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) }}</template><template v-else-if="selectedAccs.size && deployTpl && deployMode==='batch' && batchAssetIds.size"> · {{ t('launch.batchBudgetHint', { total: (selectedAccs.size * batchAssetIds.size * Number(deployTpl.budget_usd || 0)).toFixed(0), n: selectedAccs.size, m: batchAssetIds.size, per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
+        <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl && deployMode==='single'"> · {{ singleIsLifetime ? t('launch.totalBudgetLifetimeHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) : t('launch.totalBudgetHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) }}</template><template v-else-if="selectedAccs.size && deployTpl && deployMode==='batch' && batchAssetIds.size"> · {{ t('launch.batchBudgetHint', { total: (selectedAccs.size * batchAssetIds.size * Number(deployTpl.budget_usd || 0)).toFixed(0), n: selectedAccs.size, m: batchAssetIds.size, per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
         <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="deploying||!selectedAccs.size||(deployMode==='batch'&&!batchAssetIds.size)" @click="startDeploy">{{ deploying ? t('launch.submitting') : t('launch.startDeploy') }}</button>
 </template>
@@ -2287,6 +2649,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span>{{ t('launch.pfAdsetCount') }}：<b>{{ preflightResult.adset_count }}</b> · {{ t('launch.pfAdTotal') }}：<b>{{ preflightResult.ad_total }}</b></span>
             <span>{{ t('launch.budgetColon') }}<b v-if="preflightResult.abo_total_usd != null">${{ preflightResult.abo_total_usd }}/{{ t('launch.perDay') }}（{{ t('launch.pfAboTotal') }}）</b><b v-else>${{ preflightResult.budget_usd }} → {{ preflightResult.camp_budget_fb }}（{{ t('launch.minorUnitHint') }}）</b></span>
 </div>
+          <div v-if="pfBudgetSegments(preflightResult).length" class="pf-bs-row">
+            <span class="pf-bs-label">{{ t('launch.pfBudgetSchedule') }}</span>
+            <span v-for="(sg, i) in pfBudgetSegments(preflightResult)" :key="i" class="pf-bs-seg">{{ sg }}</span>
+          </div>
           <div class="pf-section">
             <div class="pf-title">{{ t('launch.pfTreeTitle') }}</div>
             <div class="pf-tree">
@@ -2295,6 +2661,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <span :class="['pft-state', s.enabled ? 'on' : 'off']">{{ s.enabled ? t('launch.treeStateOn') : t('launch.treeStatePaused') }}</span>
                   <span class="pft-name">{{ s.name }}</span>
                   <span class="pft-budget">${{ s.budget_usd ?? '—' }} → {{ s.budget_local_fb }}</span>
+                  <span v-for="(sg, i) in pfBudgetSegments(s)" :key="'bs'+i" class="pft-meta">{{ sg }}</span>
 </div>
                 <div v-for="(a, ai) in s.ads" :key="ai" class="pft-ad">
                   <span :class="['pft-state', a.enabled ? 'on' : 'off']">{{ a.enabled ? t('launch.treeStateOn') : t('launch.treeStatePaused') }}</span>
@@ -2317,6 +2684,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <span>{{ t('launch.fxRate') }}：{{ preflightResult.fx_rate || t('launch.none') }}</span>
           <span>{{ t('launch.modeColon') }}{{ preflightResult.budget_mode }}</span>
 </div>
+        <div v-if="pfBudgetSegments(preflightResult).length" class="pf-bs-row">
+          <span class="pf-bs-label">{{ t('launch.pfBudgetSchedule') }}</span>
+          <span v-for="(sg, i) in pfBudgetSegments(preflightResult)" :key="i" class="pf-bs-seg">{{ sg }}</span>
+        </div>
 </template>
         <div class="pf-section">
           <div class="pf-title">{{ t('launch.pfCampaign') }}</div>
@@ -2457,9 +2828,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .op:hover{background:var(--bg3)}
 .empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px}
 
-.level-tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--bg3);padding:3px;border-radius:8px}
-.ltab{flex:1;padding:8px;border:none;background:transparent;color:var(--t3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;font-family:inherit}
-.ltab.on{background:var(--bg2);color:var(--ac)}
 .form{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-direction:column;gap:4px}
 .row label{font-size:12px;color:var(--t3);font-weight:500}
@@ -2651,10 +3019,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .interest-search .inp{flex:1}
 .interest-list{display:flex;gap:4px;flex-wrap:wrap;padding:4px 0}
 
-/* #8 summary strip */
-.summary-strip{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;padding:6px 10px;background:var(--bg3);border-radius:8px}
-.ss-chip{font-size:11px;color:var(--t2);padding:2px 8px;background:var(--bg2);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;cursor:pointer;transition:color .15s}
-.ss-chip:hover{color:var(--ac)}
+/* #8 完备状态 chip（编辑器顶栏） */
 .ss-status{font-size:11px;padding:2px 8px;border-radius:8px;font-weight:600;margin-left:auto}
 .ss-status.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .ss-status.pending{color:var(--warning);background:rgba(255,159,10,.13)}
@@ -2716,33 +3081,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .mm-quick-replies{display:flex;gap:4px;flex-wrap:wrap}
 .mm-qr{font-size:11px;padding:4px 10px;background:var(--bg2);border:1px solid var(--ac);color:var(--ac);border-radius:14px}
 
-/* 1:1 三层结构模式：模式切换 + 左树右表单 */
+/* 1:1 三层结构模式：模式切换（树面板已并入三段手风琴） */
 .tpl-mode-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .tpl-mode-row label{font-size:12px;color:var(--t3);font-weight:500}
-.tree-cols{display:flex;gap:14px;align-items:flex-start}
-.edit-main{flex:1;min-width:0}
-.tree-side{flex:none;width:220px;border:1px solid var(--bd);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;background:var(--bg2);max-height:65vh;overflow-y:auto;position:sticky;top:0}
-.tnode{display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--t2);min-width:0}
-.tnode:hover{background:var(--bg3)}
-.tnode.sel{background:rgba(10,132,255,.12);color:var(--ac)}
-.tnode.root .tnode-name{font-weight:600;color:var(--t1)}
-.tnode.adset{font-weight:500}
-.tnode.ad{margin-left:16px}
-.tnode-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tdot{width:8px;height:8px;border-radius:50%;flex:none}
 .tdot.g{background:var(--success)}
 .tdot.y{background:var(--warning)}
 .tdot.c{background:var(--t3);opacity:.35}
 .t-arrow{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);flex:none;transition:transform .15s;display:inline-block;cursor:pointer;padding:2px}
 .t-arrow.open{transform:rotate(90deg)}
-.tnode-ops{display:none;gap:2px;flex:none}
-.tnode:hover .tnode-ops{display:flex}
 .t-op{background:none;border:none;color:var(--t3);cursor:pointer;padding:2px;border-radius:4px;display:inline-flex;align-items:center}
 .t-op:hover{color:var(--ac);background:var(--bg3)}
 .t-op.danger:hover{color:var(--error)}
 .t-add-adset{margin-top:4px;padding:6px;border:1px dashed var(--bd);background:none;color:var(--t3);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit}
 .t-add-adset:hover{color:var(--ac);border-color:var(--ac)}
-.tree-node-form{margin-top:12px}
 
 /* 部署抽屉：结构模板树概览卡 */
 .deploy-tree-card{border:1px solid var(--ac);background:rgba(10,132,255,.06);border-radius:8px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:4px}
@@ -2766,14 +3118,70 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pft-budget{margin-left:auto;color:var(--t3);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
 .pft-meta{color:var(--t3);font-size:11px;white-space:nowrap;flex:none}
 
+/* FB 创建流：编辑器顶栏（面包屑 + 完备状态）+ 三段手风琴 */
+.fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.fb-crumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t2);font-weight:500;flex-wrap:wrap}
+.crumb-sep{color:var(--t3);font-size:11px}
+.fb-sec{border:1px solid var(--bd);border-radius:8px;background:var(--bg2);margin-bottom:12px;overflow:hidden}
+.fb-sec-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg3);user-select:none}
+.fb-sec-head:hover{background:var(--bg2)}
+.fb-sec-arrow{font-size:10px;color:var(--t3);transition:transform .15s;display:inline-block}
+.fb-sec-arrow.open{transform:rotate(90deg)}
+.fb-sec-title{font-size:13px;font-weight:600;color:var(--t1)}
+.fb-sec-meta{font-size:11px;color:var(--t3);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+.fb-sec-body{padding:12px}
+/* 目标只读 chip（点击重开目标弹窗）+ 只读字段 + CBO 行 + 必填标记 */
+.obj-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg3);border:1px solid var(--ac);color:var(--t1);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;width:fit-content}
+.obj-chip:hover{background:rgba(10,132,255,.08)}
+.obj-chip-edit{font-size:10px;color:var(--ac);font-weight:500}
+.ro-field{padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);font-size:13px}
+.cbo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cbo-seg button{flex:none;padding:5px 14px}
+.req-mark{color:var(--error);font-weight:700;margin-left:2px}
+/* 排期（datetime 起止） */
+.sched-row{display:flex;align-items:center;gap:6px}
+.sched-sep{color:var(--t3)}
+/* 广告组卡 / 广告小卡（结构模式） */
+.as-card{border:1px solid var(--bd);border-radius:8px;background:var(--bg2);margin-bottom:10px;overflow:hidden}
+.as-card-head{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;background:var(--bg3)}
+.as-card-head:hover{background:var(--bg2)}
+.as-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--t1)}
+.as-card-ops{display:flex;gap:2px;flex:none}
+.as-card-body{padding:12px}
+.ad-group-head{display:flex;align-items:center;gap:8px;margin:2px 0 8px}
+.ad-group-name{font-size:12px;font-weight:600;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ad-card{border:1px solid var(--bd);border-radius:6px;background:var(--bg2);margin-bottom:8px;overflow:hidden}
+.ad-card-head{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;background:var(--bg3)}
+.ad-card-head:hover{background:var(--bg2)}
+.ad-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--t2)}
+.ad-card-body{padding:10px}
+/* 目标选择弹窗（FB Objective Picker 形态） */
+.objp{display:flex;gap:14px}
+.objp-list{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.objp-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--t2);font-size:14px;cursor:pointer;font-family:inherit;text-align:left}
+.objp-item:hover{border-color:var(--ac);color:var(--t1)}
+.objp-item.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.08);font-weight:600}
+.objp-radio{width:16px;height:16px;border-radius:50%;border:2px solid var(--bd);flex:none;box-sizing:border-box}
+.objp-item.on .objp-radio{border-color:var(--ac);border-width:5px}
+.objp-detail{flex:1;min-width:0;border-left:1px solid var(--bd);padding-left:14px;display:flex;flex-direction:column;gap:8px}
+.objp-detail-name{font-size:15px;font-weight:600;color:var(--t1)}
+.objp-detail-desc{font-size:13px;color:var(--t3);line-height:1.6}
+.objp-naming{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.objp-fold{display:inline-flex;align-items:center;gap:6px;background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;padding:2px 0;font-family:inherit}
+.objp-fold:hover{color:var(--ac)}
+/* 预检「预算与排期」行 */
+.pf-bs-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--t2);padding:8px 10px;background:var(--bg3);border-radius:8px}
+.pf-bs-label{font-weight:600;color:var(--ac);flex:none}
+.pf-bs-seg{padding:2px 8px;background:var(--bg2);border-radius:var(--rs);white-space:nowrap}
+
 /* #23 移动端适配 */
 @media (max-width: 768px) {
   .grid{grid-template-columns:1fr !important}
   .picker-grid{grid-template-columns:1fr !important}
   .acc-config{grid-template-columns:1fr !important}
-  .level-tabs{flex-direction:column}
-  .summary-strip{flex-direction:column}
-  .tree-cols{flex-direction:column}
-  .tree-side{width:100%;max-height:40vh;position:static}
+  .objp{flex-direction:column}
+  .objp-detail{border-left:none;padding-left:0;border-top:1px solid var(--bd);padding-top:10px}
+  .sched-row{flex-direction:column;align-items:stretch}
+  .fb-sec-meta{max-width:100%}
 }
 </style>
