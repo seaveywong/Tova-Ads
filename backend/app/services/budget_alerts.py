@@ -70,10 +70,15 @@ def check_account_budget_progress(
 
     try:
         # adsets 走 ads_cache（0 API，cron 已同步全状态；本 job 只需 ACTIVE+日预算，本地过滤）；
-        # adset 维度今日消耗是本 job 独有数据（巡检只拉 ad 维度 insights），保留 live 拉
-        adsets = _active_adsets_from_cache(db, tenant_id, acc.act_id)
+        # adset 维度今日消耗是本 job 独有数据（巡检只拉 ad 维度 insights），保留 live 拉。
+        # 仅 FB 走缓存：TT 广告主 id 是小整数，可能与同租户 FB act_id 数值撞号误读 FB 行
+        # （复审 2026-09-08）——TT 一律 live 拉。
+        if (getattr(acc, "platform", None) or "fb") == "fb":
+            adsets = _active_adsets_from_cache(db, tenant_id, acc.act_id)
+        else:
+            adsets = None
         if adsets is None:
-            adsets = fb.get_adsets(acc.act_id)   # cache 未建行/异常 → live 兜底（保可用性）
+            adsets = fb.get_adsets(acc.act_id)   # cache 未建行/异常/TT → live 兜底（保可用性）
         spend_map = {i.get("adset_id"): float(i.get("spend", 0))
                      for i in fb.get_adset_insights(acc.act_id, "today")}
     except FbApiError as e:

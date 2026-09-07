@@ -166,7 +166,7 @@ const cacheStale = computed(() => {
   return !isNaN(ts) && (Date.now() - ts > 3600e3)
 })
 
-// 缓存新鲜度标签：/ads 顶层 last_sync（后端字段上线前显示「—」）；30s 心跳让「X 分钟前」自动走字
+// 缓存新鲜度标签：/ads 顶层 last_sync（广告层由巡检 ~5min 回写、系列/组 ~15min 全量同步，见 cacheAgeTip）；30s 心跳让「X 分钟前」自动走字
 const nowTick = ref(Date.now())
 let _ageTimer = null
 const cacheAgeMin = computed(() => {
@@ -185,7 +185,7 @@ const cacheAgeText = computed(() => {
 const cacheAgeStale = computed(() => cacheAgeMin.value != null && cacheAgeMin.value >= 60)
 
 // 实时核验：对选中账户逐个调 GET /ads/live-status?act_id=，用返回 {ads:[{id,effective_status}]} 逐条 patch 本地行
-// 端点未上线（404 Not Found）时静默；其他失败 toast。同账户 10s 防抖（后端另有缓存，双保险）
+// 失败 toast；同账户 10s 防抖（后端另有缓存，双保险）
 const liveVerifying = ref(false)
 const liveVerifiedAt = ref('')
 const _liveLastCall = {}
@@ -588,7 +588,7 @@ const unsubscribeLeads = async () => {
           <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}
         </el-option>
       </el-select>
-      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : ''">{{ cacheAgeText }}</span>
+      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
       <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')">⚡ {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <div class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
@@ -614,7 +614,7 @@ const unsubscribeLeads = async () => {
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <template v-if="tab === 'campaign'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid"><span v-if="platChipByAct(c.act_id)" :class="['plat-chip', platChipByAct(c.act_id)]">{{ platChipByAct(c.act_id).toUpperCase() }}</span>{{ c.account_name }} · {{ c.id }}</div></div>
@@ -630,7 +630,7 @@ const unsubscribeLeads = async () => {
         </div>
       </template>
       <template v-else-if="tab === 'adset'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
         <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}</div>
           <div class="nm clk" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid"><span v-if="platChipByAct(s.act_id)" :class="['plat-chip', platChipByAct(s.act_id)]">{{ platChipByAct(s.act_id).toUpperCase() }}</span>{{ s.account_name }} · {{ s.id }}</div></div>
@@ -646,7 +646,7 @@ const unsubscribeLeads = async () => {
         </div>
       </template>
       <template v-else>
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : '' }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : '' }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
+        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
         <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
           <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="a.effective_status === 'DISAPPROVED' && rfOf(a)" class="rf-flag" :title="t('adm.reviewFlagHint')" @click.stop="showReview(a)">⚠</span></div>
           <div class="nm ad-nm"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @click.stop="showThumb(a)" /><div class="txt"><div v-if="titleOf(a)" class="cpy tt" :title="titleOf(a)">{{ titleOf(a) }}</div><div v-if="copyOf(a)" class="cpy bd" :title="copyOf(a)">{{ copyOf(a) }}</div><div class="an">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span></div><div class="sid"><span v-if="platChipByAct(a.act_id)" :class="['plat-chip', platChipByAct(a.act_id)]">{{ platChipByAct(a.act_id).toUpperCase() }}</span>{{ a.account_name }} · {{ a.id }}</div></div></div>
@@ -660,7 +660,7 @@ const unsubscribeLeads = async () => {
           <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
         </div>
       </template>
-      <div v-if="!curList.length && !loading" class="empty">{{ t('common.noData') }}</div>
+      <div v-if="!curList.length && !loading" class="empty">{{ tab === 'lead' ? t('common.noData') : t('adm.emptyAdsHint') }}</div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
       <div class="leads-bar">
@@ -781,7 +781,7 @@ const unsubscribeLeads = async () => {
           <div class="diag-sec" v-if="diagData.cooldown">
             <div class="diag-sec-title">{{ t('adm.diagCooldown') }}</div>
             <div class="diag-cooldown">
-              🔒 {{ t('adm.diagCooldownMsg', { rule: diagData.cooldown.rule, min: diagData.cooldown.remaining_min }) }}
+              🔒 {{ t('adm.diagCooldownMsg', { rule: diagData.cooldown.rule, ago: Math.max(0, 60 - diagData.cooldown.remaining_min), left: diagData.cooldown.remaining_min }) }}
             </div>
           </div>
           <div class="diag-sec" v-if="diagData.whitelisted">

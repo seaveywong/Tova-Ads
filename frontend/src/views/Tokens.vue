@@ -122,7 +122,7 @@ const delTtApp = async (a) => {
   } catch { return }
   try {
     await DELETE(`/tt/apps/${a.id}`)
-    ElMessage.success(t('common.opOk'))
+    ElMessage.success(t('common.savedOk'))
     await loadTtApps()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
@@ -853,8 +853,6 @@ const deleteToken = async (tk) => {
                 <button class="dots-btn small" @click.stop>⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item disabled>{{ t('tokens.publishAdsSoon') }}</el-dropdown-item>
-                    <el-dropdown-item disabled>{{ t('tokens.viewInsightsSoon') }}</el-dropdown-item>
                     <el-dropdown-item command="unmanage" divided>{{ t('tokens.unmanage') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
