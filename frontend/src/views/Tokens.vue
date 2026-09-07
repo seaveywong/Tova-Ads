@@ -776,7 +776,7 @@ const deleteToken = async (tk) => {
         <span>{{ t('tokens.type') }}</span><span></span>
       </div>
       <div v-for="tk in sortedTokens" :key="tk.id" class="row" :class="statusMeta(tk).dot" :title="t('tokens.openDetailTip')" @click="openDrawer(tk)">
-        <span class="c-st"><span class="dot" :class="statusMeta(tk).dot"></span>{{ statusMeta(tk).label }}</span>
+        <span class="c-st"><span class="dot" :class="statusMeta(tk).dot"></span>{{ statusMeta(tk).label }}<span v-if="tk.last_verified_at" class="st-when">{{ fmtTime(tk.last_verified_at) }}</span></span>
         <span class="c-nm" @click.stop>
           <input v-if="editId===tk.id" v-model="editAlias" class="inp" @keyup.enter="saveEdit(tk)" @blur="saveEdit(tk)" />
           <span v-else class="nm" @click="startEdit(tk)">{{ tk.alias || t('tokens.unnamed') }}<span class="pen">✎</span></span>
@@ -1120,6 +1120,7 @@ const deleteToken = async (tk) => {
 .row.err{opacity:.65}
 
 .c-st{display:flex;align-items:center;gap:4px;font-size:12px}
+.st-when{font-size:10px;color:var(--t3)}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .dot.ok{background:var(--success)}.dot.warn{background:var(--warning)}.dot.err{background:var(--error)}.dot.off{background:var(--t3)}
 

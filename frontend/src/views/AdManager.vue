@@ -617,7 +617,7 @@ const unsubscribeLeads = async () => {
         <span v-if="data.cached_at" class="cache-at" :class="{ stale: cacheStale }" :title="cacheStale ? t('adm.cacheStaleTip') : ''">{{ t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) }}</span>
       </div>
       <div class="ph-actions">
-        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
+        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
       </div>
     </header>
     <div class="ctrl-bar">
