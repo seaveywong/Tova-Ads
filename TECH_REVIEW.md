@@ -1168,3 +1168,12 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - **沿途抓出并修复 3 个真 bug**：①写令牌同 priority 时 manage 恒排前→建广告全撞管理号（tiebreaker: operate 优先）②App Live 后发主页帖被 pages_manage_posts 挡成死路（发帖被拒自动回退 object_story_spec 内嵌——standard access 正确路径）③FB 原始错误码被吞只留英文摘要（code31→account_checkpoint 安全锁定分类 + 未知错误保留 FB error_user_title/user_msg 中文原文——#3858385 风控锁定一眼定位）。
 - **投放前置的 FB 侧知识沉淀**（实测矩阵探针）：账户写权/主页可推广对象/页权限三者独立——错误码分别对应 account_write(33)/1815645 可推广对象不匹配/code31 安全检查点(#3858385 异地登录风控，需号主本人验证)。
 - 限流状态列（888d1fe）+ webhook 12 页订阅全通 + 巡检 6.1s/轮同批完成。
+
+### 告警收敛 + 巡检独家供数 + 主页受控（2026-09-08，e6a83b8/0f3693c/f0956db/9e231b3/8cd4b6b/5053066）
+- **告警链收敛到两条**（用户决策）：一次令牌故障只报「令牌失效」(根因) +「数据同步已停」(持续)。inspection_skipped 剔除 token_expired 类（同轮根因告警已发）、watchdog 单账户停滞在租户全平台无活跃凭证时让位 sync_stalled——同因抑制而非时间窗抑制，叠加故障（另一账户别的原因丢覆盖）不吞。streak 匹配改机器记号 `fb_fallback=`（曾被解释文案「见兜底计数」撞词误报，同一处咬两次的教训）。
+- **巡检独家供数批**（9e231b3，省 API）：FB 巡检改拉全状态 /ads（本地过滤 ACTIVE 语义等价，复审四疑点全核验）+ 回写 ads_cache.ads_json——管理器广告层数据源从 15min cron 变 5min 巡检；ads_cache_sync 不再拉 /ads（include_ads=False）；budget_alerts ACTIVE adsets 走缓存。/ads edge 16→12 调/h·账户。
+- **数据源断链可见化**（f0956db）：/ads/list 加 token_status（纯 DB）→ 页头警示条 + 行内「快照」角标 + 状态开关禁用——令牌失效后「投放中」是最后快照而非实时。
+- **双层时间戳**（8cd4b6b，迁移 0086）：ads_cache.ads_updated_at 独立列（巡检回写/手动全量刷；结构层 sync 不再冒充广告层新鲜）——修「缓存不到1分钟配陈旧广告数据」误导（令牌切换间隙实测）。管理器三时间戳全按 ads 层取。
+- **按页订阅 + 主页受控视图**（8cd4b6b+5053066）：GET /leads/pages（每页权限面 可管理/仅广告/只读 + subscribed_apps 实况按 App id 匹配，多令牌同页权限 OR 合并与订阅语义一致）；subscribe 加 page_ids；前端「主页与订阅」面板勾选订阅。生产实证：Gim Jim 令牌 10 页 0 可管理/4 仅广告/6 只读——OAuth 复制权限不能放大，权限三层独立（账户写✓/页广告✗/页管理✗）再获实证。
+- **复审修复**（5053066）：P1×2（TtCredential import 错模块被 except 静默吞→TT 租户停滞告警失效；受控面板「首个即锁」弱令牌误判只读）+ P2×4（token_status TT 恒 True；缩略图 @error 永久隐藏；docstring 矛盾；budget freshness 需第三列记录不做）。
+- 用户侧挂账：Gim Jim 需 BM 补「管理主页」+「广告」任务（10 页当前 0 订阅能力）；Gemini 充值；极简操作规划待讨论。
