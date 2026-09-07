@@ -990,8 +990,14 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                         for _a in _cache_ads})
                     if _cache_ids:
                         active_ids = _cache_ids
-                        res["live_fallback"] = True  # cache 顶替 live（主循环降级 streak 统计+心跳后缀）
-                        logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE")
+                        # live_fetch_degraded streak 只统计「有读令牌但拉取失败/为空」（真降级）。
+                        # 无令牌账户走 cache 是已知稳态（orphan_account/sync_stalled 专项告警在管，
+                        # 重复计 streak → 每 1h 一条误报降级告警——2026-09-07 生产实测：
+                        # TopProperty/SD Web 两无令牌遗留账户把 streak 顶到 3 触发告警，而 Roly 正常）
+                        if cred:
+                            res["live_fallback"] = True  # cache 顶替 live（主循环降级 streak 统计+心跳后缀）
+                        logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE"
+                                    + ("" if cred else "（无令牌稳态，不计降级 streak）"))
             except Exception:
                 pass
         hist_rows_7d: list[dict] = []   # 近7天历史分天行（FB；回填快照+trend_drop 复用）
