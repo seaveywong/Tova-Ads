@@ -1162,3 +1162,9 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - **修复（在其骨架上补齐并一并部署 5 文件）**：AiError 加 `quota` 标记 → quota=True 走 **6h 长退避**（充值后改 AI 配置即换键立即恢复）+ 首次发 `ai_quota_exhausted` warning（24h dedup，文案含充值指引）+ 前端事件翻译。
 - **生产断言**：强制巡检后 `kpi_ai_retry:* quota=True retry_in_min=360` ✓ / notifications 1 条「🟡 AI 服务额度已耗尽」✓ / 5min 后 journal `prepayment credits` 出现 0 次（刷屏消失）✓。
 - **用户行动项**：Gemini 余额充值（ai.studio → Billing）。
+
+### 真投放最终验收 + 错误精确识别（2026-09-07，0ac194b/a87d4a9/c789bc9）
+- **第一条真实广告上线**：job#16 completed（Roly-V21 × RH-Signals × YR-001素材 × TRAFFIC $5/天），FB 核实 ad 120249455794040413 存在、IN_PROCESS 审核中。全链 8 秒建成。
+- **沿途抓出并修复 3 个真 bug**：①写令牌同 priority 时 manage 恒排前→建广告全撞管理号（tiebreaker: operate 优先）②App Live 后发主页帖被 pages_manage_posts 挡成死路（发帖被拒自动回退 object_story_spec 内嵌——standard access 正确路径）③FB 原始错误码被吞只留英文摘要（code31→account_checkpoint 安全锁定分类 + 未知错误保留 FB error_user_title/user_msg 中文原文——#3858385 风控锁定一眼定位）。
+- **投放前置的 FB 侧知识沉淀**（实测矩阵探针）：账户写权/主页可推广对象/页权限三者独立——错误码分别对应 account_write(33)/1815645 可推广对象不匹配/code31 安全检查点(#3858385 异地登录风控，需号主本人验证)。
+- 限流状态列（888d1fe）+ webhook 12 页订阅全通 + 巡检 6.1s/轮同批完成。
