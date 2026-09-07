@@ -588,10 +588,12 @@ const openLoad = async () => {
   loadSelected.value = {}
   loadLoading.value = true
   try {
-    const r = await GET('/fb/credentials/loadable-accounts')
-    loadableAccounts.value = r.ad_accounts || []
-    // 导入行为配置（超管在设置页统一配）：true=默认全选未导入账户（>50 提交时仍有确认弹窗）
-    if (r.import_default_all) {
+    // 端点返回裸 list（旧形状）；import_default_all 走 X-Import-Default-All 响应头（原生 fetch 才拿得到头）
+    const _resp = await fetch((import.meta.env.VITE_API_BASE || 'https://api.tovaads.com') + '/fb/credentials/loadable-accounts', {
+      headers: { Authorization: 'Bearer ' + window.localStorage.getItem('tova_token') }
+    })
+    loadableAccounts.value = await _resp.json()
+    if (_resp.headers.get('x-import-default-all') === '1') {
       const sel = {}
       for (const a of loadableAccounts.value) if (!a.imported) sel[a.account_id] = true
       loadSelected.value = sel

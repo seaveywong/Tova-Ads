@@ -7,7 +7,8 @@ import logging
 import math
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from ..core.database import get_db, get_system_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission, require_superadmin
@@ -1127,16 +1128,7 @@ def get_assets(
         except (FbApiError, TtApiError):
             # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合
             continue
-    # 导入行为配置（超管在设置页统一配）：true=前端载入弹窗默认全选未导入账户
-    _default_all = False
-    try:
-        from ..models.system import SystemSetting as _SS
-        _row = db.query(_SS).filter(_SS.key == "import_default_all").first()
-        if _row and _row.value:
-            _default_all = bool(json.loads(_row.value))
-    except Exception:
-        pass
-    return {"ad_accounts": accounts, "pages": pages, "import_default_all": _default_all}
+    return {"ad_accounts": accounts, "pages": pages}
 
 
 @router.get("/credentials/loadable-accounts")
@@ -1159,7 +1151,17 @@ def loadable_accounts(
     for r in rows:
         r["imported"] = r["account_id"] in imported_ids
         out.append(r)
-    return out
+    # import_default_all 放响应头 X-Import-Default-All（不打碎旧前端裸 list 形状——
+    # 曾改成 dict 会让 loadableAccounts.value = list 直接变 dict 炸勾选列表）
+    _da = False
+    try:
+        from ..models.system import SystemSetting as _SS
+        _row2 = db.query(_SS).filter(_SS.key == "import_default_all").first()
+        if _row2 and _row2.value:
+            _da = bool(json.loads(_row2.value))
+    except Exception:
+        pass
+    return JSONResponse(content=out, headers={"X-Import-Default-All": "1" if _da else "0"})
 
 
 _LOADABLE_CACHE: dict = {}   # tenant_id -> (ts, rows)；rows 含 tokens[]（无 imported——每次现算）
