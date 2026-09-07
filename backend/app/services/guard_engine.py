@@ -2286,6 +2286,10 @@ def run_watchdog():
         # 单账户漏巡完全无感。>30min 未巡检 = critical（止损对该账户失效）。──
         try:
             _stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=ACCOUNT_STALE_MIN)
+            # 新纳管宽限（2026-09-07 用户实测场景：刚导入 → 令牌绑定/首巡未完成 → 30min 整
+            # 触发 critical 炞惊。这是告警降噪不是止损保护期——评估照常，只是缓报 35min）：
+            # 纳管 <35min 的账户不进停滞名单（给导入→绑定→首轮巡检一个完整周期）
+            _grace_cutoff = datetime.now(timezone.utc) - timedelta(minutes=ACCOUNT_STALE_MIN + 5)
             # 账户集镜像巡检主循环口径（复审R1-P1）：仅排除死状态（2/8/100/101），NULL/未结清3/
             # 受限7/宽限9 仍在投放必须覆盖——用 ==1 会把这些账户挡在停滞告警外（漏报）
             _stale = db.query(Account).filter(
@@ -2293,6 +2297,7 @@ def run_watchdog():
                 or_(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
                 or_(Account.last_inspected_at.is_(None),
                     Account.last_inspected_at < _stale_cutoff),
+                or_(Account.created_at.is_(None), Account.created_at < _grace_cutoff),
             ).all()
             _stale_by_tenant: dict = {}
             for _a in _stale:
