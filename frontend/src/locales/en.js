@@ -959,6 +959,7 @@ export default {
     tokenDeadBar: '{n} accounts have no usable token — their statuses are last-known snapshots. Re-authorize in Token Management',
     tokenDeadTip: 'With the token expired, inspection/sync stop updating; statuses below are stale snapshots, not live. Re-authorizing restores live data',
     snapTag: 'snap', snapTagTip: 'No usable token for this account — this status is a cached snapshot (not live). Re-authorize in Token Management before acting on it',
+    belongsToCampaign: 'Campaign: {name} (click the name to view ad groups under this campaign)',
     liveVerify: 'Live Verify', liveVerifying: 'Verifying…', liveVerifyTip: 'Fetch live ad statuses for the selected accounts from the platform (bypassing cache) and refresh the list',
     liveVerifiedAt: 'Live verified {time}', liveVerifyOk: 'Live-verified {n} ad statuses', liveVerifyFail: 'Live verification failed',
     liveVerifyPickAccount: 'Select account(s) in the account filter above first', liveVerifyTooOften: 'Already verified within the last 10s; please wait',

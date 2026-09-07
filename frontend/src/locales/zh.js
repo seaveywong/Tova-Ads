@@ -970,6 +970,7 @@ export default {
     tokenDeadBar: '{n} 个账户数据源已断（无可用令牌），其状态为最后快照——请到「令牌管理」重新授权',
     tokenDeadTip: '令牌失效后巡检/同步停更，列表里的状态停留在最后快照，不代表实时投放状态；重新授权后自动恢复实时',
     snapTag: '快照', snapTagTip: '该账户无可用令牌，此状态为缓存快照（非实时）；操作前请先到令牌管理重新授权',
+    belongsToCampaign: '所属系列：{name}（点击行名查看该系列下的广告组）',
     liveVerify: '实时核验', liveVerifying: '核验中…', liveVerifyTip: '从平台实时拉取所选账户的广告状态（绕过缓存），逐条刷新列表状态',
     liveVerifiedAt: '已实时核验 {time}', liveVerifyOk: '已实时核验 {n} 条广告状态', liveVerifyFail: '实时核验失败',
     liveVerifyPickAccount: '请先在上方账户筛选中选择账户，再实时核验', liveVerifyTooOften: '这些账户 10 秒内已核验过，请稍候再试',
