@@ -589,10 +589,17 @@ const openLoad = async () => {
   loadLoading.value = true
   try {
     // 端点返回裸 list（旧形状）；import_default_all 走 X-Import-Default-All 响应头（原生 fetch 才拿得到头）
+    const _ctrl = new AbortController()
+    const _tmr = setTimeout(() => _ctrl.abort(), 30000)
     const _resp = await fetch((import.meta.env.VITE_API_BASE || 'https://api.tovaads.com') + '/fb/credentials/loadable-accounts', {
-      headers: { Authorization: 'Bearer ' + window.localStorage.getItem('tova_token') }
+      headers: { Authorization: 'Bearer ' + window.localStorage.getItem('tova_token') }, signal: _ctrl.signal
     })
-    loadableAccounts.value = await _resp.json()
+    clearTimeout(_tmr)
+    if (_resp.status === 401) { window.localStorage.removeItem('tova_token'); window.location.href = '/login'; return }
+    if (!_resp.ok) throw new Error((await _resp.json().catch(() => ({}))).detail || `HTTP ${_resp.status}`)
+    const _body = await _resp.json()
+    if (!Array.isArray(_body)) throw new Error('bad response shape')   // 复审P1：4xx detail dict 曾直接赋列表炸筛选
+    loadableAccounts.value = _body
     if (_resp.headers.get('x-import-default-all') === '1') {
       const sel = {}
       for (const a of loadableAccounts.value) if (!a.imported) sel[a.account_id] = true
@@ -623,6 +630,7 @@ const doImport = async (ids) => {
     const parts = [t('tokens.importedCount', { n: r.count })]
     if (r.skipped_existing) parts.push(t('tokens.skippedExisting', { n: r.skipped_existing }))
     if (r.not_found && r.not_found.length) parts.push(t('tokens.notFound', { n: r.not_found.length }))
+    if (r.skipped_over_limit && r.skipped_over_limit.length) parts.push(t('tokens.skippedOverLimit', { n: r.skipped_over_limit.length }))
     ElMessage.success(parts.join(' · '))
     loadOpen.value = false
     await Promise.all([load(), loadSummary(), loadAtRisk()])

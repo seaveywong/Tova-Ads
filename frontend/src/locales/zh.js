@@ -456,6 +456,7 @@ export default {
     renameBtn: '改名', categoryBtn: '改类型', pageCategoryPrompt: '新的主页类别（如 Internet Marketing Service，将真实修改 FB 主页类型；需主页管理权限）', pageCategoryLimit: '1-120 字符', pageCategorySaved: '主页类别已更新',
     maxAccountsBtn: '账户数上限', maxAccountsPrompt: '该令牌最多绑定多少个账户（当前已绑 {n} 个，现为 {cur}）。留空 = 不限。操作号建议 ≤100，防一个号带几千账户炸巡检。', maxAccountsLimit: '留空或 1-5 位数字', maxAccountsUnlimited: '不限',
     importBigBatchConfirm: '本次将导入 {n} 个账户——大量账户会显著增加巡检耗时与 API 消耗，且操作号有绑定上限（超额账户会被跳过）。确定继续？',
+    skippedOverLimit: '有 {n} 个账户因令牌绑定上限被跳过（调上限或换令牌后重导）',
     pageRenamePrompt: '新的主页名称（将真实修改 Facebook 主页名）',
     pageRenameLimit: '名称需 1-100 字符',
     pageRenamed: '主页已改名',

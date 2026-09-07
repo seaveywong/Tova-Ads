@@ -374,7 +374,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { loadFaApps(); loadIb(); await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
+onMounted(async () => { if (isSuper.value) { loadFaApps(); loadIb() } await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -446,6 +446,63 @@ const saveKeepalive = async () => {
   kaSaving.value = false
 }
 const kaRunning = ref(false)
+
+// ── FB App 配置管理（重建入口：列表/新建/改 secret/删除——OAuth 授权与 webhook 验签依赖）──
+const faApps = ref([])
+const faLoading = ref(false)
+const faEditId = ref(null)   // null=新建
+const faForm = ref({ name: '', app_id: '', app_secret: '', is_system: false })
+const faDialog = ref(false)
+const faSaving = ref(false)
+const loadFaApps = async () => {
+  faLoading.value = true
+  try { faApps.value = (await GET('/fb/apps')) || [] }
+  catch { faApps.value = [] }   // 非超管/加载失败静默空列表（卡片 isSuper 才显示）
+  faLoading.value = false
+}
+const faOpenNew = () => { faEditId.value = null; faForm.value = { name: '', app_id: '', app_secret: '', is_system: false }; faDialog.value = true }
+const faOpenEdit = (a) => { faEditId.value = a.id; faForm.value = { name: a.name || '', app_id: a.app_id, app_secret: '', is_system: !!a.is_system }; faDialog.value = true }
+const faSave = async () => {
+  if (!faForm.value.app_id.trim() || (!faForm.value.app_secret.trim() && !faEditId.value)) return ElMessage.warning(t('settings.faFillBoth'))
+  faSaving.value = true
+  try {
+    const body = { ...faForm.value, name: faForm.value.name.trim(), app_id: faForm.value.app_id.trim(), app_secret: faForm.value.app_secret }
+    if (faEditId.value) await POST(`/fb/apps/${faEditId.value}`, body)
+    else await POST('/fb/apps', body)
+    faDialog.value = false
+    ElMessage.success(t('common.savedOk'))
+    await loadFaApps()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  faSaving.value = false
+}
+const faDelete = async (a) => {
+  try { await ElMessageBox.confirm(t('settings.faDeleteConfirm', { id: a.app_id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) } catch { return }
+  try { await DELETE(`/fb/apps/${a.id}`); ElMessage.success(t('common.savedOk')); await loadFaApps() }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+
+// ── 账户导入行为（超管统一入口：默认全选 + 新令牌默认上限）──
+const ibCfg = ref({ import_default_all: false, import_default_cap: 100 })
+const ibCapInput = ref('100')
+const ibAll = ref(false)
+const ibSaving = ref(false)
+const loadIb = async () => {
+  try {
+    ibCfg.value = await GET('/settings/import-behavior')
+    ibAll.value = !!ibCfg.value.import_default_all
+    ibCapInput.value = String(ibCfg.value.import_default_cap ?? 100)
+  } catch { /* 非超管 403 → 卡片隐藏即可 */ }
+}
+const saveIb = async () => {
+  const cap = parseInt(ibCapInput.value, 10)
+  if (isNaN(cap) || cap < 0 || cap > 10000) return ElMessage.warning(t('settings.ibCapLimit'))
+  ibSaving.value = true
+  try {
+    ibCfg.value = await PUT('/settings/import-behavior', { import_default_all: ibAll.value, import_default_cap: cap })
+    ElMessage.success(t('common.savedOk'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  ibSaving.value = false
+}
 
 // ── 锚点导航（sticky 横条，点跳对应卡片；滚动高亮当前区）──
 const activeSection = ref('sec-account')

@@ -214,18 +214,18 @@ class FbClient:
         """
         import json as _json
         out: list[dict | None] = []
-        for i in range(0, len(relative_urls), 50):
+        for i in range(0, len(relative_urls), 50):   # 复审P2：整段在循环内（曾循环外只处理最后一块）
             chunk = relative_urls[i:i + 50]
             batch = [{"method": "GET", "relative_url": u} for u in chunk]
             resp = httpx.post(GRAPH_BASE, params={
                 "access_token": self.token, "batch": _json.dumps(batch),
                 "include_headers": "false"}, timeout=60)
             data = resp.json()
-        if not isinstance(data, list):   # 全库审查P2：顶层 error（token失效/batch被拒）曾 AttributeError
-            err = data.get("error", {}) if isinstance(data, dict) else {}
-            cat, friendly = classify_fb_error(err)
-            raise FbApiError(cat, friendly, err, resp.status_code)
-        for item in data:
+            if not isinstance(data, list):   # 全库审查P2：顶层 error（token失效/batch被拒）曾 AttributeError
+                err = data.get("error", {}) if isinstance(data, dict) else {}
+                cat, friendly = classify_fb_error(err)
+                raise FbApiError(cat, friendly, err, resp.status_code)
+            for item in data:
                 try:
                     out.append(_json.loads(item.get("body") or "{}"))
                 except Exception:

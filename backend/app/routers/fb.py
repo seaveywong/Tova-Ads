@@ -1384,13 +1384,14 @@ def import_accounts(
         if not tokens:
             continue
         # 上限内选第一个可用覆盖令牌；全超额 → 跳过（明细返回，不报错）
+        # 上限只约束「新增绑定」——重导恢复已绑账户/已建绑定不占新槽（曾 take 在查重前：
+        # 满额令牌连恢复自家已绑账户都被 skip，而重导是软删恢复纳管的唯一路径）
         _pick = next((t["id"] for t in tokens if _cred_slot_ok(t["id"])), None)
         if _pick is None:
             skipped_over_limit.append(aid)
             covered.add(aid)   # 有覆盖但全超额——不算 not_found
             continue
         cred_id = _pick
-        _cred_slot_take(cred_id)
         touched_creds.add(cred_id)
         exists = db.query(Account).filter(
             Account.tenant_id == user.tenant_id,
@@ -1409,6 +1410,7 @@ def import_accounts(
                     tenant_id=user.tenant_id, account_id=exists.id,
                     fb_credential_id=cred_id, priority=0, status="active",
                 ))
+                _cred_slot_take(cred_id)   # 复审P2：真实新增绑定才扣槽
             skipped_existing += 1
             continue
         new_acc = Account(
@@ -1428,6 +1430,7 @@ def import_accounts(
             tenant_id=user.tenant_id, account_id=new_acc.id,
             fb_credential_id=cred_id, priority=0, status="active",
         ))
+        _cred_slot_take(cred_id)   # 复审P2：真实新增绑定才扣槽
         imported.append(aid)
     db.commit()
     # 载入缓存行不含 imported 标记（每次现算），导入后无需作废——

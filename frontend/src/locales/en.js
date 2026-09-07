@@ -445,6 +445,7 @@ export default {
     renameBtn: 'Rename', categoryBtn: 'Change Category', pageCategoryPrompt: 'New page category (e.g. "Internet Marketing Service"). Requires page manage permission.', pageCategoryLimit: '1-120 chars', pageCategorySaved: 'Page category updated',
     maxAccountsBtn: 'Account Cap', maxAccountsPrompt: 'Max accounts this token may bind (currently {n} bound, limit: {cur}). Empty = unlimited. Operate tokens advised ≤100.', maxAccountsLimit: 'Empty or 1-5 digits', maxAccountsUnlimited: 'unlimited',
     importBigBatchConfirm: 'You are about to import {n} accounts — large batches increase inspection time & API usage, and token caps may skip some. Continue?',
+    skippedOverLimit: '{n} accounts skipped due to token binding cap (raise the cap or use another token)',
     pageRenamePrompt: 'New page name (renames the real Facebook page)',
     pageRenameLimit: 'Name must be 1-100 characters',
     pageRenamed: 'Page renamed',
