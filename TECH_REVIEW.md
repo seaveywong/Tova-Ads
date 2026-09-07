@@ -1177,3 +1177,12 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 - **按页订阅 + 主页受控视图**（8cd4b6b+5053066）：GET /leads/pages（每页权限面 可管理/仅广告/只读 + subscribed_apps 实况按 App id 匹配，多令牌同页权限 OR 合并与订阅语义一致）；subscribe 加 page_ids；前端「主页与订阅」面板勾选订阅。生产实证：Gim Jim 令牌 10 页 0 可管理/4 仅广告/6 只读——OAuth 复制权限不能放大，权限三层独立（账户写✓/页广告✗/页管理✗）再获实证。
 - **复审修复**（5053066）：P1×2（TtCredential import 错模块被 except 静默吞→TT 租户停滞告警失效；受控面板「首个即锁」弱令牌误判只读）+ P2×4（token_status TT 恒 True；缩略图 @error 永久隐藏；docstring 矛盾；budget freshness 需第三列记录不做）。
 - 用户侧挂账：Gim Jim 需 BM 补「管理主页」+「广告」任务（10 页当前 0 订阅能力）；Gemini 充值；极简操作规划待讨论。
+
+### 全库逐行审查+修复（2026-09-08，6db2507/89be592/184ce2b/eb6f85e/2c83bce）
+- **审查规模**：5-agent 对抗审查（26路由+20服务+26core/模型逐行 + 前端17.2k行全读），发现 P0×4/P1×13/P2×30+/P3 若干。
+- **P0 全修**：webhook tenant_id 未定义先引用（leadgen 全断500）；fb.py write_log 未导入（改名/类型切换 NameError，FB侧已成功但审计丢）；权限退避标记非armed账户永不过期（止损无限期静默禁用，违反无保护期铁律）；前端归档参数 t 遮蔽 i18n（100%坏死）。
+- **P1 全修**：TT 暂停 API advertiser_id 列表→标量（全链路40001）；限流令牌永不回池+回退绕过 tiebreaker；TG 1200 裸截断劈HTML→400 通知丢；页归属闸部分集合缓存→潜客永久丢；投放模板 CPA/Advantage 残留污染新模板出价策略；TT 冷却键跨广告主撞号；route_next 无效secret信息泄漏；Dashboard/LaunchTemplates 竞态与孤儿轮询。
+- **复审抓回归2**（本批自引入）：TT 加白写侧无platform（读侧过滤后永不命中）；rule_pause_notified 标记键与 dedup 读键不同式（TT 每5min重发TG）——均已修；TG 400 降级纯文本重发根治截断家族。
+- **剩余 P2/P3 全修**：batch_get 顶层error/get_paged 实际limit/fb去重按source/RLS set_config固化/usd_to_fb_amount缺汇率raise/config弱密钥默认门/ad_ops platform消歧/auth限速淘汰最旧/audiences update校验/zip炸弹限额/keepalive币种感知——24文件 ast.parse 全过。
+- **性能**：kpi_mapping 60s 缓存（巡检每广告1查→每分钟1查）+写入失效钩子；前端 KeepAlive 失活暂停轮询/TgManager懒加载/竞态守卫×4。
+- **未修记录**（外部依赖或 by-design）：debug_token 需 app token（观察项，watchdog 预警链在 BM 拥有 App 前不生效）；landing_events 热路径 ad→act 全表扫（有 30s 缓存样板可套，待事件量上来再做）；Guard.vue category 入库存 locale（跨语言协作项，需迁移改 key）；subcodes 无分页（量小）。
