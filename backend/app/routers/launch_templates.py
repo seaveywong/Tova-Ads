@@ -180,10 +180,12 @@ def _parse_structure(t: LaunchTemplate) -> list[dict]:
         return []
 
 
-def _sync_flat_from_structure(t: LaunchTemplate) -> None:
+def _sync_flat_from_structure(t: LaunchTemplate, db: Session = None) -> None:
     """平铺双写（0088）：结构模式保存时把「第一组第一广告」回写平铺列——
     旧读方（部署清单/保活/批量母版视图）不感知 structure 也能拿到合理值。
-    节点空值 = 回退模板级（覆盖只发生在节点显式配置时）。"""
+    节点空值 = 回退模板级（覆盖只发生在节点显式配置时）。
+    asset_id 带 FK——节点素材可能已被删（结构允许保存悬挂引用，部署端点另有校验），
+    落库前查存在性，不存在就不写（防 ForeignKeyViolation 500）。"""
     adsets = _parse_structure(t)
     if not adsets:
         return
@@ -201,8 +203,10 @@ def _sync_flat_from_structure(t: LaunchTemplate) -> None:
     if not ads:
         return
     ad = ads[0]
-    if ad.get("asset_ids"):
-        t.asset_id = int(ad["asset_ids"][0])
+    if ad.get("asset_ids") and db is not None:
+        _aid = int(ad["asset_ids"][0])
+        if db.query(Asset).filter(Asset.id == _aid, Asset.tenant_id == t.tenant_id).first():
+            t.asset_id = _aid
     for col in ("headline", "body", "cta_type", "ad_language", "landing_url",
                 "subcode_slug", "pixel_id"):
         if ad.get(col):
@@ -213,6 +217,23 @@ def _sync_flat_from_structure(t: LaunchTemplate) -> None:
     if ad.get("post_source") == "reuse" and ad.get("reuse_post_ref"):
         t.post_source = "reuse"
         t.reuse_post_ref = ad["reuse_post_ref"]
+
+
+def _validate_tree_assets(db, adsets: list, tenant_id: int) -> None:
+    """树素材存在性/类型校验（deploy/preflight 共用，对齐 _validate_batch_assets 口径）：
+    素材被删/跨租户/非图片视频 → 400 快失败。结构允许保存悬挂引用（编辑期素材可能
+    后删），部署是最后一道门——坏素材进 job 会逐账户重复失败 N 轮。"""
+    ids = {int(a) for s in adsets for ad in (s.get("ads") or []) for a in (ad.get("asset_ids") or [])}
+    if not ids:
+        return
+    rows = db.query(Asset).filter(Asset.id.in_(ids), Asset.tenant_id == tenant_id).all()
+    found = {r.id: r for r in rows}
+    missing = sorted(ids - set(found))
+    if missing:
+        raise HTTPException(400, f"结构引用的素材不存在或已删除：{missing[:8]}（请在模板编辑器更新广告节点素材）")
+    bad = [f"{r.id}({r.type})" for r in rows if (r.type or "image") not in ("image", "video")]
+    if bad:
+        raise HTTPException(400, f"结构引用的素材类型不支持（需图片/视频）：{bad[:8]}")
 
 
 # ── 模板 CRUD ──
@@ -304,7 +325,7 @@ def create_template(body: TemplateIn,
     except ValueError as e:
         raise HTTPException(400, str(e))
     t = LaunchTemplate(tenant_id=user.tenant_id, created_by=user.id, status="draft", **body.model_dump())
-    _sync_flat_from_structure(t)   # 结构模式 → 平铺列双写（旧读方不炸）
+    _sync_flat_from_structure(t, db)   # 结构模式 → 平铺列双写（旧读方不炸；asset 查存在性防 FK500）
     db.add(t)
     db.flush()
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
@@ -327,7 +348,7 @@ def update_template(tid: int, body: TemplateIn,
         raise HTTPException(400, str(e))
     for k, v in body.model_dump().items():
         setattr(t, k, v)
-    _sync_flat_from_structure(t)   # 结构模式 → 平铺列双写（旧读方不炸）
+    _sync_flat_from_structure(t, db)   # 结构模式 → 平铺列双写（旧读方不炸；asset 查存在性防 FK500）
     db.commit()
     return _tpl_dict(t)
 
@@ -416,6 +437,7 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
             raise HTTPException(400, "结构模式暂不支持 TikTok 模板（TT 仍用平铺模式部署）")
         if body.asset_ids:
             raise HTTPException(400, "结构模板的素材已在树内按广告节点配置，不支持再叠加「按素材批量生成系列」")
+        _validate_tree_assets(db, _parse_structure(t), user.tenant_id)
     _budget_guard_400(t)
     # 账户归属 + managed 校验 + 去重（保序）
     seen, clean_items = set(), []
@@ -646,6 +668,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
             raise HTTPException(400, "结构模式暂不支持 TikTok 模板（TT 仍用平铺模式部署）")
         if body.asset_ids:
             raise HTTPException(400, "结构模板的素材已在树内按广告节点配置，不支持叠加批量生成")
+        _validate_tree_assets(db, _tree, user.tenant_id)
         return _preflight_tree_fb(db, t, _tree, body, user.tenant_id)
     # 批量模式：先校验选中素材（与 deploy 同口径），示例 payload 改用第一个素材
     batch_assets = _validate_batch_assets(db, body.asset_ids, user.tenant_id) if body.asset_ids else []
@@ -1846,7 +1869,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 ad_name = ad_name[:100]
                 try:
                     if asset is None and not (node_post == "reuse" and anode.get("reuse_post_ref")):
-                        raise FbApiError("no_id", "广告节点未选素材（跟帖模式可无素材）")
+                        raise FbApiError("no_id", "广告节点未选素材或素材已被删除（跟帖模式可无素材）")
                     if asset is not None and (asset.type or "image") not in ("image", "video"):
                         raise FbApiError("no_id", f"素材「{asset.name or asset.id}」不是图片/视频")
                     # 素材上传缓存（FB image_hash / video_id 按账户隔离）
