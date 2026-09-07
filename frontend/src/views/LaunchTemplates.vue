@@ -1792,7 +1792,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dep-job-head:hover{background:var(--bg2)}
 .dep-job-time{font-size:12px;color:var(--t1);font-variant-numeric:tabular-nums}
 .dep-job-counts{font-size:11px;color:var(--t3);margin-left:auto}
-.dep-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block}
+.dep-arrow{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);transition:transform .15s;display:inline-block}
 .dep-arrow.open{transform:rotate(90deg)}
 .dep-items{border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:2px;padding:6px 0;max-height:40vh;overflow-y:auto}
 .dep-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 12px;font-size:12px}
@@ -1862,7 +1862,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .ai-copy-t{font-size:11px;color:var(--t3);margin-bottom:2px}
 .ai-pick{font-size:12px;color:var(--t2);cursor:pointer;padding:3px 6px;border-radius:4px;line-height:1.4}
 .ai-pick:hover{background:var(--bg2);color:var(--t1)}
-.ai-tag{font-size:9px;color:var(--ac);background:rgba(10,132,255,.15);padding:1px 4px;border-radius:3px;margin-right:4px}
+.ai-tag{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--ac);background:rgba(10,132,255,.15);padding:1px 4px;border-radius:3px;margin-right:4px}
 
 .picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .picker-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;overflow:hidden;cursor:pointer;content-visibility:auto;contain-intrinsic-size:140px}
@@ -2033,7 +2033,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dpa-grid{display:grid;grid-template-columns:32px 1fr;grid-auto-rows:auto;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:8px;background:var(--bg2);overflow-x:auto;min-width:0}
 .dpa-row{grid-column:2;display:grid;grid-template-columns:repeat(24,minmax(14px,1fr));gap:2px}
 .dpa-corner{grid-column:1;grid-row:1}
-.dpa-hhdr{grid-column:2;grid-row:1;display:flex;justify-content:space-between;font-size:9px;color:var(--t3);padding:0 2px 3px}
+.dpa-hhdr{grid-column:2;grid-row:1;display:flex;justify-content:space-between;font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);padding:0 2px 3px}
 .dpa-rhdr{grid-column:1;font-size:10px;color:var(--t3);display:flex;align-items:center;justify-content:center}
 .dpa-cell{height:16px;border-radius:3px;background:var(--bg3);border:1px solid var(--bd);cursor:pointer;transition:background .1s}
 .dpa-cell.on{background:var(--ac);border-color:var(--ac)}
@@ -2045,7 +2045,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pt-node{border-radius:4px}
 .pt-head{display:flex;align-items:center;gap:4px;padding:4px 6px;cursor:pointer}
 .pt-head:hover{background:var(--bg3)}
-.pt-arrow{font-size:9px;color:var(--t3);transition:transform .15s;display:inline-block;transform:rotate(0deg)}
+.pt-arrow{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);transition:transform .15s;display:inline-block;transform:rotate(0deg)}
 .pt-arrow.open{transform:rotate(90deg)}
 .pt-label{font-size:13px;color:var(--t2);display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:500}
 .pt-label input{margin:0}

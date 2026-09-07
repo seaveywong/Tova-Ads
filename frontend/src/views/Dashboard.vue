@@ -20,6 +20,7 @@ const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(true)
 const _dashGuard = useLatest()
+const dashError = ref('')   // UI审计D：页面级错误态
 const _trendGuard = useLatest()   // 全库审查P1：伴生加载竞态守卫
 const _landGuard = useLatest()
 const _landTrendGuard = useLatest()
@@ -191,6 +192,7 @@ const loadDashboard = async (fresh = false) => {
       GET('/fb/credentials').catch(() => []),
     ])
     if (!isLatest()) return   // 快速切日期/60s 自动刷新并发时旧响应后到——丢弃
+    dashError.value = ''
     data.value = dash
     // 后端 is_managed → 前端 removed（is_managed=false = 已移除纳管）
     if (data.value.accounts) {
@@ -203,7 +205,7 @@ const loadDashboard = async (fresh = false) => {
     totalTokens.value = allCreds.length
     fetchLanding()
   } catch (e) {
-    if (isLatest()) import('element-plus').then(m => m.ElMessage.error(e.message))
+    if (isLatest()) { dashError.value = e.message || ''; ElMessage.error(dashError.value) }
   } finally {
     loading.value = false
   }
@@ -1088,6 +1090,10 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <button v-if="isSuper" class="head-btn force" :disabled="refreshing" @click="forceRefresh" :title="t('dashboard.forceTitle')">{{ refreshing ? t('dashboard.collecting') : t('dashboard.collectNow') }}</button>
       </div>
     </header>
+    <div v-if="dashError" class="page-error-bar">
+      ⚠ {{ t('dashboard.loadFailed') }}：{{ dashError }}
+      <button class="ctrl-btn sm" @click="loadDashboard()">{{ t('common.retry') }}</button>
+    </div>
 
     <!-- TG 未绑定引导（可关闭）：告警第一时间到 TG -->
     <div v-if="tgBanner" class="tg-banner">
@@ -1820,7 +1826,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .task-card.info .task-icon { color: var(--ac); }
 .task-card.ok .task-icon { color: var(--success); }
 .task-body { flex: 1; min-width: 0; }
-.task-title { font-size: 13.5px; font-weight: 600; color: var(--t1); line-height: 1.3; }
+.task-title { font-size: 13px; font-weight: 600; color: var(--t1); line-height: 1.3; }
 .task-desc {
   font-size: 12px; color: var(--t3); margin-top: 4px; line-height: 1.45;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -1959,7 +1965,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .badge-lv.warning { background: rgba(255,159,10,.15); color: var(--warning); }
 .badge-lv.info { background: rgba(10,132,255,.12); color: var(--ac); }
 .ac-time { margin-left: auto; font-size: 11px; color: var(--t3); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ac-msg { font-size: 13.5px; color: var(--t1); line-height: 1.5; word-break: break-word; }
+.ac-msg { font-size: 13px; color: var(--t1); line-height: 1.5; word-break: break-word; }
 .ac-item-meta { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .ac-item-meta .ack-btn, .ac-item-meta .acked-tag { margin-left: auto; margin-top: 0; }
 .ac-entity { font-size: 11px; color: var(--t3); background: var(--bg3); padding: 1px 8px; border-radius: 4px; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
@@ -2028,3 +2034,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .ph-title { font-size: 18px; }
 }
 </style>
+
+/* UI审计D：页面级错误横幅 */
+.page-error-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent) }

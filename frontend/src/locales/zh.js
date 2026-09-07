@@ -986,6 +986,7 @@ export default {
     budgetBigJumpTitle: '确认预算大幅上调', budgetBigJumpConfirm: '预算变动较大：{change}，确认应用？',
     reviewFlagTitle: '拒审原因', reviewFlagHint: '点击查看拒审原因', thumbTitle: '创意缩略图',
     redirectRemoveConfirm: '移除该广告的专属跳转链接？恢复为默认目标。',
+    loadFailed: '数据加载失败',
     thumbNoneShort: '无预览', thumbArchivedShort: '已归档', thumbNone: '平台未返回此广告的预览图', thumbArchived: '已归档广告：素材已失效，平台不再提供预览图',
     rename: '改名', renameTitle: '改名 · {name}', renamePrompt: '新名称',
     renameEmpty: '名称不能为空', renameTooLong: '名称不能超过 200 字符', renamed: '已改名',

@@ -1,14 +1,16 @@
 /* ========== Tova Ads 全局样式 — 双主题（暗色/亮色）========== */
 
 /* ── z-index 层级（防下层挡上层）── */
+/* z-index 层级（UI审计C：原 200-500 低于 EP 弹层 2000+，自绘 overlay 从不敢用——
+   校准到 EP 之上并成为唯一真相源：EP popup 2000+ / modal 2026+ / message 2100+） */
 :root {
   --z-content: 1;
   --z-sidebar: 50;
-  --z-topbar: 40;
-  --z-dropdown: 200;
-  --z-drawer: 300;
-  --z-modal: 400;
-  --z-toast: 500;
+  --z-topbar: 100;
+  --z-dropdown: 200;      /* 页内 dropdown */
+  --z-drawer: 300;        /* 侧栏抽屉 */
+  --z-modal: 2200;        /* 自绘 modal——EP message-box(2026) 之上 */
+  --z-toast: 3000;        /* toast 顶层 */
 }
 
 /* ── EP 组件变量桥接（UI审计#3）：一切走 --el-color-* 的组件（pagination/message-box/tag/radio）
@@ -114,7 +116,7 @@ a { color: var(--ac); text-decoration: none; }
 .btn.ghost:hover { color: var(--t1); background: var(--bg3) }
 
 /* ── 平台小标（账户名/选项前的 FB/TT chip，Ads/AdManager/Dashboard/LandingLogs 共用一份） ── */
-.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; vertical-align: middle; }
+.plat-chip { display: inline-block; font-size:10px   /* UI审计B：9px 中文笔画不可读 */; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; vertical-align: middle; }
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 

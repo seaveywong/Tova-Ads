@@ -32,6 +32,7 @@ const campNameOf = (s) => {
   return c ? t('adm.belongsToCampaign', { name: c.name }) : ''
 }
 const loading = ref(false)
+const loadError = ref('')   // UI审计D：页面级错误态——空态与加载失败可区分
 const _loadGuard = useLatest()
 const _diagGuard = useLatest()    // 全库审查P2：诊断/潜客各自请求序列守卫（快速连点旧响应后到丢弃）
 const _leadsGuard = useLatest()
@@ -97,11 +98,12 @@ const load = async (refresh = false) => {
     if (!isLatest()) return   // 快速切日期/轮询完成回调并发时旧响应后到——丢弃
     data.value = r
     tokenStatus.value = r.token_status || {}
+    loadError.value = ''
     if (refresh) { drillCampaign.value = ''; drillAdset.value = '' }   // 只在用户主动刷新时清下钻——后台刷新完成自动 load 不踢用户出当前视图
     // 后台刷：立即返回了缓存 → 轮询 refresh-status，完成后自动更新列表
     if (refresh && data.value.refreshing) watchRefreshDone()
   }
-  catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.fail')) }
+  catch (e) { if (isLatest()) { loadError.value = e.message || t('common.fail'); ElMessage.error(loadError.value) } }
   if (isLatest()) loading.value = false
 }
 // 后台刷新轮询：每 3s 查 /ads/refresh-status，running=false 时重拉列表；上限 20 次防死循环
@@ -394,9 +396,9 @@ const showThumb = (a) => {
   ElMessageBox.alert(h('div', { class: 'cre-preview' }, [
     h('img', { src: u, style: 'width:100%;border-radius:8px;display:block' }),
     ti ? h('div', { style: 'font-weight:600;margin:10px 2px 2px;font-size:14px' }, ti) : null,
-    co ? h('div', { style: 'color:var(--t3);margin:2px;font-size:12.5px;line-height:1.5;white-space:pre-wrap' }, co) : null,
+    co ? h('div', { style: 'color:var(--t3);margin:2px;font-size:12px;line-height:1.5;white-space:pre-wrap' }, co) : null,
     cta ? h('div', { style: 'margin:10px 2px 2px' }, [
-      h('span', { style: 'display:inline-block;background:#0a84ff;color:#fff;border-radius:6px;padding:6px 14px;font-size:12.5px', title: cta.link || '' }, `▶ ${cta.label}`),
+      h('span', { style: 'display:inline-block;background:#0a84ff;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px', title: cta.link || '' }, `▶ ${cta.label}`),
     ]) : null,
   ]), t('adm.thumbTitle'), { confirmButtonText: t('common.confirm'), customStyle: { maxWidth: '520px' } })
 }
@@ -668,6 +670,10 @@ const unsubscribeLeads = async () => {
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
+    </div>
+    <div v-if="loadError" class="page-error-bar">
+      ⚠ {{ t('adm.loadFailed') }}：{{ loadError }}
+      <button class="ctrl-btn sm" @click="load()">{{ t('common.retry') }}</button>
     </div>
     <div v-if="tab !== 'lead' && deadAccounts.length" class="dead-acc-bar" :title="t('adm.tokenDeadTip')">
       ⚠ {{ t('adm.tokenDeadBar', { n: deadAccounts.length }) }}
@@ -977,13 +983,13 @@ const unsubscribeLeads = async () => {
 .rd-mark { font-size: 10px; color: var(--ac); background: rgba(10,132,255,.12); padding: 1px 5px; border-radius: 4px; margin-left: 6px; font-weight: 400; vertical-align: middle }
 .ad-thumb { width: 72px; height: 40px; border-radius: 6px; object-fit: cover; cursor: zoom-in; flex: none }
 /* 无预览占位（FB 对归档广告不返回缩略图；个别 ACTIVE 也缺）——显式占位而非留空，布局一致 */
-.ad-thumb.ph { display: flex; align-items: center; justify-content: center; background: var(--bd); color: var(--t3); font-size: 9px; cursor: default; text-align: center; line-height: 1.3 }
+.ad-thumb.ph { display: flex; align-items: center; justify-content: center; background: var(--bd); color: var(--t3); font-size:10px   /* UI审计B：9px 中文笔画不可读 */; cursor: default; text-align: center; line-height: 1.3 }
 /* 广告行创意优先：文案标题/正文各放开 2 行，广告名降为小字行（campaign/adset 的 .nm 不套 ad-nm） */
 .ad-nm { display: flex; align-items: center; gap: 8px; min-width: 0 }
 .ad-nm .txt { min-width: 0; flex: 1 }
 .ad-nm .cpy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
-.ad-nm .cpy.tt { font-size: 12.5px; color: var(--t1) }
-.ad-nm .cpy.bd { font-size: 11.5px; font-weight: 400; color: var(--t3); margin-top: 1px }
+.ad-nm .cpy.tt { font-size: 12px; color: var(--t1) }
+.ad-nm .cpy.bd { font-size: 11px; font-weight: 400; color: var(--t3); margin-top: 1px }
 .ad-nm .an { font-size: 10px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px }
 .rf-flag { color: var(--error); cursor: pointer; font-size: 11px; margin-left: 2px }
 .rf-flag:hover { opacity: .8 }
@@ -991,13 +997,13 @@ const unsubscribeLeads = async () => {
 .cache-at.stale { color: var(--warning) }
 /* 数据源断链（无可用令牌）账户的快照态标注 */
 .dead-acc-bar { margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent) }
-.snap-tag { font-size: 9px; color: var(--t3); border: 1px solid var(--bd); border-radius: 3px; padding: 0 3px; margin-left: 4px; line-height: 1.4; cursor: help }
+.snap-tag { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; color: var(--t3); border: 1px solid var(--bd); border-radius: 3px; padding: 0 3px; margin-left: 4px; line-height: 1.4; cursor: help }
 /* 主页受控面板（页权限 + 订阅实况） */
 .pages-panel { max-height: 56vh; overflow-y: auto }
 .pp-hint { font-size: 11px; color: var(--t3); margin-bottom: 8px; line-height: 1.5 }
 .pp-row { display: grid; grid-template-columns: 22px 1fr 110px 90px; gap: 8px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--bd) }
 .pp-row.pp-head { font-size: 11px; color: var(--t3); border-bottom: 1px solid var(--bd) }
-.pp-name { min-width: 0; font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.pp-name { min-width: 0; font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .pp-tag { font-size: 10px; border-radius: 3px; padding: 1px 5px; border: 1px solid var(--bd); white-space: nowrap }
 .pp-tag.ok { color: var(--ok, #34c759); border-color: currentColor }
 .pp-tag.mid { color: var(--warning) }
@@ -1068,3 +1074,6 @@ const unsubscribeLeads = async () => {
 .ld-extra { display: flex; flex-wrap: wrap; gap: 4px }
 .ld-chip { font-size: 10px; color: var(--t2); background: var(--bg3); padding: 1px 6px; border-radius: 8px; white-space: nowrap }
 </style>
+
+/* UI审计D：页面级错误横幅——加载失败与空态区分 */
+.page-error-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent) }

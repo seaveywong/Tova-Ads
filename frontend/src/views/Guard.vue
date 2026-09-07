@@ -428,7 +428,7 @@ const doInspect = async (force = false) => {
 .rule-body{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:12px;flex-wrap:wrap}
 .rule-type{color:var(--t2)}
 .rule-params{color:var(--t1);font-variant-numeric:tabular-nums}
-.rule-cond{color:var(--t1);font-size:12.5px}
+.rule-cond{color:var(--t1);font-size:12px}
 .rule-arrow{color:var(--t3);margin:0 4px}
 .rule-hit{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--t3);font-variant-numeric:tabular-nums}
 .rule-hit.active{background:rgba(255,69,58,.12);color:var(--error)}
@@ -442,7 +442,7 @@ const doInspect = async (force = false) => {
 .empty-step{font-size:13px;line-height:1.7}
 .empty-cta-btn{margin-top:16px}
 
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2500;display:flex;align-items:center;justify-content:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center}
 .modal{background:var(--bg2);border-radius:12px;padding:20px;width:480px;max-width:90vw;box-shadow:var(--shadow-dropdown);max-height:88vh;overflow-y:auto}
 .m-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:14px}
 .form-l{display:flex;align-items:flex-start;gap:8px;margin-bottom:10px}
@@ -456,7 +456,7 @@ const doInspect = async (force = false) => {
 .param-unit{font-size:11px;color:var(--t3)}
 .m-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 /* 平台 chip（复制自 AdManager 同款视觉，不跨文件 import）*/
-.plat-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; }
+.plat-chip { display: inline-block; font-size:10px   /* UI审计B：9px 中文笔画不可读 */; font-weight: 600; padding: 0 4px; border-radius: 4px; margin-right: 5px; line-height: 14px; }
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 

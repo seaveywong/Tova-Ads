@@ -1,6 +1,7 @@
 // Dashboard namespace — zh/en 同文件，避免跨文件不同步。由 zh.js / en.js 导入展开。
 export default {
   zh: {
+    loadFailed: '数据加载失败',
     gran5min: '5分钟', gran30min: '30分钟', gran1hour: '1小时', granByDay: '按天',
     justNow: '刚刚', minutesAgo: '{n} 分钟前', hoursAgo: '{n} 小时前',
     cdWaitingFirst: '等待首次巡检', cdNormal: '巡检正常', cdNext: '下次巡检 {m}分{s}秒', cdStalled: '巡检停滞 · {n}min',
@@ -86,6 +87,7 @@ export default {
     clickToCopy: '点击复制', noDetailContent: '无详情内容',
   },
   en: {
+    loadFailed: 'Failed to load data',
     gran5min: '5 min', gran30min: '30 min', gran1hour: '1 hour', granByDay: 'Daily',
     justNow: 'just now', minutesAgo: '{n} min ago', hoursAgo: '{n} h ago',
     cdWaitingFirst: 'Waiting for first inspection', cdNormal: 'Inspection OK', cdNext: 'Next inspection in {m}m {s}s', cdStalled: 'Inspection stalled · {n}min',

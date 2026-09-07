@@ -277,7 +277,7 @@ const permLabel = (key) => {
 .perm-chip { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: var(--bg3); color: var(--t2) }
 .role-desc { font-size: 12px; color: var(--t3); margin-top: 6px }
 
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2500; display: flex; align-items: center; justify-content: center }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: var(--z-modal)   /* UI审计C：z token 落地 */; display: flex; align-items: center; justify-content: center }
 .modal { background: var(--bg2); border-radius: 12px; padding: 20px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; box-shadow: var(--shadow-dropdown) }
 .role-modal { width: 640px }
 .m-title { font-size: 16px; font-weight: 600; color: var(--t1); margin-bottom: 14px }
@@ -297,7 +297,7 @@ const permLabel = (key) => {
 .pg-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--bd); border-radius: 5px; font-size: 11px; color: var(--t3); cursor: pointer; transition: .12s }
 .pg-item.on { color: var(--ac); border-color: var(--ac); background: rgba(10,132,255,.06) }
 .pg-item input { margin: 0; accent-color: var(--ac) }
-.pk { font-size: 9px; color: var(--t3); opacity: .5 }
+.pk { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; color: var(--t3); opacity: .5 }
 
 .m-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--bd) }
 .perm-total { margin-right: auto; font-size: 12px; color: var(--t3) }

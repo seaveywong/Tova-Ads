@@ -481,8 +481,8 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .batch-btn.danger { border-color: var(--error); color: var(--error); background: rgba(239,68,68,.1) }
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
-.warmup-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle }
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: 2500 }
+.warmup-badge { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: var(--z-modal)   /* UI审计C：z token 落地 */ }
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }
 .load-list { max-height: 360px; overflow: auto }

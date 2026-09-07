@@ -760,7 +760,7 @@ const countryLabel = (code) => {
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
 /* TK 竖屏徽章：TikTok 品牌红 + 加粗，一眼可辨 */
 .tk-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(254,44,85,.9); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; letter-spacing: .3px; }
-.type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 9px; padding: 1px 5px; border-radius: 4px; }
+.type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 4px; }
 .card-body { padding: 8px 10px; flex: 1; }
 .name { font-size: 13px; color: var(--t1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .name-edit { display: flex; }
@@ -768,7 +768,7 @@ const countryLabel = (code) => {
 .tag-row { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
 .tag-chip { font-size: 10px; padding: 1px 6px; background: var(--bg3); color: var(--t2); border-radius: 8px; }
 .tag-more { font-size: 10px; padding: 1px 5px; color: var(--t3); }
-.fb-mark { font-size: 9px; padding: 1px 5px; background: rgba(10,132,255,.15); color: var(--ac); border-radius: 4px; font-weight: 600; }
+.fb-mark { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; background: rgba(10,132,255,.15); color: var(--ac); border-radius: 4px; font-weight: 600; }
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; align-items: center; }

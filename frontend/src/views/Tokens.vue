@@ -1128,12 +1128,12 @@ const deleteToken = async (tk) => {
 
 .c-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nm{cursor:text;display:inline-flex;align-items:center;gap:3px}
-.pen{font-size:9px;color:var(--t3);opacity:0}.nm:hover .pen{opacity:1}
+.pen{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);opacity:0}.nm:hover .pen{opacity:1}
 .inp{width:80px;padding:2px 6px;background:var(--bg3);border:1px solid var(--ac);border-radius:4px;color:var(--t1);font-size:13px}
 
 .c-fb{display:flex;flex-direction:column;line-height:1.3;overflow:hidden}
 .fbn{font-size:12px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fbi{font-size:9px;color:var(--t3);font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fbi{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .num-h{text-align:center}
 .c-num{text-align:center;font-size:13px;color:var(--t2);font-variant-numeric:tabular-nums}
@@ -1202,9 +1202,9 @@ const deleteToken = async (tk) => {
 .load-row.off{opacity:.55}
 .load-row input{width:14px;height:14px;flex-shrink:0}
 .load-tokens{display:inline-flex;gap:3px;flex-wrap:wrap}
-.tk-badge{font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(48,209,88,.1);color:var(--success);white-space:nowrap}
+.tk-badge{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;padding:1px 5px;border-radius:4px;background:rgba(48,209,88,.1);color:var(--success);white-space:nowrap}
 .tk-badge.dead{background:rgba(255,159,10,.12);color:var(--warning)}
-.imp-mark{font-size:9px;padding:1px 5px;border-radius:4px;background:var(--bg2);color:var(--t3)}
+.imp-mark{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;padding:1px 5px;border-radius:4px;background:var(--bg2);color:var(--t3)}
 .load-area{min-height:120px;resize:vertical;font-family:'SF Mono','Fira Code',monospace;font-size:12px}
 .hint-left{font-size:11px;color:var(--t3);margin-bottom:8px;line-height:1.5}
 .hint-left code{font-family:'SF Mono',monospace;font-size:10px;background:var(--bg3);padding:0 4px;border-radius:3px}
@@ -1220,7 +1220,7 @@ const deleteToken = async (tk) => {
 .h-samples{width:100%;display:flex;flex-direction:column;gap:2px}
 .h-sample{font-size:10px;color:var(--t3);font-family:'SF Mono','Fira Code',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:var(--z-modal);display:flex;align-items:center;justify-content:center}
 .modal{background:var(--bg2);border-radius:12px;padding:20px;width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-dropdown)}   /* UI审计#6：长弹窗溢出视口 */
 .modal.wide{width:540px}
 .m-title{font-size:15px;font-weight:600;color:var(--t1);margin-bottom:12px}
