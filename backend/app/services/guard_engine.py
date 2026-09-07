@@ -1630,7 +1630,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             ]]})})
                         events.append({"kind": "log", "kwargs": dict(
                             tenant_id=tenant_id, trace_id=trace_id,
-                            actor_type="system", target_type="ad", target_id=ad_id,
+                            actor_type="system", target_type="ad", target_id=_tgt_id,   # 复审：dedup 读侧带 act 前缀，标记必须同键（曾 TT 永不命中→每5min重发TG）
                             action_type="rule_pause_notified", source="rule_engine",
                             result="success", trigger_detail=f"ad={ad_id}")})
 
@@ -2604,7 +2604,7 @@ def _sentinel_pause_tt(db, tt, acc, trace_id: str, failures: list | None = None)
             paused += 1
             _patch_cache_after_pause(db, acc.tenant_id, acc.act_id, "tt", ad_id, "ad")
             write_log(db, tenant_id=acc.tenant_id, trace_id=trace_id, actor_type="sentinel",
-                      target_type="ad", target_id=ad_id,
+                      target_type="ad", target_id=f"{acc.act_id}:{ad_id}",   # 复审：与 dedup 键同式
                       action_type="pause", source="sentinel_patrol", result="success",
                       trigger_type="sentinel", platform="tt",
                       trigger_detail=f"[TT] sentinel armed, ad {ad_name} 直接停")
@@ -2985,6 +2985,14 @@ def _ka_res(acc, result, category, reason=""):
             "result": result, "category": category, "reason": reason}
 
 
+def _ka_budget_minor(usd: float, currency: str) -> int:
+    """保活预算 USD → 账户本币 minor units（to_usd 逆运算 + 零小数位币种因子）。"""
+    from ..core.ad_ops import ZERO_DECIMAL as _ZD
+    _r = to_usd(1.0, currency or "USD") or 1.0   # 1 本币 = _r USD → 本币 = usd/_r
+    amt = usd / _r
+    return max(1, int(round(amt * (1 if (currency or "USD").upper() in _ZD else 100))))
+
+
 def run_keepalive():
     """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $5 lifetime Page Like。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
@@ -3040,7 +3048,7 @@ def run_keepalive():
                     cfg.setdefault(dk, dv)
                 prefix = cfg["campaign_prefix"]
                 idle_days = cfg["idle_days"]
-                budget = int(float(cfg["budget_usd"]) * 100)
+                budget = _ka_budget_minor(float(cfg["budget_usd"]), acc.currency)   # 币种感知（全库审查P3：曾 USD 分硬编码）
                 asset_prefix = cfg["asset_prefix"]
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=idle_days)).strftime("%Y-%m-%d")
 

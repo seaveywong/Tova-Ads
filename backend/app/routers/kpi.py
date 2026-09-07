@@ -56,6 +56,7 @@ def set_kpi(body: KpiConfigIn, user: CurrentUser = Depends(require_permission("r
               action_type="upsert", source="user", result="success",
               metadata={"campaign_id": body.target_id, "target_cpa": body.target_cpa})
     db.commit()
+    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
     return {"id": row.id, "trace_id": tid, "target_id": body.target_id,
             "kpi_field": body.kpi_field, "target_cpa": body.target_cpa}
 
@@ -69,6 +70,7 @@ def delete_kpi(kid: int, user: CurrentUser = Depends(require_permission("rules.c
         raise HTTPException(404, "KPI 配置不存在")
     db.delete(row)
     db.commit()
+    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
     return {"id": kid, "deleted": True}
 
 
@@ -82,6 +84,7 @@ def toggle_kpi(kid: int, enabled: bool,
         raise HTTPException(404, "KPI 配置不存在")
     row.enabled = enabled
     db.commit()
+    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
     return {"id": kid, "enabled": row.enabled}
 
 

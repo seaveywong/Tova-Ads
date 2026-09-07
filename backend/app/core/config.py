@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _fail_fast_on_weak_secrets(self):
         """生产环境弱密钥直接拒启（jwt_secret<32 或 fb_cred_key 是占位符=加密形同虚设）。"""
-        if self.app_env == "production":
+        if self.app_env == "production" or self.app_env not in ("development", "staging", "test"):
+            # 全库审查P2：APP_ENV 漏写时默认值不是 production——弱密钥 fail-open；改为仅显式开发态才跳过
             if len(self.jwt_secret or "") < 32:
                 raise ValueError("production 环境 jwt_secret 必须 ≥32 字符")
             if not self.fb_cred_key or self.fb_cred_key in ("placeholder", "") or len(self.fb_cred_key) < 32:

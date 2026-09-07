@@ -361,6 +361,21 @@ def _tg_send(bot_token: str, chat_id: str, text: str, reply_markup=None,
                 with _tg_fail_lock:
                     _tg_fail_streak.pop(track_key, None)
             return True
+        if resp.status_code == 400 and payload.get("parse_mode"):
+            # 全库审查复审（根治）：HTML 解析失败（截断劈标签/未闭合标签等）→ 降级纯文本重发，
+            # 绝不让告警因格式问题静默丢失（4xx 不重试的既有语义保留给真错）
+            try:
+                r2 = httpx.post(url, json={**payload, "parse_mode": None}, timeout=10)
+                if r2.status_code == 200:
+                    if track_key is not None:
+                        with _tg_fail_lock:
+                            _tg_fail_streak.pop(track_key, None)
+                    return True
+                last_err = f"HTTP {r2.status_code} (plain-fallback)"
+                continue
+            except httpx.HTTPError as e:
+                last_err = f"network(plain): {e}"
+                continue
         last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
         if resp.status_code >= 500:  # TG 侧临时故障 → 可重试
             continue

@@ -111,6 +111,7 @@ def store_credential(
     existing = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.fb_user_id == me.get("id"),
+        FbCredential.token_source == (body.token_source or "manual"),   # 全库审查P2：注释声称按 source 去重，查询没带——跨 App 互顶
     ).first()
 
     if existing:

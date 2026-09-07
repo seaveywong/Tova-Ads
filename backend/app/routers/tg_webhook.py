@@ -185,6 +185,7 @@ async def tg_webhook(secret: str, request: Request):
         allowance_date = _account_local_today(acc)
         existing = db.query(GuardAllowance).filter(
             GuardAllowance.tenant_id == tenant_id,
+            GuardAllowance.platform == (acc.platform or "fb"),   # 全库审查复审：与读侧同键
             GuardAllowance.act_id == act_id,
             GuardAllowance.ad_id == ad_id,
             GuardAllowance.allowance_date == allowance_date,
@@ -195,6 +196,7 @@ async def tg_webhook(secret: str, request: Request):
             db.add(GuardAllowance(
                 tenant_id=tenant_id, act_id=act_id, ad_id=ad_id,
                 allowance_date=allowance_date, status="active",
+                platform=(acc.platform or "fb"),   # 全库审查复审：TT 写 tt 行
             ))
         db.commit()
 

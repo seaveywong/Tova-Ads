@@ -81,8 +81,8 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_system_db))
     if not user or not verify_password(body.password, user.password_hash):
         _fails.append(_now)
         _LOGIN_FAILS[_key] = _fails[-10:]
-        if len(_LOGIN_FAILS) > 5000:  # 防 dict 无上限
-            _LOGIN_FAILS.clear()
+        if len(_LOGIN_FAILS) > 5000:  # 防 dict 无上限（全库审查P2：淘汰最旧键——曾全清可被垃圾 IP 洗掉全局限速）
+            _LOGIN_FAILS.pop(next(iter(_LOGIN_FAILS)))
         write_log(db, tenant_id=1, trace_id=new_trace_id(), actor_type="user",
                   actor_user_id=user.id if user else None, action_type="login",
                   source="auth", result="fail", friendly_error="邮箱或密码错误",

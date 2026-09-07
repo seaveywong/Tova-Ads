@@ -132,16 +132,35 @@ KPI_CATEGORIES = {
 }
 
 
+_KPI_MAP_CACHE: dict = {"v": None, "ts": 0.0}   # 全库审查P2：巡检每广告查一次=每轮数百次 DB 往返
+
+
+def reset_kpi_mapping_cache():
+    """配置保存后调用立即失效（kpi.py 写入方）。"""
+    _KPI_MAP_CACHE["v"] = None
+    _KPI_MAP_CACHE["ts"] = 0.0
+
+
 def get_kpi_mapping(db: Session) -> dict:
+    import time as _t
+    now = _t.time()
+    if _KPI_MAP_CACHE["v"] is not None and now - _KPI_MAP_CACHE["ts"] < 60:
+        return _KPI_MAP_CACHE["v"]
     """读 KPI 映射配置（DB 优先 → 默认）。"""
     row = db.query(SystemSetting).filter(SystemSetting.key == "kpi_mapping").first()
     if row and row.value:
         try:
             cfg = json.loads(row.value)
-            return _merge_defaults(cfg)
+            _v = _merge_defaults(cfg)
+            _KPI_MAP_CACHE["v"] = _v
+            _KPI_MAP_CACHE["ts"] = now
+            return _v
         except Exception:
             pass
-    return _default_mapping()
+    _v = _default_mapping()
+    _KPI_MAP_CACHE["v"] = _v
+    _KPI_MAP_CACHE["ts"] = now
+    return _v
 
 
 def save_kpi_mapping(db: Session, cfg: dict):

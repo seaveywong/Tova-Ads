@@ -220,7 +220,12 @@ class FbClient:
             resp = httpx.post(GRAPH_BASE, params={
                 "access_token": self.token, "batch": _json.dumps(batch),
                 "include_headers": "false"}, timeout=60)
-            for item in resp.json():
+            data = resp.json()
+        if not isinstance(data, list):   # 全库审查P2：顶层 error（token失效/batch被拒）曾 AttributeError
+            err = data.get("error", {}) if isinstance(data, dict) else {}
+            cat, friendly = classify_fb_error(err)
+            raise FbApiError(cat, friendly, err, resp.status_code)
+        for item in data:
                 try:
                     out.append(_json.loads(item.get("body") or "{}"))
                 except Exception:

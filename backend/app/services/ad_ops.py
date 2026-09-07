@@ -81,12 +81,20 @@ import time as _time_mod
 LIVE_STALE_MARKS: dict[str, float] = {}   # {f"{tenant_id}:{act_id}": mark_ts}
 
 
+def _acc_platform_of(db, tenant_id: int, act_id: str) -> str:
+    """账户平台（cache patch 用）：TT 小整数 ad_id 与 FB 撞号时防止 patch 写错平台行。"""
+    from ..models.fb import Account as _Acc
+    a = db.query(_Acc).filter(_Acc.tenant_id == tenant_id, _Acc.act_id == act_id).first()
+    return "tt" if (getattr(a, "platform", None) or "fb") == "tt" else "fb"
+
+
 def _patch_cache_status(db: Session, tenant_id: int, act_id: str, node_id: str,
                         level: str, new_status: str, new_effective: str):
     """写后 patch ads_cache JSON（避免等 15min 同步才看到变更）。"""
     LIVE_STALE_MARKS[f"{tenant_id}:{act_id}"] = _time_mod.time()
     row = db.query(AdsCache).filter(
-        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id).first()
+        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+        AdsCache.platform == _acc_platform_of(db, tenant_id, act_id)).first()   # 全库审查P2：平台消歧
     if not row:
         return
     import json
@@ -113,7 +121,8 @@ def _patch_cache_budget(db: Session, tenant_id: int, act_id: str, node_id: str,
                         daily_budget_minor: str = None, lifetime_minor: str = None):
     """写后 patch ads_cache 预算字段（daily / lifetime 二选一）。"""
     row = db.query(AdsCache).filter(
-        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id).first()
+        AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+        AdsCache.platform == _acc_platform_of(db, tenant_id, act_id)).first()   # 全库审查P2：平台消歧
     if not row:
         return
     import json
@@ -294,7 +303,8 @@ def delete_node(db: Session, tenant_id: int, act_id: str, node_id: str,
         fb.delete_node(node_id)
         # patch cache：从 ads_cache JSON 中移除该节点
         row = db.query(AdsCache).filter(
-            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id).first()
+            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+        AdsCache.platform == _acc_platform_of(db, tenant_id, act_id)).first()   # 全库审查P2：平台消歧
         if row:
             import json
             for field in ["campaigns_json", "adsets_json", "ads_json"]:

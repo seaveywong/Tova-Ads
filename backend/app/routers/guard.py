@@ -159,7 +159,8 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
     from ..services.guard_engine import _account_local_today
     today = _account_local_today(acc)
     existing = db.query(GuardAllowance).filter(
-        GuardAllowance.act_id == body.act_id,
+        GuardAllowance.platform == ((acc.platform or "fb") if acc else "fb"),   # 全库审查复审：读侧已按 platform 过滤，写/查侧必须同键（曾 TT 加白落 fb 行永不命中）
+    GuardAllowance.act_id == body.act_id,
         GuardAllowance.ad_id == ad_id,
         GuardAllowance.allowance_date == today,
         GuardAllowance.status == "active",
@@ -169,7 +170,8 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
     # 检查是否有 inactive 的（解除过又重新加）→ 复活
     inactive = db.query(GuardAllowance).filter(
         GuardAllowance.tenant_id == user.tenant_id,
-        GuardAllowance.act_id == body.act_id,
+        GuardAllowance.platform == ((acc.platform or "fb") if acc else "fb"),   # 全库审查复审：读侧已按 platform 过滤，写/查侧必须同键（曾 TT 加白落 fb 行永不命中）
+    GuardAllowance.act_id == body.act_id,
         GuardAllowance.ad_id == ad_id,
         GuardAllowance.allowance_date == today,
         GuardAllowance.status == "inactive",
@@ -179,7 +181,8 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
         db.commit()
         return {"status": "added", "date": today}
     allowance = GuardAllowance(tenant_id=user.tenant_id, act_id=body.act_id,
-                               ad_id=ad_id, allowance_date=today)
+                               ad_id=ad_id, allowance_date=today,
+                               platform=(acc.platform or "fb"))   # 全库审查复审：TT 写 tt 行
     db.add(allowance)
     db.flush()
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",

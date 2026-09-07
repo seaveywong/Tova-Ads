@@ -470,6 +470,8 @@ async def upload_template(
         total = sum(i.file_size for i in zf.infolist())
         if total > 50 * 1024 * 1024:
             raise HTTPException(400, "解压内容超过 50MB")
+
+        _zip_total = [0]   # 实际解压累计字节
         for info in zf.infolist():
             if info.is_dir():
                 continue
@@ -482,10 +484,15 @@ async def upload_template(
                 raise HTTPException(400, f"禁用文件类型（安全限制）: {fname}")
             if ext not in ALLOWED_TEMPLATE_EXT:
                 raise HTTPException(400, f"不支持的文件类型: {fname}")
+            # 全库审查P2：声明大小+解压累计双重限额（deflate 炸弹声明小实解大）
+            _read = zf.read(info)
+            _zip_total[0] += len(_read)
+            if _zip_total[0] > 80 * 1024 * 1024:
+                raise HTTPException(400, "解压总量超限（80MB）")
             if base_name.lower() in ("index.html", "index.htm"):
-                html = zf.read(info).decode("utf-8", errors="ignore")
+                html = _read.decode("utf-8", errors="ignore")
             elif ext in (".css", ".js", ".json", ".svg", ".txt"):
-                resources[fname] = zf.read(info).decode("utf-8", errors="ignore")
+                resources[fname] = _read.decode("utf-8", errors="ignore")
     except zipfile.BadZipFile:
         raise HTTPException(400, "损坏的 zip 文件")
     except HTTPException:

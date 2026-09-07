@@ -30,7 +30,10 @@ def usd_to_fb_amount(usd: float, currency: str, fx_rate: float) -> int:
     fx_rate = CurrencyRate.rate（约定 1 USD = rate × 本币，如 VND≈25400）。
     零小数位币种（VND/JPY/KRW…）单位=整本币；其余（USD/EUR/THB/IDR…）×100=分。
     """
-    rate = fx_rate if fx_rate and fx_rate > 0 else 1.0  # 兜底（USD 账户或汇率缺失）
+    if (currency or "").upper() != "USD" and not (fx_rate and fx_rate > 0):
+        raise ValueError(f"currency {currency} has no fx rate — refusing 1:1 fallback "
+                         "(全库审查P2：差两个数量级的错预算)")   # USD 或有汇率才继续
+    rate = fx_rate if fx_rate and fx_rate > 0 else 1.0
     amount_local = float(usd or 0) * rate
     factor = 1 if (currency or "").upper() in ZERO_DECIMAL else 100
     return max(1, int(round(amount_local * factor)))

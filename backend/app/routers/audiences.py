@@ -116,6 +116,13 @@ def update_audience(aid: int, body: AudienceUpdate,
     data = body.model_dump(exclude_unset=True)
     if "strategy" in data and data["strategy"] not in ("broad_interest", "broad_only", "interest_only"):
         raise HTTPException(400, "strategy 无效")
+    # 全库审查P2：update 补 create 同款校验（曾可存 age_min=5/gender=9 进 FB targeting）
+    _amin = data.get("age_min", row.age_min)
+    _amax = data.get("age_max", row.age_max)
+    if not (18 <= _amin <= 65) or not (18 <= _amax <= 65) or _amin > _amax:
+        raise HTTPException(400, "age_min/age_max 范围无效（18-65，min<=max）")
+    if data.get("gender", row.gender) not in (0, 1, 2):
+        raise HTTPException(400, "gender 必须是 0/1/2")
     for k, v in data.items():
         if k == "interests":
             row.interests_json = json.dumps(v)
