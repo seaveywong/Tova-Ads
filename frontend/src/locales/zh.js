@@ -928,6 +928,8 @@ export default {
     ppColPage: '主页', ppColPerm: '权限', ppColSub: '订阅', ppManage: '可管理', ppAdvertise: '仅广告', ppAdvertiseTip: '可投放广告，但订阅 webhook 需「管理主页」权限（BM/页设置分配）',
     ppView: '只读', ppViewTip: '该令牌在此页只有查看权限——投放与订阅都不可用', ppNoManage: '无「管理主页」权限，不可订阅',
     ppSubscribed: '已订阅', ppEmpty: '暂无主页（先在令牌页授权带主页的账号）', ppSubscribeSelected: '订阅选中（{n}）',
+    purgeStaleBtn: '清理旧主页数据', purgeStaleConfirm: '将删除「不属于当前任何令牌主页」的历史潜客，并归档其表单模板（此后旧主页事件也不再入库）。该操作不可撤销，确定清理？',
+    purgeStaleDone: '已清理：潜客 {leads} 条、表单模板 {tpls} 个',
     leadsEmpty: '暂无潜客（部署 Instant Form 后点同步，或主页 webhook 实时推送）',
     lcolTime: '提交时间', lcolName: '姓名', lcolEmail: '邮箱', lcolPhone: '电话', lcolSource: '来源', lcolDetail: '其他字段',
     lfCity: '城市', lfState: '省/州', lfZip: '邮编', lfCountry: '国家', lfGender: '性别', lfDob: '生日',

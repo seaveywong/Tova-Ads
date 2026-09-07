@@ -62,11 +62,49 @@ async def fb_webhook_verify(request: Request):
     return Response(content="Forbidden", status_code=403)
 
 
+# 活跃页集合缓存（tenant_id → (ts, {page_id})，TTL 10min）：webhook 页归属闸用——
+# 订阅是 page×App 级不随令牌失效，旧主页（令牌已删）事件仍会推来；不在当前活跃令牌
+# 页集合的页直接忽略，防旧业务线潜客混入（2026-09-08 用户确认清理旧主页）。
+_PAGE_SET_TTL = 600.0
+_PAGE_SET_CACHE: dict = {}
+
+
+def _active_page_ids(db, tenant_id: int) -> set | None:
+    """租户当前活跃令牌可管理的页 id 集（None=拉取失败，调用方 fail-open 放行）。"""
+    import time as _t
+    now = _t.time()
+    ent = _PAGE_SET_CACHE.get(tenant_id)
+    if ent and now - ent[0] < _PAGE_SET_TTL:
+        return ent[1]
+    from app.core.encryption import decrypt
+    from app.core.fb_client import FbClient, FbApiError
+    from app.models.fb import FbCredential
+    pages: set = set()
+    try:
+        for c in db.query(FbCredential).filter(
+            FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+        ).all():
+            try:
+                fb = FbClient(decrypt(c.access_token_enc))
+                for p in fb.get_paged("me/accounts", {"fields": "id"}):
+                    if p.get("id"):
+                        pages.add(str(p["id"]))
+            except (FbApiError, Exception):
+                continue
+    except Exception:
+        return None
+    if pages:
+        _PAGE_SET_CACHE[tenant_id] = (now, pages)
+    return pages or None   # 空集（零页）不缓存不拦——可能令牌全灭，fail-open
+
+
 @router.post("")
 async def fb_webhook_receive(request: Request):
     """FB 推送事件。leadgen → 存 leads 表。返回 200（FB 要求快速 200）。
 
     HMAC 遍历 active App secret 验签；无 active App 或验不过 → 403。
+    页归属闸：page_id 不在该租户活跃令牌的页集合 → 忽略（旧主页订阅残留防混入；
+    集合拉取失败 fail-open——不能把新页潜客挡死）。
     webhook 只带 leadgen_id/form_id/ad_id/created_time（不带 field_data 答案），
     答案由 /leads/sync（GET /{form_id}/leads）回填——webhook 快速通知，sync 补全数据。
     """
@@ -109,6 +147,12 @@ async def fb_webhook_receive(request: Request):
                     tenant_id = tpl.tenant_id if tpl else None
                 if not tenant_id:
                     logger.info(f"[FB Webhook] lead 无归属租户: lead_id={lid} form={form_id}")
+                    continue
+                # 页归属闸：不在活跃令牌页集合 → 忽略（拉取失败 None → 放行）
+                _known = _active_page_ids(db, tenant_id)
+                if _known is not None and page_id and str(page_id) not in _known:
+                    logger.info(f"[FB Webhook] 旧主页事件忽略: page={page_id} "
+                                f"lead_id={lid} tenant={tenant_id}")
                     continue
                 try:
                     db.add(Lead(

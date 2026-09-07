@@ -917,6 +917,8 @@ export default {
     ppColPage: 'Page', ppColPerm: 'Permission', ppColSub: 'Subscribed', ppManage: 'Full', ppAdvertise: 'Ads only', ppAdvertiseTip: 'Can run ads, but webhook subscription requires the "Manage Page" task (assign in BM/page settings)',
     ppView: 'View', ppViewTip: 'This token has view-only access on the page — neither advertising nor subscription works', ppNoManage: 'No "Manage Page" task — cannot subscribe',
     ppSubscribed: 'Yes', ppEmpty: 'No pages yet (authorize an account with pages in Token Management first)', ppSubscribeSelected: 'Subscribe selected ({n})',
+    purgeStaleBtn: 'Clean up stale pages', purgeStaleConfirm: 'Deletes leads from pages no longer covered by any active token and archives their form templates (future events from those pages are also dropped). This cannot be undone. Continue?',
+    purgeStaleDone: 'Cleaned: {leads} leads, {tpls} form templates',
     leadsEmpty: 'No leads yet (sync after deploying an Instant Form, or pages push via webhook)',
     lcolTime: 'Submitted', lcolName: 'Name', lcolEmail: 'Email', lcolPhone: 'Phone', lcolSource: 'Source', lcolDetail: 'Details',
     lfCity: 'City', lfState: 'State', lfZip: 'Zip', lfCountry: 'Country', lfGender: 'Gender', lfDob: 'DOB',

@@ -582,6 +582,18 @@ const loadLeadPages = async () => {
 const openPagesPanel = () => { pagesDlg.value = true; loadLeadPages() }
 const togglePage = (pid) => { const s = new Set(pageSel.value); s.has(pid) ? s.delete(pid) : s.add(pid); pageSel.value = s }
 const subscribeSelected = () => subscribeLeads([...pageSel.value])
+const purgeStalePages = async () => {
+  try {
+    await ElMessageBox.confirm(t('adm.purgeStaleConfirm'), t('adm.pagesPanelTitle'), { type: 'warning', confirmButtonText: t('common.confirm') })
+  } catch { return }
+  opLoading.value = true
+  try {
+    const r = await POST('/leads/purge-stale-pages')
+    ElMessage.success(t('adm.purgeStaleDone', { leads: r.leads_deleted || 0, tpls: r.templates_archived || 0 }))
+    loadLeads(); loadLeadPages()
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  opLoading.value = false
+}
 const unsubscribeLeads = async () => {
   try { await ElMessageBox.confirm(t('adm.leadsUnsubConfirm'), t('common.confirm'), { type: 'warning' }) }
   catch { return }
@@ -755,6 +767,7 @@ const unsubscribeLeads = async () => {
       <template #footer>
         <button class="ctrl-btn" :disabled="pagesLoading" @click="loadLeadPages">⟳ {{ t('common.refresh') }}</button>
         <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected">🔔 {{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
+        <button class="ctrl-btn" style="color: var(--error)" :disabled="opLoading" @click="purgeStalePages">🧹 {{ t('adm.purgeStaleBtn') }}</button>
       </template>
     </el-dialog>
 

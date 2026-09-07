@@ -427,6 +427,55 @@ def subscribe_webhook(
     return {"subscribed": ok, "total_pages": total_pages or len(results), "pages": results}
 
 
+@router.post("/purge-stale-pages")
+def purge_stale_pages(
+    user: CurrentUser = Depends(require_permission("ads.create")),
+    db: Session = Depends(get_db),
+):
+    """清理旧主页残留（用户确认删除）：删「不属于任何活跃令牌页集合」的潜客 + 软删其表单模板。
+
+    背景：订阅是 page×App 级不随令牌失效——换号后旧主页事件仍会推来混入潜客列表。
+    webhook 已加页归属闸（新事件不再入库）；本端点清历史存量 + 归档旧页表单模板
+    （模板归档同时让 webhook 的 form→租户反查失效，双保险）。判定=当前活跃令牌
+    me/accounts 页集合，拉取失败（None）拒绝执行（避免误删全部）。
+    """
+    from ..routers.fb_webhook import _active_page_ids
+    known = _active_page_ids(db, user.tenant_id)
+    if known is None:
+        raise HTTPException(503, "无法确认当前主页集合（令牌拉取失败），请稍后再试")
+    # 旧页潜客：page_id 非空且不在集合（page_id 空的 webhook stub 没有 FB 来源的留着）
+    _stale_leads = db.query(Lead).filter(
+        Lead.tenant_id == user.tenant_id,
+        Lead.page_id.isnot(None), Lead.page_id != "",
+        ~Lead.page_id.in_(known),
+    )
+    _lead_n = _stale_leads.count()
+    stale_pages = {r[0] for r in db.query(Lead.page_id).filter(
+        Lead.tenant_id == user.tenant_id, Lead.page_id.isnot(None), Lead.page_id != "",
+        ~Lead.page_id.in_(known)).distinct().all()}
+    _stale_leads.delete(synchronize_session="fetch")
+    # 旧页表单模板软删（同时断掉 webhook form→租户反查）
+    _tpl_n = 0
+    for t in db.query(LeadFormTemplate).filter(
+        LeadFormTemplate.tenant_id == user.tenant_id,
+        LeadFormTemplate.fb_page_id.isnot(None),
+        LeadFormTemplate.fb_page_id != "",
+        ~LeadFormTemplate.fb_page_id.in_(known),
+        LeadFormTemplate.status != "archived",
+    ).all():
+        t.status = "archived"
+        _tpl_n += 1
+    from ..core.log_utils import write_log, new_trace_id
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="page", target_id="*",
+              action_type="purge_stale_pages", source="user", result="success",
+              trigger_detail=f"leads={_lead_n} templates={_tpl_n} "
+                             f"stale_pages={';'.join(sorted(stale_pages)[:10])}")
+    db.commit()
+    return {"leads_deleted": _lead_n, "templates_archived": _tpl_n,
+            "stale_pages": sorted(stale_pages)}
+
+
 @router.post("/unsubscribe")
 def unsubscribe_webhook(
     user: CurrentUser = Depends(require_permission("ads.create")),
