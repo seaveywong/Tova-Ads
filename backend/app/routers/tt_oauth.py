@@ -117,7 +117,8 @@ def tt_oauth_start(app_pk: int = 0,
     try:
         app_id = ""
         if app_pk:
-            row = sdb.query(TtApp).filter(TtApp.id == app_pk).first()
+            row = sdb.query(TtApp).filter(TtApp.is_system.is_(True), TtApp.tenant_id.is_(None),   # 全库审查 P2：只认系统级 App
+                                    TtApp.id == app_pk).first()
             if not row:
                 raise HTTPException(404, "TikTok App 不存在")
             app_id = row.app_id
@@ -159,7 +160,8 @@ def tt_oauth_callback(request: Request):
         # 按 state 记录的 app_pk 选 App（从哪个卡片发起就用哪个的 secret 换码）
         apk = int(state.get("apk") or 0)
         if apk:
-            row = db.query(TtApp).filter(TtApp.id == apk).first()
+            row = db.query(TtApp).filter(TtApp.is_system.is_(True), TtApp.tenant_id.is_(None),   # 全库审查 P2：只认系统级 App
+                                    TtApp.id == apk).first()
             if not row:
                 return _done_page(False, "TikTok App 已被删除，请重新从令牌页发起连接")
             from ..core.encryption import decrypt as _dec

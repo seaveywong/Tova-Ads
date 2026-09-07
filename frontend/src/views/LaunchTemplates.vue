@@ -76,6 +76,7 @@ const landingPages = ref([])
 const progressOpen = ref(false)
 const activeJob = ref(null)
 let pollTimer = null
+let pollGen = 0   // 全库审查P1：轮询代际——双开进度弹窗曾产生孤儿轮询链持续请求
 // 受众库（SavedAudience 选择器——后端 CRUD 现成，此处接通消费端）
 const savedAudiences = ref([])
 // 模板已部署清单抽屉
@@ -327,7 +328,7 @@ onMounted(() => {
   }
 })
 const loadTplPages = async () => { try { const r = await GET('/fb/assets'); tplPages.value = r.pages || [] } catch {} }
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; pollGen++ })
 
 // #2 dirty-check：编辑抽屉关闭前确认
 let _formSnapshot = ''
@@ -640,8 +641,11 @@ const _tplMissing = (tpl) => {
 const _tplReady = (tpl) => _tplMissing(tpl).length === 0
 
 // 编辑（openNew(p)：p='fb'/'tt' 建模板时定平台；缺省 fb）
-const openNew = (p) => { editing.value = null; form.value = blankForm(); if (p) form.value.platform = p; editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
+const openNew = (p) => { editing.value = null; form.value = blankForm();
+  advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：游离ref重置，防跨模板污染出价策略
+  if (p) form.value.platform = p; editingAsset.value = null; editLevel.value = 'campaign'; validationErrors.value = []; editOpen.value = true; snapshotForm() }
 const openEdit = async (tpl) => {
+  advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：无条件归零（原仅在有配置时恢复，缺失时残留上一模板）
   editing.value = tpl
   const f = blankForm()
   Object.assign(f, tpl)
@@ -1053,9 +1057,10 @@ const openProgress = async (jobId) => {
 }
 // 前 12 次（30s）每 2.5s，之后每 10s；终态由 pollJob 停止
 const startPoll = (jobId, n) => {
+  const my = ++pollGen
   pollTimer = setTimeout(async () => {
     await pollJob(jobId)
-    if (pollTimer) startPoll(jobId, n + 1)
+    if (my === pollGen && pollTimer) startPoll(jobId, n + 1)
   }, n < 12 ? 2500 : 10000)
 }
 const pollJob = async (jobId) => {

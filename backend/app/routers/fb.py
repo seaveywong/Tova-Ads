@@ -3,6 +3,7 @@
 所有 FB 调用走 fb_client（总则4），凭证加密存（doc 01 D 节）。
 """
 import json
+import logging
 import math
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from ..core.i18n import req_locale, L
 from ..core.encryption import encrypt, decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..core.tt_client import TtApiError
+from ..core.log_utils import write_log, new_trace_id   # P0：rename_page/set_token_type 曾用未导入（NameError 500，双门抓不到运行时错误）
 from ..models.fb import FbCredential, Account, AccountFbCredential, TokenHealth
 from ..schemas.fb import StoreCredentialIn, FbCredentialOut, ImportAccountsIn
 
@@ -150,8 +152,8 @@ def store_credential(
     try:
         from ..core.fb_tokens import reassociate_orphan_accounts
         reassociate_orphan_accounts(db, user.tenant_id)
-    except Exception:
-        pass
+    except Exception as _re:
+        logging.getLogger("toveads.fb").warning(f"reassociate 失败 tenant={user.tenant_id}: {_re}")   # 全库审查 P2：曾静默
     return result
 
 
@@ -362,8 +364,8 @@ def delete_credential(
     try:
         from ..core.fb_tokens import reassociate_orphan_accounts
         reassociate_orphan_accounts(db, user.tenant_id)
-    except Exception:
-        pass
+    except Exception as _re:
+        logging.getLogger("toveads.fb").warning(f"reassociate 失败 tenant={user.tenant_id}: {_re}")   # 全库审查 P2：曾静默
     return {"deleted": True, "id": cred_id}
 
 
@@ -1027,9 +1029,9 @@ def refresh_credential_accounts(
         _dr = live.get("disable_reason")
         if _dr is not None:
             acc.disable_reason = int(_dr)
-        acc.balance = str(live.get("balance", "") or "")
-        acc.spend_cap = str(live.get("spend_cap", "") or "")
-        acc.amount_spent = str(live.get("amount_spent", "") or "")
+        acc.balance = str(live.get("balance") or acc.balance or "")   # 缺字段保旧值（全库审查P2）
+        acc.spend_cap = str(live.get("spend_cap") or acc.spend_cap or "")
+        acc.amount_spent = str(live.get("amount_spent") or acc.amount_spent or "")
         updated += 1
     db.commit()
     return {"updated": updated, "imported_total": len(imported_rows)}
@@ -1209,9 +1211,9 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
                     acc.disable_reason = int(_dr)
                 if live.get("timezone_name"):
                     acc.timezone_name = live["timezone_name"]  # 时区是巡检/加白日期的基准，必须补准
-                acc.balance = str(live.get("balance", "") or "")
-                acc.spend_cap = str(live.get("spend_cap", "") or "")
-                acc.amount_spent = str(live.get("amount_spent", "") or "")
+                acc.balance = str(live.get("balance") or acc.balance or "")   # 缺字段保旧值（全库审查P2）
+                acc.spend_cap = str(live.get("spend_cap") or acc.spend_cap or "")
+                acc.amount_spent = str(live.get("amount_spent") or acc.amount_spent or "")
         db.commit()
     finally:
         db.close()

@@ -669,14 +669,14 @@ def warmup_disarm(body: WarmupArmIn, user: CurrentUser = Depends(require_permiss
 
 
 @router.post("/budget-check")
-def manual_budget_check(user: CurrentUser = Depends(require_permission("rules.read"))):
+def manual_budget_check(user: CurrentUser = Depends(require_superadmin)):
     """手动触发预算进度告警（doc 03 §3.10，审计项目21）。纯告警不改预算。"""
     from ..services.budget_alerts import run_budget_alerts
     return run_budget_alerts()
 
 
 @router.post("/watchdog")
-def manual_watchdog(user: CurrentUser = Depends(require_permission("rules.read"))):
+def manual_watchdog(user: CurrentUser = Depends(require_superadmin)):
     """手动触发系统看门狗（06_附录 §四）：巡检停滞检测 + token 主动健康检查。"""
     from ..services.guard_engine import run_watchdog
     return run_watchdog()

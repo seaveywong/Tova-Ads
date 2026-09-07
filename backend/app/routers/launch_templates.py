@@ -622,7 +622,8 @@ def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
         raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
-    q = sdb.query(Account).filter(Account.act_id == act_id)
+    q = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2：SuperSession 绕 RLS 曾无租户过滤
+                                                Account.act_id == act_id)
     if tenant_id:
         q = q.filter(Account.tenant_id == tenant_id)
     acc = q.first()
@@ -649,7 +650,8 @@ def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
         raise ValueError("模板未配置预算（budget_usd/daily_budget 均为空），请填写日预算后再部署")
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
-    q = sdb.query(Account).filter(Account.act_id == act_id)
+    q = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2：SuperSession 绕 RLS 曾无租户过滤
+                                                Account.act_id == act_id)
     if tenant_id:
         q = q.filter(Account.tenant_id == tenant_id)
     acc = q.first()
@@ -1295,7 +1297,8 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         sdb.commit()  # 持久化 page_posts 缓存
     # 追踪参数插值：逐系列/逐账户解出真实 URL（{{campaign.name}}=系列名，批量模式=素材名）
     _sn = series_name or tpl.name_prefix
-    _acc = sdb.query(Account).filter(Account.act_id == item.act_id).first()
+    _acc = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2
+                                                        Account.act_id == item.act_id).first()
     _lp_url = _interp_landing_url(
         tpl.landing_url, campaign_name=_sn,
         account_name=(_acc.name if _acc else ""), account_id=item.act_id,
@@ -1880,7 +1883,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             if page_post_id:
                 sdb.commit()
             # 追踪参数插值（retry 单模板路径；批量 retry 走 _deploy_item_fb_batch→_deploy_series_fb 已接）
-            _rt_acc = sdb.query(Account).filter(Account.act_id == it.act_id).first()
+            _rt_acc = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2
+                                                        Account.act_id == it.act_id).first()
             _lp_url = _interp_landing_url(
                 tpl.landing_url, campaign_name=tpl.name_prefix,
                 account_name=(_rt_acc.name if _rt_acc else ""), account_id=it.act_id,

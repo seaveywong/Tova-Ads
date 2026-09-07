@@ -654,6 +654,14 @@ def batch_set_status(
         raise HTTPException(400, "批量操作上限 100 条")
     results = []
     for item in body.items[:100]:
+        # is_managed 门（全库审查 P2）：单端点都有，批量曾绕过——软删账户广告仍可被批量操作
+        if not db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == item.act_id,
+            Account.is_managed == True,  # noqa: E712
+        ).first():
+            results.append({"success": False, "act_id": item.act_id, "node_id": item.node_id,
+                            "error": "account not managed"})
+            continue
         r = set_status_any(db, user.tenant_id, item.act_id, item.node_id, item.level, item.status, operator=user.email)
         results.append({"node_id": item.node_id, "level": item.level, **r})
     return {"results": results, "success_count": sum(1 for r in results if r.get("success"))}

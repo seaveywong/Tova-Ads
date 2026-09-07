@@ -60,7 +60,7 @@ def first_client(db: Session, tenant_id: int) -> Optional[object]:
     TtClient = _tt_client_cls()
     if TtClient is not None:
         for tc in _iter_tt_creds(db, tenant_id):
-            return TtClient(decrypt(tc.access_token_enc))
+            return TtClient(decrypt(tc.access_token_enc), app_id=(tc.app_id or ""))   # app_id 必传缺失会炸调用方
     return None
 
 
@@ -145,7 +145,9 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
         ).filter(
             AccountFbCredential.account_id == acc.id,
             AccountFbCredential.status == "active",
-            FbCredential.status == "active",
+            # 凭证侧含 rate_limited（冷却过期自动回池——_is_cred_available 判定；曾硬过滤
+            # active 让限流过的令牌永久退出候选池，RR 池缩水直到人工干预）
+            FbCredential.status.in_(("active", "rate_limited")),
         ).order_by(*_order).all()
         pool_avail = [c for c in pool_creds if _is_cred_available(c) and _op_ok(c, op_kind)]
         if pool_avail:
@@ -172,6 +174,11 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
     avail = [c for c in creds if _is_cred_available(c) and _op_ok(c, op_kind)]
     if not avail:
         return None
+    if op_kind in ("write", "pause"):
+        # 回退段补写路径 tiebreaker（全库审查 P1：回退曾纯 RR——operate 未先于 manage，
+        # 候选池空时写操作又撞回管理号"权限不足"，池内修复被旁路）
+        avail.sort(key=lambda c: ((c.token_type or "manage").strip().strip("'\"").lower() != "operate", c.id))
+        return avail[0]
     key = (tenant_id, act_id, op_kind)
     cursor = _RR_STATE.get(key, 0)
     pick = avail[cursor % len(avail)]

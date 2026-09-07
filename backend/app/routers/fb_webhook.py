@@ -70,32 +70,38 @@ _PAGE_SET_CACHE: dict = {}
 
 
 def _active_page_ids(db, tenant_id: int) -> set | None:
-    """租户当前活跃令牌可管理的页 id 集（None=拉取失败，调用方 fail-open 放行）。"""
+    """租户当前活跃令牌可管理的页 id 集（None=拉取失败，调用方 fail-open 放行）。
+
+    全量成功才缓存：任一令牌 me/accounts 失败即返 None（曾 per-cred continue 把部分
+    集合缓存 10min 当权威 → 缺失页的 lead 被「旧主页」忽略且 200 → FB 不再重推 →
+    潜客永久丢失）。状态放宽到 rate_limited（限流冷却是 30min 瞬时态，冷却中令牌的
+    页不是旧主页——曾硬过滤 active 把冷却期页全误判）。"""
     import time as _t
     now = _t.time()
     ent = _PAGE_SET_CACHE.get(tenant_id)
     if ent and now - ent[0] < _PAGE_SET_TTL:
         return ent[1]
     from app.core.encryption import decrypt
-    from app.core.fb_client import FbClient, FbApiError
+    from app.core.fb_client import FbClient
     from app.models.fb import FbCredential
     pages: set = set()
-    try:
-        for c in db.query(FbCredential).filter(
-            FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-        ).all():
-            try:
-                fb = FbClient(decrypt(c.access_token_enc))
-                for p in fb.get_paged("me/accounts", {"fields": "id"}):
-                    if p.get("id"):
-                        pages.add(str(p["id"]))
-            except (FbApiError, Exception):
-                continue
-    except Exception:
-        return None
+    creds = db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
+    ).all()
+    if not creds:
+        return None   # 无令牌租户 fail-open（不拦）
+    for c in creds:
+        try:
+            fb = FbClient(decrypt(c.access_token_enc))
+            for p in fb.get_paged("me/accounts", {"fields": "id"}):
+                if p.get("id"):
+                    pages.add(str(p["id"]))
+        except Exception:
+            return None   # 任一失败 → 整体 fail-open（绝不缓存部分集合）
     if pages:
         _PAGE_SET_CACHE[tenant_id] = (now, pages)
-    return pages or None   # 空集（零页）不缓存不拦——可能令牌全灭，fail-open
+    return pages or None
 
 
 @router.post("")
@@ -136,9 +142,9 @@ async def fb_webhook_receive(request: Request):
                 if not lead_id:
                     continue
                 lid = str(lead_id)
-                if db.query(Lead).filter(Lead.lead_id == lid, Lead.tenant_id == tenant_id).first():
-                    continue
-                # form_id → tenant 反查（LeadFormTemplate.fb_form_id）
+                # form_id → tenant 反查（LeadFormTemplate.fb_form_id）——必须先于查重：
+                # 曾在 tenant_id 赋值前引用它做去重查询 → UnboundLocalError → 500，
+                # leadgen 推送全断（2026-09-08 全库审查 P0）
                 tenant_id = None
                 if form_id:
                     tpl = db.query(LeadFormTemplate).filter(
@@ -147,6 +153,8 @@ async def fb_webhook_receive(request: Request):
                     tenant_id = tpl.tenant_id if tpl else None
                 if not tenant_id:
                     logger.info(f"[FB Webhook] lead 无归属租户: lead_id={lid} form={form_id}")
+                    continue
+                if db.query(Lead).filter(Lead.lead_id == lid, Lead.tenant_id == tenant_id).first():
                     continue
                 # 页归属闸：不在活跃令牌页集合 → 忽略（拉取失败 None → 放行）
                 _known = _active_page_ids(db, tenant_id)

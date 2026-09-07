@@ -307,6 +307,8 @@ def route_next(body: RouteNextIn, dry_run: bool = False):
     db = SuperSessionLocal()
     try:
         page = _find_page_by_secret(db, body.secret)
+    if not page:
+        raise HTTPException(401, "invalid secret")   # 全库审查 P1：曾失败后继续走 → 无认证枚举 slug 泄跳转目标
         link = db.query(LandingAdLink).filter(LandingAdLink.slug == body.slug).first() if body.slug else None
         # 跨页防护：slug 全局唯一，但若该子码不属于本页(老数据/迁移)，不当本页子码用(避免 fire 错像素/跳错)
         if link and page and link.page_id and link.page_id != page.id:

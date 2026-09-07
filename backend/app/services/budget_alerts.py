@@ -8,7 +8,7 @@ dedup：action_logs(action_type=budget_progress_alert, target_id=adset_id, trigg
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 from ..core.fb_client import FbClient, FbApiError
 from ..core.log_utils import write_log, new_trace_id
@@ -182,7 +182,11 @@ def run_budget_alerts():
             if not creds:
                 continue
             accounts = db.query(Account).filter(
-                Account.tenant_id == tenant_id, Account.account_status == 1,
+                Account.tenant_id == tenant_id,
+                # 死状态集与巡检同口径（全库审查 P2：受限/未结清/宽限账户仍在花钱，
+                # 预算烧穿告警必须覆盖——曾 ==1 成资金监控盲区）
+                or_(Account.account_status.is_(None),
+                    Account.account_status.notin_([2, 8, 100, 101])),
                 Account.is_managed.is_(True),
             ).all()
             for acc in accounts:

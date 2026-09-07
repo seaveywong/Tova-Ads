@@ -272,7 +272,14 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
     # TG 消息带发送时间（北京时区）：手机免打扰集中看时区分不了告警何时发生——
     # 站内有 created_at 排序，TG 侧没有；业务日基准=北京，统一 GMT+8 不按用户 locale 换
     _ts = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M")
-    text = f"{icon} <b>{title}</b>\n{body}\n<i>🕐 {_ts} GMT+8</i>"[:1200]
+    text = f"{icon} <b>{title}</b>\n{body}\n<i>🕐 {_ts} GMT+8</i>"
+    if len(text) > 1200:
+        # 安全截断（全库审查 P1）：曾裸 [:1200] 劈开 HTML 标签 → TG parse 400 → 告警静默丢失
+        _cut = text[:1200]
+        _lt = _cut.rfind("<")
+        if _lt > 1000 and ">" not in _cut[_lt:]:
+            _cut = _cut[:_lt]
+        text = _cut
     sent_keys: set[tuple] = set()  # (bot_token, chat_id) 去重
 
     # 用户级：critical → 全租户在职成员中已绑用户；其余 → role∈roles 的用户。

@@ -20,6 +20,9 @@ const { t, locale } = useI18n()
 const router = useRouter()
 const loading = ref(true)
 const _dashGuard = useLatest()
+const _trendGuard = useLatest()   // 全库审查P1：伴生加载竞态守卫
+const _landGuard = useLatest()
+const _landTrendGuard = useLatest()
 const refreshing = ref(false)
 const datePreset = ref('today')
 const data = ref({
@@ -54,6 +57,7 @@ const autoGran = () => {
   return 'day'
 }
 const loadTrend = async () => {
+  const isLatest = _trendGuard.next()
   try {
     const q = showCustom.value
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
@@ -61,6 +65,7 @@ const loadTrend = async () => {
     const actQ = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
     const cq = conversionCategory.value !== 'all' ? `&conversion_category=${conversionCategory.value}` : ''   // KPI 卡收窄时趋势线同步
     trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}&granularity=${trendGran.value}`)
+  if (!isLatest()) return
   } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
 }
 const renderTrendCharts = () => {
@@ -223,10 +228,12 @@ const landingSearch = ref('')
 const landingFilter = ref('all')  // all / good / waste / watch
 const landingLoading = ref(false)
 const fetchLanding = async () => {
+  const isLatest = _landGuard.next()
   landingLoading.value = true
   try {
     const _aq = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
     landing.value = await GET(`/dashboard/landing?${rangeQuery()}${_aq}`)   // 账户筛选与广告区同口径
+  if (!isLatest()) return
   }
   catch (e) { /* 落地页加载失败不阻断主看板 */ }
   finally { landingLoading.value = false }
@@ -309,11 +316,13 @@ const LT_SERIES = computed(() => [
 const ltCanvas = ref(null)
 let _ltCharts = []
 const loadLandingTrend = async () => {
+  const isLatest = _landTrendGuard.next()
   try {
     let q = (showCustom.value && customFrom.value && customTo.value)
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
       : `date_preset=${datePreset.value}`
     landingTrend.value = await GET(`/dashboard/landing-trend?${q}`)   // 落地事件跨平台，不做 platform 过滤
+  if (!isLatest()) return
   } catch { landingTrend.value = { labels: [], visits: [], clicks: [], blocked: [] } }
 }
 const renderLandingTrend = () => {

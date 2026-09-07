@@ -7,6 +7,7 @@ FB 的 ads 层由巡检独家供数（巡检每 5min 拉全状态 /ads 后回写
 不再重复拉同 edge；campaigns/adsets 巡检不拉，仍由本 job 供数）。TT 无巡检回写，本 job 恒拉三层。
 """
 import logging
+from sqlalchemy import or_
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.fb_tokens import client_for_account
 from ..models.fb import Account
@@ -24,7 +25,11 @@ def run_ads_cache_sync():
     try:
         from ..routers.ads import _sync_one, _acc_platform  # 同一实现（FB/TT 分发），避免映射两份 drift
         accounts = db.query(Account).filter(
-            Account.is_managed == True, Account.account_status == 1,  # noqa: E712
+            Account.is_managed == True,  # noqa: E712
+            # 死状态集与巡检同口径（全库审查 P2：受限7/未结清3/宽限9 仍投放须覆盖；
+            # 曾 ==1 把这些账户的实体同步排除成盲区）
+            or_(Account.account_status.is_(None),
+                Account.account_status.notin_([2, 8, 100, 101])),
         ).all()
         updated = 0
         _no_token: dict[int, int] = {}  # tenant_id → 无令牌纳管账户数（停更告警用）

@@ -1006,8 +1006,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
             if e.category == "rate_limited" and cred and platform == "fb":
                 try:
                     mark_cred_cooldown(db, cred.id, minutes=30, status="rate_limited")
+                    db.commit()   # 不 commit 冷却随 close 丢弃（全库审查 P2）——下轮同令牌再撞墙
                 except Exception:
-                    pass
+                    db.rollback()
             active_ids = None  # 平台 API 拉失败，下面用 ads_cache 兜底
         except Exception:
             active_ids = None  # 平台 API 拉失败，下面用 ads_cache 兜底
@@ -1108,6 +1109,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             # fill forward：FB 拉失败时复制上一轮 tick，避免趋势消耗因漏采掉线
             try:
                 _lt = db.query(PerfSnapshotTick).filter(
+                    PerfSnapshotTick.tenant_id == tenant_id,   # 双租户同 act_id 串数据（leads_poll 实证）
                     PerfSnapshotTick.act_id == acc.act_id,
                 ).order_by(PerfSnapshotTick.snapshot_at.desc()).first()
                 if _lt:
@@ -1189,7 +1191,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             ad_id = ad.get("ad_id", "")
             # tick spend + conv 累计所有广告（含已暂停——累计值不因暂停下降）
             try:
-                _tick_usd = to_usd(float(ad.get("spend", 0)), acc.currency)
+                _tick_usd = to_usd(_sf(ad.get("spend", 0)), acc.currency)
                 if _tick_usd is not None:
                     acc_tick_spend += _tick_usd  # 未知币种(None)不计入（账户已另发 unsupported_currency 告警）
             except Exception:
@@ -1295,6 +1297,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             whitelisted = db.query(GuardAllowance).filter(
                 GuardAllowance.tenant_id == tenant_id,   # SuperSession 绕 RLS——显式租户过滤
                 GuardAllowance.act_id == acc.act_id,
+                GuardAllowance.platform == platform,     # 同 act 双平台行误加白（全库审查 P2）
                 GuardAllowance.ad_id.in_([ad_id, "*"]),
                 GuardAllowance.allowance_date == acc_today,
                 GuardAllowance.status == "active",
@@ -1383,11 +1386,12 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         # 平台隔离（照 _scale_cooldown_ok 模式）：TT 小整数 ad_id 与 FB
                         # 撞号时互相吞停；FB 存量日志全回填 'fb'，过滤对 FB 零差异
                         _pf = [ActionLog.platform == platform] if platform == "tt" else []
+                        _cd_tgt = (f"{acc.act_id}:{ad_id}" if platform == "tt" else ad_id)
                         if not force:
                             succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
                             succ = db.query(ActionLog).filter(
                                 ActionLog.tenant_id == tenant_id,
-                                ActionLog.target_id == ad_id,
+                                ActionLog.target_id == _cd_tgt,
                                 ActionLog.trigger_type == rule.rule_type,
                                 # observe 规则记 observe_alert（不再是"pause"）——冷却同样认它，
                                 # 否则 observe 每 5min 巡检都重写一条日志（通知侧另有 60min dedup）
@@ -1401,7 +1405,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         fail_cd = now_utc - timedelta(minutes=RETRY_COOLDOWN_MIN)
                         fail_recent = db.query(ActionLog).filter(
                             ActionLog.tenant_id == tenant_id,
-                            ActionLog.target_id == ad_id,
+                            ActionLog.target_id == _cd_tgt,
                             ActionLog.trigger_type == rule.rule_type,
                             ActionLog.action_type == "pause",
                             ActionLog.result == "fail",
@@ -1473,12 +1477,25 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         _perm_only_fail = True   # 升级链失败是否全为 permissions（账户级永久错误判定）
                         _deny_key = f"sentinel_perm_deny_{acc.act_id}"
                         # 权限退避（复审R1，与哨兵对称）：写权限已标记丢失(24h) → 不空试暂停链
-                        # （每 5min 重试必然再失败）；权限恢复由标记过期后自动重试发现
+                        # （每 5min 重试必然再失败）；权限恢复由标记过期后自动重试发现。
+                        # 过期判定在读取侧（2026-09-08 全库审查 P0）：标记清理原只在哨兵 armed
+                        # 循环内做——从未 arm 的账户（常态）标记永不过期 → 止损被无限期静默
+                        # 禁用（违反"不允许任何保护期"铁律）。读到过期标记即删并正常重试。
                         _deny_row = db.query(SystemSetting).filter(SystemSetting.key == _deny_key).first()
                         if _deny_row:
-                            action_text = "暂停跳过（账户写权限丢失退避中，见「写权限丢失」告警）"
-                            pause_result = "fail"
-                            _perm_only_fail = False   # 已有标记：不重写/不重发告警
+                            try:
+                                _since = datetime.fromisoformat(
+                                    json.loads(_deny_row.value).get("since"))
+                            except Exception:
+                                _since = None
+                            if _since and datetime.now(timezone.utc) - _since < timedelta(hours=24):
+                                action_text = "暂停跳过（账户写权限丢失退避中，见「写权限丢失」告警）"
+                                pause_result = "fail"
+                                _perm_only_fail = False   # 退避期内：不重写/不重发告警
+                            else:
+                                db.delete(_deny_row)   # 过期：清标记重试（权限可能已恢复）
+                                db.commit()
+                                _deny_row = None
                         for pid, label in chain:
                             if _deny_row or not pid:
                                 continue
@@ -1563,9 +1580,10 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     # 记日志（账户/系列/组/广告 ID + 本币花销 + 动作 + trace_id）——events 队列，主线程回放
                     # observe 分支记 observe_alert（日志中心 action 筛选是自由文本，
                     # 不与 pause 混淆——用户能区分"真停了"vs"只告警"）
+                    _tgt_id = (f"{acc.act_id}:{ad_id}" if platform == "tt" else ad_id)   # TT 小整数 ad_id 跨广告主撞号（P1）
                     events.append({"kind": "log", "kwargs": dict(
                         tenant_id=tenant_id, trace_id=trace_id,
-                        actor_type="system", target_type="ad", target_id=ad_id,
+                        actor_type="system", target_type="ad", target_id=_tgt_id,
                         action_type="observe_alert" if ra == "observe" else "pause",
                         source="rule_engine", result=pause_result,
                         platform=platform,
@@ -1581,7 +1599,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                   "cred_id": _rid, "cred_alias": _alias})})
 
                     # 通知（去重 60min/广告：已停广告每轮重复命中不应重复 notify）
-                    if not dedup_recent(db, tenant_id, "rule_pause_notified", ad_id, 60):
+                    if not dedup_recent(db, tenant_id, "rule_pause_notified",
+                                        (f"{acc.act_id}:{ad_id}" if platform == "tt" else ad_id), 60):
                         _loc = tenant_locale(db, tenant_id)
                         # 动作位：observe 必须显式说"未暂停"（消息与真暂停区分，防用户误读）
                         if ra == "observe":

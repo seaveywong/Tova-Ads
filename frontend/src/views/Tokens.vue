@@ -503,7 +503,7 @@ const changeTokenType = async (tk) => {
   const cur = tk.token_type || 'manage'
   const next = cur === 'operate' ? 'manage' : 'operate'
   try {
-    await ElMessageBox.confirm(t('tokens.tokenTypeConfirm', { from: t(`tokens.tt${cur}`), to: t(`tokens.tt${next}`) }),
+    await ElMessageBox.confirm(t('tokens.tokenTypeConfirm', { from: t(`tokens.type${cur[0].toUpperCase() + cur.slice(1)}`), to: t(`tokens.type${next[0].toUpperCase() + next.slice(1)}`) }),   // 全库审查P1：曾拼不存在的 ttOperate 裸键
       t('tokens.changeTypeBtn'), { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
   } catch { return }
   try {

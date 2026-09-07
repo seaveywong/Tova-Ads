@@ -113,8 +113,8 @@ const saveForm = async () => {
   } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
 }
-const removeForm = async (t) => {
-  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/forms/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
+const removeForm = async (item) => {   // 参数曾用 t 遮蔽 i18n 导致归档坏死（全库审查 P0）
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: item.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/forms/' + item.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }   // 被引用等真报错要提示
 }
 const previewForm = (t) => { previewType.value = 'form'; previewData.value = t.config || {}; previewOpen.value = true }
@@ -181,8 +181,8 @@ const saveMsg = async () => {
   } catch (e) { showError(e, t('common.opFail')) }
   saving.value = false
 }
-const removeMsg = async (t) => {
-  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: t.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/messages/' + t.id); ElMessage.success(t('formtpl.archived')); await load() }
+const removeMsg = async (item) => {   // 同上
+  try { await ElMessageBox.confirm(t('formtpl.archiveConfirm', { name: item.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE('/form-templates/messages/' + item.id); ElMessage.success(t('formtpl.archived')); await load() }
   catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 const previewMsg = (t) => { previewType.value = 'msg'; previewData.value = t; previewOpen.value = true }

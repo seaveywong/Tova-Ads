@@ -577,8 +577,8 @@ class TtClient:
         except (TypeError, ValueError):
             adv = advertiser_id
         return self.post(f"{node_type}/status/update/", {
-            "advertiser_id": [adv],
-            ids_key: [str(node_id)],
+            "advertiser_id": adv,   # v1.3 标量 int64（曾发列表 → 40001 全链路断）
+            ids_key: [int(node_id)]   # int64 数组（曾字符串数组）,
             "opt_status": opt,
         })
 
