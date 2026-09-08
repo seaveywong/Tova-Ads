@@ -26,6 +26,22 @@ const data = ref({ campaigns: [], adsets: [], ads: [], currency: 'USD' })
 const tokenStatus = ref({})
 const deadAccounts = computed(() => Object.entries(tokenStatus.value).filter(([, v]) => v === false).map(([k]) => k))
 const accDead = (a) => tokenStatus.value[a?.act_id] === false
+// 脱管=有账户行但令牌没了/失效（管不了但账户本身还活着）
+const accUnmanaged = (a) => {
+  const acc = accounts.value.find(x => x.act_id === (a?.act_id || a))
+  return acc?.no_token === true
+}
+// 被禁=FB 侧账户本身被禁（account_status!=1 或有 disable_reason）
+const accBanned = (a) => {
+  const acc = accounts.value.find(x => x.act_id === (a?.act_id || a))
+  return acc && (acc.account_status === 2 || acc.account_status === 3 || !!acc.disable_reason)
+}
+// 统一状态标签：脱管/被禁/正常
+const accStateTag = (a) => {
+  if (accBanned(a)) return { cls: 'banned', label: t('adm.accBanned') }
+  if (accDead(a) || accUnmanaged(a)) return { cls: 'unmanaged', label: t('adm.accUnmanaged') }
+  return null
+}
 // 组行悬停显示所属系列名（非下钻视图下组的归属上下文；下钻时 drill-tag 已标）
 const campNameOf = (s) => {
   const c = (data.value.campaigns || []).find(x => String(x.id) === String(s.campaign_id))
@@ -654,14 +670,18 @@ const unsubscribeLeads = async () => {
         <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
       </div>
     </header>
-    <div class="ctrl-bar">
+    <div v-if="selectedActs.length === 1 && accStateTag({ act_id: selectedActs[0] })" :class="['acc-warn-bar', accStateTag({ act_id: selectedActs[0] }).cls]">
+          {{ accStateTag({ act_id: selectedActs[0] }).cls === 'banned' ? t('adm.accBannedBanner') : t('adm.accUnmanagedBanner') }}
+        </div>
+        <div class="ctrl-bar">
       <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
         </template>
-        <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="a.name">
+        <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(accStateTag(a) ? accStateTag(a).label + ' ' : '') + a.name">
           <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}
+          <span v-if="accStateTag(a)" :class="['mini-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span>
         </el-option>
       </el-select>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
@@ -995,6 +1015,17 @@ const unsubscribeLeads = async () => {
 .rf-flag:hover { opacity: .8 }
 .cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
 .cache-at.stale { color: var(--warning) }
+/* 脱管/被禁账户视觉体系：行内标签 + 顶部警示条 */
+.acc-state-tag { font-size: 10px; border-radius: 3px; padding: 0 5px; margin-left: 4px; line-height: 1.5; cursor: help; font-weight: 500; white-space: nowrap }
+.acc-state-tag.unmanaged { color: var(--warning, #e6a700); border: 1px solid var(--warning, #e6a700); background: transparent }
+.acc-state-tag.banned { color: var(--error, #f56c6c); border: 1px solid var(--error, #f56c6c); background: transparent }
+.mini-tag { font-size: 10px; margin-left: 6px; padding: 0 4px; border-radius: 3px }
+.mini-tag.unmanaged { color: var(--warning); border: 1px solid var(--warning) }
+.mini-tag.banned { color: var(--error); border: 1px solid var(--error) }
+.acc-warn-bar { padding: 8px 14px; border-radius: var(--rs); font-size: 13px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px }
+.acc-warn-bar.unmanaged { background: rgba(230,167,0,0.08); border: 1px solid rgba(230,167,0,0.3); color: var(--warning, #e6a700) }
+.acc-warn-bar.banned { background: rgba(245,108,108,0.08); border: 1px solid rgba(245,108,108,0.3); color: var(--error, #f56c6c) }
+
 /* 数据源断链（无可用令牌）账户的快照态标注 */
 .dead-acc-bar { margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent) }
 .snap-tag { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; color: var(--t3); border: 1px solid var(--bd); border-radius: 3px; padding: 0 3px; margin-left: 4px; line-height: 1.4; cursor: help }
