@@ -148,12 +148,10 @@ from sqlalchemy import text as _t
 _db = SuperSessionLocal()
 _created_ids = {"page": [], "pixel": [], "cache": [], "tpl": []}
 try:
-    from app.models.auth import User
-    _u = _db.query(User).filter(User.email == "seavey@tovaads.com").first()
     row = _db.execute(_t("SELECT act_id FROM accounts WHERE tenant_id=1 AND is_managed=true "
                          "AND platform='fb' AND act_id<>'' ORDER BY id LIMIT 1")).first()
     ACT = row[0]
-    TENANT = _u.tenant_id if _u else 1
+    TENANT = 1
 
     # 3b. _resolve_landing_base：无自定义域页 → pages.dev base（部署可用，非空）
     lp = LandingPage(tenant_id=TENANT, title="SMOKE-II-LP", status="published",
@@ -172,7 +170,7 @@ try:
     from app.models.perf import CurrencyRate
     _cur = (acc[0] if acc else "USD") or "USD"
     _cr = _db.query(CurrencyRate).filter(CurrencyRate.code == _cur.upper()).first()
-    from app.core.ad_builder import usd_to_fb_amount
+    from app.core.ad_ops import usd_to_fb_amount
     _exp_bid = usd_to_fb_amount(0.5, _cur, _cr.rate if _cr else 1.0)
 
     tpl = LaunchTemplate(tenant_id=TENANT, name="SMOKE-II", platform="fb",

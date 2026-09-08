@@ -4,6 +4,7 @@
 用 SuperSessionLocal（BYPASSRLS）因为无租户上下文（secret→page→tenant 解析）。
 """
 import hashlib
+import json as _json   # 模块级：_resolve_tt_pixel_ids 等辅助函数同用（原仅 route_next 内局部导入）
 import time
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.orm import Session
