@@ -144,6 +144,28 @@ def _campaign_objectives(fb, campaign_ids) -> dict:
     return out
 
 
+def _adset_optgoals(db, tenant_id: int, act_id: str, platform: str) -> dict:
+    """{adset_id: optimization_goal}（ads_cache adsets_json，15min 结构同步写入）。
+
+    FB campaign 对象没有 optimization_goal（组级字段），_campaign_objectives 拿到的 og 恒空；
+    成效口径要按组优化目标解析（批I：TRAFFIC 系列下的 CTW/对话广告按 CONVERSATIONS 数会话，
+    否则按系列 fallback 误数链接点击）。查不到返空 dict → 行为回落到系列维度（与旧版一致）。"""
+    from ..models.ads_cache import AdsCache
+    out: dict[str, str] = {}
+    try:
+        row = db.query(AdsCache).filter(
+            AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+            AdsCache.platform == platform).first()
+        if row:
+            for s in json.loads(row.adsets_json or "[]"):
+                og = (s.get("optimization_goal") or "").upper()
+                if og and s.get("id"):
+                    out[str(s["id"])] = og
+    except Exception:
+        pass
+    return out
+
+
 def _account_local_today(acc) -> str:
     """账户本地今日（YYYY-MM-DD），用 timezone_name。"""
     try:
@@ -1181,6 +1203,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
             leads_map = {}
         # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
         obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
+        adset_og_map = _adset_optgoals(db, tenant_id, acc.act_id, platform) if platform == "fb" else {}
         # objectives 缺口观测（复审R1）：拉不到 objective 时 resolver 落 fallback 转化集聚合，
         # 转化口径可能系统性漂移（多算/少算）——曾完全静默。计数进轮末 KPI 告警（仅 FB：
         # TT 的 objective 走报表行自带，不经此路径）
@@ -1216,7 +1239,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     try:
                         _obj_s, _opt_s = obj_map.get(ad.get("campaign_id", ""), ("", ""))
                         _kpi_s = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
-                                             _obj_s, _opt_s, ad.get("actions", []))
+                                             _obj_s, adset_og_map.get(ad.get("adset_id", "")) or _opt_s,
+                                             ad.get("actions", []))
                         _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id,
                                             _kpi_s, _kpi_s["conversions"], biz_today)
                     except Exception:
@@ -1241,6 +1265,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
             if "[Tova-保活]" in (ad.get("campaign_name") or ""):
                 continue
             ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
+            # 组优化目标优先（批I 成效口径；系列级 og 恒空作兜底）
+            ad_opt_goal = adset_og_map.get(ad.get("adset_id", "")) or ad_opt_goal
             ad_name = ad.get("ad_name", ad_id)[:50]
             res["evaluated"] += 1
             spend = _sf(ad.get("spend", 0))
@@ -1728,7 +1754,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             continue  # 未知币种：不写假 USD（NULL/本币冒充都会污染看板与 burn_fast 基线），账户已告警
                         _obj7, _opt7 = obj_map.get(r7.get("campaign_id", ""), ("", ""))
                         _kpi7 = resolve_kpi(db, tenant_id, r7.get("campaign_id", ""),
-                                             _obj7, _opt7, r7.get("actions", []))
+                                             _obj7, adset_og_map.get(r7.get("adset_id", "")) or _opt7,
+                                             r7.get("actions", []))
                         _cv7 = _kpi7["conversions"]
                         _roas7 = float(r7.get("purchase_roas", 0) or 0)
                         _e7 = _existing7.get((_aid7, _d7))

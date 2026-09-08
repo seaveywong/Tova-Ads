@@ -712,7 +712,7 @@ def ads_insights_breakdown(
             return _ent[1]
 
     params = {
-        "fields": "spend,impressions,clicks,ctr,reach,frequency,campaign_id,actions",
+        "fields": "spend,impressions,clicks,ctr,reach,frequency,campaign_id,adset_id,actions",
         "limit": "100",
     }
     if dim == "conversion_location":
@@ -733,6 +733,7 @@ def ads_insights_breakdown(
 
     # 目标反查（同 guard obj_map：AdsCache campaigns 的 objective——insights 行不请求该字段）
     obj_map = {}
+    og_map = {}
     _cr = db.query(AdsCache).filter(
         AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == aid,
         AdsCache.platform == "fb").first()
@@ -740,6 +741,13 @@ def ads_insights_breakdown(
         try:
             for c in json.loads(_cr.campaigns_json or "[]"):
                 obj_map[str(_id_of(c.get("id")))] = c.get("objective") or ""
+        except Exception:
+            pass
+        try:
+            for st in json.loads(_cr.adsets_json or "[]"):
+                og = (st.get("optimization_goal") or "").upper()
+                if og and st.get("id"):
+                    og_map[str(_id_of(st.get("id")))] = og
         except Exception:
             pass
     from ..services.kpi_resolver import resolve_kpi
@@ -754,7 +762,7 @@ def ads_insights_breakdown(
                 try:
                     kpi = resolve_kpi(db, user.tenant_id, r.get("campaign_id", ""),
                                       obj_map.get(str(r.get("campaign_id") or ""), ""),
-                                      "", [a])
+                                      og_map.get(str(r.get("adset_id") or ""), ""), [a])
                     v = int(kpi.get("results_fb") or 0)
                 except Exception:
                     v = 0
@@ -774,7 +782,8 @@ def ads_insights_breakdown(
         try:
             kpi = resolve_kpi(db, user.tenant_id, r.get("campaign_id", ""),
                               obj_map.get(str(r.get("campaign_id") or ""), ""),
-                              "", r.get("actions") or [])
+                              og_map.get(str(r.get("adset_id") or ""), ""),
+                              r.get("actions") or [])
             results = int(kpi.get("results_fb") or 0)
         except Exception:
             results = 0
@@ -1223,11 +1232,22 @@ def diagnose_ad(
         result["clicks"] = int(ad_insights.get("clicks", 0) or 0)
         result["reach"] = int(ad_insights.get("reach", 0) or 0)
 
-        # KPI 解析
+        # KPI 解析（批I：FB 广告组优化目标优先——CTW/对话广告数会话不数点击；查不到回落
+        # OFFSITE_CONVERSIONS 语义，与旧口径一致）
         try:
             camp_id = ad_insights.get("campaign_id", "")
             obj = ad_insights.get("objective", "")
-            kpi = resolve_kpi(db, user.tenant_id, camp_id, obj, "OFFSITE_CONVERSIONS", ad_insights.get("actions", []))
+            _diag_og = ""
+            if _plat == "fb":
+                _fcrow = db.query(AdsCache).filter(
+                    AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == _act_id,
+                    AdsCache.platform == "fb").first()
+                if _fcrow:
+                    _og_map = {str(_id_of(s.get("id"))): (s.get("optimization_goal") or "").upper()
+                               for s in json.loads(_fcrow.adsets_json or "[]") if s.get("id")}
+                    _diag_og = _og_map.get(str(_id_of(ad_insights.get("adset_id"))), "")
+            kpi = resolve_kpi(db, user.tenant_id, camp_id, obj,
+                              _diag_og or "OFFSITE_CONVERSIONS", ad_insights.get("actions", []))
             result["fb_conversions"] = kpi["conversions"]
             result["fb_kpi_source"] = kpi.get("source", "")
             result["fb_kpi_field"] = kpi.get("kpi_field", "")

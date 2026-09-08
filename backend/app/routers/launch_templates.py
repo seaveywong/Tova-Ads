@@ -717,23 +717,34 @@ def update_template(tid: int, body: TemplateIn,
 
 
 @router.delete("/{tid}/hard")
-def hard_delete_template(tid: int, user: CurrentUser = Depends(require_permission("ads.create")),
+def hard_delete_template(tid: int, force: int = 0,
+                         user: CurrentUser = Depends(require_permission("ads.create")),
                          db: Session = Depends(get_db)):
-    """永久删除模板（真删行，非归档）。有部署历史的拒删（FK 挡），无历史的直接删。"""
+    """永久删除模板（真删行，非归档）。
+
+    无部署历史直接删；有历史的需 force=1——部署 job 行保留（投放记录不丢，job 自带
+    template_name 快照），仅把 template_id 解除关联后删模板。
+    """
     t = db.query(LaunchTemplate).filter(
         LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
-    _has_jobs = db.query(LaunchJob).filter(
-        LaunchJob.template_id == tid, LaunchJob.tenant_id == user.tenant_id).first()
-    if _has_jobs:
-        raise HTTPException(400, f"该模板有 {1} 次部署历史——永久删除会丢失投放记录，建议用「归档」（归档后不再显示但保留历史）。如确要删除请先清理部署记录")
+    _jobs = db.query(LaunchJob).filter(
+        LaunchJob.template_id == tid, LaunchJob.tenant_id == user.tenant_id).all()
+    if _jobs and not force:
+        raise HTTPException(400, f"该模板有 {len(_jobs)} 次部署历史——确认删除请带 force=1（部署记录保留，仅解除关联）；或改用「归档」")
+    detached = 0
+    if _jobs:
+        for j in _jobs:
+            j.template_id = None   # job 保留 template_name 快照，历史不丢
+            detached += 1
     db.delete(t)
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="launch_template", target_id=str(tid),
-              action_type="hard_delete", source="user", result="success", metadata={"name": t.name})
+              action_type="hard_delete", source="user", result="success",
+              metadata={"name": t.name, "force": bool(force), "jobs_detached": detached})
     db.commit()
-    return {"id": tid, "deleted": True}
+    return {"id": tid, "deleted": True, "jobs_detached": detached}
 
 
 @router.delete("/{tid}")

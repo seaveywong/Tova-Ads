@@ -114,6 +114,21 @@ _POOR_FALLBACK_TYPES = {
 }
 SOURCE_LABELS = {"manual": "手动", "rule": "规则", "ai": "AI", "fallback": "兜底", "default": "默认", "error": "错误"}
 
+# 批I：组优化目标 → KPI 字段确定性映射（FB「成效」列 = 广告组 optimization_goal 对应的 action）。
+# 矩阵 obj|og 未命中时优先按组优化目标取数，再看 objective 维度——否则 TRAFFIC 系列下的
+# Click-to-WhatsApp/对话广告（组=CONVERSATIONS）会按系列 fallback 数成链接点击，而 FB 实际
+# 显示会话数（生产实证 2026-09-09：系列 Te 六个组 CONVERSATIONS/WHATSAPP，FB 成效=1 会话，
+# 旧口径数成 6 点击）。OFFSITE_CONVERSIONS/VALUE/THRUPLAY 等无确定性单一 action 的不进表，
+# 继续走 objective 级映射（需要 custom_event_type / 视频口径，语义不唯一）。
+_OPT_GOAL_FIELD_DEFAULTS = {
+    "CONVERSATIONS": "onsite_conversion.messaging_conversation_started_7d",
+    "LINK_CLICKS": "link_click",
+    "LANDING_PAGE_VIEWS": "landing_page_view",
+    "LEAD_GENERATION": "onsite_conversion.lead_grouped",
+    "QUALITY_LEAD": "onsite_conversion.lead_grouped",
+    "PAGE_LIKES": "like",
+}
+
 
 def _action_count(actions: list, field: str) -> int:
     for a in actions:
@@ -210,10 +225,10 @@ def _resolve_kpi_impl(db: Session, tenant_id: int, campaign_id: str, objective: 
                 "conversions": _action_count(actions, manual.kpi_field),
                 "source": "manual", "target_cpa": target_cpa}
 
-    # L4：objective × opt_goal 矩阵（DB 映射）→ objective fallback（DB 映射）
+    # L4：objective × opt_goal 矩阵（DB 映射）→ 批I 组优化目标确定性映射 → objective fallback（DB 映射）
     matrix = mapping.get("matrix", {})
     by_obj = mapping.get("by_objective", {})
-    field = matrix.get(f"{obj}|{og}") or by_obj.get(obj)
+    field = matrix.get(f"{obj}|{og}") or _OPT_GOAL_FIELD_DEFAULTS.get(og) or by_obj.get(obj)
     if field:
         # L1/L2 AI 纠偏：规则推出辅助字段时，AI 推断更准
         if field in _AUXILIARY_FIELDS:

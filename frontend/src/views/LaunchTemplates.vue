@@ -1637,6 +1637,41 @@ const openAssetPicker = async () => {
   try { pickerAssets.value = await GET('/assets') } catch {}
   pickerLoading.value = false
 }
+// 选择器内直传（批J：不用跳素材库页）——上传完成自动选中新素材（多选时选最后一个）
+const _API_BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
+const pickerUploading = ref(false)
+const pickerFileInput = ref(null)
+const onPickerUpload = async (ev) => {
+  const files = [...(ev.target.files || [])]
+  ev.target.value = ''
+  if (!files.length || pickerUploading.value) return
+  pickerUploading.value = true
+  let lastAsset = null
+  let failMsg = ''
+  for (const f of files) {
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      fd.append('name', f.name)
+      const r = await fetch(_API_BASE + '/assets/upload', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') },
+        body: fd,
+      })
+      if (r.status === 401) { localStorage.removeItem('tova_token'); throw new Error(t('error.unauthorized')) }
+      const data = await r.json()
+      if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : (data.detail?.name || JSON.stringify(data.detail || '').slice(0, 120)))
+      lastAsset = data
+    } catch (e) { failMsg = e.message || String(e) }
+  }
+  pickerUploading.value = false
+  if (failMsg) ElMessage.error(t('launch.pickerUploadFail', { msg: failMsg }))
+  if (lastAsset) {
+    ElMessage.success(t('launch.pickerUploadOk'))
+    try { pickerAssets.value = await GET('/assets') } catch {}
+    pickAsset(lastAsset)
+  }
+}
 const openPreview = (a) => { previewAsset.value = a; previewOpen.value = true }
 const fmtSize = (n) => { if (!n) return ''; if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return Math.floor(n/1e3)+'K'; return String(n) }
 // 保存
@@ -1774,7 +1809,8 @@ const hardDeleteTpl = async (tpl) => {
       t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
   } catch { return }
   try {
-    await DELETE('/launch-templates/' + tpl.id + '/hard')
+    // force=1：有部署历史也删（job 行保留 template_name 快照，仅解除关联——投放记录不丢）
+    await DELETE('/launch-templates/' + tpl.id + '/hard?force=1')
     ElMessage.success(t('launch.hardDeleted')); await load()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
@@ -3039,6 +3075,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
     <!-- 素材选择器 -->
     <el-drawer v-model="assetPickerOpen" :title="t('launch.selectAsset')" direction="rtl" size="560px" append-to-body>
+      <div class="picker-bar" style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <input ref="pickerFileInput" type="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo" style="display:none" @change="onPickerUpload" />
+        <button class="btn sm" :disabled="pickerUploading || pickerLoading" @click="pickerFileInput?.click()">{{ pickerUploading ? t('launch.pickerUploading') : '↑ ' + t('launch.pickerUpload') }}</button>
+      </div>
       <div class="picker-grid" v-loading="pickerLoading">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
