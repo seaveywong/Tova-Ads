@@ -322,7 +322,8 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <div class="card-ops">
           <button class="op" @click="previewForm(item)">{{ t('common.preview') }}</button>
           <button class="op" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
-          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button><button class="op sm" style="color:var(--error)" @click="hardDelete(item, 'form')">{{ t('common.delete') }}</button>
+          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button>
+          <button class="op sm" style="color:var(--error)" @click="hardDelete(item, 'form')">{{ t('common.delete') }}</button>
         </div>
       </div>
       <div v-if="!filteredForms.length && !loading" class="empty">{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
