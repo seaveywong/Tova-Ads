@@ -1307,7 +1307,8 @@ const unsubscribeLeads = async () => {
 .manager-table tfoot { background:var(--bg2); font-weight:600 }
 .sort-button, .entity-name, .preview-button { border:0; background:transparent; color:inherit; padding:0; cursor:pointer; font:inherit; text-align:left }
 .sort-button:disabled { cursor:default }
-.entity-name { color:var(--ac); font-weight:500; overflow-wrap:anywhere }
+.entity-name { color:var(--t1); font-weight:500; overflow-wrap:anywhere }
+.entity-name:hover { color:var(--ac); text-decoration:underline }
 .preview-button { flex-shrink:0 }
 .inline-budget { padding:8px; gap:12px }
 .inline-budget label { display:flex; align-items:center; gap:12px }
