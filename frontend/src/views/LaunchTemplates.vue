@@ -2452,6 +2452,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <div v-else class="ro-field">{{ t('launch.convLocNone') }}</div>
                   <span class="hint">{{ t('launch.convLocationHint') }}</span>
 </div>
+                <!-- 成效目标（优化目标）覆盖：紧跟转化位置（FB 组面板顺序 名称→转化位置→成效目标→
+                     数据集/像素→…）；按 OPT_GOALS_BY_OBJECTIVE×objective 过滤，空=按转化位置矩阵自动 -->
+                <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
+                  <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
+                    <el-option value="" :label="t('launch.optAutoByLoc')" />
+                    <el-option v-for="g in optGoalsForObj" :key="g.v" :value="g.v" :label="t(g.l)" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+</div>
                 <div v-if="!s.conv_location && convLocationsForObj.length" class="loc-hint">{{ t('launch.locPickHint') }}</div>
                 <!-- 转化事件：转化位置=网站 且 SALES/LEADS（写系列级 conversion_goal → 部署映射 custom_event_type） -->
                 <div v-show="s.conv_location === 'website' && convGoalsForObjective.length" class="row"><label>{{ t('launch.conversionGoal') }}</label>
@@ -2671,14 +2680,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     </div>
                   </div>
                 </div>
-                <!-- 优化目标覆盖：按 OPT_GOALS_BY_OBJECTIVE×objective 过滤（空=按转化位置矩阵自动） -->
-                <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
-                  <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
-                    <el-option value="" :label="t('launch.optAutoByLoc')" />
-                    <el-option v-for="g in optGoalsForObj" :key="g.v" :value="g.v" :label="t(g.l)" />
-                  </el-select>
-                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
-</div>
                 <!-- 受益人/付款人披露（FB 广告组层 payload 字段 dsa_*；数据存模板级，所有组共用） -->
                 <hr class="sep" />
                 <div class="sec-title">{{ t('launch.disclosure') }}</div>

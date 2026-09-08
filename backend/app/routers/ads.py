@@ -475,7 +475,21 @@ def list_ads(
     # cache_ages=每账户缓存龄秒数（前端据此提示哪些账户该 live-status 核对）。
     def _ads_at(c):
         return getattr(c, "ads_updated_at", None) or c.updated_at
-    _agg_caches = [c for c in caches if _token_status.get(c.act_id, True)] or caches
+    # 批K v2：排除两类"数据断流"账户——①无可用令牌；②广告层数据龄 >1h（有兜底令牌但对
+    # 该账户无权限/令牌过期，选得出令牌≠拉得动数据，Roly 实证：token_status=true 但 cache
+    # 停更 23h）。正常链路最慢 15min 结构同步 + 5min 巡检，1h 未动=断流。全空回退全量。
+    _t0 = datetime.now(timezone.utc)
+    _agg_caches = []
+    for c in caches:
+        if not _token_status.get(c.act_id, True):
+            continue
+        _at = _ads_at(c)
+        if _at:
+            _u = _at if _at.tzinfo else _at.replace(tzinfo=timezone.utc)
+            if (_t0 - _u).total_seconds() > 3600:
+                continue
+        _agg_caches.append(c)
+    _agg_caches = _agg_caches or caches
     _cached_ats = [_ads_at(c) for c in _agg_caches if _ads_at(c)]
     _cache_ages: dict[str, int] = {}
     _now_utc = datetime.now(timezone.utc)
