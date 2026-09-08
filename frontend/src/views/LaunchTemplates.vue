@@ -852,6 +852,19 @@ const toggleTreeExpand = (key) => {
   s.has(key) ? s.delete(key) : s.add(key)
   expandedTreeKeys.value = s
 }
+// 组卡「出价控制」折叠区（默认收起；已设覆盖值时标题行右侧显示当前值，防隐藏已有配置）
+const bidOpenKeys = ref(new Set())
+const toggleBidCtrl = (key) => {
+  const s = new Set(bidOpenKeys.value)
+  s.has(key) ? s.delete(key) : s.add(key)
+  bidOpenKeys.value = s
+}
+const bidCtrlSummary = (s) => {
+  const parts = []
+  if (BID_NEEDS_AMOUNT.includes(form.value.bid_strategy) && s.bid_amount_usd !== null && s.bid_amount_usd !== '') parts.push('$' + s.bid_amount_usd)
+  if (BID_NEEDS_ROAS.includes(form.value.bid_strategy) && s.minimum_roas !== null && s.minimum_roas !== '') parts.push('ROAS ' + s.minimum_roas)
+  return parts.join(' · ')
+}
 const expandAllTree = () => { expandedTreeKeys.value = new Set(tree.value.adsets.map(s => s.key)) }
 const addTreeAdset = () => {
   if (tree.value.adsets.length >= TREE_ADSETS_MAX) return ElMessage.warning(t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }))
@@ -1138,7 +1151,7 @@ const openNew = (p) => {
 const _startNew = (p) => { editing.value = null; form.value = blankForm();
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：游离ref重置，防跨模板污染出价策略
   if (p) form.value.platform = p; editingAsset.value = null; validationErrors.value = []; editOpen.value = true
-  expandedAdKeys.value = new Set()
+  expandedAdKeys.value = new Set(); bidOpenKeys.value = new Set()
   if ((p || 'fb') === 'tt') {
     editMode.value = 'flat'; tree.value = { adsets: [] }; expandedTreeKeys.value = new Set()
     selectTreeNode('campaign')
@@ -1238,7 +1251,7 @@ const openEdit = async (tpl) => {
   }
   // 结构模式模板：structure（JSON 串）→ 解析进树 + 进结构模式（TT 模板不支持结构，强制平铺）
   tree.value = { adsets: [] }; expandedTreeKeys.value = new Set(); selectTreeNode('campaign')
-  expandedAdKeys.value = new Set(); nodeReuseInputs.value = {}
+  expandedAdKeys.value = new Set(); nodeReuseInputs.value = {}; bidOpenKeys.value = new Set()
   editMode.value = 'flat'
   if (tpl.structure && !isTt.value) {
     try {
@@ -2017,10 +2030,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         </template>
         <!-- FB ABO structure mode: template default daily budget (nodes fall back to it) -->
         <div v-else-if="editMode==='tree'" class="row"><label>{{ t('launch.treeDefaultDailyBudget') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.treeBudgetPh') }}</span></div>
-        <!-- bid strategy + bid amount / minimum ROAS (FB) -->
+        <!-- bid strategy (campaign-level) + bid amount / minimum ROAS (FB)：模板默认值，各广告组在组卡「出价控制」逐组覆盖（ABO/CBO 下 FB 出价额都在组级生效） -->
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
-        <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.bidAmountUsd') }}</label><input v-model.number="form.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.bidAmountPh')" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
-        <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.minimumRoas') }}</label><input v-model.number="form.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.minRoasPh')" /></div>
+        <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.bidAmountUsd') }}</label><input v-model.number="form.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.bidAmountPh')" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span><span class="hint">{{ t('launch.bidDefaultHint') }}</span></div>
+        <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.minimumRoas') }}</label><input v-model.number="form.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.minRoasPh')" /><span class="hint">{{ t('launch.bidDefaultHint') }}</span></div>
         <!-- 系列支出上限（0091）：达到即停整个系列——与预算（控制投放节奏）不同 -->
         <div class="row"><label>{{ t('launch.spendCapUsd') }}</label>
           <input v-model.number="form.spend_cap_usd" type="number" min="1" step="1" class="inp" :placeholder="t('launch.spendCapPh')" />
@@ -2034,22 +2047,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
 </div>
-        <!-- IG 身份（0091）：创意以该 IG 账号展示（IG 版位）；留空=用主页关联的 IG -->
-        <div v-if="!isTt" class="row"><label>{{ t('launch.instagramActor') }}</label>
-          <input v-model.trim="form.instagram_actor_id" class="inp" :placeholder="t('launch.instagramActorPh')" />
-          <span class="hint">{{ t('launch.instagramActorHint') }}</span>
-</div>
-        <!-- structure mode campaign extras: pixel & disclosure (flat keeps pixel in the ad section) -->
-        <template v-if="editMode === 'tree'">
-        <hr class="sep" />
-        <div class="sec-title">{{ t('launch.treeCampaignExtra') }}</div>
-        <div class="row"><label>{{ t('launch.pixelId') }}</label>
-          <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ t('launch.pixelIdHint') }}</span>
-</div>
-        <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
-        <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
-        </template>
 </div>
 </div>
 </div><!-- /sec1 -->
@@ -2077,10 +2074,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div v-if="expandedTreeKeys.has(s.key)" class="as-card-body form">
                 <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="s.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
+                <!-- 转化设置（FB 广告组层）：转化发生位置 + 转化像素 -->
+                <div class="sec-title">{{ t('launch.convSettingsTitle') }}</div>
                 <!-- conversion location: auto by objective (read-only) -->
                 <div class="row"><label>{{ t('launch.convLocation') }}</label>
                   <div class="ro-field">{{ convLocationText }}</div>
                   <span class="hint">{{ t('launch.convLocationHint') }}</span>
+</div>
+                <!-- 像素（promoted_object，广告组层）：模板级默认值——部署链按 item.pixel_id > 模板取，绑定模板字段 -->
+                <div class="row"><label>{{ t('launch.treePixelLabel') }}</label>
+                  <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+                  <span class="hint">{{ t('launch.treePixelHint') }}</span>
 </div>
                 <!-- budget & schedule (ABO: per-set; CBO: budget sits on the campaign) -->
                 <template v-if="!cboOn">
@@ -2113,11 +2117,23 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <button :class="{on:s.pacing==='accelerated'}" @click="s.pacing='accelerated'">{{ t('launch.pacingAccelerated') }}</button>
                   </div>
 </div>
-                <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeBidOverride') }}</label>
-                  <input v-model.number="s.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+                <!-- 出价控制覆盖（广告组层；ABO/CBO 下 FB 出价额都在组级生效，故两种模式都显示；默认收起） -->
+                <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy) || BID_NEEDS_ROAS.includes(form.bid_strategy)" class="bid-ctrl">
+                  <button type="button" class="bid-ctrl-head" @click="toggleBidCtrl(s.key)">
+                    <span class="t-arrow" :class="{ open: bidOpenKeys.has(s.key) }">▶</span>
+                    <span>{{ t('launch.bidControlTitle') }}</span>
+                    <span v-if="bidCtrlSummary(s)" class="bid-ctrl-val">{{ bidCtrlSummary(s) }}</span>
+                  </button>
+                  <template v-if="bidOpenKeys.has(s.key)">
+                  <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeBidOverride') }}</label>
+                    <input v-model.number="s.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+                    <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
-                <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeRoasOverride') }}</label>
-                  <input v-model.number="s.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+                  <div v-if="BID_NEEDS_ROAS.includes(form.bid_strategy)" class="row"><label>{{ t('launch.treeRoasOverride') }}</label>
+                    <input v-model.number="s.minimum_roas" type="number" min="0" step="0.1" class="inp" :placeholder="t('launch.treeFallbackHint')" />
+                    <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+</div>
+                  </template>
 </div>
                 <div class="row"><label>{{ t('launch.treeAudienceOverride') }}</label>
                   <el-select v-model="s.audience_id" filterable size="small" style="width:100%">
@@ -2136,6 +2152,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   </el-select>
                   <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
+                <!-- 受益人/付款人披露（FB 广告组层 payload 字段 dsa_*；数据存模板级，所有组共用） -->
+                <hr class="sep" />
+                <div class="sec-title">{{ t('launch.disclosure') }}</div>
+                <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /><span class="hint">{{ t('launch.treeDisclosureHint') }}</span></div>
+                <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
               </div>
             </div>
             <button class="t-add-adset" @click="addTreeAdset">{{ t('launch.treeAddGroup') }}</button>
@@ -2190,6 +2211,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </template>
         <div v-else class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
+        <!-- 像素（广告组层转化设置；FB/TT 的转化追踪像素都配置在组层，自广告段移入） -->
+        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
+          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
+          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
+</div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
         <!-- 特殊广告类别已声明：FB 强制忽略年龄/性别/部分兴趣定向（合规收窄，提前告知） -->
@@ -2500,12 +2527,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </template>
 </template>
-        <!-- 像素（新建帖/跟帖都要——转化追踪依赖；原在①系列，现与落地页/子码同区） -->
-        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
-          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
-          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
-</div>
+        <!-- 像素已移至②广告组段「转化设置」（FB/TT 均为组层字段） -->
 </div>
 </template>
         <!-- structure mode: ad groups -> one collapsible mini-card per ad -->
@@ -2528,6 +2550,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div v-if="expandedAdKeys.has(a.key)" class="ad-card-body form">
                 <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="a.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
+                <!-- 身份（FB 广告层）：主页在系列段选定；IG 为模板级全局身份（structure 无节点字段，不加节点级） -->
+                <div class="sec-title">{{ t('launch.adIdentitySec') }}</div>
+                <div class="row"><label>{{ t('launch.instagramActor') }}</label>
+                  <input v-model.trim="form.instagram_actor_id" class="inp" :placeholder="t('launch.instagramActorPh')" />
+                  <span class="hint">{{ t('launch.treeIgGlobalHint') }}</span>
+</div>
                 <div class="row"><label>{{ t('launch.treePostSource') }}</label>
                   <el-radio-group :model-value="a.post_source" size="small" @change="v => setNodePostSource(a, v)">
                     <el-radio-button value="new">{{ t('launch.postSourceNew') }}</el-radio-button>
@@ -3312,6 +3340,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .t-op.danger:hover{color:var(--error)}
 .t-add-adset{margin-top:4px;padding:6px;border:1px dashed var(--bd);background:none;color:var(--t3);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit}
 .t-add-adset:hover{color:var(--ac);border-color:var(--ac)}
+.bid-ctrl-head{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;font-family:inherit}
+.bid-ctrl-head:hover{color:var(--ac)}
+.bid-ctrl-val{margin-left:auto;font-weight:500;color:var(--ac)}
 
 /* 部署抽屉：结构模板树概览卡 */
 .deploy-tree-card{border:1px solid var(--ac);background:rgba(10,132,255,.06);border-radius:8px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:4px}
