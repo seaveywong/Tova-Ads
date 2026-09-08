@@ -447,15 +447,36 @@ def list_ads(
         ad["object_story_id"] = _sid
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
 
+    # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
+    # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）。
+    # 按 platform 分发：FB 走 cred_for_account_op；TT 走 tt_client_for_account（FB 版对
+    # platform='tt' 直接 raise，曾恒 True 漏标）。FB 的租户级 RR 兜底保留——巡检同一函数
+    # 选令牌，兜底令牌拉得动就真会更新（同源判定自洽），拉不动 skip 告警会发声。
+    from ..core.fb_tokens import cred_for_account_op as _cred_ok
+    _token_status = {}
+    for _a in _acc_rows:
+        try:
+            if _acc_platform(_a) == "tt":
+                from ..core.fb_tokens import tt_client_for_account
+                _token_status[_a.act_id] = bool(
+                    tt_client_for_account(db, user.tenant_id, _a.act_id, "read")[0])
+            else:
+                _token_status[_a.act_id] = bool(
+                    _cred_ok(db, user.tenant_id, _a.act_id, "read"))
+        except Exception:
+            _token_status[_a.act_id] = True   # 查询失败按可用（不误标快照）
     # cached_at/last_sync/cache_ages 全按 ads 层时间戳（0086：ads_updated_at，回退 updated_at）——
     # 用户在管理器看的核心是广告行，结构层（campaigns/adsets 15min sync 刷 updated_at）的新鲜
     # 不该冒充广告层新鲜（令牌切换间隙曾「缓存不到1分钟」配陈旧广告数据误导）。
-    # cached_at 取全部账户的最旧值（语义=最迟也是这个时间的数据）。
+    # 批K：令牌已断的账户 cache 恒冻结（拉不动）——把它算进「数据更新至」会让整页时间戳被
+    # 僵尸账户钉死（Roly-V21 令牌过期后页头停在 9/8 06:36，用户连问多次）。死令牌账户的
+    # 冻结状态由行内「快照」标+顶部警示条表达；全部账户都死时回退全量（仍给个时间）。
     # last_sync/cache_ages 是实时性戳：last_sync=最新一行的广告层时间（前端显示"数据 X 分钟前"）；
     # cache_ages=每账户缓存龄秒数（前端据此提示哪些账户该 live-status 核对）。
     def _ads_at(c):
         return getattr(c, "ads_updated_at", None) or c.updated_at
-    _cached_ats = [_ads_at(c) for c in caches if _ads_at(c)]
+    _agg_caches = [c for c in caches if _token_status.get(c.act_id, True)] or caches
+    _cached_ats = [_ads_at(c) for c in _agg_caches if _ads_at(c)]
     _cache_ages: dict[str, int] = {}
     _now_utc = datetime.now(timezone.utc)
     for c in caches:
@@ -527,24 +548,6 @@ def list_ads(
     except Exception:
         for ad in all_ads:
             ad.pop("_ih", None)
-    # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
-    # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）。
-    # 按 platform 分发：FB 走 cred_for_account_op；TT 走 tt_client_for_account（FB 版对
-    # platform='tt' 直接 raise，曾恒 True 漏标）。FB 的租户级 RR 兜底保留——巡检同一函数
-    # 选令牌，兜底令牌拉得动就真会更新（同源判定自洽），拉不动 skip 告警会发声。
-    from ..core.fb_tokens import cred_for_account_op as _cred_ok
-    _token_status = {}
-    for _a in _acc_rows:
-        try:
-            if _acc_platform(_a) == "tt":
-                from ..core.fb_tokens import tt_client_for_account
-                _token_status[_a.act_id] = bool(
-                    tt_client_for_account(db, user.tenant_id, _a.act_id, "read")[0])
-            else:
-                _token_status[_a.act_id] = bool(
-                    _cred_ok(db, user.tenant_id, _a.act_id, "read"))
-        except Exception:
-            _token_status[_a.act_id] = True   # 查询失败按可用（不误标快照）
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",

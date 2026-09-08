@@ -216,7 +216,11 @@ const nowTick = ref(Date.now())
 let _ageTimer = null
 const cacheAgeMin = computed(() => {
   void nowTick.value
-  const times = curList.value.map(a => a.snapshot_at).filter(Boolean).sort()
+  // 死令牌账户的行恒冻结（拉不动）——不算进聚合缓存龄，否则整页被僵尸行钉死（批K）
+  const dead = new Set(deadAccounts.value)
+  let rows = curList.value.filter(a => !dead.has(a.act_id))
+  if (!rows.length) rows = curList.value
+  const times = rows.map(a => a.snapshot_at).filter(Boolean).sort()
   const ls = times[0]
   if (!ls) return null
   const ts = new Date(ls).getTime()
