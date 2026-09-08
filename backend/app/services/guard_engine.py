@@ -1978,7 +1978,8 @@ def run_inspection(force: bool = False):
         if _degraded:
             _loc = tenant_locale(db, 1)
             _t_lf, _b_lf = notify_text(_loc, "live_fetch_degraded",
-                                       streak=_streak, n=_n_fallback)
+                                       streak=_streak, n=_n_fallback,
+                                       mins=_streak * 5, cache_min=15)
             # 带具体账户名单（用户反馈：只说"1 个账户"不可行动，跟 coverage_lost 同格式）
             _fb_names = [_r.get("fallback_name") for _r in results
                          if _r.get("live_fallback") and _r.get("fallback_name")]

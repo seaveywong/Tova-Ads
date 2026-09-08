@@ -237,10 +237,10 @@ NOTIFY = {
     },
     # live /ads 拉取连续降级（连续多轮 cache 兜底——巡检覆盖降级为 15min 缓存口径）
     "live_fetch_degraded": {
-        "title": {"zh": "🟡 live 广告拉取连续 {streak} 轮降级", "en": "🟡 Live Ad Fetch Degraded for {streak} Rounds"},
+        "title": {"zh": "🟡 广告数据卡在旧缓存——{n} 个账户拉不到最新数据", "en": "🟡 Ad Data Stuck on Stale Cache — {n} Accounts"},
         "body": {
-            "zh": "连续 {streak} 轮 live /ads 拉取失败或为空（本轮 {n} 个账户用 ads_cache 兜底），巡检覆盖降级为 15 分钟缓存口径，请检查令牌/限流。",
-            "en": "Live /ads fetch has failed or returned empty for {streak} consecutive rounds ({n} accounts fell back to the ads_cache this round); inspection coverage is degraded to the 15-minute cache scope. Please check tokens and rate limits.",
+            "zh": "已连续 {streak} 轮（约 {mins} 分钟）无法从 Facebook 拉到实时广告数据，以下账户只能用 {cache_min} 分钟前的旧数据顶替。止损规则仍在跑但看到的是旧数据，不会漏停（偏保守）。\n根本原因通常是：令牌失效/被移除，或 FB 接口限流。\n处理：重新授权令牌，或把不用了的账户移除纳管。",
+            "en": "For {streak} consecutive rounds (~{mins} min), we could not fetch fresh ad data from Facebook. The accounts below are running on {cache_min}-minute-old cached data. Stop-loss rules are still active but seeing stale data (conservative, no missed stops).\nRoot cause is usually: token expired/removed, or FB API rate limiting.\nFix: re-authorize the token, or unmanage accounts you no longer use.",
         },
     },
     # ── 预算进度 ──
