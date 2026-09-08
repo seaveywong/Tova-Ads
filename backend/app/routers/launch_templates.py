@@ -593,15 +593,22 @@ class TemplateIn(BaseModel):
         ① conv_location 必须在该 objective 的合法集合（蓝图转化位置全表）；
         ② 组 optimization_goal 覆盖必须与 objective 兼容（审计 S8/C4：旧 UI 全集下拉可选出 FB 必拒组合）；
         ③ 两者都显式时交叉校验（方案 §4.1：显式 conv_location 优先，不兼容的优化目标 400/422）。"""
+        obj = normalize_objective(self.objective or "")
+        allowed_goal = OPT_GOALS_BY_OBJECTIVE.get(obj, set())
+        # 模板级 optimization_goal 兜底（批次II 修审计 C4 残留侧）：平铺模式与树节点回退共用
+        # 此字段，前端 watcher 切目标会清但历史残留/旧数据直写仍可送达——非空且不在该目标
+        # 白名单时 422 带可用清单（组级覆盖在下方逐组校验，双保险）
+        _tpl_og = (self.optimization_goal or "").strip().upper()
+        if _tpl_og and _tpl_og not in allowed_goal:
+            raise ValueError(f"优化目标「{_tpl_og}」与目标 {self.objective} 不兼容"
+                             f"（可用：{sorted(allowed_goal)}）")
         if not self.structure:
             return self
         try:
             data = json.loads(self.structure)
         except Exception:
             return self  # 形状错误由 structure 字段校验器拦
-        obj = normalize_objective(self.objective or "")
         allowed_loc = CONV_LOCATIONS_BY_OBJECTIVE.get(obj, set())
-        allowed_goal = OPT_GOALS_BY_OBJECTIVE.get(obj, set())
         for si, s in enumerate(data.get("adsets") or [], 1):
             nm = s.get("name") or f"组{si}"
             loc = (s.get("conv_location") or "").strip().lower()
@@ -1049,6 +1056,15 @@ def preflight_deploy(tid: int, body: PreflightIn,
         account_name=(acc.name if acc else ""), account_id=body.act_id,
         asset_name=((asset.name or asset.filename or "") if asset else ""),
         template_name=t.name, platform="fb")
+    # 落地 URL 跟随（批次II 修 B9/B5）：绑了落地页 → 用页行实时解析的 base（与部署 runner 同口径，
+    # 预检=所见即所发）；页不存在/解析失败回落插值快照
+    if t.landing_page_id:
+        try:
+            _pf_base = _resolve_landing_base(db, user.tenant_id, int(t.landing_page_id))[0] or ""
+            if _pf_base:
+                _lp_url = _pf_base
+        except Exception:
+            pass
     try:
         _p_btype = (t.budget_type or "daily").lower()
         _p_lifetime_fb = (usd_to_fb_amount(float(t.lifetime_budget_usd), currency, cr.rate if cr else 1.0)
@@ -1076,7 +1092,8 @@ def preflight_deploy(tid: int, body: PreflightIn,
             landing_url=_lp_url, bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
             targeting=targeting, dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
-            destination_type_override=t.destination_type or "", extra=advanced,
+            destination_type_override=t.destination_type or "",
+            extra=_strip_adv_bid(advanced, _p_bid_fb),   # 出价单一管道（G2②）：与部署 runner 同口径
             budget_type=_p_btype, lifetime_budget=_p_lifetime_fb,
             start_time=(t.schedule_start or ""), end_time=(t.schedule_end or ""),
             pacing=(t.pacing or ""), bid_amount=_p_bid_fb,
@@ -1243,6 +1260,21 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             account_id=body.act_id,
             asset_name=((first_asset.name or first_asset.filename or "") if first_asset else ""),
             template_name=t.name or "", platform="fb")
+        # 落地 URL 跟随（批次II 修 B9/B5）：首广告绑了落地页 → 用页行实时 base（与部署 runner
+        # 同口径）；页不存在/解析失败回落插值快照
+        if first_ad.get("landing_page_id"):
+            try:
+                _pf_lp_base = _resolve_landing_base(db, tenant_id, int(first_ad["landing_page_id"]))[0] or ""
+                if _pf_lp_base:
+                    _lp_url = _pf_lp_base
+            except Exception:
+                pass
+        # 出价额样例（G2② 单管道口径）：首组 bid_amount_usd（组级 > 模板级）→ 目标账户本币 minor units
+        _pf_bid_usd = adsets[0].get("bid_amount_usd")
+        if _pf_bid_usd in (None, ""):
+            _pf_bid_usd = t.bid_amount_usd
+        _pf_bid_fb = (usd_to_fb_amount(float(_pf_bid_usd), currency, cr.rate if cr else 1.0)
+                      if _pf_bid_usd else None)
         campaign_payload = build_campaign(
             name=campaign_name, objective=t.objective,
             daily_budget=camp_budget_fb if is_cbo else None,
@@ -1259,12 +1291,16 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=(adsets[0].get("optimization_goal") or t.optimization_goal or ""),
             billing_event=(adsets[0].get("billing_event") or t.billing_event or ""),
-            destination_type_override=t.destination_type or "", extra=_parse_advanced(t),
+            destination_type_override=t.destination_type or "",
+            # 出价单一管道（G2②）：首组样例与部署 runner 同口径——组级 bid_amount_usd 换算值
+            # 非空时剥离 adv.bid_amount（美分原始值不再覆盖换算值）
+            extra=_strip_adv_bid(_parse_advanced(t), _pf_bid_fb),
             # 批次I：组节点转化位置/版位/CTW 号码（与部署 runner 同构；destination_type_override
             # 在 conv_location 非空时被 builder 忽略——隐患A 修复同口径）
             conv_location=(adsets[0].get("conv_location") or ""),
             placements=_node_placements(adsets[0] or {}),
-            whatsapp_phone_number=(t.whatsapp_phone_number or ""))
+            whatsapp_phone_number=(t.whatsapp_phone_number or ""),
+            bid_amount=_pf_bid_fb)
         creative_payload = build_creative(
             page_id=(body.page_id or t.page_id or ""), objective=t.objective,
             conversion_goal=t.conversion_goal, landing_url=_lp_url,
@@ -1544,7 +1580,7 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
     空 = 单模板模式沿用 tpl.name_prefix。job=None 时只写 item 状态不动 job 计数（批量汇总用）。
     """
     from ..core.ad_ops import (deploy_one_account_tt, ensure_tt_file_id_for_account,
-                               tt_client_for_account, pick_random_copy)
+                               tt_client_for_account)
     from ..core.tt_ad_builder import normalize_tt_objective
     try:
         from ..models.fb import Account as _AccT
@@ -1575,9 +1611,10 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
         if not pixel_code and normalize_tt_objective(tpl.objective) == "WEB_CONVERSIONS":
             raise TtApiError("invalid_param",
                              "未解析到 TikTok 像素 code（转化类目标必填）：部署抽屉选 TT 像素 / 模板填像素 code / 像素库添加 platform=tt 像素")
-        # 随机组合素材 AI 文案（与 FB 链一致，增多样性；TT 创意只有 ad_text 无独立标题）
-        _rh, _rb = pick_random_copy(asset)
-        _body = _rb or (tpl.body or "")
+        # 文案优先级（批次II 修审计 A3，与 FB 链同口径）：模板手填 > 素材 AI 随机（TT 创意
+        # 只有 ad_text 无独立标题，headline 仅作 _resolve_page_post 的兜底文案源）
+        from ..core.ad_ops import pick_ad_copy
+        _tt_head, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
         # 追踪参数插值（与 FB 链同口径）：{{campaign.name}}=系列名（批量=素材名）
         _tt_sn = name_prefix_override or tpl.name_prefix
         _lp_url = _interp_landing_url(
@@ -1590,7 +1627,7 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
             conversion_goal=tpl.conversion_goal, pixel_code=pixel_code,
             landing_url=_lp_url, daily_budget=daily_budget_tt,
             budget_mode=tpl.budget_mode, name_prefix=name_prefix_override or tpl.name_prefix,
-            headline=_rh or (tpl.headline or ""), body=_body, cta_type=tpl.cta_type,
+            headline=_tt_head, body=_body, cta_type=tpl.cta_type,
             image_file_id=image_file_id, video_file_id=video_file_id,
             subcode_slug=tpl.subcode_slug, subcode_link=link,
             targeting=_resolve_tt_targeting(sdb, tpl.audience_id, tpl.audience_json or "", tenant_id),
@@ -1708,6 +1745,16 @@ def _parse_advanced(tpl: LaunchTemplate) -> dict | None:
         return cfg if isinstance(cfg, dict) else None
     except Exception:
         return None
+
+
+def _strip_adv_bid(adv: dict | None, bid_fb) -> dict | None:
+    """出价单一管道（批次II 修审计 G2②）：模板出价控制（bid_amount_usd 按账户本币换算的
+    bid_fb）非空时，从 advanced_config 剥离 adv.bid_amount——它是旧 CPA 性能目标存的美分
+    原始值，深合并会覆盖换算值（非 USD 账户出价额错一个汇率量级）。模板出价优先；
+    两者都空时原样返回（adv.bid_amount 直通=旧行为）。返回剥离后的浅拷贝，不动调用方 dict。"""
+    if not adv or bid_fb is None or "bid_amount" not in adv:
+        return adv
+    return {k: v for k, v in adv.items() if k != "bid_amount"}
 
 
 def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str,
@@ -2098,11 +2145,9 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             _msg_body = post_content["message"]  # 跟帖：用帖子文案当欢迎语
         if _msg_body:
             message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-    # 随机组合素材 AI 文案+标题（每系列/每账户不同，增多样性）
-    from ..core.ad_ops import pick_random_copy
-    _rh, _rb = pick_random_copy(asset)
-    _headline = _rh or (tpl.headline or "")
-    _body = _rb or (tpl.body or "")
+    # 文案优先级（批次II 修审计 A3）：模板手填（平铺模式的手填层=模板表单）> 素材 AI 随机
+    from ..core.ad_ops import pick_ad_copy
+    _headline, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
     page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
     if page_post_id:
         sdb.commit()  # 持久化 page_posts 缓存
@@ -2130,8 +2175,15 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     except Exception:
         _cats = []
     # 自动建链（批次I，每广告一子码——平铺/批量口径同树）：绑了落地页且未手选子码 → 本系列
-    # 自动建 reserved 子码，base 用落地页行解析；失败降级直投 + warn（不静默）
+    # 自动建 reserved 子码，base 用落地页行解析；失败降级直投 + warn（不静默）。
+    # 落地 URL 跟随（批次II 修 B9/B5）：绑了落地页的模板一律用页行实时 base（含手选子码/
+    # 自动建链失败降级场景），不再信编辑时 landing_url 快照
     _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, item, asset)
+    if not _a_base and (tpl.landing_page_id or 0):
+        try:
+            _a_base = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))[0] or ""
+        except Exception:
+            _a_base = ""
     if _a_base:
         _lp_url = _a_base
     r = deploy_one_account(
@@ -2335,7 +2387,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 adv_node = json.loads(snode["advanced_config"]) or {}
             except Exception:
                 adv_node = {}
-        merged_adv = {**_tpl_adv, **adv_node}
+        merged_adv = _strip_adv_bid({**_tpl_adv, **adv_node}, s_bid_fb)
         # 组级转化位置/成效目标派生（批次I 统一链）：is_messaging 门、消息分流、CTA app_destination
         # 都以此为准；destination_type_override 传模板残留值——builder 在 conv_location 非空时
         # 忽略它（修隐患A：覆盖派生 MESSENGER 后被 ON_PAGE 顶掉）
@@ -2413,11 +2465,12 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         LandingAdLink.tenant_id == tenant_id,
                         LandingAdLink.status.in_(["reserved", "active"])).first()
                 node_link = _subcode_cache[node_slug]
-            # 自动建链（批次I，每广告一子码）：绑了落地页且未手选 slug 的节点 → 部署时逐展开
-            # 广告自动建 reserved 子码；base 从落地页行解析（不信 landing_url 快照——B5）
+            # 落地 URL 跟随（批次II 修 B9/B5）：绑了落地页的节点一律从落地页行实时解析 base
+            # （custom_domain/bound_subdomains/pages.dev 兜底），不再用编辑时的 landing_url 快照——
+            # 页换域名/加子域后快照变死链。自动建链（未手选 slug）同一数据源。
             node_lpid = int(anode.get("landing_page_id") or 0)
             node_lp_base = ""
-            if not node_slug and node_lpid:
+            if node_lpid:
                 if node_lpid not in _lp_base_cache:
                     _lp_base_cache[node_lpid] = _resolve_landing_base(sdb, tenant_id, node_lpid)[0] or ""
                 node_lp_base = _lp_base_cache[node_lpid]
@@ -2502,27 +2555,33 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             _msg_body = post_content["message"]
                         if _msg_body:
                             message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-                    # 文案：素材 AI 文案随机组合 > 节点文案 > 模板文案
-                    from ..core.ad_ops import pick_random_copy
-                    _rh, _rb = pick_random_copy(asset)
-                    _headline = _rh or (anode.get("headline") or "") or (tpl.headline or "")
-                    _body = _rb or (anode.get("body") or "") or (tpl.body or "")
+                    # 文案优先级（批次II 修审计 A3）：节点手填 > 素材 AI 随机 > 模板兜底
+                    from ..core.ad_ops import pick_ad_copy
+                    _headline, _body = pick_ad_copy(
+                        asset, anode.get("headline") or "", anode.get("body") or "",
+                        tpl.headline or "", tpl.body or "")
                     # 主页帖（new=每素材建 / reuse=节点引用帖）
                     page_post_id = _resolve_page_post(sdb, fb, tenant_id, vtpl, asset, _page_id, body=_body)
                     if page_post_id:
                         sdb.commit()
-                    # 落地 URL：节点占位符逐组/逐账户解值（组名真实传入）
+                    # 落地 URL：节点占位符逐组/逐账户解值（组名真实传入）；绑了落地页的节点
+                    # 用页行实时解析的 base 覆盖（快照仅作未绑页时的占位符容器）
                     _lp_url = _interp_landing_url(
                         vtpl.landing_url or "", campaign_name=campaign_name,
                         adset_name=sname, account_name=_acc_name, account_id=item.act_id,
                         asset_name=((asset.name or asset.filename or "") if asset is not None else ""),
                         template_name=tpl.name or "", platform="fb")
-                    # 子码 effective_url（与 deploy_one_account 同构；自动建的用落地页行 base）
+                    if node_lp_base:
+                        _lp_url = node_lp_base
+                    # 子码 effective_url（与 deploy_one_account 同构；base 同源=落地页行实时解析；
+                    # 无可用 base 快失败，不再兜底 tovaads.com 死链——批次II 修 B5）
                     effective_url = _lp_url
                     auto_link, auto_slug = None, ""
                     if node_slug and node_link is not None:
-                        base = _lp_url or "https://tovaads.com"
-                        effective_url = f"{base}/a/{node_slug}?ad=" + "{{ad.id}}"
+                        if not _lp_url:
+                            raise FbApiError("no_id", f"{ad_name}: 已选子码「{node_slug}」但缺少可用落地 URL"
+                                                     "（节点未绑落地页且 URL 为空），请绑定落地页或填写落地 URL")
+                        effective_url = f"{_lp_url}/a/{node_slug}?ad=" + "{{ad.id}}"
                     elif node_lp_base:
                         # 自动建链（每广告）：建 reserved LandingAdLink → URL 立即进 FB（先 commit，
                         # worker 必须能查到）；失败降级裸 URL 直投 + 记录（不静默——铁律）
@@ -3191,10 +3250,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     _msg_body = post_content["message"]
                 if _msg_body:
                     message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-            from ..core.ad_ops import pick_random_copy
-            _rh, _rb = pick_random_copy(asset)
-            _headline = _rh or (tpl.headline or "")
-            _body = _rb or (tpl.body or "")
+            from ..core.ad_ops import pick_ad_copy
+            _headline, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
             page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, _page_id, body=_body)
             if page_post_id:
                 sdb.commit()
@@ -3206,8 +3263,13 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 account_name=(_rt_acc.name if _rt_acc else ""), account_id=it.act_id,
                 asset_name=((asset.name or asset.filename or "") if asset else ""),
                 template_name=tpl.name, platform="fb")
-            # 自动建链（批次I，与 _deploy_series_fb 同口径；重试=全新部署等价）
+            # 自动建链（批次I，与 _deploy_series_fb 同口径；重试=全新部署等价）+ URL 跟随（批次II）
             _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, it, asset)
+            if not _a_base and (tpl.landing_page_id or 0):
+                try:
+                    _a_base = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))[0] or ""
+                except Exception:
+                    _a_base = ""
             if _a_base:
                 _lp_url = _a_base
             r = deploy_one_account(

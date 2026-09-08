@@ -372,16 +372,63 @@ const onEditBeforeClose = (done) => {
 
 // #1 保存前校验
 const validationErrors = ref([])
-const validateTemplate = () => {
+// 校验错误定位（批次II 修审计 G1）：结构化错误 { msg, sec, key }——sec=三段手风琴段名
+// （campaign/adset/ad），key=组/广告节点 key（''=段级，滚动到段即可）。保存失败时展开
+// 对应段+双层折叠卡、组卡/广告卡标红边并滚动到首个出错对象（不只在 toast 里列文本）。
+const saveErrKeys = ref(new Set())
+const _validateFlatEx = () => {
   const errs = []
   const isReuse = form.value.post_source === 'reuse'
-  if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
-  if (!isReuse && !form.value.asset_id) errs.push(t('launch.fieldAssetAdTab'))
-  if (isReuse && !form.value.reuse_post_ref) errs.push(t('launch.fieldReusePost'))
-  errs.push(..._budgetErrors())
+  if (!form.value.name?.trim()) errs.push({ msg: t('launch.fieldTplName'), sec: 'campaign' })
+  if (!isReuse && !form.value.asset_id) errs.push({ msg: t('launch.fieldAssetAdTab'), sec: 'ad' })
+  if (isReuse && !form.value.reuse_post_ref) errs.push({ msg: t('launch.fieldReusePost'), sec: 'ad' })
+  _budgetErrors().forEach(m => errs.push({ msg: m, sec: 'campaign' }))
   if (!isReuse && !form.value.landing_url && !form.value.landing_page_id && !['OUTCOME_AWARENESS'].includes(form.value.objective))
-    errs.push(t('launch.fieldLandingPickOrUrl'))
+    errs.push({ msg: t('launch.fieldLandingPickOrUrl'), sec: 'ad' })
   return errs
+}
+const validateTemplate = () => _validateFlatEx().map(e => e.msg)
+// 结构化错误 → 展开段/折叠卡 + 标红 + 滚动到首个出错对象（组级在组卡、广告级在广告卡）
+const _focusErrs = (errs) => {
+  saveErrKeys.value = new Set(errs.map(e => e.key).filter(Boolean))
+  const first = errs.find(e => e.key) || errs[0]
+  if (!first) return
+  secOpen.value = { ...secOpen.value, [first.sec]: true }
+  if (first.key) {
+    for (const s of (tree.value.adsets || [])) {
+      if (s.key === first.key) {
+        expandedTreeKeys.value = new Set([...expandedTreeKeys.value, s.key])
+        break
+      }
+      const ad = (s.ads || []).find(a => a.key === first.key)
+      if (ad) {
+        expandedTreeKeys.value = new Set([...expandedTreeKeys.value, s.key])
+        expandedAdKeys.value = new Set([...expandedAdKeys.value, ad.key])
+        break
+      }
+    }
+  }
+  nextTick(() => {
+    const root = document.querySelector('.edit-body')
+    if (!root) return
+    const el = (first.key && root.querySelector(`[data-err="${first.key}"]`))
+      || root.querySelector(`[data-sec="${first.sec}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+// 后端 422（模型校验文案带「节点名」）定位：按名称匹配组/广告节点 → 标红+展开+滚动首个
+const _anchorBackendSaveErrs = (msg) => {
+  if (!msg || editMode.value !== 'tree') return
+  const names = [...String(msg).matchAll(/「([^」]+)」/g)].map(m => m[1])
+  if (!names.length) return
+  const anchors = []
+  ;(tree.value.adsets || []).forEach((s, si) => {
+    if (names.includes(adsetNodeLabel(s, si))) anchors.push({ sec: 'adset', key: s.key })
+    ;(s.ads || []).forEach((a, ai) => {
+      if (names.includes(adNodeLabel(a, ai))) anchors.push({ sec: 'ad', key: a.key })
+    })
+  })
+  if (anchors.length) _focusErrs(anchors)
 }
 // 完整性状态（编辑器顶栏 chip：按当前模式取平铺/树口径校验）
 const editStatus = computed(() => {
@@ -1118,52 +1165,53 @@ const _budgetErrors = () => {
   return errs
 }
 // 结构模式保存前校验（与后端 _validate_structure 同口径，提前给清晰提示）
-const validateTree = () => {
-  const errs = []
-  if (!form.value.name?.trim()) errs.push(t('launch.fieldTplName'))
-  errs.push(..._budgetErrors())
+const _validateTreeEx = () => {
+  const errs = []   // { msg, sec, key }：组级 key=组卡、广告级 key=广告卡、模板级 key=''
+  if (!form.value.name?.trim()) errs.push({ msg: t('launch.fieldTplName'), sec: 'campaign' })
+  _budgetErrors().forEach(m => errs.push({ msg: m, sec: 'campaign' }))
   const adsets = tree.value.adsets
-  if (!adsets.length) { errs.push(t('launch.treeErrNoAdset')); return errs }
-  if (adsets.length > TREE_ADSETS_MAX) errs.push(t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }))
+  if (!adsets.length) { errs.push({ msg: t('launch.treeErrNoAdset'), sec: 'adset' }); return errs }
+  if (adsets.length > TREE_ADSETS_MAX) errs.push({ msg: t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }), sec: 'adset' })
   let total = 0
   adsets.forEach((s, si) => {
-    if (!(s.ads || []).length) errs.push(t('launch.treeErrAdsetNeedsAd', { name: adsetNodeLabel(s, si) }))
-    if ((s.ads || []).length > TREE_ADS_PER_ADSET_MAX) errs.push(t('launch.treeErrAdsMax', { n: TREE_ADS_PER_ADSET_MAX }))
+    const nm = adsetNodeLabel(s, si)
+    if (!(s.ads || []).length) errs.push({ msg: t('launch.treeErrAdsetNeedsAd', { name: nm }), sec: 'adset', key: s.key })
+    if ((s.ads || []).length > TREE_ADS_PER_ADSET_MAX) errs.push({ msg: t('launch.treeErrAdsMax', { n: TREE_ADS_PER_ADSET_MAX }), sec: 'adset', key: s.key })
     if (s.budget_usd !== null && s.budget_usd !== '' && !(Number(s.budget_usd) > 0))
-      errs.push(t('launch.treeErrBudget', { name: adsetNodeLabel(s, si) }))
+      errs.push({ msg: t('launch.treeErrBudget', { name: nm }), sec: 'adset', key: s.key })
     if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
-      errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
+      errs.push({ msg: t('launch.treeErrBudgetCap', { name: nm, n: 5000 }), sec: 'adset', key: s.key })
     // 批G组节点：lifetime 必须带组级排期（后端保存 422 同口径）；出价额/ROAS 正数
     if (s.budget_type === 'lifetime') {
-      if (!(s.schedule_start && s.schedule_end)) errs.push(t('launch.treeErrLifetimeSchedule', { name: adsetNodeLabel(s, si) }))
+      if (!(s.schedule_start && s.schedule_end)) errs.push({ msg: t('launch.treeErrLifetimeSchedule', { name: nm }), sec: 'adset', key: s.key })
       if (s.lifetime_budget_usd !== null && s.lifetime_budget_usd !== '' && !(Number(s.lifetime_budget_usd) > 0))
-        errs.push(t('launch.treeErrBudget', { name: adsetNodeLabel(s, si) }))
+        errs.push({ msg: t('launch.treeErrBudget', { name: nm }), sec: 'adset', key: s.key })
       if (Number(s.lifetime_budget_usd) > 50000)
-        errs.push(t('launch.treeErrLifetimeCap', { name: adsetNodeLabel(s, si), n: 50000 }))
+        errs.push({ msg: t('launch.treeErrLifetimeCap', { name: nm, n: 50000 }), sec: 'adset', key: s.key })
     }
     if (s.bid_amount_usd !== null && s.bid_amount_usd !== '' && !(Number(s.bid_amount_usd) > 0))
-      errs.push(t('launch.treeErrBidAmount', { name: adsetNodeLabel(s, si) }))
+      errs.push({ msg: t('launch.treeErrBidAmount', { name: nm }), sec: 'adset', key: s.key })
     if (s.minimum_roas !== null && s.minimum_roas !== '' && !(Number(s.minimum_roas) > 0))
-      errs.push(t('launch.treeErrMinRoas', { name: adsetNodeLabel(s, si) }))
-    if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
-      errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
+      errs.push({ msg: t('launch.treeErrMinRoas', { name: nm }), sec: 'adset', key: s.key })
     // 批次I：转化位置 × 目标 / 手动版位至少一平台（后端保存 422 同口径，提前给清晰提示）
     if (s.conv_location && !convLocationsForObj.value.includes(s.conv_location))
-      errs.push(t('launch.treeErrConvLoc', { name: adsetNodeLabel(s, si), loc: s.conv_location }))
+      errs.push({ msg: t('launch.treeErrConvLoc', { name: nm, loc: s.conv_location }), sec: 'adset', key: s.key })
     if (s.placement_mode === 'manual' && !(s.publisher_platforms || []).length)
-      errs.push(t('launch.treeErrPlacement', { name: adsetNodeLabel(s, si) }))
-    ;(s.ads || []).forEach(a => {
-      if ((a.asset_ids || []).length > TREE_ASSETS_PER_NODE_MAX) errs.push(t('launch.treeErrAssetsMax', { n: TREE_ASSETS_PER_NODE_MAX }))
+      errs.push({ msg: t('launch.treeErrPlacement', { name: nm }), sec: 'adset', key: s.key })
+    ;(s.ads || []).forEach((a, ai) => {
+      const anm = adNodeLabel(a, ai)
+      if ((a.asset_ids || []).length > TREE_ASSETS_PER_NODE_MAX) errs.push({ msg: t('launch.treeErrAssetsMax', { name: anm, n: TREE_ASSETS_PER_NODE_MAX }), sec: 'ad', key: a.key })
       total += Math.max((a.asset_ids || []).length, 1)
       if (a.post_source === 'reuse') {
-        if (!a.reuse_post_ref) errs.push(t('launch.treeErrReuseRef'))
-        if ((a.asset_ids || []).length > 1) errs.push(t('launch.treeErrReuseMulti'))
+        if (!a.reuse_post_ref) errs.push({ msg: t('launch.treeErrReuseRef', { name: anm }), sec: 'ad', key: a.key })
+        if ((a.asset_ids || []).length > 1) errs.push({ msg: t('launch.treeErrReuseMulti', { name: anm }), sec: 'ad', key: a.key })
       }
     })
   })
-  if (total > TREE_ADS_MAX) errs.push(t('launch.treeErrAdsTotalMax', { n: TREE_ADS_MAX }))
+  if (total > TREE_ADS_MAX) errs.push({ msg: t('launch.treeErrAdsTotalMax', { n: TREE_ADS_MAX }), sec: 'ad' })
   return errs
 }
+const validateTree = () => _validateTreeEx().map(e => e.msg)
 // 广告节点辅助：子码过滤 / 落地页联动 / 模板下拉 / 跟帖
 const subcodesForNode = (node) => {
   if (!node.landing_page_id) return []
@@ -1377,6 +1425,7 @@ const openEdit = async (tpl) => {
     } catch {}
   }
   resetSecOpen()
+  saveErrKeys.value = new Set()
   // FB 模板一律结构模式（平铺模式已移除；无 structure 的旧模板自动合成 1 组 1 广告视图，保存即升级）
   if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
   validationErrors.value = []; editOpen.value = true; snapshotForm()
@@ -1414,18 +1463,25 @@ const buildAudienceJson = () => {
 }
 const saveTpl = async () => {
   if (editMode.value === 'tree') {
-    // 结构模式：树口径校验（超规模/reuse 多素材等提前拦）+ 软提示（无素材节点不阻断）
-    const treeErrs = validateTree()
-    if (treeErrs.length) return ElMessage.warning(t('launch.pendingMissing', { fields: treeErrs.join('、') }))
+    // 结构模式：树口径校验（超规模/reuse 多素材等提前拦）+ 软提示（无素材节点不阻断）；
+    // 失败时标红+展开+滚动到首个出错卡（审计 G1：错误必须可定位）
+    const treeErrsEx = _validateTreeEx()
+    if (treeErrsEx.length) {
+      _focusErrs(treeErrsEx)
+      return ElMessage.warning(t('launch.pendingMissing', { fields: treeErrsEx.map(e => e.msg).join('、') }))
+    }
     if (!tree.value.adsets.some(s => (s.ads || []).some(a => adDot(a) === 'g')))
       ElMessage.warning(t('launch.treeWarnNoContent'))
     validationErrors.value = []
   } else {
-    validationErrors.value = validateTemplate()
+    const flatEx = _validateFlatEx()
+    validationErrors.value = flatEx.map(e => e.msg)
     if (validationErrors.value.length) {
+      _focusErrs(flatEx)
       return ElMessage.warning(t('launch.pendingMissing', { fields: validationErrors.value.join('、') }))
     }
   }
+  saveErrKeys.value = new Set()
   saving.value = true
   try {
     const body = {
@@ -1540,7 +1596,11 @@ const saveTpl = async () => {
     if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success(t('common.saved')) }
     else { await POST('/launch-templates', body); ElMessage.success(t('launch.created')) }
     editOpen.value = false; await load(); snapshotForm()
-  } catch (e) { showError(e, t('launch.saveTplFail')) }
+  } catch (e) {
+    showError(e, t('launch.saveTplFail'))
+    // 后端 422（detail 带组名/可用清单）→ 按节点名定位标红+滚动（api 层已展开 detail 文本）
+    _anchorBackendSaveErrs(typeof e === 'string' ? e : (e?.message || ''))
+  }
   saving.value = false
 }
 const removeTpl = async (tpl) => {
@@ -2048,7 +2108,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         </span>
       </div>
       <!-- 段1 广告系列（FB 创建流：目标/特殊类别/购买类型/CBO 预算/出价策略/前缀/主页） -->
-      <div class="fb-sec">
+      <div class="fb-sec" data-sec="campaign">
         <div class="fb-sec-head" @click="toggleSec('campaign')">
           <span class="fb-sec-arrow" :class="{open:secOpen.campaign}">▶</span>
           <span class="fb-sec-title">{{ t('launch.levelCampaign') }}</span>
@@ -2154,7 +2214,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div><!-- /sec1 -->
 
       <!-- section 2: ad sets -->
-      <div class="fb-sec">
+      <div class="fb-sec" data-sec="adset">
         <div class="fb-sec-head" @click="toggleSec('adset')">
           <span class="fb-sec-arrow" :class="{open:secOpen.adset}">▶</span>
           <span class="fb-sec-title">{{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</span>
@@ -2163,7 +2223,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-show="secOpen.adset" class="fb-sec-body">
           <!-- structure mode: one collapsible card per ad set -->
           <template v-if="editMode === 'tree'">
-            <div v-for="(s, si) in tree.adsets" :key="s.key" class="as-card">
+            <div v-for="(s, si) in tree.adsets" :key="s.key" :class="['as-card', { err: saveErrKeys.has(s.key) }]" :data-err="s.key">
               <div class="as-card-head" @click="toggleTreeExpand(s.key)">
                 <span class="t-arrow" :class="{ open: expandedTreeKeys.has(s.key) }">▶</span>
                 <span @click.stop><el-switch v-model="s.enabled" size="small" /></span>
@@ -2454,7 +2514,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div><!-- /sec2 -->
 
       <!-- section 3: ads -->
-      <div class="fb-sec">
+      <div class="fb-sec" data-sec="ad">
         <div class="fb-sec-head" @click="toggleSec('ad')">
           <span class="fb-sec-arrow" :class="{open:secOpen.ad}">▶</span>
           <span class="fb-sec-title">{{ t('launch.levelAd') }}</span>
@@ -2584,8 +2644,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="preview-link">{{ t('common.preview') }}</span>
 </div>
 </template>
-        <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建） -->
-        <template v-if="form.objective === 'OUTCOME_LEADS' && !isTt">
+        <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建；
+             批次II 修盘点 A2：去掉 !isTt 门（后端 _resolve_lead_form 已支持 TT，口径统一） -->
+        <template v-if="form.objective === 'OUTCOME_LEADS'">
           <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
 </div>
@@ -2593,6 +2654,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
               <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
 </el-select>
+            <span class="hint">{{ t('launch.formTplPlatScope', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
             <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
 </div>
           <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
@@ -2611,7 +2673,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span class="ad-group-name">{{ adsetNodeLabel(s, si) }}</span>
               <button class="op sm" @click="addTreeAd(si)">+ {{ t('launch.treeAddAd') }}</button>
             </div>
-            <div v-for="(a, ai) in s.ads" :key="a.key" class="ad-card">
+            <div v-for="(a, ai) in s.ads" :key="a.key" :class="['ad-card', { err: saveErrKeys.has(a.key) }]" :data-err="a.key">
               <div class="ad-card-head" @click="toggleAdExpand(a.key)">
                 <span class="t-arrow" :class="{ open: expandedAdKeys.has(a.key) }">▶</span>
                 <span @click.stop><el-switch v-model="a.enabled" size="small" /></span>
@@ -2728,6 +2790,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <el-select :model-value="a.lead_form_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="v => setNodeFormTpl(a, v)">
                     <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
                   </el-select>
+                  <span class="hint">{{ t('launch.formTplPlatScope', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
 </div>
                 </template>
                 </template>
@@ -3493,6 +3556,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .sched-sep{color:var(--t3)}
 /* 广告组卡 / 广告小卡（结构模式） */
 .as-card{border:1px solid var(--bd);border-radius:8px;background:var(--bg2);margin-bottom:10px;overflow:hidden}
+.as-card.err,.ad-card.err{border-color:var(--error);box-shadow:0 0 0 1px var(--error)}
 .as-card-head{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;background:var(--bg3)}
 .as-card-head:hover{background:var(--bg2)}
 .as-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--t1)}

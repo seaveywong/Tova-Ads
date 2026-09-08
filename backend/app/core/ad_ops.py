@@ -132,6 +132,20 @@ def pick_random_copy(asset) -> tuple[str, str]:
     return h, b
 
 
+def pick_ad_copy(asset, manual_headline: str = "", manual_body: str = "",
+                 fallback_headline: str = "", fallback_body: str = "") -> tuple[str, str]:
+    """广告文案单一优先级（批次II 修审计 A3）：手填 > 素材 AI 随机 > 模板兜底。
+
+    旧序（AI 随机 > 手填）会把节点/模板里用户手写的文案静默顶掉；FB 口径=手动输入优先，
+    自动文案变体属 Advantage+ creative 且需 opt-in。全部部署链（树节点/平铺/重试/TT）统一走此。
+    manual_* = 用户手填层（树模式=广告节点，平铺/TT=模板级表单即手填层）；
+    fallback_* = 模板级兜底（仅树模式与手填层分离时传）。
+    """
+    _rh, _rb = pick_random_copy(asset)
+    return (((manual_headline or "").strip() or _rh or (fallback_headline or "")),
+            ((manual_body or "").strip() or _rb or (fallback_body or "")))
+
+
 def pick_cta(body: str, objective: str) -> str:
     """根据文案内容 + 广告目标选最合适的 CTA 类型。"""
     b = (body or "").lower()
@@ -208,6 +222,13 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
 
     # 2. AdSet（目标感知 + 受众）
+    # 出价单一管道（批次II 修审计 G2②）：模板出价控制（bid_amount_usd 按账户本币换算后的
+    # bid_amount 形参）非空时，advanced_config 里的 adv.bid_amount（旧 CPA 性能目标存的
+    # 美分原始值）剥离——深合并会覆盖换算值，非 USD 账户出价额错一个汇率量级。
+    # 两者都空维持旧行为（adv.bid_amount 直通）。浅拷贝剥离，不动调用方 dict（跨 item 共享）。
+    _adv = advanced_config
+    if advanced_config and bid_amount is not None and "bid_amount" in advanced_config:
+        _adv = {k: v for k, v in advanced_config.items() if k != "bid_amount"}
     adset_payload = build_adset(
         name=f"{name_prefix} 组", campaign_id=campaign_id,
         daily_budget=daily_budget, objective=objective,
@@ -218,7 +239,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         dsa_beneficiary=dsa_beneficiary, dsa_payor=dsa_payor,
         optimization_goal=optimization_goal, billing_event=billing_event,
         destination_type_override=destination_type_override,
-        extra=advanced_config,
+        extra=_adv,
         budget_type=budget_type, lifetime_budget=lifetime_budget,
         start_time=start_time, end_time=end_time, pacing=pacing,
         bid_amount=bid_amount, minimum_roas=minimum_roas,
@@ -230,11 +251,13 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     if not adset_id:
         raise FbApiError("no_id", f"FB 创建 adset 未返回 id（响应：{str(adset)[:200]}）")
 
-    # 3. 创意链接（子码集成）
+    # 3. 创意链接（子码集成）。base 必须来自调用方解析好的落地页行/模板 URL——
+    # 旧 tovaads.com 兜底是死链（页不在该域），宁可快失败也不让死 URL 进 FB（批次II 修 B5 残留）
     effective_url = landing_url
     if subcode_slug and subcode_link is not None:
-        base = landing_url or "https://tovaads.com"
-        effective_url = f"{base}/a/{subcode_slug}?ad=" + "{{ad.id}}"  # FB 宏（双花括号——Meta 文档/1.0 生产口径；单花括号 FB 不替换=归因全死，2026-09-08 调研实证）
+        if not landing_url:
+            raise FbApiError("no_id", "已选子码但缺少可用落地 URL（模板未绑落地页且落地 URL 为空），请绑定落地页或填写落地 URL")
+        effective_url = f"{landing_url}/a/{subcode_slug}?ad=" + "{{ad.id}}"  # FB 宏（双花括号——Meta 文档/1.0 生产口径；单花括号 FB 不替换=归因全死，2026-09-08 调研实证）
 
     # 3b. 欢迎语（消息类广告前置；批次I 门统一：按派生目的地/成效目标判定，不再查 conversion_goal 词表）
     welcome_msg = None

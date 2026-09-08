@@ -293,6 +293,44 @@ class RouteNextIn(BaseModel):
     act_id: str = ""  # 本次点击的广告账户（worker 从 ?act= 透传；多账户复用按它 fire 正确像素）
 
 
+def _resolve_tt_pixel_ids(db: Session, page, link, ad_id: str, explicit_act: str) -> list[str]:
+    """TT 像素动态解析（批次II 修方案 B6，对齐 FB 三级口径）。
+
+    优先级：候选账户的 LandingPixel(platform='tt', status='active') > 页级 tt_pixel_ids。
+    候选序同 FB 分支：ads_cache 反查广告所在账户 > ?act= 显式 > link.act_id。
+    多账户（尤其 TT 多广告主）共用一页时按账户分流，不再全页 fire 同一批像素。
+    TT adgroup 绑的是像素 code 而非 FB 数字 pixel_id，故无 adset 级推导层（与 FB 的差异）。
+    """
+    _derived_act = None
+    if ad_id and page:
+        from ..models.ads_cache import AdsCache
+        for _row in db.query(AdsCache).filter(AdsCache.tenant_id == page.tenant_id).all():
+            try:
+                for _ad in _json.loads(_row.ads_json or "[]"):
+                    if str(_ad.get("id")) == str(ad_id):
+                        _derived_act = _row.act_id
+                        break
+                if _derived_act:
+                    break
+            except Exception:
+                continue
+    for _act in [c for c in [_derived_act, explicit_act, (link.act_id if link else None)] if c]:
+        # tenant 过滤：SuperSession 绕 RLS，必须显式按页租户过滤（同 FB 分支口径）
+        ids = [p.pixel_id for p in db.query(LandingPixel).filter(
+            LandingPixel.act_id == _act, LandingPixel.status == "active",
+            LandingPixel.platform == "tt",
+            LandingPixel.tenant_id == (page.tenant_id if page else None),
+        ).all()] if page else []
+        if ids:
+            return ids
+    if page and page.tt_pixel_ids:
+        try:
+            return _json.loads(page.tt_pixel_ids)
+        except Exception:
+            return []
+    return []
+
+
 @router.post("/router/next")
 def route_next(body: RouteNextIn, dry_run: bool = False):
     """子码路由：slug → target_url（rotation: sequential/random/first，doc 02 §C）+ 子码级像素。
@@ -414,13 +452,9 @@ def route_next(body: RouteNextIn, dry_run: bool = False):
                 pass
         if not conversion_events and conversion_event:
             conversion_events = [conversion_event]
-        # TK 像素+转化事件（现阶段=页级 fallback，无 TK adset 动态解析）
-        tt_pixel_ids = []
-        if page and page.tt_pixel_ids:
-            try:
-                tt_pixel_ids = _json.loads(page.tt_pixel_ids)
-            except Exception:
-                pass
+        # TK 像素+转化事件（批次II B6：候选账户 TT 像素 > 页级——对齐 FB 三级分流口径）
+        tt_pixel_ids = _resolve_tt_pixel_ids(db, page, link, str(body.ad_id or ""),
+                                             _clean_act(body.act_id))
         tt_conversion_events = []
         if page and page.tt_conversion_events:
             try:

@@ -782,8 +782,14 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
         except Exception:
             pass
     pass_rate = round(click_count / visit_count * 100, 1) if visit_count else 0
+    # 公开 URL 回退链（批次II 修 B5 回填落空）：custom_domain > 绑定子域名 bound_subdomains[0]
+    # （页级子域名 lp{id}.根域）> pages.dev 项目地址。旧 `custom_domain or ""` 让无自定义域的页
+    # 回填空串 → 编辑器选页联动 landing_url 落空 → 部署 base 进一步掉进死链兜底。
+    _pub_url = (p.custom_domain
+                or (f"https://{bound_subs[0]}" if bound_subs else "")
+                or f"https://tovaads-landing-{p.id}.pages.dev")
     return {"id": p.id, "title": p.title, "status": p.status,
-            "public_url": p.custom_domain or "",
+            "public_url": _pub_url,
             "custom_domain": p.custom_domain, "custom_domains": cd_list,
             "target_urls": targets,
             "rotation_mode": p.rotation_mode, "pixel_ids": ids,
