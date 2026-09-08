@@ -2161,6 +2161,7 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
         snap.actions_json = json.dumps(ad.get("actions", []))[:4000]
         snap.resolved_kpi = kpi.get("kpi_field", "")
         snap.kpi_source = kpi.get("source", "")
+        snap.updated_at = datetime.now(timezone.utc)
     else:
         db.add(PerfSnapshot(
             tenant_id=tenant_id, act_id=acc.act_id, ad_id=ad_id,

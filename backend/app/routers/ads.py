@@ -176,7 +176,10 @@ def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to:
     """
     q = db.query(PerfSnapshot.ad_id, func.sum(PerfSnapshot.spend), func.sum(PerfSnapshot.spend_native),
                  func.sum(PerfSnapshot.conversions),
-                 func.sum(PerfSnapshot.impressions), func.sum(PerfSnapshot.clicks), func.sum(PerfSnapshot.reach)).filter(
+                 func.sum(PerfSnapshot.impressions), func.sum(PerfSnapshot.clicks), func.sum(PerfSnapshot.reach),
+                 func.sum(PerfSnapshot.results_fb), func.count(PerfSnapshot.results_fb),
+                 func.count(PerfSnapshot.id), func.min(PerfSnapshot.updated_at),
+                 PerfSnapshot.act_id, PerfSnapshot.platform).filter(
         PerfSnapshot.tenant_id == tenant_id)
     if act_id:
         q = q.filter(PerfSnapshot.act_id == act_id)
@@ -184,26 +187,39 @@ def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to:
         q = q.filter(PerfSnapshot.snapshot_date >= date_from)
     if date_to:
         q = q.filter(PerfSnapshot.snapshot_date <= date_to)
-    rows = q.group_by(PerfSnapshot.ad_id).all()
+    rows = q.group_by(PerfSnapshot.ad_id, PerfSnapshot.act_id, PerfSnapshot.platform).all()
     out = {}
     for r in rows:
         usd = float(r[1] or 0)
         native = float(r[2] or 0)
         if native == 0 and usd > 0:
             native = usd  # 旧快照行缺 spend_native（列上线前写入）——按 USD 金额兜底展示
-        out[r[0]] = {"spend": native, "spend_usd": usd, "conv": int(r[3] or 0),
-                     "impressions": int(r[4] or 0), "clicks": int(r[5] or 0), "reach": int(r[6] or 0)}
+        out[(r[12] or "fb", str(r[11]), str(r[0]))] = {
+            "spend": native, "spend_usd": usd, "conv": int(r[3] or 0),
+            "impressions": int(r[4] or 0), "clicks": int(r[5] or 0), "reach": int(r[6] or 0),
+            "results_fb": int(r[7] or 0), "results_fb_complete": r[8] == r[9],
+            "metrics_updated_at": r[10].isoformat() if r[10] else None}
     return out
+
+
+def _entity_key(item: dict, node_id=None):
+    return (item.get("platform") or "fb", str(item.get("act_id")),
+            str(_id_of(item.get("id") if node_id is None else node_id)))
 
 
 def _attach_perf(items: list, perf_map: dict) -> list:
     out = []
     for it in items:
-        p = perf_map.get(it.get("id"), {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
+        p = perf_map.get(_entity_key(it), {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
                                         "impressions": 0, "clicks": 0, "reach": 0})
         spend, usd, conv = p["spend"], p["spend_usd"], p["conv"]
         imp, clk, reach = p["impressions"], p["clicks"], p["reach"]
+        fb = p.get("results_fb") if p.get("results_fb_complete") else None
         out.append({**it, "spend": round(spend, 2), "spend_usd": round(usd, 2), "conversions": conv,
+                    "results_fb": fb, "results_fb_complete": fb is not None,
+                    "metrics_updated_at": p.get("metrics_updated_at"),
+                    "cost_per_result": round(spend / fb, 2) if fb else None,
+                    "cost_per_result_usd": round(usd / fb, 2) if fb else None,
                     "cpa": round(spend / conv, 2) if conv else 0.0,
                     "cpa_usd": round(usd / conv, 2) if conv else 0.0,
                     "impressions": imp, "clicks": clk, "reach": reach,
@@ -237,6 +253,11 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
         adsets = [tt_to_fb_adset(a, currency) for a in adsets]
         if ads is not None:
             ads = [tt_to_fb_ad(a, currency) for a in ads]
+    # Row update time is also advanced by guard writeback; preserve a true
+    # per-entity structure fetch time inside the existing JSON (no schema change).
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    for entity in [*campaigns, *adsets]:
+        entity["snapshot_at"] = fetched_at
     row = db.query(AdsCache).filter(
         AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
         AdsCache.platform == platform).first()
@@ -343,16 +364,25 @@ def list_ads(
         for cm in json.loads(c.campaigns_json or "[]"):
             cm["act_id"] = c.act_id; cm["account_name"] = acc_map.get(c.act_id, c.act_id)
             cm["currency"] = cur_map.get(c.act_id, "USD")
+            cm["platform"] = c.platform or "fb"
+            cm["snapshot_at"] = cm.get("snapshot_at")
             all_campaigns.append(cm)
         for as_ in json.loads(c.adsets_json or "[]"):
             as_["act_id"] = c.act_id; as_["account_name"] = acc_map.get(c.act_id, c.act_id)
             as_["currency"] = cur_map.get(c.act_id, "USD")
+            as_["platform"] = c.platform or "fb"
+            as_["snapshot_at"] = as_.get("snapshot_at")
             all_adsets.append(as_)
         for ad in json.loads(c.ads_json or "[]"):
             ad["act_id"] = c.act_id; ad["account_name"] = acc_map.get(c.act_id, c.act_id)
             ad["currency"] = cur_map.get(c.act_id, "USD")
-            ad_to_adset[ad.get("id")] = _id_of(ad.get("adset_id"))
-            ad_to_camp[ad.get("id")] = _id_of(ad.get("campaign_id"))
+            ad["platform"] = c.platform or "fb"
+            ad_at = c.ads_updated_at or c.updated_at
+            ad["snapshot_at"] = ad_at.isoformat() if ad_at else None
+            if _id_of(ad.get("adset_id")):
+                ad_to_adset[_entity_key(ad)] = _entity_key(ad, ad["adset_id"])
+            if _id_of(ad.get("campaign_id")):
+                ad_to_camp[_entity_key(ad)] = _entity_key(ad, ad["campaign_id"])
             all_ads.append(ad)
     # perf 跨账户 + adset/campaign 聚合（本币/USD 双列——跨币种 rollup 只有 USD 合计有意义）
     perf = _perf_map(db, user.tenant_id, act_id, date_from, date_to)
@@ -362,9 +392,15 @@ def list_ads(
             if not key:
                 continue
             d = tgt.setdefault(key, {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
-                                     "impressions": 0, "clicks": 0, "reach": 0})
+                                     "impressions": 0, "clicks": 0, "reach": 0,
+                                     "results_fb": 0, "results_fb_complete": True,
+                                     "metrics_updated_at": None})
             d["spend"] += p["spend"]; d["spend_usd"] += p["spend_usd"]; d["conv"] += p["conv"]
             d["impressions"] += p["impressions"]; d["clicks"] += p["clicks"]; d["reach"] += p["reach"]
+            d["results_fb"] += p["results_fb"]
+            d["results_fb_complete"] = d["results_fb_complete"] and p["results_fb_complete"]
+            times = [v for v in (d["metrics_updated_at"], p["metrics_updated_at"]) if v]
+            d["metrics_updated_at"] = min(times) if times else None
     def _conv_budget(items):
         for it in items:
             cur = cur_map.get(it.get("act_id"), "USD")

@@ -7,6 +7,7 @@ import landing from './views/landing'
 import guard from './views/guard'
 import lplogs from './views/lplogs'
 import adsExtra from './views/ads'
+import admanager from './views/admanager'
 
 // English message dictionary. Mirrors zh.js key-for-key.
 export default {
@@ -896,6 +897,7 @@ export default {
     addSuccess: 'Added successfully', addFail: 'Failed to add',
   },
   adm: {
+    ...admanager.en,
     pageTitle: 'Ad Manager',
     loadAccountsFail: 'Failed to load accounts',
     budgetDaily: '{v}/day', budgetLifetime: '{v} total',

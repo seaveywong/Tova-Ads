@@ -7,6 +7,7 @@ import landing from './views/landing'
 import guard from './views/guard'
 import lplogs from './views/lplogs'
 import adsExtra from './views/ads'
+import admanager from './views/admanager'
 
 // 中文文案字典。按命名空间组织：common(通用按钮) / nav(导航) / role(角色) /
 // status(状态术语，配合 useStatus.js) / layout(外壳) / login / 各业务页。
@@ -907,6 +908,7 @@ export default {
     addSuccess: '添加成功', addFail: '添加失败',
   },
   adm: {
+    ...admanager.zh,
     pageTitle: '广告管理器',
     loadAccountsFail: '加载账户失败',
     budgetDaily: '{v}/日', budgetLifetime: '{v} 总',

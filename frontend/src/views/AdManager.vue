@@ -9,6 +9,7 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { usePlatform } from '../composables/usePlatform'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
+import { entityKey, entityContext, searchMatches, compareRows, columnsFor, normalizeViewPreferences, fbResult } from '../composables/adManagerView'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -29,7 +30,7 @@ const accDead = (a) => tokenStatus.value[a?.act_id] === false
 // 脱管=有账户行但令牌没了/失效（管不了但账户本身还活着）
 const accUnmanaged = (a) => {
   const acc = accounts.value.find(x => x.act_id === (a?.act_id || a))
-  return acc?.no_token === true
+  return acc?.no_token === true || acc?.is_managed === false
 }
 // 被禁=FB 侧账户本身被禁（account_status!=1 或有 disable_reason）
 const accBanned = (a) => {
@@ -58,6 +59,24 @@ const statusFilter = ref('all')
 const sortKey = ref('spend')
 const sortDir = ref('desc')
 const searchQ = ref('')
+let savedView = {}
+try { savedView = JSON.parse(localStorage.getItem('admanager-view-v1') || '{}') } catch {}
+const viewPrefs = ref(normalizeViewPreferences(savedView))
+const availableColumns = computed(() => columnsFor(tab.value))
+const visibleColumns = computed(() => availableColumns.value.filter(c => viewPrefs.value[tab.value]?.columns.includes(c.id)))
+const contextOf = computed(() => entityContext(data.value))
+watch(tab, level => {
+  const pref = viewPrefs.value[level]
+  if (pref) { sortKey.value = pref.sortKey; sortDir.value = pref.sortDir }
+  selected.value = new Set(); budgetDialog.value = false
+}, { flush: 'sync' })
+sortKey.value = viewPrefs.value.campaign.sortKey
+sortDir.value = viewPrefs.value.campaign.sortDir
+watch([sortKey, sortDir], () => {
+  const pref = viewPrefs.value[tab.value]
+  if (pref) { pref.sortKey = sortKey.value; pref.sortDir = sortDir.value }
+})
+watch(viewPrefs, value => { try { localStorage.setItem('admanager-view-v1', JSON.stringify(value)) } catch {} }, { deep: true })
 
 const curRange = computed(() => {
   if (showCustom.value && customFrom.value) return { date_from: customFrom.value, date_to: customTo.value || customFrom.value }
@@ -94,11 +113,6 @@ const fmtBudget = (a, ctx) => {
   return ctx === 'campaign' ? t('adm.budgetAdsetLevel') : t('adm.budgetCampaignLevel')
 }
 const hasBudget = (a) => a.daily_budget_amount != null || a.lifetime_budget_amount != null
-
-const cols = computed(() => tab.value === 'ad'
-  ? '0.95fr 1.5fr 0.7fr 0.5fr 0.5fr 0.5fr 0.5fr 0.5fr 0.5fr 0.55fr 0.5fr 28px'
-  : '0.95fr 1.5fr 0.6fr 0.65fr 0.6fr 0.5fr 0.5fr 0.6fr 0.5fr 28px')
-const rowStyle = computed(() => ({ gridTemplateColumns: cols.value, minWidth: tab.value === 'ad' ? '1180px' : '980px' }))
 
 const loadAccounts = async () => {
   try { accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]; await load(); await loadRedirectMap() }
@@ -152,7 +166,7 @@ const actMatch = (item) => !selectedActs.value.length ? true : selectedActs.valu
 const { platform } = usePlatform()
 const platAccounts = computed(() => platform.value === 'all' ? accounts.value : accounts.value.filter(a => (a.platform || 'fb') === platform.value))
 const platActIds = computed(() => platform.value === 'all' ? null : new Set(platAccounts.value.map(a => a.act_id)))
-const platMatch = (item) => { const ids = platActIds.value; return !ids || ids.has(item.act_id) }
+const platMatch = (item) => platform.value === 'all' || (item.platform || 'fb') === platform.value
 // 页头副信息：仅选中单个账户时显示该账户名
 const currentAccountName = computed(() => {
   if (selectedActs.value.length !== 1) return ''
@@ -202,7 +216,8 @@ const nowTick = ref(Date.now())
 let _ageTimer = null
 const cacheAgeMin = computed(() => {
   void nowTick.value
-  const ls = data.value.last_sync
+  const times = curList.value.map(a => a.snapshot_at).filter(Boolean).sort()
+  const ls = times[0]
   if (!ls) return null
   const ts = new Date(ls).getTime()
   if (isNaN(ts)) return null
@@ -235,6 +250,7 @@ const verifyLive = async () => {
       const r = await GET('/ads/live-status?act_id=' + encodeURIComponent(actId))
       const m = new Map((r.ads || []).map(x => [String(x.id), x.effective_status]))
       for (const ad of (data.value.ads || [])) {
+        if (ad.act_id !== actId) continue
         const st = m.get(String(ad.id))
         if (st != null) { ad.effective_status = st; patched++ }
       }
@@ -250,26 +266,18 @@ const curList = computed(() => {
   let arr
   if (tab.value === 'campaign') arr = data.value.campaigns || []
   else if (tab.value === 'adset') { arr = data.value.adsets || []; if (drillCampaign.value) arr = arr.filter(a => _idOf(a.campaign_id) === drillCampaign.value) }
-  else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => _idOf(a.adset_id) === drillAdset.value) }
+  else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => String(_idOf(a.adset_id)) === String(drillAdset.value)); else if (drillCampaign.value) arr = arr.filter(a => String(_idOf(a.campaign_id)) === String(drillCampaign.value)) }
   arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatch(a.effective_status))
   // 脱管/被禁账户排后面（用户反馈：不好区分，正常在前异常在后）
   const _deadRank = (a) => accStateTag(a) ? 1 : 0
-  arr = arr.slice().sort((a, b) => _deadRank(a) - _deadRank(b))
+  arr = arr.slice()
   if (searchQ.value.trim()) {
     const q = searchQ.value.trim().toLowerCase()
-    arr = arr.filter(a => (a.name || '').toLowerCase().includes(q) || String(a.id || '').includes(q))
+    arr = arr.filter(a => searchMatches(a, q, contextOf.value))
   }
   return arr.slice().sort((a, b) => {
-    if (sortKey.value === '_status_rank') { const d = statusRank(a.effective_status) - statusRank(b.effective_status); return sortDir.value === 'desc' ? d : -d }
-    // 用户主动选了排序列：该列为主排序，状态仅作同值兜底（否则"消耗降序"时 PAUSED 永远压底，找不到已停的高消耗）
-    const _sk = (mixedCur.value && (sortKey.value === 'spend' || sortKey.value === 'cpa')) ? sortKey.value + '_usd' : sortKey.value
-    // 预算列：日预算缺省时回退总预算（lifetime-only 系列不至于按 0 排序）
-    const _num = (x) => _sk === 'daily_budget_amount'
-      ? Number(x.daily_budget_amount ?? x.lifetime_budget_amount ?? 0)
-      : Number(x[_sk] || 0)
-    let va = _num(a), vb = _num(b)
-    if (va !== vb) return sortDir.value === 'desc' ? vb - va : va - vb
-    return statusRank(a.effective_status) - statusRank(b.effective_status)
+    return compareRows(a, b, { key: sortKey.value, direction: sortDir.value, mixedCurrency: mixedCur.value, blocked: _deadRank, statusRank })
+
   })
 })
 // 表尾汇总：当前筛选后的消耗/转化合计（多币种折 USD，与列口径一致）
@@ -278,15 +286,14 @@ const sumSpend = computed(() => {
   for (const it of curList.value) { native += Number(it.spend || 0); usd += Number(it.spend_usd || 0) }
   return mixedCur.value ? (usd ? fmtMoney(usd) : '-') : fmtAmount(native, viewCur.value)
 })
-const sumConv = computed(() => curList.value.reduce((n, it) => n + (Number(it.results_fb ?? it.conversions) || 0), 0))
 const totalLabel = computed(() => t('adm.totalRow', { n: curList.value.length }))
 const drillName = computed(() => {
   if (tab.value === 'adset' && drillCampaign.value) { const c = (data.value.campaigns || []).find(x => x.id === drillCampaign.value); return c ? t('adm.drillCampaign', { name: c.name }) : '' }
   if (tab.value === 'ad' && drillAdset.value) { const s = (data.value.adsets || []).find(x => x.id === drillAdset.value); return s ? t('adm.drillAdset', { name: s.name }) : '' }
   return ''
 })
-const drillToAdset = (c) => { drillCampaign.value = c.id; tab.value = 'adset'; if (c.act_id && !selectedActs.value.includes(c.act_id)) selectedActs.value = [c.act_id] }
-const drillToAd = (s) => { drillAdset.value = s.id; tab.value = 'ad'; if (s.act_id && !selectedActs.value.includes(s.act_id)) selectedActs.value = [s.act_id] }
+const drillToAdset = (c) => { drillCampaign.value = c.id; drillAdset.value = ''; tab.value = 'adset'; selectedActs.value = [c.act_id] }
+const drillToAd = (s) => { drillCampaign.value = _idOf(s.campaign_id) || ''; drillAdset.value = s.id; tab.value = 'ad'; selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
 onMounted(() => { loadAccounts(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
 onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null }; if (_ageTimer) { clearInterval(_ageTimer); _ageTimer = null } })
@@ -295,7 +302,7 @@ const selected = ref(new Set())
 const opLoading = ref(false)
 const budgetDialog = ref(false)
 const budgetTarget = ref(null)
-const budgetInput = ref(0)
+const budgetInput = ref('')
 // 广告级跳转链接覆盖
 const redirectMap = ref({})           // {ad_id: target_url} 内联显示用
 const redirectDialog = ref(false)     // 设单条
@@ -306,6 +313,7 @@ const redirectList = ref([])
 const curLevel = () => tab.value === 'campaign' ? 'campaign' : (tab.value === 'adset' ? 'adset' : 'ad')
 
 const toggleStatus = async (item) => {
+  if (opLoading.value || accStateTag(item)) return
   const ns = item.effective_status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
   opLoading.value = true
   try {
@@ -320,19 +328,21 @@ const toggleStatus = async (item) => {
   opLoading.value = false
 }
 const openBudget = (item) => {
-  const isLifetime = item.lifetime_budget_amount != null
+  if (opLoading.value || accStateTag(item)) return
+  const isLifetime = item.daily_budget_amount == null && item.lifetime_budget_amount != null
   budgetTarget.value = {
     act_id: item.act_id, node_id: item.id, level: curLevel(), name: item.name,
     budget_type: isLifetime ? 'lifetime' : 'daily',
-    old_value: Number(item.lifetime_budget_amount ?? (item.daily_budget_amount || 0)) || 0,
+    old_value: Number(isLifetime ? item.lifetime_budget_amount : item.daily_budget_amount) || 0,
     currency: item.currency || 'USD',
   }
-  budgetInput.value = Number(item.lifetime_budget_amount ?? (item.daily_budget_amount || 0))
+  budgetInput.value = ''
   budgetDialog.value = true
 }
 // 预算大幅上调防护：新值 > 旧值×3 且差额 > 500（本币）→ 二次确认（防手滑多打一个 0；×2 快捷键叠加后同判）
 const _fmtBudgetVal = (v, cur) => cur === 'USD' ? '$' + Number(v).toLocaleString() : Number(v).toLocaleString()
 const saveBudget = async () => {
+  if (opLoading.value) return
   if (!budgetInput.value || budgetInput.value <= 0) return ElMessage.warning(t('adm.budgetGtZero'))
   const nv = Number(budgetInput.value)
   const ov = Number(budgetTarget.value.old_value || 0)
@@ -348,6 +358,11 @@ const saveBudget = async () => {
   opLoading.value = true
   try {
     const r = await POST('/ads/budget', payload)
+    if (r.success && (r.verified === false || r.warning)) {
+      ElMessage.warning(r.warning || t('adm.fakePauseWarn'))
+      opLoading.value = false
+      return
+    }
     if (r.success) {
       const it = curList.value.find(x => x.id === budgetTarget.value.node_id)
       if (it) {
@@ -359,7 +374,6 @@ const saveBudget = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   opLoading.value = false
 }
-const budgetQuick = (m) => { budgetInput.value = Math.round(budgetInput.value * m * 100) / 100 }
 const deleteItem = async (item) => {
   try {
     await ElMessageBox.confirm(t('adm.delConfirm', { name: item.name }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
@@ -372,6 +386,7 @@ const deleteItem = async (item) => {
   opLoading.value = false
 }
 const batchStatus = async (status) => {
+  if (opLoading.value) return
   if (!selected.value.size) return ElMessage.warning(t('adm.selectRowsFirst'))
   if (status === 'PAUSED') {
     try { await ElMessageBox.confirm(t('adm.batchPauseConfirm', { n: selected.value.size }), t('adm.batchPauseTitle'), { type: 'warning', confirmButtonText: t('adm.paused'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' }) }
@@ -380,21 +395,31 @@ const batchStatus = async (status) => {
     try { await ElMessageBox.confirm(t('adm.batchActivateConfirm', { n: selected.value.size }), t('adm.batchActivateTitle'), { type: 'warning', confirmButtonText: t('adm.batchActivate'), cancelButtonText: t('common.cancel') }) }
     catch { return }
   }
-  const items = []; for (const id of selected.value) { const it = curList.value.find(x => x.id === id); if (it) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
+  const items = []; for (const id of selected.value) { const it = curList.value.find(x => entityKey(x) === id); if (it && !accStateTag(it)) items.push({ act_id: it.act_id, node_id: it.id, level: curLevel(), status }) }
+  if (!items.length) return ElMessage.warning(t('adm.selectRowsFirst'))
   opLoading.value = true
   try {
     const r = await POST('/ads/batch-status', { items })
+    batchResults.value = r.results || []
     // 任一条假停/未生效（verified=false 或 warning）→ warning 而非 success
-    const warnItem = (r.results || []).find(x => x.warning || x.verified === false)
-    if (warnItem) ElMessage.warning(t('adm.batchResult', { ok: r.success_count, n: items.length }) + ' · ' + (warnItem.warning || t('adm.fakePauseWarn')))
+    const warnItem = (r.results || []).find(x => !x.success || x.warning || x.verified === false)
+    if (warnItem || r.success_count !== items.length) ElMessage.warning(t('adm.batchResult', { ok: r.success_count, n: items.length }) + ' · ' + (warnItem?.warning || warnItem?.error || t('adm.fakePauseWarn')))
     else ElMessage.success(t('adm.batchResult', { ok: r.success_count, n: items.length }))
-    await load(); selected.value = new Set()
+    const failedKeys = new Set(items.filter(it => !batchResults.value.some(r => r.node_id === it.node_id && (!r.act_id || r.act_id === it.act_id) && r.success && r.verified !== false && !r.warning)).map(it => {
+      const row = curList.value.find(a => a.id === it.node_id && a.act_id === it.act_id)
+      return row && entityKey(row)
+    }).filter(Boolean))
+    await load(); selected.value = failedKeys
   } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }
 // 创意缩略图：大图源优先（adimages 原图 CDN / 本地素材），FB thumbnail_url(128px) 兜底。
 // 行内缩略与点击放大弹窗共用（全库审查P2：删除优先级链完全相同的重复 bigThumbOf）
-const thumbOf = (a) => a?.big_thumb || a?.local_thumb || a?.creative?.thumbnail_url || ''
+const thumbFailures = ref({})
+const batchResults = ref([])
+const thumbSources = a => [...new Set([a?.big_thumb, a?.local_thumb, a?.creative?.thumbnail_url].filter(Boolean))]
+const thumbOf = a => thumbSources(a)[thumbFailures.value[entityKey(a)] || 0] || ''
+const nextThumb = a => { const key = entityKey(a); thumbFailures.value[key] = (thumbFailures.value[key] || 0) + 1 }
 // FB CTA 按钮文案（FB 官方中文叫法；en 原名本身即英文）
 const CTA_LABELS = {
   LEARN_MORE: '了解详情', SHOP_NOW: '立即购物', SIGN_UP: '注册', SUBSCRIBE: '订阅',
@@ -406,14 +431,13 @@ const CTA_LABELS = {
 const ctaOf = (a) => {
   const cta = a?.creative?.object_story_spec?.link_data?.call_to_action
   const ty = cta?.type || ''
-  return ty ? { label: CTA_LABELS[ty] || ty, link: cta?.value?.link || '' } : null
+  return ty ? { label: (locale.value === 'en' ? ty.replaceAll('_', ' ') : CTA_LABELS[ty]) || ty, link: cta?.value?.link || '' } : null
 }
 const showThumb = (a) => {
   const u = thumbOf(a)
-  if (!u) return
   const ti = titleOf(a), co = copyOf(a), cta = ctaOf(a)
   ElMessageBox.alert(h('div', { class: 'cre-preview' }, [
-    h('img', { src: u, style: 'width:100%;border-radius:8px;display:block' }),
+    u ? h('img', { src: u, style: 'width:100%;border-radius:8px;display:block', onError: event => { nextThumb(a); const next = thumbOf(a); if (next) event.target.src = next; else event.target.replaceWith(document.createTextNode(t('adm.thumbNone'))) } }) : h('div', t('adm.thumbNone')),
     ti ? h('div', { style: 'font-weight:600;margin:10px 2px 2px;font-size:14px' }, ti) : null,
     co ? h('div', { style: 'color:var(--t3);margin:2px;font-size:12px;line-height:1.5;white-space:pre-wrap' }, co) : null,
     cta ? h('div', { style: 'margin:10px 2px 2px' }, [
@@ -512,8 +536,35 @@ const resetRedirects = async () => {
   } catch (e) {}
 }
 const toggleSelect = (id) => { const s = new Set(selected.value); s.has(id) ? s.delete(id) : s.add(id); selected.value = s }
-const selectAll = () => { selected.value = selected.value.size === curList.value.length ? new Set() : new Set(curList.value.map(x => x.id)) }
+const selectAll = () => { selected.value = allSelected.value ? new Set() : new Set(curList.value.map(entityKey)) }
 const isSelected = (id) => selected.value.has(id)
+const allSelected = computed(() => curList.value.length > 0 && curList.value.every(a => selected.value.has(entityKey(a))))
+watch(curList, rows => {
+  const keys = new Set(rows.map(entityKey))
+  selected.value = new Set([...selected.value].filter(key => keys.has(key)))
+})
+const campaignCrumb = computed(() => (data.value.campaigns || []).find(a => String(a.id) === String(drillCampaign.value) && actMatch(a))?.name || drillCampaign.value)
+const adsetCrumb = computed(() => (data.value.adsets || []).find(a => String(a.id) === String(drillAdset.value) && actMatch(a))?.name || drillAdset.value)
+const tableWidth = computed(() => 600 + visibleColumns.value.reduce((n, c) => n + c.width, 0))
+const snapshotStale = a => a.snapshot_at && nowTick.value - new Date(a.snapshot_at).getTime() > 86400e3
+const snapshotText = a => a.snapshot_at ? t(snapshotStale(a) ? 'adm.staleSnapshot' : 'adm.snapshot', { time: fmtTime(a.snapshot_at) }) : t('adm.snapshotUnknown')
+const metricText = (a, id) => {
+  if (id === 'objective') return objLabel(a.objective)
+  if (id === 'optimization_goal') return optLabel(a.optimization_goal)
+  if (id === 'spend') return fmtSpendCol(a)
+  if (id === 'cpa') return fmtCpaCol(a)
+  if (id === 'results_fb') return fbResult(a) == null ? '—' : fbResult(a).toLocaleString()
+  if (id === 'cost_per_result') return fmtAmount(mixedCur.value ? a.cost_per_result_usd : a.cost_per_result, viewCur.value)
+  if (id === 'ctr') return a.ctr == null ? '—' : Number(a.ctr).toFixed(2) + '%'
+  if (id === 'pass_rate') return a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '—'
+  return a[id] == null || a[id] === '' ? '—' : typeof a[id] === 'number' ? a[id].toLocaleString() : a[id]
+}
+const sumMetric = id => {
+  if (id === 'spend') return sumSpend.value
+  if (!['results_fb','conversions','impressions','clicks','landing_visits','landing_pass'].includes(id)) return ''
+  if (id === 'results_fb' && curList.value.some(a => fbResult(a) == null)) return '—'
+  return curList.value.reduce((sum, a) => sum + Number(a[id] || 0), 0).toLocaleString()
+}
 
 // 潜客（FB Leadgen）
 const leads = ref([])
@@ -688,10 +739,10 @@ const unsubscribeLeads = async () => {
         </el-option>
       </el-select>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
-      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')">⚡ {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
+      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
-      <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchNameId')" />
+      <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
     </div>
     <div v-if="loadError" class="page-error-bar">
@@ -710,6 +761,10 @@ const unsubscribeLeads = async () => {
         <button class="ctrl-btn sm ghost" @click="selected = new Set()">{{ t('adm.clearSelection') }}</button>
       </div>
     </transition>
+    <details v-if="batchResults.length" class="batch-results" open>
+      <summary>{{ t('adm.operationResults') }}</summary>
+      <div v-for="(result, i) in batchResults" :key="i">{{ result.node_id }} · {{ t(!result.success ? 'adm.failed' : result.verified === false || result.warning ? 'adm.unverified' : 'adm.verified') }} <span>{{ result.error || result.warning || '' }}</span></div>
+    </details>
     <div class="tabs">
       <div :class="['tab', { on: tab === 'campaign' }]" @click="tab = 'campaign'; clearDrill(); selected = new Set()">{{ t('adm.tabCampaign') }}</div>
       <div :class="['tab', { on: tab === 'adset' }]" @click="tab = 'adset'; selected = new Set()">{{ t('adm.tabAdset') }}</div>
@@ -718,54 +773,66 @@ const unsubscribeLeads = async () => {
       <div v-if="drillName" class="drill-tag">{{ drillName }} <span @click="clearDrill">✕</span></div>
       <span v-if="platform !== 'all'" :class="['scope-chip', platform]">{{ platform === 'fb' ? 'Facebook' : 'TikTok' }} · {{ t('adm.scopeAccounts', { n: platAccounts.length }) }}</span>
     </div>
+    <div v-if="tab !== 'lead'" class="manager-tools">
+      <nav class="breadcrumbs" :aria-label="t('adm.pageTitle')">
+        <button class="ctrl-btn sm" @click="tab = 'campaign'; clearDrill()">{{ t('adm.allCampaigns') }}</button>
+        <template v-if="drillCampaign"><span>›</span><button class="ctrl-btn sm" @click="tab = 'adset'; drillAdset = ''">{{ campaignCrumb }}</button></template>
+        <template v-if="drillAdset"><span>›</span><span>{{ adsetCrumb }}</span></template>
+      </nav>
+      <el-popover trigger="click" width="250" placement="bottom-end">
+        <template #reference><button class="ctrl-btn sm">{{ t('adm.columns') }}</button></template>
+        <el-checkbox-group v-model="viewPrefs[tab].columns" class="column-options">
+          <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
+        </el-checkbox-group>
+      </el-popover>
+    </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
-      <template v-if="tab === 'campaign'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colSeries') }}</div><div>{{ t('adm.colObjective') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
-        <div v-for="c in curList" :key="c.id" class="row" :class="{ sel: isSelected(c.id) }" :style="rowStyle" @click="toggleSelect(c.id)">
-          <div class="status-cell" @click.stop><el-switch :model-value="c.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(c)" :disabled="opLoading || accDead(c)" /><span class="dot" :class="statusDot(c.effective_status)"></span>{{ statusLabel(c.effective_status) }}<span v-if="accStateTag(c)" :class="['acc-state-tag', accStateTag(c).cls]" :title="accStateTag(c).cls === 'banned' ? t('adm.accBannedTip') : t('adm.accUnmanagedTip')">{{ accStateTag(c).label }}</span></div>
-          <div class="nm clk" @click.stop="drillToAdset(c)">{{ c.name }}<div class="sid"><span v-if="platChipByAct(c.act_id)" :class="['plat-chip', platChipByAct(c.act_id)]">{{ platChipByAct(c.act_id).toUpperCase() }}</span>{{ c.account_name }} · {{ c.id }}</div></div>
-          <div>{{ objLabel(c.objective) }}</div>
-          <div class="budget-cell" :class="{ editable: hasBudget(c) }" @click.stop="hasBudget(c) && openBudget(c)">{{ fmtBudget(c, 'campaign') }}</div>
-          <div>{{ fmtSpendCol(c) }}</div><div><span title="{{ t('adm.convDual', { fb: c.results_fb || 0, total: c.conversions || 0 }) }}">{{ c.results_fb ?? c.conversions ?? 0 }}</span></div><div>{{ fmtCpaCol(c) }}</div><div>{{ fmtNum(c.reach) }}</div><div>{{ c.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, c)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ c.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(c)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
-        </div>
-        <div v-if="curList.length" class="row sum" :style="rowStyle">
-          <div></div><div class="sum-label">{{ totalLabel }}</div><div></div><div></div>
-          <div class="sum-val">{{ sumSpend }}</div><div class="sum-val">{{ sumConv }}</div>
-          <div></div><div></div><div></div><div></div>
-        </div>
-      </template>
-      <template v-else-if="tab === 'adset'">
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.colAdset') }}</div><div>{{ t('adm.colOptGoal') }}</div><div class="so" @click="sortBy('daily_budget_amount')">{{ t('adm.colBudget') }}{{ budgetCurTag }}{{ sortIcon('daily_budget_amount') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('frequency')">{{ t('adm.colFrequency') }}{{ sortIcon('frequency') }}</div><div></div></div>
-        <div v-for="s in curList" :key="s.id" class="row" :class="{ sel: isSelected(s.id) }" :style="rowStyle" @click="toggleSelect(s.id)">
-          <div class="status-cell" @click.stop><el-switch :model-value="s.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(s)" :disabled="opLoading || accDead(s)" /><span class="dot" :class="statusDot(s.effective_status)"></span>{{ statusLabel(s.effective_status) }}<span v-if="accStateTag(s)" :class="['acc-state-tag', accStateTag(s).cls]" :title="accStateTag(s).cls === 'banned' ? t('adm.accBannedTip') : t('adm.accUnmanagedTip')">{{ accStateTag(s).label }}</span></div>
-          <div class="nm clk" :title="campNameOf(s)" @click.stop="drillToAd(s)">{{ s.name }}<div class="sid"><span v-if="platChipByAct(s.act_id)" :class="['plat-chip', platChipByAct(s.act_id)]">{{ platChipByAct(s.act_id).toUpperCase() }}</span>{{ s.account_name }} · {{ s.id }}</div></div>
-          <div>{{ optLabel(s.optimization_goal) }}</div>
-          <div class="budget-cell" :class="{ editable: hasBudget(s) }" @click.stop="hasBudget(s) && openBudget(s)">{{ fmtBudget(s, 'adset') }}</div>
-          <div>{{ fmtSpendCol(s) }}</div><div><span title="{{ t('adm.convDual', { fb: s.results_fb || 0, total: s.conversions || 0 }) }}">{{ s.results_fb ?? s.conversions ?? 0 }}</span></div><div>{{ fmtCpaCol(s) }}</div><div>{{ fmtNum(s.reach) }}</div><div>{{ s.frequency || '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, s)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ s.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item v-if="hasBudget(s)" command="budget">{{ t('adm.editBudget') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
-        </div>
-        <div v-if="curList.length" class="row sum" :style="rowStyle">
-          <div></div><div class="sum-label">{{ totalLabel }}</div><div></div><div></div>
-          <div class="sum-val">{{ sumSpend }}</div><div class="sum-val">{{ sumConv }}</div>
-          <div></div><div></div><div></div><div></div>
-        </div>
-      </template>
-      <template v-else>
-        <div class="row head" :style="rowStyle"><div class="so" @click="sortBy('_status_rank')">{{ t('common.status') }}{{ sortIcon('_status_rank') }}</div><div>{{ t('adm.tabAd') }}</div><div>{{ t('adm.colSubcode') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('spend')">{{ t('adm.colSpend') }}{{ mixedCur ? ' (USD)' : budgetCurTag }}{{ sortIcon('spend') }}</div><div class="so" @click="sortBy('conversions')">{{ t('adm.colConversion') }}{{ sortIcon('conversions') }}</div><div class="so" :title="mixedCur ? t('adm.mixedCurrencyTip') : ''" @click="sortBy('cpa')">CPA{{ mixedCur ? ' ($)' : budgetCurTag }}{{ sortIcon('cpa') }}</div><div class="so" @click="sortBy('landing_visits')">{{ t('adm.colVisits') }}{{ sortIcon('landing_visits') }}</div><div class="so" @click="sortBy('landing_pass')">{{ t('adm.colPass') }}{{ sortIcon('landing_pass') }}</div><div>{{ t('adm.colPassRate') }}</div><div class="so" @click="sortBy('reach')">{{ t('adm.colReach') }}{{ sortIcon('reach') }}</div><div class="so" @click="sortBy('ctr')">CTR{{ sortIcon('ctr') }}</div><div></div></div>
-        <div v-for="a in curList" :key="a.id" class="row" :class="{ sel: isSelected(a.id) }" :style="rowStyle" @click="toggleSelect(a.id)">
-          <div class="status-cell" @click.stop><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" @change="toggleStatus(a)" :disabled="opLoading || accDead(a)" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]" :title="accStateTag(a).cls === 'banned' ? t('adm.accBannedTip') : t('adm.accUnmanagedTip')">{{ accStateTag(a).label }}</span><span v-if="a.effective_status === 'DISAPPROVED' && rfOf(a)" class="rf-flag" :title="t('adm.reviewFlagHint')" @click.stop="showReview(a)">⚠</span></div>
-          <div class="nm ad-nm"><img v-if="thumbOf(a)" :key="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="$event.target.style.display = 'none'" @click.stop="showThumb(a)" /><div v-else class="ad-thumb ph" :title="a.effective_status === 'ARCHIVED' ? t('adm.thumbArchived') : t('adm.thumbNone')">{{ a.effective_status === 'ARCHIVED' ? t('adm.thumbArchivedShort') : t('adm.thumbNoneShort') }}</div><div class="txt"><div v-if="titleOf(a)" class="cpy tt" :title="titleOf(a)">{{ titleOf(a) }}</div><div v-if="copyOf(a)" class="cpy bd" :title="copyOf(a)">{{ copyOf(a) }}</div><div class="an">{{ a.name }}<span v-if="redirectMap[a.id]" class="rd-mark" @click.stop="openRedirect(a)" :title="t('adm.redirectMarkTitle', { url: redirectMap[a.id] })">{{ t('adm.redirectShort') }}</span></div><div class="sid"><span v-if="platChipByAct(a.act_id)" :class="['plat-chip', platChipByAct(a.act_id)]">{{ platChipByAct(a.act_id).toUpperCase() }}</span>{{ a.account_name }} · {{ a.id }}</div></div></div>
-          <div class="slug-cell"><code v-if="a.slug" class="ad-slug" @click.stop="goLandingLogs(a.slug, a.id)" :title="t('adm.slugTitle', { slug: a.slug, pass: a.landing_pass||0 })">/a/{{ a.slug }}</code><span v-else class="muted" :title="t('adm.slugEmptyTitle')">{{ t('adm.slugEmpty') }}</span></div>
-          <div>{{ fmtSpendCol(a) }}</div><div><span title="{{ t('adm.convDual', { fb: a.results_fb || 0, total: a.conversions || 0 }) }}">{{ a.results_fb ?? a.conversions ?? 0 }}</span></div><div>{{ fmtCpaCol(a) }}</div><div class="lv" :title="t('adm.lvTitle')">{{ a.landing_visits || '-' }}</div><div class="lp" :title="t('adm.lpTitle')">{{ a.landing_pass || '-' }}</div><div class="lpr" :title="a.landing_visits ? t('adm.lprTitle', { pass: a.landing_pass||0, visits: a.landing_visits }) : t('adm.noVisits')">{{ a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '-' }}</div><div>{{ fmtNum(a.reach) }}</div><div>{{ a.ctr ? Number(a.ctr).toFixed(2) + '%' : '-' }}</div>
-          <div class="ops" @click.stop><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :disabled="opLoading">⚙</button><template #dropdown><el-dropdown-menu><el-dropdown-item command="toggle">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item><el-dropdown-item command="rename">{{ t('adm.rename') }}</el-dropdown-item><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}{{ redirectMap[a.id] ? ' · ' + t('adm.redirectSet') : '' }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">🔍 {{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">📌 {{ t('adm.reuseThisPost') }}</el-dropdown-item><el-dropdown-item command="delete" divided style="color:var(--error)">{{ t('common.delete') }}</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
-        </div>
-        <div v-if="curList.length" class="row sum" :style="rowStyle">
-          <div></div><div class="sum-label">{{ totalLabel }}</div><div></div>
-          <div class="sum-val">{{ sumSpend }}</div><div class="sum-val">{{ sumConv }}</div>
-          <div></div><div></div><div></div><div></div><div></div><div></div><div></div>
-        </div>
-      </template>
+      <table class="manager-table" :style="{ minWidth: tableWidth + 'px' }">
+        <thead><tr>
+          <th class="select-cell"><input type="checkbox" :aria-label="t('adm.selectAll')" :checked="allSelected" @change="selectAll" /></th>
+          <th class="status-col"><button class="sort-button" @click="sortBy('_status_rank')">{{ t('common.status') }} {{ sortIcon('_status_rank') }}</button></th>
+          <th class="name-col"><button class="sort-button" @click="sortBy('name')">{{ t(tab === 'campaign' ? 'adm.colSeries' : tab === 'adset' ? 'adm.colAdset' : 'adm.tabAd') }} {{ sortIcon('name') }}</button></th>
+          <th v-for="col in visibleColumns" :key="col.id" :style="{ width: col.width + 'px' }"><button class="sort-button" :disabled="!col.sort" @click="col.sort && sortBy(col.sort)">{{ t('adm.' + col.label) }} {{ ['spend','cpa','cost_per_result'].includes(col.id) ? '(' + viewCur + ')' : '' }} {{ sortIcon(col.sort) }}</button></th>
+          <th class="action-col">{{ t('adm.actions') }}</th>
+        </tr></thead>
+        <tbody>
+          <template v-for="a in curList" :key="entityKey(a)">
+            <tr :class="{ sel: isSelected(entityKey(a)) }">
+              <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
+              <td><div class="status-cell"><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
+              <td><div class="ad-nm">
+                <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
+                <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
+                  <div class="sid">{{ a.account_name }} · {{ a.id }}</div>
+                  <div v-if="tab !== 'campaign'" class="sid">{{ contextOf(a).campaign?.name }}<template v-if="tab === 'ad' && contextOf(a).adset"> › {{ contextOf(a).adset.name }}</template></div>
+                  <div class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.metrics_updated_at ? t('adm.metricsAt', { time: fmtTime(a.metrics_updated_at) }) : ''">{{ snapshotText(a) }}</div>
+                  <span v-if="tab === 'ad' && redirectMap[a.id]" class="rd-mark" @click="openRedirect(a)">{{ t('adm.redirectShort') }}</span>
+                </div>
+              </div></td>
+              <td v-for="col in visibleColumns" :key="col.id">
+                <button v-if="col.id === 'budget'" class="budget-cell sort-button" :disabled="!hasBudget(a) || !!accStateTag(a) || opLoading" @click="openBudget(a)">{{ fmtBudget(a, tab) }}</button>
+                <code v-else-if="col.id === 'slug' && a.slug" class="ad-slug" @click="goLandingLogs(a.slug, a.id)">/a/{{ a.slug }}</code>
+                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? t('adm.fbMissing') : ''">{{ metricText(a, col.id) }}</span>
+              </td>
+              <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
+                <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item>
+                <el-dropdown-item command="rename" :disabled="!!accStateTag(a)">{{ t('adm.rename') }}</el-dropdown-item>
+                <el-dropdown-item v-if="hasBudget(a)" command="budget" :disabled="!!accStateTag(a)">{{ t('adm.editBudget') }}</el-dropdown-item>
+                <template v-if="tab === 'ad'"><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">{{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">{{ t('adm.reuseThisPost') }}</el-dropdown-item></template>
+                <el-dropdown-item command="delete" :disabled="!!accStateTag(a)" divided>{{ t('common.delete') }}</el-dropdown-item>
+              </el-dropdown-menu></template></el-dropdown></td>
+            </tr>
+            <tr v-if="budgetDialog && budgetTarget?.node_id === a.id && budgetTarget?.act_id === a.act_id"><td :colspan="visibleColumns.length + 4">
+              <form class="inline-budget" @submit.prevent="saveBudget" @keydown.esc="!opLoading && (budgetDialog = false)">
+                <label>{{ budgetTarget.budget_type === 'lifetime' ? t('adm.lifetimeBudgetLabel') : t('adm.dailyBudgetLabel') }} ({{ budgetTarget.currency }})
+                  <input v-model.number="budgetInput" type="number" min="0.01" step="0.01" class="budget-input" :placeholder="String(budgetTarget.old_value)" :disabled="opLoading" required /></label>
+                <button type="submit" class="ctrl-btn primary" :disabled="opLoading">{{ t('common.save') }}</button><button type="button" class="ctrl-btn" :disabled="opLoading" @click="budgetDialog = false">{{ t('common.cancel') }}</button>
+              </form>
+            </td></tr>
+          </template>
+        </tbody>
+        <tfoot v-if="curList.length"><tr><td></td><td></td><td>{{ totalLabel }}</td><td v-for="col in visibleColumns" :key="col.id">{{ sumMetric(col.id) }}</td><td></td></tr></tfoot>
+      </table>
       <div v-if="!curList.length && !loading" class="empty">{{ t('adm.emptyAdsHint') }}</div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
@@ -776,9 +843,9 @@ const unsubscribeLeads = async () => {
         </div>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
         <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="openPagesPanel">📄 {{ t('adm.pagesPanelBtn') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads()">🔔 {{ t('adm.leadsSubscribe') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="unsubscribeLeads">🔕 {{ t('adm.leadsUnsubscribe') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="openPagesPanel"> {{ t('adm.pagesPanelBtn') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads()"> {{ t('adm.leadsSubscribe') }}</button>
+        <button class="ctrl-btn sm" :disabled="opLoading" @click="unsubscribeLeads"> {{ t('adm.leadsUnsubscribe') }}</button>
         <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
       </div>
       <div class="tbl" v-loading="leadsLoading">
@@ -805,15 +872,6 @@ const unsubscribeLeads = async () => {
         <div v-if="!leads.length && !leadsLoading" class="empty">{{ t('adm.leadsEmpty') }}</div>
       </div>
     </div>
-    <el-dialog v-model="budgetDialog" :title="t('adm.editBudgetTitle', { name: budgetTarget?.name || '' })" width="360px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
-      <div class="budget-form">
-        <label>{{ budgetTarget?.budget_type === 'lifetime' ? t('adm.lifetimeBudgetLabel') : t('adm.dailyBudgetLabel') }}</label>
-        <input v-model.number="budgetInput" type="number" min="1" step="0.01" class="budget-input" />
-        <div class="quick-btns"><button v-for="m in [1, 1.2, 1.5, 2]" :key="m" class="ctrl-btn sm" @click="budgetQuick(m)">×{{ m }}</button></div>
-      </div>
-      <template #footer><button class="ctrl-btn" @click="budgetDialog = false">{{ t('common.cancel') }}</button><button class="ctrl-btn primary" :disabled="opLoading" @click="saveBudget">{{ opLoading ? t('common.saving') + '…' : t('common.save') }}</button></template>
-    </el-dialog>
-
     <el-dialog v-model="pagesDlg" :title="t('adm.pagesPanelTitle')" width="640px" :destroy-on-close="true" append-to-body>
       <div v-loading="pagesLoading" class="pages-panel">
         <div class="pp-hint">{{ t('adm.pagesPanelHint') }}</div>
@@ -828,8 +886,8 @@ const unsubscribeLeads = async () => {
       </div>
       <template #footer>
         <button class="ctrl-btn" :disabled="pagesLoading" @click="loadLeadPages">⟳ {{ t('common.refresh') }}</button>
-        <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected">🔔 {{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
-        <button class="ctrl-btn" style="color: var(--error)" :disabled="opLoading" @click="purgeStalePages">🧹 {{ t('adm.purgeStaleBtn') }}</button>
+        <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected"> {{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
+        <button class="ctrl-btn" style="color: var(--error)" :disabled="opLoading" @click="purgeStalePages"> {{ t('adm.purgeStaleBtn') }}</button>
       </template>
     </el-dialog>
 
@@ -890,7 +948,7 @@ const unsubscribeLeads = async () => {
           <div class="diag-sec" v-if="diagData.rules.length">
             <div class="diag-sec-title">{{ t('adm.diagRuleEval') }}</div>
             <div v-for="r in diagData.rules" :key="r.rule_id" class="diag-rule" :class="{ hit: r.hit }">
-              <span class="rule-icon">{{ r.hit ? '🔴' : '🟢' }}</span>
+              <span class="rule-icon">{{ r.hit ? '' : '' }}</span>
               <div class="rule-info">
                 <div class="rule-title">{{ r.rule_name }} <span class="rule-type">{{ RULE_ZH[r.rule_type] || r.rule_type }}</span></div>
                 <div class="rule-detail" v-if="r.detail">{{ r.detail }}</div>
@@ -1107,7 +1165,28 @@ const unsubscribeLeads = async () => {
 .ld-note-btn:hover { color: var(--ac) }
 .ld-extra { display: flex; flex-wrap: wrap; gap: 4px }
 .ld-chip { font-size: 10px; color: var(--t2); background: var(--bg3); padding: 1px 6px; border-radius: 8px; white-space: nowrap }
-</style>
 
 /* UI审计D：页面级错误横幅——加载失败与空态区分 */
 .page-error-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent) }
+
+.manager-tools, .breadcrumbs, .inline-budget { display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+.manager-tools { justify-content:space-between; margin:12px 0 }
+.column-options { display:flex; flex-direction:column }
+.manager-table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:12px }
+.manager-table th, .manager-table td { padding:12px 10px; text-align:left; border-bottom:1px solid var(--bd); overflow-wrap:anywhere; vertical-align:middle }
+.manager-table th { background:var(--bg2); color:var(--t2); font-weight:500 }
+.manager-table .select-cell { width:30px }
+.manager-table .status-col { width:190px }
+.manager-table .name-col { width:300px }
+.manager-table .action-col { width:60px }
+.manager-table tr.sel { background:color-mix(in srgb,var(--ac) 8%,transparent) }
+.manager-table tfoot { background:var(--bg2); font-weight:600 }
+.sort-button, .entity-name, .preview-button { border:0; background:transparent; color:inherit; padding:0; cursor:pointer; font:inherit; text-align:left }
+.sort-button:disabled { cursor:default }
+.entity-name { color:var(--ac); font-weight:500; overflow-wrap:anywhere }
+.preview-button { flex-shrink:0 }
+.inline-budget { padding:8px; gap:12px }
+.inline-budget label { display:flex; align-items:center; gap:12px }
+.inline-budget input { width:180px }
+.stale-snapshot { color:var(--warning, #b87917) }
+</style>
