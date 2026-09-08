@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-09-08 — 批次 I 后端：FB 广告管理器 1:1 对齐（转化位置矩阵/版位/WhatsApp/自动建链）
+
+### 概述
+《总方案_v2_FB对齐》批次 I 后端部分（前端下一批）。一个 commit（bd57b79），回退点 = 9efdba6（批次0）+ 服务器备份 /opt/toveads/backups/batchI_09080813/。用户已批：转化位置全开（含 WhatsApp/电话/IG 私信/Leads 组合位）、自动建链=每广告。
+核心：**一套「转化位置→成效目标」矩阵**（ad_builder）替换三套互不相交的旧词表（_OPT_GOAL_MAP 目的地语义 key / UI custom_event_type 词表 / is_messaging 门），conv_location 空 = 存量行为逐字不变（零迁移兼容）。
+
+### 变更表
+| 文件 | 变更 | 验证 |
+|---|---|---|
+| `backend/app/core/ad_builder.py` | ①新映射族：`CONV_LOCATIONS_BY_OBJECTIVE`（按 objective 合法转化位置，蓝图 §2.1）+ `_CONV_MATRIX`（21 行 (obj,loc)→(destination_type, 默认成效目标, promoted_object 形态)，蓝图 §5.2 CTM/CTW 实证）+ `OPT_GOALS_BY_OBJECTIVE`/`OPT_GOALS_BY_LOCATION`（成效目标兼容校验表）+ `_LEGACY_DEST`（conv_location 空的存量推导，含消息类覆盖组合补全）+ `_CUSTOM_EVENT_MAP`（UI 词表→custom_event_type）；②`custom_event_from_goal()`：conversion_goal（AddToCart/add_to_cart/ADD_TO_CART 统一）真实进 promoted_object.custom_event_type（修恒 PURCHASE/LEAD，盘点 C2）；③`resolve_adset_destination()`+`is_messaging_destination()`：门统一按派生目的地判定（修 A1 死链——组覆盖 CONVERSATIONS 现在也开欢迎语门）；④build_adset 新参 conv_location/placements/whatsapp_phone_number：矩阵派生 destination/promoted_object（CTW 号码仅 ENGAGEMENT 进 promoted_object）；**修 bugA**：destination_type_override 仅 conv_location 空时生效；**修 bugB**：SALES 任何成效目标必带 promoted_object（消息类兜底 page_id，缺则 ValueError）+消息类目的地兜底；版位进 targeting（extra 深合并前）；MESSENGER 版位并入去重（不再整体覆盖）；⑤`build_wa_welcome_message()`（VISUAL_EDITOR autofill_message 预填形态）+ `parse_message_template(channel=)` 分流；⑥build_creative 新参 app_destination：消息类目的地且未显式选 CTA → WHATSAPP_MESSAGE/MESSAGE_PAGE + value.app_destination | 本机功能断言 24 项全过 + 服务器 smoke |
+| `backend/app/core/ad_ops.py` | deploy_one_account 新参 conv_location/whatsapp_phone_number/placements 透传 build_adset；is_messaging 改 resolve_adset_destination 派生（删旧 conversion_goal 词表门）；WA/CTM 欢迎语 channel 分流；消息类 CTA app_destination | py_compile ✓ 双门 ✓ |
+| `backend/app/routers/launch_templates.py` | ①`_validate_structure`：组节点白名单+规范化 +conv_location/placement_mode/publisher_platforms/device_platforms（枚举/子集/manual 需非空平台/auto 清残留勾选）；②TemplateIn：whatsapp_phone_number（E.164 宽松校验）+ model_validator 按矩阵校验 conv_location×objective、optimization_goal×objective、交叉兼容（非法 422，审计 S8/C4 门）；③`_budget_guard_400`：lifetime 无模板级排期时接受「任一启用组带完整排期」（树排期随组下发，修审计 C1 可存不可部署死路）；④自动建链族：`_auto_slug_base`（lt{模板id}-{节点key}-{素材id|s}-{账户尾4}，[A-Za-z0-9_-] ≤44）+ `_create_auto_subcode`（reserved LandingAdLink，碰撞 -N 后缀，语义位耗尽退随机 6 位）+ `_flat_auto_subcode`（平铺/批量/重试共用）+ `_auto_landing_gate`（deploy/preflight 前提门：页已发布+display 模式，redirect 建链无意义 B11）；⑤树 runner：组级派生 grp_dest/grp_opt → build_adset 接线 + 消息门 + WA 分流（`mt.type` 消费）+ CTA app_destination；每展开广告自动建链（base=页行解析不信快照 B5）+回绑 active+广告名[子码:]标注+失败降级直投且 item error/action_log 留痕；树 slug 查询过滤 reserved/active（B4）；`LaunchJobItem.subcode_slug` 激活（B10）；⑥树预检：payload 样例带 conv_location/placements/whatsapp + tree 概览带版位/转化位置 + `auto_subcode_nodes` 计数；平铺预检 `auto_subcode` 标志 | 服务器 smoke 54 断言 + 树/batchG 回归全过 |
+| `backend/app/models/launch_template.py` | LaunchTemplate + whatsapp_phone_number Text 列 | py_compile ✓ |
+| `backend/alembic/versions/0092_launch_tpl_whatsapp_number.py` | 迁移 0092：列 + GRANT toveads_app/toveads_super | 服务器已跑：COL ✓ VER=0092 ✓ GRANTS ✓✓ |
+| `_smoke_batch_i.py` | 批次I smoke：词表归一（AddToCart→ADD_TO_CART/旧 key 兼容/空→默认）、conv_location 4 类 422、版位 auto/manual payload、WhatsApp promoted_object（ENGAGEMENT 带号码/TRAFFIC 不带）、Leads 组合位、CBO+lifetime 组排期守卫、自动建链建/查/碰撞/门/降级/清理、bugA/B 回归、0088 树 smoke 回归 | **54/54 PASS**（服务器生产实测） |
+
+### 新映射表摘要（矩阵要点）
+- **合法转化位置**：SALES=website/messenger/whatsapp/phone_call；LEADS=+on_ad/on_ad_messenger（组合位→ON_AD+LEAD_GENERATION，分流在 FB 投放侧）/instagram_direct；TRAFFIC=website/messenger/whatsapp/instagram_direct/phone_call；ENGAGEMENT=website/on_page/messenger/whatsapp/instagram_direct；AWARENESS/APP_PROMOTION=无（后者链路未建，C3）。
+- **派生链示例**：SALES+website→WEBSITE/OFFSITE_CONVERSIONS/pixel+事件；SALES+messenger→MESSENGER/MESSAGING_PURCHASE_CONVERSION/page；ENGAGEMENT+whatsapp→WHATSAPP/CONVERSATIONS/page(ENGAGEMENT 才带显式号码)；LEADS+on_ad→ON_AD/LEAD_GENERATION/page；TRAFFIC+website→WEBSITE/LINK_CLICKS/无。
+- **❓未实测**（蓝图无逐格矩阵，真投放校准）：phone_call/instagram_direct 的成效目标组合、WA autofill_message 键名、组合位创意层挂法。
+
+### DB 迁移
+- 0092：launch_templates.whatsapp_phone_number（Text，空=不传）。GRANT 两角色 ✓。存量 structure JSON 零迁移（conv_location 空=现状）。
+
+### 生产环境变更
+- 服务器已执行（为跑 smoke 的验证部署，非最终上线）：备份 4 文件 → 上传 5 文件 → py_compile+import 双门 ✓ → alembic 0092 ✓ → restart+health ✓（v1.3.5 active）→ smoke batchI 54/54 + batchG 回归 + 0088 树回归全过 → smoke 数据零残留（lp/link/active-tpl=0/0/0）。无 .env/FB 侧/数据操作。
+
+### 复审结论（已知限制/风险）
+- conv_location/版位/whatsapp 号码的 UI 还没有（前端下一批）——后端字段就绪，存量行为不变；optimization_goal 兼容门是新校验：存量模板若存过非法组合（旧 UI 全集下拉可存），下次保存会 422（消息里带可用清单，属预期门）。
+- 自动建链降级语义：建链失败（DB/碰撞耗尽）→ 广告照建、裸 URL 直投、item error+action_log 留痕（error_code=auto_subcode_degraded）；未发布/redirect 页在 deploy/preflight 提交即 400 不进 job。
+- WhatsApp 欢迎语 text_format/autofill_message 键名、phone_call/IG 私信成效目标组合未经真金白银验证——批次 I 完成后的真投放实测（用户授权花钱）覆盖：{{ad.id}} 宏替换/转化位置/promoted_object/版位/自动建链/像素 fire 全链。
+- 树模式自动建链对「组停用/广告停用」无差别建链（链接建了广告 PAUSED 也回绑 active）——广告 PAUSED 时 slug 已 active 归属该广告，语义正确；孤儿 reserved 由既有 14d 清理回收。
+- TT 部署链未动（TT 模板恒平铺，自动建链仅 FB）。
+
+### commit
+- `bd57b79` 批次I后端：FB 对齐核心——转化位置矩阵统一三套词表+conv_location/版位组节点字段+WhatsApp真链路+每广告自动建链（已 push GitHub）
+
+关联：[[tree-launch-templates]] [[bare-except-silent-failure]] [[tech-review-format]] [[toveads-pause-state-2026-09]]
+
+---
+
 ## 2026-09-04 — 落地页整套集成验证（拖欠项 #25/#187 关闭）+ app 域上线 + 官网备用
 
 ### 概述
