@@ -1483,3 +1483,31 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 代码面：组卡像素 v-show=website（与 FB 仅网站转化位有像素一致）；跟帖模式不受自动主页影响（非 reuse 才 auto）；模板级 page_id 保留向后兼容。视觉面：截图逐张复核，视觉模型报的「素材：auto×3 重复」经 DOM 核实为误读（广告卡头无链路文本）。遗留已知项：部署真花钱链路（结构树真部署）仍待用户授权实测。
 
 生产：批O 后端已随 1dd47e0 部署（双门+restart+health ok），前端 CF Pages 已部署。commit：1dd47e0（已推送）。
+
+---
+
+## 批P — Advantage+ 受众归位 + 编辑器降噪 + 数据龄双层 chip｜2026-09-09
+
+### 概述
+用户三指令：①Advantage+ 受众该在组里（验证 FB 管理器位置）+ 编辑器去花哨 ②数据龄 chip 按最优解（省 API）。
+
+**FB 实况核实**：Advantage+ 受众开关在 **Ad Set 层受众区顶部**（开=国家/年龄/性别为基础约束+AI 扩展；关=原始受众完整手动定向，API=`targeting_automation:{"advantage_audience":0}`）。我们此前放系列 Tab 且**从未发过该字段**（纯 UI 摆设——本次一并修掉）。
+
+### 变更表
+| 位置 | 变更 |
+|---|---|
+| ad_builder.build_adset | 新参 advantage_audience=True；仅显式 False 发 `targeting_automation={"advantage_audience":0}`（FB 默认开=省略） |
+| launch_templates 树 runner/树预检 | per-set `snode.advantage_audience`（仅显式 False 关）；平铺预检/ad_ops 平铺部署：`not flexible_spec` 启发式（手动兴趣=原始受众） |
+| LaunchTemplates.vue | 系列Tab开关盒移除；组卡受众区顶部加开关（per-set）；开=兴趣行隐藏；advp 系列 chip 改派生（树=所有组全开）；树节点结构 JSON 加 advantage_audience（旧节点按"有手动兴趣→关"启发式回填）；平铺→树转换带入 |
+| 风格降噪（18 处） | 信息类容器（advantage-box/saved-aud/reuse 卡/批量提示/结构树卡/msg-hint）蓝框蓝底→中性 --bg2/--bd；选中态 6 种浓度→统一 --acg；节标题去蓝→--t2；el-switch 3 处剥硬编码色。警告色（scat/aud-empty）与状态绿保留——语义色不删 |
+| AdManager.vue | chip 改双层：「广告 X 分钟前 · 系列/组 Y 分钟前」——广告层=/ads last_sync（存活账户最新，巡检 5min）；结构层=存活账户 campaign/adset snapshot_at 最新（15min 同步）。不随 Tab 暗变、不取最旧行（修"14 分钟前"误解根因）；stale 判定挂广告层 |
+
+### 结构最优解（用户拍板"省 API 不怕麻烦"）
+保留 5min 巡检（广告层，花钱数据）+ 15min 结构同步（系列/组，变得少 99% 调用拉回一样数据），chip 双层诚实表达两层的真实新鲜度——既不浪费 API 也不误导。结构同步保持 15min 的另一理由：部署后已有即时 cache 刷新对账兜底。
+
+### 验证
+- 后端 smoke：build_adset 默认省略/显式关发 0/旧调用不变（TRAFFIC 目标）✓
+- 真浏览器 7/7 PASS 0 JS 错：系列Tab开关已移除；组卡受众区开关在顶部（idx 18<受众来源 83）；开=兴趣隐藏/关=出现；chip 双层「广告 7 分钟前 · 系列/组 17 分钟前」；风格目检（中性为主、选中才蓝、无花哨色块）
+- 已知项：平铺模式无开关（FB 默认开；有手动兴趣自动发 0）；树预检 payload 展示同口径
+
+生产：后端 3 文件双门+restart+health ok；前端 CF 部署。commit fb64f36（已推送）。
