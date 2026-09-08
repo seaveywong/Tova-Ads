@@ -205,11 +205,8 @@ const budgetCurTag = computed(() => (viewCurs.value.size && !mixedCur.value) ? '
 const fmtSpendCol = (a) => mixedCur.value ? fmtMoney(a.spend_usd) : fmtAmount(a.spend, viewCur.value)
 const fmtCpaCol = (a) => mixedCur.value ? (a.cpa_usd ? fmtMoney(a.cpa_usd) : '-') : (a.cpa ? fmtAmount(a.cpa, viewCur.value) : '-')
 
-// 数据时间（ads_cache 最旧账户的 updated_at）超 1h 变橙提示
-const cacheStale = computed(() => {
-  const ts = data.value.cached_at ? new Date(data.value.cached_at).getTime() : NaN
-  return !isNaN(ts) && (Date.now() - ts > 3600e3)
-})
+// 数据时间戳统一在工具条「数据 X 分钟前」一处表达（批M：页头绝对时间 chip 移除，绝对值进 hover）
+
 
 // 缓存新鲜度标签：/ads 顶层 last_sync（广告层由巡检 ~5min 回写、系列/组 ~15min 全量同步，见 cacheAgeTip）；30s 心跳让「X 分钟前」自动走字
 const nowTick = ref(Date.now())
@@ -597,8 +594,20 @@ watch(curList, rows => {
 const campaignCrumb = computed(() => (data.value.campaigns || []).find(a => String(a.id) === String(drillCampaign.value) && actMatch(a))?.name || drillCampaign.value)
 const adsetCrumb = computed(() => (data.value.adsets || []).find(a => String(a.id) === String(drillAdset.value) && actMatch(a))?.name || drillAdset.value)
 const tableWidth = computed(() => 600 + visibleColumns.value.reduce((n, c) => n + c.width, 0))
-const snapshotStale = a => a.snapshot_at && nowTick.value - new Date(a.snapshot_at).getTime() > 86400e3
-const snapshotText = a => a.snapshot_at ? t(snapshotStale(a) ? 'adm.staleSnapshot' : 'adm.snapshot', { time: fmtTime(a.snapshot_at) }) : t('adm.snapshotUnknown')
+// 行内快照三档（批M 降噪）：≤1h 灰色相对分钟；1-6h 灰色小时；>6h 橙色过期（绝对时间在 title）
+const _snapMins = a => {
+  if (!a.snapshot_at) return null
+  const ts = new Date(a.snapshot_at).getTime()
+  return isNaN(ts) ? null : Math.max(0, Math.floor((nowTick.value - ts) / 60000))
+}
+const snapshotStale = a => { const m = _snapMins(a); return m != null && m > 360 }
+const snapshotText = a => {
+  const m = _snapMins(a)
+  if (m == null) return t('adm.snapshotUnknown')
+  if (m > 360) return t('adm.staleSnapshot', { n: Math.floor(m / 60) })
+  if (m >= 60) return t('adm.snapHour', { n: Math.floor(m / 60) })
+  return t('adm.snapMin', { n: m })
+}
 // 成效（FB）列缺失成因区分：早于采集上线（迁移默认 0）vs 日期范围无完整数据
 const fbTip = (a) => a.results_fb_available === false ? t('adm.fbNotCollected') : (a.results_fb_complete === false || a.results_fb == null ? t('adm.fbMissing') : '')
 const metricText = (a, id) => {
@@ -771,15 +780,18 @@ const unsubscribeLeads = async () => {
       <div class="ph-left">
         <h1 class="ph-title">{{ t('adm.pageTitle') }}</h1>
         <span v-if="currentAccountName" class="ph-fresh">{{ currentAccountName }}</span>
-        <span v-if="data.cached_at" class="cache-at" :class="{ stale: cacheStale }" :title="cacheStale ? t('adm.cacheStaleTip') : ''">{{ t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) }}</span>
       </div>
       <div class="ph-actions">
         <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
       </div>
     </header>
+    <!-- 警示条归组：账户状态横幅 + 死令牌横幅相邻（都在工具条上方，间距统一） -->
     <div v-if="selectedActs.length === 1 && accStateTag({ act_id: selectedActs[0] })" :class="['acc-warn-bar', accStateTag({ act_id: selectedActs[0] }).cls]">
           {{ accStateTag({ act_id: selectedActs[0] }).cls === 'banned' ? t('adm.accBannedBanner') : t('adm.accUnmanagedBanner') }}
         </div>
+    <div v-if="tab !== 'lead' && deadAccounts.length" class="dead-acc-bar" :title="t('adm.tokenDeadTip')">
+      ⚠ {{ t('adm.tokenDeadBar', { n: deadAccounts.length }) }}
+    </div>
         <div class="ctrl-bar">
       <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
       <button class="ctrl-btn create-btn" @click="router.push({ name: 'launch-templates' })">＋ {{ t('adm.createAd') }}</button>
@@ -792,7 +804,7 @@ const unsubscribeLeads = async () => {
           <span v-if="accStateTag(a)" :class="['mini-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span>
         </el-option>
       </el-select>
-      <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
+      <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
       <el-popover v-if="tab !== 'lead'" trigger="click" width="250" placement="bottom-end">
@@ -804,14 +816,11 @@ const unsubscribeLeads = async () => {
       <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
+      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
     </div>
     <div v-if="loadError" class="page-error-bar">
       ⚠ {{ t('adm.loadFailed') }}：{{ loadError }}
       <button class="ctrl-btn sm" @click="load()">{{ t('common.retry') }}</button>
-    </div>
-    <div v-if="tab !== 'lead' && deadAccounts.length" class="dead-acc-bar" :title="t('adm.tokenDeadTip')">
-      ⚠ {{ t('adm.tokenDeadBar', { n: deadAccounts.length }) }}
     </div>
     <transition name="slide">
       <div v-if="selected.size" class="batch-bar">
@@ -860,7 +869,7 @@ const unsubscribeLeads = async () => {
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
                   <div class="sid">{{ a.account_name }} · {{ a.id }}</div>
                   <div v-if="tab !== 'campaign'" class="sid">{{ contextOf(a).campaign?.name }}<template v-if="tab === 'ad' && contextOf(a).adset"> › {{ contextOf(a).adset.name }}</template></div>
-                  <div class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.metrics_updated_at ? t('adm.metricsAt', { time: fmtTime(a.metrics_updated_at) }) : ''">{{ snapshotText(a) }}</div>
+                  <div class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.snapshot_at ? t('adm.metricsAt', { time: fmtTime(a.snapshot_at) }) : ''">{{ snapshotText(a) }}</div>
                   <span v-if="tab === 'ad' && redirectMap[a.id]" class="rd-mark" @click="openRedirect(a)">{{ t('adm.redirectShort') }}</span>
                 </div>
               </div></td>
@@ -898,10 +907,16 @@ const unsubscribeLeads = async () => {
         </div>
         <button class="ctrl-btn sm" :disabled="opLoading" @click="syncLeads">⟳ {{ t('adm.leadsSync') }}</button>
         <button class="ctrl-btn sm" :disabled="!leads.length" @click="exportLeads">⬇ {{ t('common.exportCsv') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="openPagesPanel"> {{ t('adm.pagesPanelBtn') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="subscribeLeads()"> {{ t('adm.leadsSubscribe') }}</button>
-        <button class="ctrl-btn sm" :disabled="opLoading" @click="unsubscribeLeads"> {{ t('adm.leadsUnsubscribe') }}</button>
-        <span class="leads-hint">{{ t('adm.leadsHint') }}</span>
+        <!-- 订阅管理类操作收进 ⋯（批M：主栏只留数据操作） -->
+        <el-dropdown trigger="click" :disabled="opLoading" @command="cmd => cmd === 'pages' ? openPagesPanel() : cmd === 'sub' ? subscribeLeads() : cmd === 'unsub' ? unsubscribeLeads() : purgeStalePages()">
+          <button class="ctrl-btn sm">⋯</button>
+          <template #dropdown><el-dropdown-menu>
+            <el-dropdown-item command="pages">{{ t('adm.pagesPanelBtn') }}</el-dropdown-item>
+            <el-dropdown-item command="sub">{{ t('adm.leadsSubscribe') }}</el-dropdown-item>
+            <el-dropdown-item command="unsub">{{ t('adm.leadsUnsubscribe') }}</el-dropdown-item>
+            <el-dropdown-item command="purge" divided>{{ t('adm.purgeStaleBtn') }}</el-dropdown-item>
+          </el-dropdown-menu></template>
+        </el-dropdown>
       </div>
       <div class="tbl" v-loading="leadsLoading">
         <div class="row head lead-row"><div>{{ t('adm.lcolTime') }}</div><div>{{ t('adm.lcolName') }}</div><div>{{ t('adm.lcolEmail') }}</div><div>{{ t('adm.lcolPhone') }}</div><div>{{ t('adm.lcolSource') }}</div><div>{{ t('adm.lcolStatus') }}</div><div>{{ t('adm.lcolNote') }}</div><div>{{ t('adm.lcolDetail') }}</div></div>
@@ -1090,7 +1105,7 @@ const unsubscribeLeads = async () => {
 .ctrl-btn.sm { padding: 0 8px; font-size: 12px }
 .ctrl-btn.ghost { background: transparent; color: var(--t3) }
 .ctrl-btn.on { background: var(--ac); color: #fff; border-color: var(--ac) }
-.search-input { width: 160px; text-align: left; color-scheme: dark }
+.search-input { width: 210px; text-align: left; color-scheme: dark }
 .custom-range { display: flex; align-items: center; gap: 4px }
 .date-input { height: 32px; padding: 0 8px; font-size: 13px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); color-scheme: dark; box-sizing: border-box }
 .date-input:focus { outline: none; border-color: var(--ac) }
@@ -1272,6 +1287,7 @@ const unsubscribeLeads = async () => {
 .manager-table .name-col { width:300px }
 .manager-table .action-col { width:60px }
 .manager-table tr.sel { background:color-mix(in srgb,var(--ac) 8%,transparent) }
+.manager-table tbody tr:hover { background:var(--bg2) }
 .manager-table tfoot { background:var(--bg2); font-weight:600 }
 .sort-button, .entity-name, .preview-button { border:0; background:transparent; color:inherit; padding:0; cursor:pointer; font:inherit; text-align:left }
 .sort-button:disabled { cursor:default }

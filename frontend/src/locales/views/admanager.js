@@ -2,7 +2,9 @@ export default {
   zh: {
     columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化',
     costPerResult: '单次成效费用', combinedCpa: '综合 CPA', ctrLabel: 'CTR',
-    snapshot: '快照 {time}', staleSnapshot: '过期快照 {time}', snapshotUnknown: '快照时间未知',
+    snapshot: '快照 {time}', snapshotUnknown: '快照时间未知',
+    snapMin: '快照 {n} 分钟前', snapHour: '快照 {n} 小时前',
+    staleSnapshot: '过期快照（{n} 小时未更新）',
     metricsAt: '指标更新于 {time}', allCampaigns: '全部系列', searchContext: '搜索名称、ID、账户或所属系列/组',
     fbMissing: '当前日期范围尚无完整 FB 成效数据', operationResults: '批量操作结果',
     verified: '已核验', unverified: '待核验', failed: '失败', actions: '操作',
@@ -19,7 +21,9 @@ export default {
   en: {
     columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined conversions',
     costPerResult: 'Cost per result', combinedCpa: 'Combined CPA', ctrLabel: 'CTR',
-    snapshot: 'Snapshot {time}', staleSnapshot: 'Stale snapshot {time}', snapshotUnknown: 'Snapshot time unavailable',
+    snapshot: 'Snapshot {time}', snapshotUnknown: 'Snapshot time unavailable',
+    snapMin: 'Snapshot {n} min ago', snapHour: 'Snapshot {n} h ago',
+    staleSnapshot: 'Stale snapshot ({n} h old)',
     metricsAt: 'Metrics updated {time}', allCampaigns: 'All campaigns', searchContext: 'Search name, ID, account, campaign or ad set',
     fbMissing: 'Complete FB results are not available for this date range', operationResults: 'Batch operation results',
     verified: 'Verified', unverified: 'Unverified', failed: 'Failed', actions: 'Actions',

@@ -972,7 +972,7 @@ export default {
     ruleBudgetBurnFast: 'Fast Burn Stop', csFb: 'Facebook only', csLanding: 'Landing only', csEither: 'Combined (max)',
     mixedCurrencyTip: 'Selected accounts use multiple currencies — spend/CPA converted to USD',
     dataAsOf: 'Data as of {t}', cacheStaleTip: 'Data is over 1 hour old — refresh recommended',
-    cacheAge: 'Cached {n} min ago', cacheAgeLt1: 'Cached <1 min', cacheAgeNone: 'Cached —',
+    cacheAge: 'Data {n} min ago', cacheAgeLt1: 'Data <1 min', cacheAgeNone: 'Data —',
     cacheAgeTip: 'Ad status/creative refresh ~every 5 min via inspection; campaign/adset structure full-syncs ~every 15 min. Use "Live Verify" to fetch platform statuses now',
     emptyAdsHint: 'No data — try widening the date range or switching the account filter; deploy new ads from "Launch Templates"',
     tokenDeadBar: '{n} accounts have no usable token — their statuses are last-known snapshots. Re-authorize in Token Management',
