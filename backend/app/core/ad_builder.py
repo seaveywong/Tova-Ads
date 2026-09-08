@@ -338,7 +338,7 @@ def build_adset(
     bid_amount: int | None = None,          # COST_CAP/BID_CAP 出价额（本币 minor units）
     minimum_roas: float | None = None,      # 最小 ROAS（SALES 用）
     conv_location: str = "",                # 转化位置（组节点字段；空=存量推导路径，行为不变）
-    placements: dict | None = None,         # 结构化版位 {publisher_platforms,device_platforms}；None=省略（Advantage+ 自动版位）
+    placements: dict | None = None,         # 结构化版位 {publisher_platforms,device_platforms,facebook/instagram/messenger_positions}；None=省略（Advantage+ 自动版位）
     whatsapp_phone_number: str = "",        # CTW 显式号码（仅 ENGAGEMENT 下进 promoted_object；蓝图：Traffic/Sales 随主页不传）
 ) -> dict:
     obj = normalize_objective(objective)
@@ -483,6 +483,11 @@ def build_adset(
         _dp = [str(d) for d in (placements.get("device_platforms") or []) if str(d).strip()]
         if _dp:
             payload["targeting"]["device_platforms"] = _dp
+        # 细分版位（批次III）：省略=该平台全部位置（FB 官方语义）；值合法性由 _validate_structure 白名单把关
+        for _pk in ("facebook_positions", "instagram_positions", "messenger_positions"):
+            _pv = [str(x) for x in (placements.get(_pk) or []) if str(x).strip()]
+            if _pv:
+                payload["targeting"][_pk] = _pv
 
     # MESSENGER 目的地需 publisher_platforms 含 messenger：并入既有选择（去重），不再整体覆盖
     if payload.get("destination_type") == "MESSENGER":

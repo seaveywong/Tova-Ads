@@ -21,7 +21,8 @@ from ..core.ad_builder import (build_targeting, build_campaign, build_adset, bui
                                normalize_objective, CONV_LOCATIONS_BY_OBJECTIVE,
                                OPT_GOALS_BY_OBJECTIVE, OPT_GOALS_BY_LOCATION)
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
-                           ensure_video_id_for_account, usd_to_fb_amount, pick_cta)
+                           ensure_video_id_for_account, usd_to_fb_amount, pick_cta,
+                           bind_link_ad_id)
 from ..core.tt_client import TtApiError
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink, LandingPage
@@ -97,6 +98,17 @@ _CONV_LOC_ALL = ("website", "on_ad", "on_ad_messenger", "messenger", "whatsapp",
                  "instagram_direct", "phone_call", "on_page")
 _PLACEMENT_PLATFORMS = ("facebook", "instagram", "messenger", "audience_network")  # threads P1
 _PLACEMENT_DEVICES = ("desktop", "mobile")
+# 细分版位白名单（批次III）：key=平台（须在 _PLACEMENT_PLATFORMS 内），value=该平台合法位置
+# 枚举来源 = FB v25.0 targeting-spec 官方文档（messenger_home 为 1.0 生产验证值，官方现文档未列，
+# 真投放实测校准）。省略某平台的 positions = 该平台全部位置（FB 官方默认语义）。
+_PLACEMENT_POSITIONS = {
+    "facebook": ("feed", "right_hand_column", "marketplace", "video_feeds", "story",
+                 "search", "instream_video", "facebook_reels", "facebook_reels_overlay",
+                 "profile_feed", "notification"),
+    "instagram": ("stream", "story", "explore", "explore_home", "reels",
+                  "profile_feed", "ig_search", "profile_reels"),
+    "messenger": ("messenger_home", "sponsored_messages", "story"),
+}
 _SLUG_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 
@@ -112,6 +124,13 @@ def _node_placements(snode: dict) -> dict | None:
     dp = [d for d in (snode.get("device_platforms") or []) if d]
     if dp:
         out["device_platforms"] = dp
+    # 细分版位（批次III）：空数组=省略（该平台全部位置）
+    for plat, pos_key in (("facebook", "facebook_positions"),
+                          ("instagram", "instagram_positions"),
+                          ("messenger", "messenger_positions")):
+        vals = [x for x in (snode.get(pos_key) or []) if x]
+        if vals and plat in pp:
+            out[pos_key] = vals
     return out or None
 
 
@@ -317,9 +336,29 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 return {}, f"广告组「{name or si}」设备平台非法：{d!r}（可用：{list(_PLACEMENT_DEVICES)}）"
             if d not in dp:
                 dp.append(d)
+        # 细分版位（批次III）：数组白名单校验；位置已选但平台未勾选 = 矛盾组合 400（省略=该平台全位置）
+        pos_out = {}
+        for plat, pos_key in (("facebook", "facebook_positions"),
+                              ("instagram", "instagram_positions"),
+                              ("messenger", "messenger_positions")):
+            raw = adset.get(pos_key) or []
+            if not isinstance(raw, list):
+                return {}, f"广告组「{name or si}」{pos_key} 需为数组"
+            vals = []
+            for x in raw:
+                if x not in _PLACEMENT_POSITIONS[plat]:
+                    return {}, (f"广告组「{name or si}」平台 {plat} 版位位置非法：{x!r}"
+                                f"（可用：{list(_PLACEMENT_POSITIONS[plat])}）")
+                if x not in vals:
+                    vals.append(x)
+            if vals and placement_mode == "manual" and plat not in pp:
+                return {}, f"广告组「{name or si}」选了 {plat} 的细分位置但未勾选 {plat} 平台（先勾平台或清空细分位置）"
+            if vals:
+                pos_out[pos_key] = vals
         # auto/空 = 省略全部版位键（Advantage+ 自动版位官方语义）——残留的勾选值清掉防歧义
         if placement_mode != "manual":
             pp, dp = [], []
+            pos_out = {}
         elif not pp:
             return {}, f"广告组「{name or si}」手动版位必须至少选择一个平台"
         out_adsets.append({
@@ -337,6 +376,9 @@ def _validate_structure(raw) -> tuple[dict, str]:
             "placement_mode": (placement_mode if placement_mode == "manual" else ""),
             "publisher_platforms": pp,
             "device_platforms": dp,
+            "facebook_positions": pos_out.get("facebook_positions", []),
+            "instagram_positions": pos_out.get("instagram_positions", []),
+            "messenger_positions": pos_out.get("messenger_positions", []),
             "budget_type": ("lifetime" if str(adset.get("budget_type") or "").lower() == "lifetime" else "daily"),
             "lifetime_budget_usd": (float(adset["lifetime_budget_usd"])
                                     if adset.get("lifetime_budget_usd") not in (None, "", 0) else None),
@@ -1067,11 +1109,13 @@ def preflight_deploy(tid: int, body: PreflightIn,
             pass
     try:
         _p_btype = (t.budget_type or "daily").lower()
-        _p_lifetime_fb = (usd_to_fb_amount(float(t.lifetime_budget_usd), currency, cr.rate if cr else 1.0)
+        # 金额换算统一走 _usd_to_account_minor（批次III：缺汇率 raise→400，与部署管道同口径；
+        # 原内联 cr.rate if cr else 1.0 是静默 1.0 兜底——预算路径先 raise 掩盖了它，换算收敛为单一管道）
+        _p_lifetime_fb = (_usd_to_account_minor(db, body.act_id, float(t.lifetime_budget_usd), user.tenant_id)
                           if (_p_btype == "lifetime" and t.lifetime_budget_usd) else None)
-        _p_bid_fb = (usd_to_fb_amount(float(t.bid_amount_usd), currency, cr.rate if cr else 1.0)
+        _p_bid_fb = (_usd_to_account_minor(db, body.act_id, float(t.bid_amount_usd), user.tenant_id)
                      if t.bid_amount_usd else None)
-        _p_spend_cap_fb = (usd_to_fb_amount(float(t.spend_cap_usd), currency, cr.rate if cr else 1.0)
+        _p_spend_cap_fb = (_usd_to_account_minor(db, body.act_id, float(t.spend_cap_usd), user.tenant_id)
                            if t.spend_cap_usd else None)
         try:
             _p_cats = json.loads(t.special_ad_categories or "[]")
@@ -1172,9 +1216,13 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         raise HTTPException(400, f"预算换算失败：{e}")
     is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
     campaign_name = (t.name_prefix or t.name or "Tova Ads")[:100]
-    # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；缺汇率同 lifetimes 取 1.0 兜底口径）
-    _p_spend_cap_fb = (usd_to_fb_amount(float(t.spend_cap_usd), currency, cr.rate if cr else 1.0)
-                       if t.spend_cap_usd else None)
+    # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；
+    # 批次III 统一缺汇率口径：_usd_to_account_minor 缺汇率 raise→调用处 400，不再静默 1.0 兜底）
+    try:
+        _p_spend_cap_fb = (_usd_to_account_minor(db, body.act_id, float(t.spend_cap_usd), tenant_id)
+                           if t.spend_cap_usd else None)
+    except ValueError as e:
+        raise HTTPException(400, f"支出上限换算失败：{e}")
 
     def _view(**ov):
         d = {c.name: getattr(t, c.name) for c in t.__table__.columns}
@@ -1240,11 +1288,14 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             "minimum_roas": (snode.get("minimum_roas") or t.minimum_roas),
             "audience_id": snode.get("audience_id") or 0,
             "optimization_goal": snode.get("optimization_goal") or "",
-            # 批次I：转化位置/版位（组节点结构化字段，前端树概览展示用）
+            # 批次I：转化位置/版位（组节点结构化字段，前端树概览展示用）；批次III：细分位置透出
             "conv_location": (snode.get("conv_location") or ""),
             "placement_mode": ("manual" if (snode.get("placement_mode") or "") == "manual" else ""),
             "publisher_platforms": (snode.get("publisher_platforms") or []),
             "device_platforms": (snode.get("device_platforms") or []),
+            "facebook_positions": (snode.get("facebook_positions") or []),
+            "instagram_positions": (snode.get("instagram_positions") or []),
+            "messenger_positions": (snode.get("messenger_positions") or []),
             "ads": ads_out,
         })
     # 首组首广告 payload 样例（与部署 runner 同构；占位符在保存时已校验）
@@ -1270,10 +1321,11 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             except Exception:
                 pass
         # 出价额样例（G2② 单管道口径）：首组 bid_amount_usd（组级 > 模板级）→ 目标账户本币 minor units
+        # （批次III 统一：换算走 _usd_to_account_minor，缺汇率 raise 由外层 try→400）
         _pf_bid_usd = adsets[0].get("bid_amount_usd")
         if _pf_bid_usd in (None, ""):
             _pf_bid_usd = t.bid_amount_usd
-        _pf_bid_fb = (usd_to_fb_amount(float(_pf_bid_usd), currency, cr.rate if cr else 1.0)
+        _pf_bid_fb = (_usd_to_account_minor(db, body.act_id, float(_pf_bid_usd), tenant_id)
                       if _pf_bid_usd else None)
         campaign_payload = build_campaign(
             name=campaign_name, objective=t.objective,
@@ -2653,21 +2705,32 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     ad_id = ad.get("id")
                     if not ad_id:
                         raise FbApiError("no_id", f"FB 创建 ad 未返回 id（响应：{str(ad)[:150]}）")
-                    # 子码标注广告名 + 回绑 ad_id（deploy_one_account 同构；手动选的与自动建的同一模式）
+                    # 子码标注广告名 + 回绑 ad_id（deploy_one_account 同构；手动选的与自动建的同一模式；
+                    # last-wins 守卫（批次III）：已绑不同广告不覆盖，item 留痕）
                     if node_slug and node_link is not None:
                         try:
                             fb.post(ad_id, {"name": f"[子码:{node_slug}] {ad_name}"})
                         except Exception:
                             pass
-                        node_link.ad_id = ad_id
-                        node_link.status = "active"
+                        if not bind_link_ad_id(node_link, ad_id):
+                            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                                      target_type="subcode", target_id=str(node_link.slug or node_slug),
+                                      action_type="bind", source="launch", result="skip",
+                                      friendly_error=f"子码已绑广告 {getattr(node_link, 'ad_id', '')}，跳过回绑 {ad_id}（last-wins 守卫）",
+                                      metadata={"act_id": item.act_id, "ad_id": str(ad_id),
+                                                "subcode_slug": node_slug, "tree": f"{sname}/{ad_name}"})
                     elif auto_link is not None:
                         try:
                             fb.post(ad_id, {"name": f"[子码:{auto_slug}] {ad_name}"})
                         except Exception:
                             pass
-                        auto_link.ad_id = ad_id
-                        auto_link.status = "active"
+                        if not bind_link_ad_id(auto_link, ad_id):
+                            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                                      target_type="subcode", target_id=str(getattr(auto_link, "slug", "") or auto_slug),
+                                      action_type="bind", source="launch", result="skip",
+                                      friendly_error=f"子码已绑广告 {getattr(auto_link, 'ad_id', '')}，跳过回绑 {ad_id}（last-wins 守卫）",
+                                      metadata={"act_id": item.act_id, "ad_id": str(ad_id),
+                                                "subcode_slug": auto_slug, "tree": f"{sname}/{ad_name}"})
                     ok += 1
                     last = {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id,
                             "page_post_id": page_post_id}

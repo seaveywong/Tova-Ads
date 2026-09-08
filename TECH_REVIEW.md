@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-09-08 — 批次 III：P2/清理与低频补齐（细分版位/redirect fire 像素/TT event_id/last-wins/死块清理/spend_cap 汇率统一）
+
+### 概述
+《总方案_v2_FB对齐》批次 III 全 7 项 + 总方案批III清单中的 spend_cap 汇率兜底统一（后端 4 文件 + 前端 2 文件，零迁移）。服务器备份 /opt/toveads/backups/batchIII_0908/（4 后端文件）。**已上传服务器+双门过+全量 smoke，未 restart（用户统一部署）**。另交付真投放实测脚本 `_smoke_real_deploy_batch_i.py`（不自动跑，用户授权后手动执行）。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| 1 细分版位 | `ad_builder.py` + `launch_templates.py` + `LaunchTemplates.vue` + `launch.js` | ①组卡版位手动模式加二级勾选（facebook_positions/instagram_positions/messenger_positions；枚举=FB v25.0 官方 targeting-spec 白名单，前端 PLATFORMS.positions 镜像 backend `_PLACEMENT_POSITIONS`；audience_network 可勾平台但无细分层=该平台全位置）②后端 `_validate_structure` 白名单+校验：非法值 422 带可用清单/位置给了但平台未勾=矛盾组合拒绝/auto 清残留/去重；空数组=省略=该平台全部位置（FB 官方语义）③`_node_placements` 透传（平台勾了才带键）④build_adset 位置进 targeting（extra 深合并前）⑤树预检 tree 概览+adset payload 样例透出 | smoke 11 断言（白名单/422/auto 清残留/node_placements/build_adset 两形态/树预检两处透出/will_spend）全过 |
+| 2 redirect fire 像素（B11） | `landing.py` | ①LP_CONFIG 增 pixel_ids/tt_pixel_ids/conversion_events/tt_conversion_events（页配置级）②redirect 分支改「跳转桥页」：200 HTML fire FB PageView+转化事件 / TT page+tt 转化事件（同口径）→ 300ms location.replace（像素加载不阻塞跳转）+ meta refresh 兜底 + 可见 Continue 链接；redirect 事件 beacon 照旧（waitUntil 不阻塞）；query 合并逻辑不变 | node 实跑 worker 桥页 6 断言（200 HTML/FB 像素+PageView+Purchase/TT 像素+CompletePayment/replace+refresh+cta/utm 合并/node --check）+ display 模式回归（仍 302 /?_d=） |
+| 3 TT event_id（B8 收口） | `landing.py` | 默认页模板 trackConversion 的 TT 分支 `ttq.track(evt, {event_id:_eid})`（与 FB 分支同 _eid；原无 id 的那次 fire 是重复计数来源——_d_decode_tt 的点击 fire 已带 id，模板函数未带） | smoke：模板串断言 + _d_decode_tt/worker eid 契约回归 + route_next 同一 UUID 进 TT S2S 与 FB CAPI（monkeypatch 捕获实测） |
+| 4 link.ad_id last-wins（B7 收口） | `ad_ops.py` + `launch_templates.py` | 新 `bind_link_ad_id(link, ad_id)` 守卫：已绑不同 ad_id → 跳过不覆盖（返 False）+树 runner write_log skip 留痕 / 平铺+TT 链 logging.warning；同 ad_id 重绑（重试/重部署）照常。四个部署回绑点（FB 平铺/TT/树手动 slug/树自动建链）全收口；ingest 首绑路径本就不覆盖（回归断言补证） | smoke 7 断言（首绑/同 id 重绑/异 id 拒绝/None 安全/守卫存在/源码无绕过直写/ingest 并发回归） |
+| 5 平铺卡尾死块清理 | `LaunchTemplates.vue` + `launch.js` | 平铺卡 FB-only 尾块整删（披露[已在组卡]/频次/归因/Dayparting/高级 JSON[纯死]）——FB 恒树模式这些块不可达；频次/归因/Dayparting 迁组卡新「高级」折叠区（默认收起，摘要 chip 显示已配值），绑节点 advanced_config（UI 态 advx_*，保存序列化/加载反解，未知键保留）；openEdit 旧模板模板级配置一次性迁入首组节点；保存流模板级一律剥 frequency_control_specs/attribution_spec/day_parting_schedule/pacing_type 残留键（节点级才是生效层，部署浅合并 `{**tpl_adv,**adv_node}` 节点覆盖模板） | build ✓；i18n zh/en 566/566 对称（新增 12 组删 6 组死键）；vue 引用 536 键全命中 |
+| 6 跟帖克隆值落树节点 | `LaunchTemplates.vue` | `applyClonedSettings`：树模式受众（国家/年龄/性别/兴趣）写首组节点内联编辑态（aud+清受众库引用）、版位写首组节点（placement_mode/publisher_platforms/device_platforms/facebook_positions 白名单过滤+平台勾选对齐）；模板级目标/出价策略仍写 form；平铺（TT）路径不变 | build ✓（FB 恒树模式下克隆受众/版位不再只进 form 静默丢） |
+| 7 真投放实测准备 | `_smoke_real_deploy_batch_i.py`（新，不自动跑） | 建 1 棵最小树（2 组×1 广告：组1 SALES+website+落地页自动建链+细分版位 feed、组2 SALES+messenger）→ 预检断言（矩阵派生/版位/全 PAUSED will_spend=[]/自动建链节点数）→ 真部署到 --act 指定账户 → FB 回读断言（campaign objective+ACTIVE/adsets 2 条 WEBSITE+MESSENGER+promoted_object+facebook_positions/ads 2 条全 PAUSED 零消耗/自动建链广告名 [子码: 标注/creative 链接 /a/{slug}?ad= 与 {{ad.id}} 宏）→ 子码回绑+ads_cache 归因对账 → 全链留痕报告。头注释写明用法/预算（默认 $2/组/日=两组合计 $4/日，全 PAUSED 手动激活才花钱） | py_compile ✓（真跑待用户授权，跑前需批次 III 已 restart） |
+| 8 spend_cap 预检汇率统一（总方案批III清单） | `launch_templates.py` | 平铺/树预检的 spend_cap/lifetime/bid 样例换算从内联 `cr.rate if cr else 1.0`（静默 1.0 兜底）统一走 `_usd_to_account_minor`（缺汇率 ValueError→400，与部署管道同口径）；预算路径本就先 raise，此改消除旁路静默换算 | 双门 ✓ + 全量回归（batchI/II/tree/G） |
+
+### DB 迁移
+- 无（纯代码批次；细分版位存进既有 structure JSON，conv_location 空=存量行为不变）。
+
+### 生产环境变更
+- **代码已上传**（4 后端文件 + 2 smoke 脚本），py_compile+import 双门 ✓，**服务未 restart**（生产仍跑批次I内存代码，磁盘为批次II+III——用户统一部署 restart 即生效）。备份 /opt/toveads/backups/batchIII_0908/。
+- 验证方式：8011 临时 uvicorn（新代码）+ in-process 混合跑：批次III 31/31 + 批次I 54 + 批次II 32 + 树 29 + 批G 26 回归全 PASS；smoke 测试行零残留（templates/links/pixels/pages 全 0）；8011 已关；前端 build ✓ 未部署 CF。
+- **注意**：landing.py 的 LP_CONFIG 变更（redirect 桥页）对**已发布页不自动生效**——worker 在发布时固化进 CF Pages，存量 redirect 页需重发（PUT 重发布）才拿到像素桥页；新发布页即时生效。
+
+### 复审结论（已知限制/风险）
+- **messenger_home 不在 FB v25.0 官方文档枚举**（官方现列 sponsored_messages/story）但保留在白名单（1.0 生产验证值 + Ads Manager 仍展示 Inbox）——若 FB 拒绝，部署报 invalid targeting 快失败可定位；真投放实测覆盖此点。
+- redirect 桥页语义变化：/a/{slug} 在 redirect 模式由裸 302 变 200 HTML（像素加载 300ms 窗口）——对用户感知为极短过渡页；无 JS 爬虫走 meta refresh 3s；防护/频次/防重链路不变。存量 redirect 页不重发=维持旧行为（不 fire 像素），见上。
+- TT event_id 只覆盖 _d 路径（route_next 已调）的点击转化；直访落地页（无 _d）无 S2S 配对、无需去重（维持现状）。
+- 树节点 advanced_config 仍是自由 JSON 容器：高级折叠区只管频次/归因/Dayparting 三键，其余键（如手改过的 targeting 残留）原样保留原样下发——高级 JSON 输入框删除后无 UI 编辑入口（API 仍可写）。
+- 跟帖克隆受众写「首组节点」：树为空（TT/异常态）回退 form 写入（旧行为）。
+- `_smoke_real_deploy_batch_i.py` 组2（SALES+messenger）会真调 FB 建 campaign/adset/ad+creative（全 PAUSED 零消耗）；跑之前确认批次 III 已 restart（脚本走 8000）。
+
+### commit
+- （见本 commit）批次III：清理与低频补齐——细分版位+redirect fire 像素+TT event_id+last-wins 守卫+死块迁组卡+真投放实测脚本（已 push）
+
+关联：[[tree-launch-templates]] [[bare-except-silent-failure]] [[tech-review-format]] [[landing-pixel-pipeline]] [[toveads-pause-state-2026-09]]
+
+---
+
+
 ## 2026-09-08 — 批次 II：P1 资金与断层（出价双管道/AI文案/URL跟随/TT像素/错误定位）
 
 ### 概述

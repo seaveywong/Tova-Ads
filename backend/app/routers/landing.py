@@ -71,7 +71,7 @@ var LP_TT_PIXELS=(_d)?[]:(__LP_TT_PIXELS_JSON__||[]);if(LP_TT_PIXELS.length){!fu
 <a href="__LP_TARGET_URL__" id="cta" style="display:inline-block;padding:15px 40px;background:#0071e3;color:#fff;text-decoration:none;border-radius:8px;font-size:18px" onclick="return goNext(event)">立即购买</a>
 </div>
 <script>
-function trackConversion(){if(window.fbq&&Array.isArray(LP_PIXELS)&&LP_CONV.length){LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});}if(window.ttq&&Array.isArray(LP_TT_CONV)&&LP_TT_CONV.length){LP_TT_CONV.forEach(function(evt){ttq.track(evt);});}}
+function trackConversion(){if(window.fbq&&Array.isArray(LP_PIXELS)&&LP_CONV.length){LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});}if(window.ttq&&Array.isArray(LP_TT_CONV)&&LP_TT_CONV.length){LP_TT_CONV.forEach(function(evt){ttq.track(evt,_eid?{event_id:_eid}:undefined);});}}
 function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion();setTimeout(function(){window.location.href=LP_TARGET_URL;},300);return false;}
 </script>
 </body>
@@ -177,7 +177,25 @@ export default{
       sendEvent("redirect",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,target_url:LP_CONFIG.target,decision:"redirect",country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
       const dest=new URL(LP_CONFIG.target);
       url.searchParams.forEach((v,k)=>{if(!k.startsWith("_")&&!dest.searchParams.has(k))dest.searchParams.set(k,v);});
-      return Response.redirect(dest.toString(),302);
+      // 跳转桥页（批次III 修 B11）：跳转前 fire 页配置像素（FB PageView+转化事件 / TT 同口径），
+      // 像素加载不阻塞跳转——300ms 后必然 location.replace；无 JS 兜底 <noscript> meta refresh + 可见链接
+      const _escH=(s)=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+      const _cfg=JSON.stringify({p:(LP_CONFIG.pixel_ids||[]),tp:(LP_CONFIG.tt_pixel_ids||[]),c:(LP_CONFIG.conversion_events||[]),tc:(LP_CONFIG.tt_conversion_events||[]),d:dest.toString()}).replace(/</g,"\\u003c");
+      const _bridge='<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Redirecting</title>'
+        +'<meta http-equiv="refresh" content="3;url='+_escH(dest.toString())+'">'
+        +'<script>window.__B='+_cfg+';</script>'
+        +'<script>(function(){var B=window.__B||{p:[],tp:[],c:[],tc:[],d:""};'
+        +'if(B.p&&B.p.length){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version="2.0";n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,"script","https://connect.facebook.net/en_US/fbevents.js");'
+        +'B.p.forEach(function(pid){if(pid){fbq("init",pid);fbq("trackSingle",pid,"PageView");}});'
+        +'(B.c||[]).forEach(function(evt){B.p.forEach(function(pid){if(pid)fbq("trackSingle",pid,evt);});});}'
+        +'if(B.tp&&B.tp.length){!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};B.tp.forEach(function(pid){if(pid)ttq.load(pid);});ttq.page();}(window,document,"ttq");'
+        +'(B.tc||[]).forEach(function(evt){try{ttq.track(evt);}catch(e){}});}'
+        +'setTimeout(function(){try{window.location.replace(B.d);}catch(e){window.location.href=B.d;}},300);})();</script>'
+        +'</head><body style="margin:0;padding:20px;font-family:sans-serif;text-align:center">'
+        +'<a id="cta" href="'+_escH(dest.toString())+'" style="display:inline-block;padding:12px 32px;background:#0071e3;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Continue</a>'
+        +'<noscript><p><a href="'+_escH(dest.toString())+'">Continue</a></p></noscript>'
+        +'</body></html>';
+      return new Response(_bridge,{status:200,headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
     }
     // display 模式：调 route_next 拿像素+目标 → 编码 _d → 302 到落地页
     let rd={};
@@ -359,6 +377,12 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         "secret": ingest_secret,
         "target": primary_target,
         "redirect_mode": body.redirect_mode or "display",
+        # 页配置像素/转化事件（批次III 修 B11）：redirect 模式跳转桥页 fire 用（display 模式
+        # 走 route_next 动态解析，不用这组；TT/FB 同口径——PageView + 配置的转化事件）
+        "pixel_ids": pixels,
+        "tt_pixel_ids": tt_pixels,
+        "conversion_events": (body.conversion_events or []),
+        "tt_conversion_events": (body.tt_conversion_events or []),
         "route_next_url": "https://api.tovaads.com/landing-pages/router/next",
         "block_enabled": bool(body.block_enabled),
         "block_target": _rules.get("block_target") or "https://whatsapp.com",

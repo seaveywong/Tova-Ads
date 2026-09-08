@@ -8,10 +8,13 @@ per-account 图片上传+缓存的逻辑由调用方处理（ensure_image_hash_f
 ensure_tt_file_id_for_account / deploy_one_account_tt —— FB 函数零改动。
 """
 import json
+import logging as _logging
 from .fb_client import FbClient, FbApiError
 from .tt_client import TtApiError
 from .ad_builder import (build_campaign, build_adset, build_creative,
                          resolve_adset_destination, is_messaging_destination)
+
+_lg = _logging.getLogger(__name__)
 
 # Meta 官方零小数币种，全仓唯一真相源（FB amount 单位 = 整本币，其余 ×100 进分）。
 # 全仓引用：services/ad_ops._NO_DECIMAL / guard_engine._NO_DECIMAL_CURRENCIES / tt_client._TT_ZERO_DECIMAL。
@@ -165,6 +168,20 @@ def pick_cta(body: str, objective: str) -> str:
     return "LEARN_MORE"
 
 
+def bind_link_ad_id(link, ad_id) -> bool:
+    """子码回绑守卫（批次III 修 last-wins）：链接已绑不同 ad_id 时不覆盖，返 False（调用方留痕）。
+    同 ad_id 重绑（重试/重部署同一广告）照常生效；空链接/空 ad_id 返 False。
+    背景：手动同 slug 多广告（树跨节点/平铺跨账户共享）时旧逻辑无条件覆盖，1:1 台账失真。"""
+    if link is None or not ad_id:
+        return False
+    old = str(getattr(link, "ad_id", "") or "")
+    if old and old != str(ad_id):
+        return False
+    link.ad_id = ad_id
+    link.status = "active"
+    return True
+
+
 def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_goal: str,
                        page_id: str, pixel_id: str, landing_url: str,
                        daily_budget: int, budget_mode: str, bid_strategy: str,
@@ -311,14 +328,15 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     if not ad_id:
         raise FbApiError("no_id", f"FB 创建 ad 未返回 id（响应：{str(ad)[:200]}）")
 
-    # 子码标注广告名（可追溯）+ 回绑 ad_id
+    # 子码标注广告名（可追溯）+ 回绑 ad_id（last-wins 守卫：已绑不同广告不覆盖）
     if subcode_slug and subcode_link is not None:
         try:
             fb.post(ad_id, {"name": f"[子码:{subcode_slug}] {name_prefix}"})
         except Exception:
             pass
-        subcode_link.ad_id = ad_id
-        subcode_link.status = "active"
+        if not bind_link_ad_id(subcode_link, ad_id):
+            _lg.warning("子码 %s 已绑广告 %s，跳过回绑新广告 %s（last-wins 守卫）",
+                        subcode_slug, getattr(subcode_link, "ad_id", ""), ad_id)
 
     return {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id, "page_post_id": page_post_id}
 
@@ -412,9 +430,11 @@ def deploy_one_account_tt(tt, *, advertiser_id: str, objective: str, conversion_
     })
     ad_id = ad["ad_id"]
 
-    # 子码回绑 ad_id（TT 不支持建后改名标注——FB 的 [子码:slug] 改名省略，回绑已保证可追溯）
+    # 子码回绑 ad_id（TT 不支持建后改名标注——FB 的 [子码:slug] 改名省略，回绑已保证可追溯；
+    # last-wins 守卫：已绑不同广告不覆盖）
     if subcode_slug and subcode_link is not None:
-        subcode_link.ad_id = ad_id
-        subcode_link.status = "active"
+        if not bind_link_ad_id(subcode_link, ad_id):
+            _lg.warning("子码 %s 已绑广告 %s，跳过回绑新广告 %s（last-wins 守卫）",
+                        subcode_slug, getattr(subcode_link, "ad_id", ""), ad_id)
 
     return {"campaign_id": campaign_id, "adgroup_id": adgroup_id, "ad_id": ad_id}

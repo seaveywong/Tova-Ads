@@ -213,23 +213,26 @@ watch(() => form.value.objective, (newObj, oldObj) => {
     if (s.optimization_goal && !_goals.includes(s.optimization_goal)) s.optimization_goal = ''
   }
 })
-// 版位选项
+// 版位选项（positions = backend _PLACEMENT_POSITIONS 镜像，FB v25.0 官方枚举；
+// audience_network 平台可勾选但无细分位置层=该平台全位置，与 FB 官方语义一致）
 const PLATFORMS = [
   { v: 'facebook', l: 'Facebook', positions: [
-    {v:'feed',l:'launch.pos_feed'},{v:'video_feeds',l:'launch.pos_video_feeds'},{v:'instream_video',l:'launch.pos_instream_video'},
-    {v:'story',l:'launch.pos_story'},{v:'reels',l:'launch.pos_reels'},{v:'marketplace',l:'launch.pos_marketplace'},
-    {v:'right_hand_column',l:'launch.pos_right_hand_column'},{v:'search',l:'launch.pos_search'},
+    {v:'feed',l:'launch.pos_feed'},{v:'facebook_reels',l:'launch.pos_reels'},{v:'story',l:'launch.pos_story'},
+    {v:'video_feeds',l:'launch.pos_video_feeds'},{v:'instream_video',l:'launch.pos_instream_video'},
+    {v:'marketplace',l:'launch.pos_marketplace'},{v:'right_hand_column',l:'launch.pos_right_hand_column'},
+    {v:'search',l:'launch.pos_search'},{v:'profile_feed',l:'launch.pos_profile_feed'},
+    {v:'facebook_reels_overlay',l:'launch.pos_reels_overlay'},{v:'notification',l:'launch.pos_notification'},
   ]},
   { v: 'instagram', l: 'Instagram', positions: [
-    {v:'stream',l:'launch.pos_stream'},{v:'story',l:'launch.pos_story'},{v:'explore',l:'launch.pos_explore'},
-    {v:'reels',l:'launch.pos_reels'},{v:'profile',l:'launch.pos_profile'},
+    {v:'stream',l:'launch.pos_stream'},{v:'story',l:'launch.pos_story'},{v:'reels',l:'launch.pos_reels'},
+    {v:'explore',l:'launch.pos_explore'},{v:'explore_home',l:'launch.pos_explore_home'},
+    {v:'ig_search',l:'launch.pos_ig_search'},{v:'profile_feed',l:'launch.pos_profile_feed'},
+    {v:'profile_reels',l:'launch.pos_profile_reels'},
   ]},
   { v: 'messenger', l: 'Messenger', positions: [
     {v:'messenger_home',l:'launch.pos_messenger_home'},{v:'story',l:'launch.pos_story'},{v:'sponsored_messages',l:'launch.pos_sponsored_messages'},
   ]},
-  { v: 'audience_network', l: 'Audience Network', positions: [
-    {v:'classic',l:'launch.pos_classic'},{v:'instream_video',l:'launch.pos_instream_video'},{v:'rewarded_video',l:'launch.pos_rewarded_video'},
-  ]},
+  { v: 'audience_network', l: 'Audience Network', positions: [] },
 ]
 const DEVICES = [{v:'desktop',l:'launch.dev_desktop'}, {v:'mobile',l:'launch.dev_mobile'}]
 // 版位平台选项（publisher_platforms 合法值 = backend _PLACEMENT_PLATFORMS）
@@ -307,13 +310,56 @@ function scheduleToGrid(sched) {
   }
   return g
 }
-const toggleCell = (di, h) => { form.value.daypart_cells[di][h] = !form.value.daypart_cells[di][h] }
-const dpaFillAll = () => { form.value.daypart_cells = emptyGrid().map(r => r.map(() => true)) }
-const dpaClearAll = () => { form.value.daypart_cells = emptyGrid() }
-const dpaFillWorkhours = () => {
-  const g = emptyGrid()
-  for (let di = 0; di < 7; di++) for (let h = 9; h < 22; h++) g[di][h] = true
-  form.value.daypart_cells = g
+// ── 组节点高级设置（批次III 迁组卡）：频次/归因/Dayparting ↔ 节点 advanced_config ──
+// 归因 spec → preset 反推（与旧平铺逻辑同口径，匹配常见组合，不匹配留空）
+function specToAttrPreset(spec) {
+  if (!Array.isArray(spec) || !spec.length) return ''
+  const sig = spec.map(x => `${x.event_type}:${x.window_days}`).sort().join(',')
+  const map = { 'CLICK:1': '1d_click', 'CLICK:7': '7d_click',
+    'CLICK:1,IMPRESSION:1': '1d_click_1d_view', 'CLICK:7,IMPRESSION:1': '7d_click_1d_view' }
+  return map[sig] || ''
+}
+// 节点 advanced_config JSON 串 → UI 态（频次/归因/Dayparting；解析失败=全默认）
+function _advxFromConfig(cfgStr) {
+  const out = { advx_freq: 0, advx_attr: '', advx_dpa: false, advx_cells: emptyGrid() }
+  try {
+    const adv = JSON.parse(cfgStr || '{}')
+    if (adv.frequency_control_specs) out.advx_freq = adv.frequency_control_specs[0]?.max_frequency || 0
+    out.advx_attr = specToAttrPreset(adv.attribution_spec)
+    if (Array.isArray(adv.day_parting_schedule) && adv.day_parting_schedule.length) {
+      out.advx_dpa = true
+      out.advx_cells = scheduleToGrid(adv.day_parting_schedule)
+    }
+  } catch {}
+  return out
+}
+// UI 态 → 节点 advanced_config（保留其它未知键；空配置=清除对应键）
+function _advxToConfig(cfgStr, s) {
+  let adv = {}
+  try { adv = JSON.parse(cfgStr || '{}') } catch {}
+  if (Number(s.advx_freq) > 0) {
+    adv.frequency_control_specs = [{ event: 'IMPRESSIONS', interval_days: 1, max_frequency: Number(s.advx_freq), type: 'CAP' }]
+  } else delete adv.frequency_control_specs
+  const aSpec = attributionToSpec(s.advx_attr)
+  if (aSpec) adv.attribution_spec = aSpec
+  else delete adv.attribution_spec
+  if (s.advx_dpa) {
+    const sched = gridToSchedule(s.advx_cells || emptyGrid())
+    if (sched.length) { adv.day_parting_schedule = sched; adv.pacing_type = ['day_parting'] }
+    else { delete adv.day_parting_schedule; delete adv.pacing_type }
+  } else { delete adv.day_parting_schedule; delete adv.pacing_type }
+  return Object.keys(adv).length ? JSON.stringify(adv) : ''
+}
+// 节点 Dayparting 网格操作（组卡内 7×24）
+const toggleNodeCell = (s, di, h) => { s.advx_cells[di][h] = !s.advx_cells[di][h] }
+const dpaFillNode = (s, mode) => {
+  if (mode === 'all') s.advx_cells = emptyGrid().map(r => r.map(() => true))
+  else if (mode === 'clear') s.advx_cells = emptyGrid()
+  else {
+    const g = emptyGrid()
+    for (let di = 0; di < 7; di++) for (let h = 9; h < 22; h++) g[di][h] = true
+    s.advx_cells = g
+  }
 }
 
 const load = async () => {
@@ -637,9 +683,7 @@ const blankForm = () => ({
   message_template_id: null, lead_form_template_id: null,
   manual_placement: false, placement_platforms: [], placement_devices: ['desktop','mobile'],
   facebook_positions: [], instagram_positions: [], messenger_positions: [], audience_network_positions: [],
-  frequency_cap: 0,
-  attribution_preset: '',
-  daypart_enabled: false, daypart_cells: emptyGrid(), daypart_tz: '',
+  // 频次/归因/Dayparting 已迁组卡节点级（批次III），不再有模板级表单态
   post_source: 'new', reuse_post_ref: '',
 })
 const objLabel = (v) => t(OBJECTIVES.find(o => o.v === v)?.l || v)
@@ -734,7 +778,8 @@ const applyReuseResponse = (r) => {
     snapshotForm()  // 重快照（含克隆+命名，避免一开就标 dirty）
   }
 }
-// 把克隆的源广告设置写进表单（系列目标/广告组受众+版位）
+// 把克隆的源广告设置写进表单（系列目标）+ 首组节点（受众/版位——批次III：FB 恒树模式，
+// 组级字段只写 form 不落节点=静默丢失；树模式写首组节点，平铺(TT)仍写表单）
 const applyClonedSettings = (s) => {
   const f = form.value
   if (s.objective) f.objective = s.objective
@@ -742,15 +787,34 @@ const applyClonedSettings = (s) => {
   if (s.billing_event) f.billing_event = s.billing_event
   if (s.destination_type) f.destination_type = s.destination_type
   if (s.bid_strategy) f.bid_strategy = s.bid_strategy
-  if (s.audience_age_min) f.audience_age_min = s.audience_age_min
-  if (s.audience_age_max) f.audience_age_max = s.audience_age_max
-  if (s.audience_gender !== undefined && s.audience_gender !== 0) f.audience_gender = s.audience_gender
-  if (s.audience_countries?.length) f.audience_countries = s.audience_countries
-  if (s.audience_interests?.length) f.audience_interests = s.audience_interests
-  if (s.manual_placement !== undefined) f.manual_placement = s.manual_placement
-  if (s.placement_platforms?.length) f.placement_platforms = s.placement_platforms
-  if (s.placement_devices?.length) f.placement_devices = s.placement_devices
-  if (s.facebook_positions?.length) f.facebook_positions = s.facebook_positions
+  const _aud = {
+    age_min: s.audience_age_min || 18, age_max: s.audience_age_max || 65,
+    gender: (s.audience_gender !== undefined && s.audience_gender !== 0) ? s.audience_gender : 0,
+    countries: s.audience_countries || [], interests: s.audience_interests || [],
+  }
+  const _posPlatforms = s.placement_platforms || []
+  const _fbPositions = (s.facebook_positions || []).filter(p => PLATFORMS[0].positions.some(x => x.v === p))
+  const g0 = (tree.value.adsets || [])[0]
+  if (editMode.value === 'tree' && g0) {
+    // 受众 → 首组节点内联编辑态（清受众库引用，克隆的是自定义定向）
+    g0.aud = { ...blankNodeAud(), ..._aud }
+    g0.audience_id = 0
+    // 版位 → 首组节点（有平台勾选才 manual；细分位置仅白名单内的值）
+    g0.placement_mode = _posPlatforms.length ? 'manual' : ''
+    g0.publisher_platforms = [..._posPlatforms]
+    g0.device_platforms = [...(s.placement_devices || [])]
+    g0.facebook_positions = _fbPositions.filter(p => _posPlatforms.includes('facebook'))
+  } else {
+    if (s.audience_age_min) f.audience_age_min = s.audience_age_min
+    if (s.audience_age_max) f.audience_age_max = s.audience_age_max
+    if (s.audience_gender !== undefined && s.audience_gender !== 0) f.audience_gender = s.audience_gender
+    if (s.audience_countries?.length) f.audience_countries = s.audience_countries
+    if (s.audience_interests?.length) f.audience_interests = s.audience_interests
+    if (s.manual_placement !== undefined) f.manual_placement = s.manual_placement
+    if (s.placement_platforms?.length) f.placement_platforms = s.placement_platforms
+    if (s.placement_devices?.length) f.placement_devices = s.placement_devices
+    if (s.facebook_positions?.length) f.facebook_positions = s.facebook_positions
+  }
   advantage_audience.value = !(s.audience_interests?.length)  // 有手选兴趣→关 Advantage+
 }
 // 手选主页 + 裸帖子号 → 拼 {page}_{post}
@@ -832,7 +896,10 @@ const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
   conv_location: '', placement_mode: '', publisher_platforms: [], device_platforms: [],
+  facebook_positions: [], instagram_positions: [], messenger_positions: [],
   aud: blankNodeAud(),
+  // 高级设置 UI 态（批次III 迁组卡）：保存时序列化进节点 advanced_config，不进 structure payload
+  advx_freq: 0, advx_attr: '', advx_dpa: false, advx_cells: emptyGrid(),
   budget_type: 'daily', lifetime_budget_usd: null, schedule_start: '', schedule_end: '', pacing: '',
   bid_amount_usd: null, minimum_roas: null,
   ads: [],
@@ -863,7 +930,11 @@ const normalizeTree = (adsets) => adsets.map(s => ({
   placement_mode: s.placement_mode === 'manual' ? 'manual' : '',
   publisher_platforms: [...(s.publisher_platforms || [])],
   device_platforms: [...(s.device_platforms || [])],
+  facebook_positions: [...(s.facebook_positions || [])],
+  instagram_positions: [...(s.instagram_positions || [])],
+  messenger_positions: [...(s.messenger_positions || [])],
   aud: _audFromJson(s.audience_json),
+  ..._advxFromConfig(s.advanced_config),
   ads: (s.ads || []).map(a => ({
     ...blankTreeAd(), ...a,
     key: a.key || _nk('ad'),
@@ -953,7 +1024,7 @@ const nodeAudSummary = (s) => {
 const nodePlSummary = (s) => s.placement_mode === 'manual'
   ? t('launch.plSumManual') + ' · ' + t('launch.plSumPlatforms', { n: (s.publisher_platforms || []).length })
   : t('launch.plSumAuto')
-// 组节点版位勾选（平台/设备；auto 时省略全部版位键）
+// 组节点版位勾选（平台/设备/细分位置；auto 时省略全部版位键）
 const toggleNodePlatform = (s, pv) => {
   const arr = s.publisher_platforms || []
   const i = arr.indexOf(pv)
@@ -965,6 +1036,31 @@ const toggleNodeDevice = (s, dv) => {
   const i = arr.indexOf(dv)
   if (i >= 0) arr.splice(i, 1); else arr.push(dv)
   s.device_platforms = [...arr]
+}
+// 细分版位勾选（批次III）：平台勾选后展开该平台位置二级勾选；不勾任何位置=该平台全部位置
+const nodePositionsKey = { facebook: 'facebook_positions', instagram: 'instagram_positions', messenger: 'messenger_positions' }
+const toggleNodePosition = (s, pv, posv) => {
+  const key = nodePositionsKey[pv]
+  const arr = s[key] || []
+  const i = arr.indexOf(posv)
+  if (i >= 0) arr.splice(i, 1); else arr.push(posv)
+  s[key] = [...arr]
+}
+const nodePositionCount = (s) =>
+  (s.facebook_positions || []).length + (s.instagram_positions || []).length + (s.messenger_positions || []).length
+// 组卡「高级」折叠区（批次III 迁组卡：频次/归因/Dayparting，绑节点 advanced_config；默认收起）
+const advOpenKeys = ref(new Set())
+const toggleAdvSec = (key) => {
+  const s = new Set(advOpenKeys.value)
+  s.has(key) ? s.delete(key) : s.add(key)
+  advOpenKeys.value = s
+}
+const advSecSummary = (s) => {
+  const parts = []
+  if (Number(s.advx_freq) > 0) parts.push(t('launch.freqCapShort', { n: s.advx_freq }))
+  if (s.advx_attr) parts.push(ATTRIBUTIONS.find(a => a.v === s.advx_attr) ? t(ATTRIBUTIONS.find(a => a.v === s.advx_attr).l) : '')
+  if (s.advx_dpa) parts.push(t('launch.daypartLabel'))
+  return parts.filter(Boolean).join(' · ')
 }
 // 组节点兴趣搜索：查询词按节点存（nodeInterestQ），结果共享、只渲染在发起搜索的组卡
 const nodeInterestQ = ref({})
@@ -1120,7 +1216,7 @@ const onModeSwitch = async (nv) => {
 // 保存前树净化：空输入的数字字段 '' → null（后端 float('') 会 400）+ 浅拷贝防中途变更；
 // aud（内联受众编辑态）序列化回 audience_json；auto 版位省略全部版位键（Advantage+ 语义）
 const _cleanTreeForSave = () => tree.value.adsets.map(s => {
-  const { aud, ...rest } = s   // aud 是 UI 态，不入 structure
+  const { aud, advx_freq, advx_attr, advx_dpa, advx_cells, ...rest } = s   // aud/advx_* 是 UI 态，不入 structure
   const _manual = s.placement_mode === 'manual' && (s.publisher_platforms || []).length > 0
   return {
     ...rest,
@@ -1141,6 +1237,12 @@ const _cleanTreeForSave = () => tree.value.adsets.map(s => {
     placement_mode: _manual ? 'manual' : '',
     publisher_platforms: _manual ? [...(s.publisher_platforms || [])] : [],
     device_platforms: _manual ? [...(s.device_platforms || [])] : [],
+    // 细分版位（批次III）：manual 才随平台下发；空数组=该平台全部位置（省略键）
+    facebook_positions: (_manual && (s.facebook_positions || []).length) ? [...s.facebook_positions] : [],
+    instagram_positions: (_manual && (s.instagram_positions || []).length) ? [...s.instagram_positions] : [],
+    messenger_positions: (_manual && (s.messenger_positions || []).length) ? [...s.messenger_positions] : [],
+    // 高级设置（频次/归因/Dayparting）序列化进节点 advanced_config（未知键保留）
+    advanced_config: _advxToConfig(s.advanced_config, s),
     ads: (s.ads || []).map(a => {
       const { multi, ...arest } = a   // multi 是 UI 态，不入 structure
       return { ...arest, asset_ids: [...(a.asset_ids || [])] }
@@ -1340,7 +1442,9 @@ const openEdit = async (tpl) => {
   // landing_page_id 后端对 NULL 返回 0；归一到 null 让 <select> 的「手动填 URL」选项（:value=null）能匹配选中
   if (!f.landing_page_id) f.landing_page_id = null
   if (tpl.audience_json) { try { const a = JSON.parse(tpl.audience_json); f.audience_countries = a.countries||[]; f.audience_interests = a.interests||[]; f.audience_age_min = a.age_min||18; f.audience_age_max = a.age_max||65; f.audience_gender = a.gender||0; f.audience_language = a.languages ? (Array.isArray(a.languages)?a.languages[0]||'':'') : '' } catch {} }
-  // 从 advanced_config 恢复 Advantage+ / 版位 / 频次 / CPA（P0-3/P0-4 fix）
+  // 从 advanced_config 恢复 Advantage+ / 版位 / CPA（P0-3/P0-4 fix）；
+  // 频次/归因/Dayparting 已迁组卡（批次III）——模板级残留值先捕获，树解析后迁入首组节点
+  let _tplAdvMigrate = null
   if (tpl.advanced_config) {
     try {
       const adv = JSON.parse(tpl.advanced_config)
@@ -1354,21 +1458,13 @@ const openEdit = async (tpl) => {
           if (tg[key]) f[key] = tg[key]
         }
       }
-      if (adv.frequency_control_specs) f.frequency_cap = adv.frequency_control_specs[0]?.max_frequency || 0
       if (adv.bid_amount) performance_goal_cpa.value = adv.bid_amount / 100
-      // 归因窗口：反推 preset（匹配常见组合，不匹配则留空）
-      if (Array.isArray(adv.attribution_spec) && adv.attribution_spec.length) {
-        const sig = adv.attribution_spec.map(x => `${x.event_type}:${x.window_days}`).sort().join(',')
-        const map = { 'CLICK:1': '1d_click', 'CLICK:7': '7d_click',
-          'CLICK:1,IMPRESSION:1': '1d_click_1d_view', 'CLICK:7,IMPRESSION:1': '7d_click_1d_view' }
-        f.attribution_preset = map[sig] || ''
-      }
-      // Dayparting：有 day_parting_schedule 表示启用
-      if (Array.isArray(adv.day_parting_schedule) && adv.day_parting_schedule.length) {
-        f.daypart_enabled = true
-        f.daypart_cells = scheduleToGrid(adv.day_parting_schedule)
-      } else {
-        f.daypart_enabled = false; f.daypart_cells = emptyGrid()
+      _tplAdvMigrate = {
+        freq: (adv.frequency_control_specs?.[0]?.max_frequency) || 0,
+        attr: specToAttrPreset(adv.attribution_spec),
+        dpaOn: !!(Array.isArray(adv.day_parting_schedule) && adv.day_parting_schedule.length),
+        cells: (Array.isArray(adv.day_parting_schedule) && adv.day_parting_schedule.length)
+          ? scheduleToGrid(adv.day_parting_schedule) : emptyGrid(),
       }
     } catch {}
   }
@@ -1406,6 +1502,14 @@ const openEdit = async (tpl) => {
       const parsed = JSON.parse(tpl.structure)
       if (parsed?.adsets?.length) {
         tree.value = { adsets: normalizeTree(parsed.adsets) }
+        // 模板级频次/归因/Dayparting 一次性迁入首组节点（批次III 迁组卡；首组已有节点级配置则不覆盖）
+        const g0 = tree.value.adsets[0]
+        if (_tplAdvMigrate && g0 && !Number(g0.advx_freq) && !g0.advx_attr && !g0.advx_dpa) {
+          g0.advx_freq = _tplAdvMigrate.freq
+          g0.advx_attr = _tplAdvMigrate.attr
+          g0.advx_dpa = _tplAdvMigrate.dpaOn
+          g0.advx_cells = _tplAdvMigrate.cells
+        }
         editMode.value = 'tree'
         expandAllTree(); ensureTreeAssets()
         expandedAdKeys.value = new Set(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.key)))
@@ -1565,32 +1669,12 @@ const saveTpl = async () => {
         delete adv.targeting.device_platforms
         for (const p of PLATFORMS) delete adv.targeting[p.v + '_positions']
       }
-      // 频次控制（0/空 = 不限，清掉残留）
-      if (form.value.frequency_cap && form.value.frequency_cap > 0) {
-        adv.frequency_control_specs = [{
-          event: 'IMPRESSIONS', interval_days: 1, max_frequency: form.value.frequency_cap, type: 'CAP'
-        }]
-      } else {
-        delete adv.frequency_control_specs
-      }
-      // 归因窗口（清空 = 用 FB 默认，删 key）
-      const aSpec = attributionToSpec(form.value.attribution_preset)
-      if (aSpec) adv.attribution_spec = aSpec
-      else delete adv.attribution_spec
-      // 时段投放 Dayparting（FB 用广告账户时区，不传 timezone；关/空 = 删 key）
-      if (form.value.daypart_enabled) {
-        const sched = gridToSchedule(form.value.daypart_cells)
-        if (sched.length) {
-          adv.day_parting_schedule = sched
-          adv.pacing_type = ['day_parting']
-        } else {
-          delete adv.day_parting_schedule
-          delete adv.pacing_type
-        }
-      } else {
-        delete adv.day_parting_schedule
-        delete adv.pacing_type
-      }
+      // 频次/归因/Dayparting 已迁组卡（批次III）：模板级一律剥残留键（部署时组节点
+      // advanced_config 覆盖模板级——节点级才是生效层，旧模板级残留顶掉不了但清理防歧义）
+      delete adv.frequency_control_specs
+      delete adv.attribution_spec
+      delete adv.day_parting_schedule
+      delete adv.pacing_type
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
     if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success(t('common.saved')) }
@@ -2397,7 +2481,68 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
                       <div v-if="!(s.publisher_platforms||[]).length" class="hint" style="color:var(--warning)">{{ t('launch.plNeedPlatform') }}</div>
+                      <!-- 细分版位（批次III）：勾选平台下的常用位置二级勾选；不勾任何位置=该平台全部位置 -->
+                      <template v-for="p in PLATFORMS" :key="'pos_'+p.v">
+                        <div v-if="p.positions.length && (s.publisher_platforms||[]).includes(p.v)" class="row">
+                          <label>{{ p.l }} · {{ t('launch.plPositionsLabel') }}</label>
+                          <div class="platform-chips">
+                            <label v-for="posv in p.positions" :key="p.v+posv.v" class="platform-chip"
+                                   :class="{on:(s[nodePositionsKey[p.v]]||[]).includes(posv.v)}">
+                              <input type="checkbox" :checked="(s[nodePositionsKey[p.v]]||[]).includes(posv.v)"
+                                     @change="toggleNodePosition(s, p.v, posv.v)" /> {{ t(posv.l) }}
+                            </label>
+                          </div>
+                          <span class="hint">{{ t('launch.plPositionsHint') }}</span>
+                        </div>
+                      </template>
                     </template>
+                  </div>
+                </div>
+                <!-- 高级折叠区（批次III 迁组卡）：频次/归因/Dayparting，绑节点 advanced_config（部署时组级覆盖模板级） -->
+                <div class="node-sec">
+                  <button type="button" class="node-sec-head" @click="toggleAdvSec(s.key)">
+                    <span class="t-arrow" :class="{ open: advOpenKeys.has(s.key) }">▶</span>
+                    <span>{{ t('launch.nodeAdvTitle') }}</span>
+                    <span v-if="advSecSummary(s)" class="node-sec-val">{{ advSecSummary(s) }}</span>
+                  </button>
+                  <div v-show="advOpenKeys.has(s.key)" class="node-sec-body">
+                    <div class="row"><label>{{ t('launch.freqCapLabel') }}</label>
+                      <input v-model.number="s.advx_freq" type="number" min="0" class="inp" placeholder="0" />
+                      <span class="hint">{{ t('launch.nodeAdvFreqHint') }}</span>
+                    </div>
+                    <div class="row"><label>{{ t('launch.attributionWindow') }}</label>
+                      <el-select v-model="s.advx_attr" style="width:100%" size="small" clearable :placeholder="t('launch.attr_default')">
+                        <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="t(a.l)" />
+                      </el-select>
+                      <span class="hint">{{ t('launch.attributionHint') }}</span>
+                    </div>
+                    <div class="row" style="flex-direction:column;align-items:stretch">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                        <label style="margin:0">{{ t('launch.daypartLabel') }}</label>
+                        <el-switch v-model="s.advx_dpa" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+                      </div>
+                      <template v-if="s.advx_dpa">
+                        <div class="dpa-tools">
+                          <button type="button" class="op sm" @click="dpaFillNode(s, 'all')">{{ t('launch.daypartAllDay') }}</button>
+                          <button type="button" class="op sm" @click="dpaFillNode(s, 'work')">{{ t('launch.daypartWorkhours') }}</button>
+                          <button type="button" class="op sm" @click="dpaFillNode(s, 'clear')">{{ t('launch.clear') }}</button>
+                          <span class="hint">{{ t('launch.daypartHint') }}</span>
+                        </div>
+                        <div class="dpa-grid">
+                          <div class="dpa-corner"></div>
+                          <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 {{ t('launch.hour') }}</span></div>
+                          <template v-for="di in 7" :key="'nd'+di+s.key">
+                            <div class="dpa-rhdr">{{ t(DPA_DAYS[di-1]) }}</div>
+                            <div class="dpa-row">
+                              <div v-for="h in 24" :key="s.key+'_'+di+'_'+h"
+                                   :class="['dpa-cell', s.advx_cells[di-1][h-1] ? 'on' : '']"
+                                   :title="t(DPA_DAYS[di-1]) + ' ' + (h-1) + ':00'"
+                                   @click="toggleNodeCell(s, di-1, h-1)"></div>
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
                   </div>
                 </div>
                 <!-- 优化目标覆盖：按 OPT_GOALS_BY_OBJECTIVE×objective 过滤（空=按转化位置矩阵自动） -->
@@ -2464,50 +2609,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.placement') }}</div>
         <div class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttPlacementHint') }}</div>
-        <template v-if="!isTt">
-        <div class="sec-title">{{ t('launch.disclosure') }}</div>
-        <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
-        <div class="row"><label>{{ t('launch.payer') }}</label><input v-model="form.payer" class="inp" /></div>
-        <hr class="sep" />
-        <div class="sec-title">{{ t('launch.pacing') }}</div>
-        <div class="row"><label>{{ t('launch.freqCapLabel') }}</label><input v-model.number="form.frequency_cap" type="number" min="0" class="inp" placeholder="0" /></div>
-        <div class="row"><label>{{ t('launch.attributionWindow') }}</label>
-          <el-select v-model="form.attribution_preset" style="width:100%" size="small" clearable :placeholder="t('launch.attr_default')">
-            <el-option v-for="a in ATTRIBUTIONS" :key="a.v||'default'" :value="a.v" :label="t(a.l)" />
-</el-select>
-          <span class="hint">{{ t('launch.attributionHint') }}</span>
-</div>
-        <div class="row" style="flex-direction:column;align-items:stretch">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <label style="margin:0">{{ t('launch.daypartLabel') }}</label>
-            <el-switch v-model="form.daypart_enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-</div>
-          <template v-if="form.daypart_enabled">
-            <div class="dpa-tools">
-              <button type="button" class="op sm" @click="dpaFillAll">{{ t('launch.daypartAllDay') }}</button>
-              <button type="button" class="op sm" @click="dpaFillWorkhours">{{ t('launch.daypartWorkhours') }}</button>
-              <button type="button" class="op sm" @click="dpaClearAll">{{ t('launch.clear') }}</button>
-              <span class="hint">{{ t('launch.daypartHint') }}</span>
-</div>
-            <div class="dpa-grid">
-              <div class="dpa-corner"></div>
-              <div class="dpa-hhdr"><span>0</span><span>6</span><span>12</span><span>18</span><span>23 {{ t('launch.hour') }}</span></div>
-              <template v-for="di in 7" :key="'d'+di">
-                <div class="dpa-rhdr">{{ t(DPA_DAYS[di-1]) }}</div>
-                <div class="dpa-row">
-                  <div v-for="h in 24" :key="di+'_'+h"
-                       :class="['dpa-cell', form.daypart_cells[di-1][h-1] ? 'on' : '']"
-                       :title="t(DPA_DAYS[di-1]) + ' ' + (h-1) + ':00'"
-                       @click="toggleCell(di-1, h-1)"></div>
-</div>
-</template>
-</div>
-</template>
-</div>
-        <hr class="sep" />
-        <div class="sec-title">{{ t('launch.advancedFieldsTitle') }}</div>
-        <div class="row"><label>{{ t('launch.advancedSettings') }}</label><textarea v-model="form.advanced_config" class="inp ta" rows="3" :placeholder='t(&apos;launch.advancedPlaceholder&apos;)'></textarea><span class="hint">{{ t('launch.advancedHint') }}</span></div>
-</template>
+        <!-- 批次III：平铺卡 FB-only 尾块（披露/频次/归因/Dayparting/高级 JSON）清理——FB 恒树模式
+             （披露已在组卡；频次/归因/Dayparting 迁组卡「高级」折叠区绑节点 advanced_config；高级 JSON 纯死删除） -->
 </div>
 </div>
 </div>
