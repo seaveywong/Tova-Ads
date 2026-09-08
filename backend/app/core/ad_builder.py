@@ -59,6 +59,165 @@ def normalize_objective(objective: str) -> str:
     return _OBJ_NORMALIZE.get(objective, objective)
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# 转化位置矩阵（批次 I · 2026-09-08）：objective → conv_location →
+# (destination_type, optimization_goal, promoted_object 形态)
+#
+# 一套词表统一三处旧口径（盘点矩阵 B 实锤的死链根因）：
+#   ① UI「转化目标」下拉（custom_event_type 词表：Purchase/AddToCart/...）→ conversion_goal 列，
+#      经 custom_event_from_goal() 进 promoted_object.custom_event_type（不再恒 PURCHASE/LEAD）；
+#   ② _OPT_GOAL_MAP 旧 key（offsite_conversions/...）→ conv_location="" 时的兼容推导路径（存量行为不变）；
+#   ③ is_messaging 门 → resolve_adset_destination() 派生 destination_type/optimization_goal 后判定。
+# 依据：蓝图_FB广告管理器创建流 §2.1/§5.2（官API v25 实证）+ 方案_版位与转化位置 §3.3 采用矩阵。
+# ❓ phone_call / instagram_direct 的 optimization_goal 组合未经真部署实测（蓝图无逐格矩阵）。
+# ══════════════════════════════════════════════════════════════════════════
+
+# conv_location 合法值（按 objective；蓝图 §2.1 全表收窄到本批已建链路；app 链路未建故不含）
+CONV_LOCATIONS_BY_OBJECTIVE = {
+    "OUTCOME_SALES": {"website", "messenger", "whatsapp", "phone_call"},
+    "OUTCOME_LEADS": {"website", "on_ad", "on_ad_messenger", "messenger",
+                      "whatsapp", "instagram_direct", "phone_call"},
+    "OUTCOME_TRAFFIC": {"website", "messenger", "whatsapp", "instagram_direct", "phone_call"},
+    "OUTCOME_ENGAGEMENT": {"website", "on_page", "messenger", "whatsapp", "instagram_direct"},
+    "OUTCOME_AWARENESS": set(),        # 无转化位置（蓝图 §2.1）
+    "OUTCOME_APP_PROMOTION": set(),    # 应用链路未建（审计 C3）
+}
+CONV_LOCATION_ALL = {loc for s in CONV_LOCATIONS_BY_OBJECTIVE.values() for loc in s}
+
+# (objective, conv_location) → (destination_type, 默认 optimization_goal, promoted_object 形态)
+# promoted 形态：pixel={pixel_id,custom_event_type} / page={page_id} / None=不带
+_CONV_MATRIX = {
+    ("OUTCOME_SALES", "website"):     ("WEBSITE", "OFFSITE_CONVERSIONS", "pixel"),
+    ("OUTCOME_SALES", "messenger"):   ("MESSENGER", "MESSAGING_PURCHASE_CONVERSION", "page"),
+    ("OUTCOME_SALES", "whatsapp"):    ("WHATSAPP", "CONVERSATIONS", "page"),
+    ("OUTCOME_SALES", "phone_call"):  ("PHONE_CALL", "LINK_CLICKS", "page"),
+    ("OUTCOME_LEADS", "website"):     ("WEBSITE", "OFFSITE_CONVERSIONS", "pixel"),
+    ("OUTCOME_LEADS", "on_ad"):       ("ON_AD", "LEAD_GENERATION", "page"),
+    # Leads 组合位「即时表单+Messenger」（蓝图 §2.1：二选一自动分配）：API 侧与 on_ad 同构
+    # （ON_AD+LEAD_GENERATION），分流发生在 FB 投放侧；创意层同时挂表单+问答模板待后续批。
+    ("OUTCOME_LEADS", "on_ad_messenger"): ("ON_AD", "LEAD_GENERATION", "page"),
+    ("OUTCOME_LEADS", "messenger"):   ("MESSENGER", "LEAD_GENERATION", "page"),
+    ("OUTCOME_LEADS", "whatsapp"):    ("WHATSAPP", "CONVERSATIONS", "page"),
+    ("OUTCOME_LEADS", "instagram_direct"): ("INSTAGRAM_DIRECT", "CONVERSATIONS", "page"),
+    ("OUTCOME_LEADS", "phone_call"):  ("PHONE_CALL", "LINK_CLICKS", "page"),
+    ("OUTCOME_TRAFFIC", "website"):   ("WEBSITE", "LINK_CLICKS", None),
+    ("OUTCOME_TRAFFIC", "messenger"): ("MESSENGER", "CONVERSATIONS", "page"),
+    ("OUTCOME_TRAFFIC", "whatsapp"):  ("WHATSAPP", "CONVERSATIONS", "page"),
+    ("OUTCOME_TRAFFIC", "instagram_direct"): ("INSTAGRAM_DIRECT", "CONVERSATIONS", "page"),
+    ("OUTCOME_TRAFFIC", "phone_call"): ("PHONE_CALL", "LINK_CLICKS", "page"),
+    ("OUTCOME_ENGAGEMENT", "website"): ("WEBSITE", "LINK_CLICKS", None),
+    ("OUTCOME_ENGAGEMENT", "on_page"): ("ON_PAGE", "PAGE_LIKES", "page"),
+    ("OUTCOME_ENGAGEMENT", "messenger"): ("MESSENGER", "CONVERSATIONS", "page"),
+    ("OUTCOME_ENGAGEMENT", "whatsapp"): ("WHATSAPP", "CONVERSATIONS", "page"),
+    ("OUTCOME_ENGAGEMENT", "instagram_direct"): ("INSTAGRAM_DIRECT", "CONVERSATIONS", "page"),
+}
+
+# 优化目标 × objective 兼容表（蓝图 §2.2 成效目标全表 + §5.2 CTM/CTW 实证枚举交集；
+# 校验树节点 optimization_goal 用——非法值保存时 422，不再等 FB 400）
+OPT_GOALS_BY_OBJECTIVE = {
+    "OUTCOME_AWARENESS": {"REACH", "IMPRESSIONS", "THRUPLAY", "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS"},
+    "OUTCOME_TRAFFIC": {"LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS", "CONVERSATIONS"},
+    "OUTCOME_ENGAGEMENT": {"REACH", "IMPRESSIONS", "LINK_CLICKS", "LANDING_PAGE_VIEWS",
+                           "POST_ENGAGEMENT", "PAGE_LIKES", "CONVERSATIONS",
+                           "MESSAGING_PURCHASE_CONVERSION", "MESSAGING_APPOINTMENT_CONVERSION",
+                           "THRUPLAY", "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS", "EVENT_RESPONSES",
+                           "OFFSITE_CONVERSIONS"},
+    "OUTCOME_LEADS": {"LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "CONVERSATIONS",
+                      "LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS"},
+    "OUTCOME_SALES": {"OFFSITE_CONVERSIONS", "VALUE", "CONVERSATIONS", "LINK_CLICKS",
+                      "LANDING_PAGE_VIEWS", "IMPRESSIONS", "REACH", "MESSAGING_PURCHASE_CONVERSION"},
+    "OUTCOME_APP_PROMOTION": {"APP_INSTALLS", "VALUE", "LINK_CLICKS"},
+}
+
+# 优化目标 × conv_location 兼容表（蓝图 §5.2 CTW 按目标枚举 + §2.2；节点同时显式设置两者时校验）
+OPT_GOALS_BY_LOCATION = {
+    "website": {"OFFSITE_CONVERSIONS", "VALUE", "LINK_CLICKS", "LANDING_PAGE_VIEWS",
+                "REACH", "IMPRESSIONS", "POST_ENGAGEMENT"},
+    "on_ad": {"LEAD_GENERATION", "QUALITY_LEAD", "CONVERSATIONS"},
+    "on_ad_messenger": {"LEAD_GENERATION", "QUALITY_LEAD", "CONVERSATIONS"},
+    "messenger": {"CONVERSATIONS", "LEAD_GENERATION", "QUALITY_LEAD",
+                  "MESSAGING_PURCHASE_CONVERSION", "LINK_CLICKS"},
+    "whatsapp": {"CONVERSATIONS", "OFFSITE_CONVERSIONS", "LINK_CLICKS", "IMPRESSIONS",
+                 "REACH", "LANDING_PAGE_VIEWS", "POST_ENGAGEMENT"},
+    "instagram_direct": {"CONVERSATIONS", "LEAD_GENERATION"},
+    "phone_call": {"LINK_CLICKS", "CONVERSATIONS", "REACH", "IMPRESSIONS"},
+    "on_page": {"PAGE_LIKES", "REACH", "IMPRESSIONS"},
+}
+
+# conv_location="" 时的兼容推导（存量行为原样保留 + 消息类覆盖组合补全——蓝图 §5.2）：
+# (objective, optimization_goal) → destination_type（与下方 build_adset 旧分支一一对应）
+_LEGACY_DEST = {
+    ("OUTCOME_SALES", "OFFSITE_CONVERSIONS"): "WEBSITE",
+    ("OUTCOME_SALES", "VALUE"): "WEBSITE",
+    ("OUTCOME_SALES", "LINK_CLICKS"): "WEBSITE",
+    ("OUTCOME_SALES", "LANDING_PAGE_VIEWS"): "WEBSITE",
+    ("OUTCOME_SALES", "CONVERSATIONS"): "MESSENGER",
+    ("OUTCOME_SALES", "MESSAGING_PURCHASE_CONVERSION"): "MESSENGER",
+    ("OUTCOME_LEADS", "LEAD_GENERATION"): "ON_AD",
+    ("OUTCOME_LEADS", "OFFSITE_CONVERSIONS"): "WEBSITE",
+    ("OUTCOME_LEADS", "CONVERSATIONS"): "MESSENGER",
+    ("OUTCOME_ENGAGEMENT", "PAGE_LIKES"): "ON_PAGE",
+    ("OUTCOME_ENGAGEMENT", "CONVERSATIONS"): "MESSENGER",
+    ("OUTCOME_ENGAGEMENT", "MESSAGING_PURCHASE_CONVERSION"): "MESSENGER",
+    ("OUTCOME_ENGAGEMENT", "MESSAGING_APPOINTMENT_CONVERSION"): "MESSENGER",
+    ("OUTCOME_ENGAGEMENT", "LINK_CLICKS"): "WEBSITE",
+    ("OUTCOME_ENGAGEMENT", "LANDING_PAGE_VIEWS"): "WEBSITE",
+    ("OUTCOME_TRAFFIC", "LINK_CLICKS"): "WEBSITE",
+    ("OUTCOME_TRAFFIC", "LANDING_PAGE_VIEWS"): "WEBSITE",
+    ("OUTCOME_TRAFFIC", "CONVERSATIONS"): "MESSENGER",
+}
+
+# UI 词表（转化事件，camelCase 标准事件名）→ FB promoted_object.custom_event_type 枚举
+# （蓝图 §2.1 各目标的网站转化事件全集；词表归一后 conversion_goal 列存 UI 原值，部署时经此映射）
+# key = 去掉非字母后的大写形态（AddToCart / add_to_cart / ADD_TO_CART 统一命中）
+_CUSTOM_EVENT_MAP = {
+    "PURCHASE": "PURCHASE", "ADDTOCART": "ADD_TO_CART", "ADDTOWISHLIST": "ADD_TO_WISHLIST",
+    "INITIATECHECKOUT": "INITIATE_CHECKOUT", "ADDPAYMENTINFO": "ADD_PAYMENT_INFO",
+    "COMPLETEREGISTRATION": "COMPLETE_REGISTRATION", "LEAD": "LEAD", "SUBSCRIBE": "SUBSCRIBE",
+    "CONTACT": "CONTACT", "STARTTRIAL": "START_TRIAL", "SEARCH": "SEARCH",
+    "VIEWCONTENT": "VIEW_CONTENT", "SCHEDULE": "SCHEDULE", "DONATE": "DONATE",
+    "FINDLOCATION": "FIND_LOCATION", "CUSTOMIZEPRODUCT": "CUSTOMIZE_PRODUCT",
+    "SUBMITAPPLICATION": "SUBMIT_APPLICATION",
+}
+
+
+def custom_event_from_goal(conversion_goal: str) -> str:
+    """conversion_goal（UI 转化事件词表 / FB 大写枚举）→ custom_event_type。
+    旧 _OPT_GOAL_MAP key（offsite_conversions 等目的地语义）不是事件 → 返空串。"""
+    import re as _re
+    cg = (conversion_goal or "").strip()
+    if not cg:
+        return ""
+    return _CUSTOM_EVENT_MAP.get(_re.sub(r"[^A-Za-z]", "", cg).upper(), "")
+
+
+def resolve_adset_destination(objective: str, conv_location: str = "",
+                              conversion_goal: str = "", optimization_goal: str = "") -> tuple[str, str]:
+    """统一派生 (destination_type, optimization_goal)——树 runner / deploy_one_account 的
+    is_messaging 门、CTA app_destination 都以此为准（不再各自查 conversion_goal 原始词表）。
+    conv_location 非空 → 矩阵派生（显式 optimization_goal 覆盖目标值）；
+    空 → 存量推导路径（get_optimization_goal + _LEGACY_DEST，行为与旧版一致）。"""
+    obj = normalize_objective(objective)
+    loc = (conv_location or "").strip().lower()
+    opt = (optimization_goal or "").strip()
+    if loc:
+        row = _CONV_MATRIX.get((obj, loc))
+        if not row:
+            raise ValueError(f"转化位置「{loc}」不适用于目标 {obj}")
+        return row[0], (opt or row[1])
+    og = opt or get_optimization_goal(obj, conversion_goal)
+    return _LEGACY_DEST.get((obj, og), ""), og
+
+
+def is_messaging_destination(destination_type: str, optimization_goal: str) -> bool:
+    """消息类广告判定（is_messaging 门统一口径）：目的地为消息类，或成效目标为会话/消息转化。"""
+    dt = (destination_type or "").upper()
+    og = (optimization_goal or "").upper()
+    return (dt in ("MESSENGER", "WHATSAPP", "INSTAGRAM_DIRECT")
+            or og in ("CONVERSATIONS", "MESSAGING_PURCHASE_CONVERSION",
+                      "MESSAGING_APPOINTMENT_CONVERSION"))
+
+
 # ── 受众定向构造（审计项目16，v1 仅兴趣受众）──
 def build_targeting(
     countries: list[str] | None = None,
@@ -160,16 +319,16 @@ def build_adset(
     page_id: str = "",
     pixel_id: str = "",
     landing_url: str = "",
-    conversion_event: str = "PURCHASE",
+    conversion_event: str = "",             # 显式 custom_event_type（空=按 conversion_goal 映射，再空=目标默认）
     bid_strategy: str = "LOWEST_COST_WITHOUT_CAP",
     target_cpa: float | None = None,
     budget_mode: str = "ABO",
     targeting: dict | None = None,
     dsa_beneficiary: str = "",
     dsa_payor: str = "",
-    optimization_goal: str = "",            # 显式覆盖（空=按 objective+conversion_goal 推）
+    optimization_goal: str = "",            # 显式覆盖（空=按 conv_location 矩阵 / objective+conversion_goal 推）
     billing_event: str = "",                # 显式覆盖（空=IMPRESSIONS）
-    destination_type_override: str = "",    # 显式覆盖 destination_type
+    destination_type_override: str = "",    # 显式覆盖 destination_type（仅 conv_location 为空时生效——批次I 修隐患A）
     extra: dict | None = None,              # 高级字段（advanced_config JSON），深合并进 payload
     budget_type: str = "daily",             # daily / lifetime（总预算必须配排期——端点守卫先拦）
     lifetime_budget: int | None = None,     # budget_type=lifetime 时用（本币 minor units）
@@ -178,9 +337,23 @@ def build_adset(
     pacing: str = "",                       # ""=standard 匀速 / accelerated 加速投放
     bid_amount: int | None = None,          # COST_CAP/BID_CAP 出价额（本币 minor units）
     minimum_roas: float | None = None,      # 最小 ROAS（SALES 用）
+    conv_location: str = "",                # 转化位置（组节点字段；空=存量推导路径，行为不变）
+    placements: dict | None = None,         # 结构化版位 {publisher_platforms,device_platforms}；None=省略（Advantage+ 自动版位）
+    whatsapp_phone_number: str = "",        # CTW 显式号码（仅 ENGAGEMENT 下进 promoted_object；蓝图：Traffic/Sales 随主页不传）
 ) -> dict:
     obj = normalize_objective(objective)
-    opt_goal = optimization_goal.strip() if optimization_goal and optimization_goal.strip() else get_optimization_goal(obj, conversion_goal)
+    loc = (conv_location or "").strip().lower()
+    if loc and loc not in CONV_LOCATION_ALL:
+        raise ValueError(f"未知转化位置「{conv_location}」")
+    if loc and (obj, loc) not in _CONV_MATRIX:
+        raise ValueError(f"转化位置「{loc}」不适用于目标 {obj}")
+    opt_override = (optimization_goal or "").strip()
+    dest_type = ""
+    if loc:
+        dest_type, matrix_goal, _kind = _CONV_MATRIX[(obj, loc)]
+        opt_goal = opt_override or matrix_goal
+    else:
+        opt_goal = opt_override or get_optimization_goal(obj, conversion_goal)
 
     payload: dict[str, Any] = {
         "name": name,
@@ -225,66 +398,98 @@ def build_adset(
     # COST_CAP 需要 bid_amount（v1 简化：不设 COST_CAP，默认 LOWEST_COST_WITHOUT_CAP）
     # 后续完善：if bid_strategy == "COST_CAP" and target_cpa: payload["bid_amount"] = ...
 
-    # ── promoted_object（按目标+转化目的）──
-    # doc 02 + 1.0 经验：不同目标需要不同的 promoted_object
-    if obj == "OUTCOME_SALES" and opt_goal == "OFFSITE_CONVERSIONS":
-        if not pixel_id:
-            raise ValueError("购物目标（OFFSITE_CONVERSIONS）需要 pixel_id")
-        payload["promoted_object"] = {
-            "pixel_id": pixel_id,
-            "custom_event_type": conversion_event or "PURCHASE",
-        }
-        payload["destination_type"] = "WEBSITE"
+    # ── promoted_object / destination_type ──
+    # conversion_event 接线（批次I）：显式形参 > conversion_goal（UI 转化事件词表）映射 > 目标默认
+    evt = (conversion_event or "").strip() or custom_event_from_goal(conversion_goal)
+    if not evt:
+        evt = "LEAD" if obj == "OUTCOME_LEADS" else "PURCHASE"
+    promo: dict | None = None
 
-    elif obj == "OUTCOME_LEADS":
-        if opt_goal == "LEAD_GENERATION":
-            # Instant Forms → ON_AD
-            if not page_id:
-                raise ValueError("潜在客户（Instant Forms）需要 page_id")
-            payload["promoted_object"] = {"page_id": page_id}
-            payload["destination_type"] = "ON_AD"
-        elif opt_goal == "OFFSITE_CONVERSIONS":
-            # 网站线索 → WEBSITE
+    if loc:
+        # 矩阵路径（conv_location 显式）：destination_type/optimization_goal/promoted_object 全由矩阵派生
+        _dest, _goal, kind = _CONV_MATRIX[(obj, loc)]
+        if kind == "pixel":
             if not pixel_id:
-                raise ValueError("潜在客户（网站）需要 pixel_id")
-            payload["promoted_object"] = {
-                "pixel_id": pixel_id,
-                "custom_event_type": "LEAD",
-            }
-            payload["destination_type"] = "WEBSITE"
-
-    elif obj == "OUTCOME_ENGAGEMENT":
-        if opt_goal == "PAGE_LIKES":
+                raise ValueError(f"转化位置「{loc}」（{obj}）需要 pixel_id")
+            promo = {"pixel_id": pixel_id, "custom_event_type": evt}
+        elif kind == "page":
             if not page_id:
-                raise ValueError("主页赞需要 page_id")
-            payload["promoted_object"] = {"page_id": page_id}
-            payload["destination_type"] = "ON_PAGE"
-        elif opt_goal == "POST_ENGAGEMENT":
-            if page_id:
-                payload["promoted_object"] = {"page_id": page_id}
-        elif opt_goal in ("CONVERSATIONS", "MESSAGING_PURCHASE_CONVERSION",
-                          "MESSAGING_APPOINTMENT_CONVERSION"):
-            if not page_id:
-                raise ValueError("消息类目标需要 page_id")
-            payload["promoted_object"] = {"page_id": page_id}
-            payload["destination_type"] = "MESSENGER"
-        elif opt_goal in ("LINK_CLICKS", "LANDING_PAGE_VIEWS"):
-            payload["destination_type"] = "WEBSITE"
+                raise ValueError(f"转化位置「{loc}」（{obj}）需要 page_id（消息/表单类主页身份）")
+            promo = {"page_id": page_id}
+            # CTW 显式号码：仅 Engagement 目标传（蓝图 §3.1/§5.2：Traffic/Sales 用主页绑定号，选主页即隐式）
+            if loc == "whatsapp" and obj == "OUTCOME_ENGAGEMENT" and (whatsapp_phone_number or "").strip():
+                promo["whatsapp_phone_number"] = whatsapp_phone_number.strip()
+    else:
+        # 存量推导路径（conv_location 空 = 行为与旧版一致；destination_type 查表与旧分支同源）
+        dest_type = _LEGACY_DEST.get((obj, opt_goal), "")
+        if obj == "OUTCOME_SALES" and opt_goal in ("OFFSITE_CONVERSIONS", "VALUE"):
+            if not pixel_id:
+                raise ValueError("购物目标（OFFSITE_CONVERSIONS）需要 pixel_id")
+            promo = {"pixel_id": pixel_id, "custom_event_type": evt}
+        elif obj == "OUTCOME_LEADS":
+            if opt_goal == "LEAD_GENERATION":
+                # Instant Forms → ON_AD
+                if not page_id:
+                    raise ValueError("潜在客户（Instant Forms）需要 page_id")
+                promo = {"page_id": page_id}
+            elif opt_goal == "OFFSITE_CONVERSIONS":
+                # 网站线索 → WEBSITE
+                if not pixel_id:
+                    raise ValueError("潜在客户（网站）需要 pixel_id")
+                promo = {"pixel_id": pixel_id, "custom_event_type": evt}
+        elif obj == "OUTCOME_ENGAGEMENT":
+            if opt_goal == "PAGE_LIKES":
+                if not page_id:
+                    raise ValueError("主页赞需要 page_id")
+                promo = {"page_id": page_id}
+            elif opt_goal == "POST_ENGAGEMENT":
+                if page_id:
+                    promo = {"page_id": page_id}
+            elif opt_goal in ("CONVERSATIONS", "MESSAGING_PURCHASE_CONVERSION",
+                              "MESSAGING_APPOINTMENT_CONVERSION"):
+                if not page_id:
+                    raise ValueError("消息类目标需要 page_id")
+                promo = {"page_id": page_id}
 
-    elif obj == "OUTCOME_TRAFFIC":
-        if opt_goal in ("LINK_CLICKS", "LANDING_PAGE_VIEWS"):
-            payload["destination_type"] = "WEBSITE"
+    # 消息类目的地兜底（legacy 覆盖路径）：destination=消息类但无 promoted_object → page_id 必填
+    # （蓝图 §5.2：CTM/CTW/CTI 的 promoted_object={page_id} 必填）
+    if dest_type in ("MESSENGER", "WHATSAPP", "INSTAGRAM_DIRECT") and promo is None:
+        if not page_id:
+            raise ValueError(f"消息类目的地（{dest_type}）需要 page_id")
+        promo = {"page_id": page_id}
+    # SALES 兜底（批次I 修隐患B）：SALES 系列任何优化目标都必须带 promoted_object——
+    # 转化类走像素（上方），其余（CONVERSATIONS/LINK_CLICKS/REACH...）用 page_id，缺则 400 快失败
+    if obj == "OUTCOME_SALES" and promo is None:
+        if not page_id:
+            raise ValueError("SALES 目标该优化组合需要 promoted_object：提供 pixel_id（转化类）或 page_id（消息/主页类）")
+        promo = {"page_id": page_id}
+    if promo is not None:
+        payload["promoted_object"] = promo
+    if dest_type:
+        payload["destination_type"] = dest_type
 
-    elif obj == "OUTCOME_AWARENESS":
-        pass  # REACH/IMPRESSIONS 不需要 promoted_object
-
-    # 用户显式覆盖 destination_type（高级设置 / 模板指定）
-    if destination_type_override and destination_type_override.strip():
+    # 用户显式覆盖 destination_type（高级设置 / 模板指定）——仅 conv_location 为空时生效：
+    # 矩阵派生值是用户显式选的转化位置，无条件顶掉会造出矛盾组合（批次I 修隐患A：
+    # 组覆盖 CONVERSATIONS 派生 MESSENGER 后被模板残留 destination_type=ON_PAGE 顶掉）
+    if destination_type_override and destination_type_override.strip() and not loc:
         payload["destination_type"] = destination_type_override.strip()
 
-    # MESSENGER 目标需 publisher_platforms 含 messenger（在 destination_type 最终确定后再判断）
+    # 结构化版位（组节点 placement_mode=manual）：写进 targeting（在 extra 深合并之前，
+    # advanced_config 仍可兜底覆盖——保持既有优先级约定）；auto/空 = 省略全部版位键（Advantage+ 版位）
+    if placements:
+        _pp = [str(p) for p in (placements.get("publisher_platforms") or []) if str(p).strip()]
+        if _pp:
+            payload["targeting"]["publisher_platforms"] = _pp
+        _dp = [str(d) for d in (placements.get("device_platforms") or []) if str(d).strip()]
+        if _dp:
+            payload["targeting"]["device_platforms"] = _dp
+
+    # MESSENGER 目的地需 publisher_platforms 含 messenger：并入既有选择（去重），不再整体覆盖
     if payload.get("destination_type") == "MESSENGER":
-        payload["targeting"]["publisher_platforms"] = ["messenger"]
+        _pp = list(payload["targeting"].get("publisher_platforms") or [])
+        if "messenger" not in _pp:
+            _pp.append("messenger")
+            payload["targeting"]["publisher_platforms"] = _pp
 
     # 高级字段深合并（advanced_config：bid_amount/attribution_spec/placements/dayparting/...）
     if extra:
@@ -342,15 +547,18 @@ def build_creative(
     welcome_message: dict | None = None,
     description: str = "",                  # 链接描述（正文下方灰色小字，FB「描述」字段）
     instagram_actor_id: str = "",           # IG 账号 ID（object_story_spec 外层；空=用主页关联 IG）
+    app_destination: str = "",              # 消息目的地（MESSENGER/WHATSAPP/INSTAGRAM_DIRECT）→ 默认消息类 CTA（显式 cta_type 优先）
 ) -> dict:
     """构造广告创意（object_story_spec）。
 
-    支持图片/视频创意 + CTA 按钮 + headline/body + Messenger 欢迎语。
+    支持图片/视频创意 + CTA 按钮 + headline/body + Messenger/WhatsApp 欢迎语。
     headline/body 优先用户自定义，空则用默认。
     welcome_message：已构造好的 page_welcome_message VISUAL_EDITOR dict（消息广告用）。
+    app_destination：消息类目的地（CTM/CTW/CTI）——cta_type 为空时默认消息类 CTA
+    （MESSENGER/INSTAGRAM_DIRECT→MESSAGE_PAGE、WHATSAPP→WHATSAPP_MESSAGE）+
+    value.app_destination（蓝图 §4.2）；用户显式选了 CTA 则不覆盖。
     """
     obj = normalize_objective(objective)
-    opt_goal = get_optimization_goal(obj, conversion_goal)
 
     link = landing_url or f"https://facebook.com/{page_id}"
     msg = body or "Check this out!"
@@ -362,6 +570,9 @@ def build_creative(
     if lead_form_id:
         cta = "SIGN_UP"
         cta_value = {"lead_gen_form_id": lead_form_id}
+    elif app_destination.upper() in ("MESSENGER", "WHATSAPP", "INSTAGRAM_DIRECT") and not cta_type:
+        cta = "WHATSAPP_MESSAGE" if app_destination.upper() == "WHATSAPP" else "MESSAGE_PAGE"
+        cta_value = {"app_destination": app_destination.upper()}
 
     link_data: dict[str, Any] = {
         "link": link,
@@ -713,13 +924,40 @@ def build_welcome_message(
     }
 
 
-def parse_message_template(raw, allow_cjk: bool = True) -> dict | None:
+def build_wa_welcome_message(welcome_text: str, allow_cjk: bool = True) -> dict:
+    """Click-to-WhatsApp 的 page_welcome_message（VISUAL_EDITOR v2 预填消息形态）。
+
+    蓝图 §4.2 CTW（官API 2026-06 快照）：landing_screen_type=welcome_message +
+    customer_action_type=autofill_message + autofill_message.content（预填句）。
+    与 Messenger 的 ice_breakers 形态互斥（WA 预填是单条文本）。
+    实测校准点：text_format/autofill_message 键名以真部署回读为准，不符只改本函数。"""
+    if not welcome_text:
+        raise ValueError("欢迎语 welcome_text 必填")
+    if not allow_cjk and _contains_cjk(welcome_text):
+        raise ValueError("非 CJK 语言禁用中/日/韩字符（02_附录 §3.2）")
+    return {
+        "type": "VISUAL_EDITOR",
+        "version": 2,
+        "landing_screen_type": "welcome_message",
+        "media_type": "text",
+        "text_format": {
+            "customer_action_type": "autofill_message",
+            "autofill_message": {"content": welcome_text},
+        },
+        "user_edit": False,
+        "surface": "visual_editor_new",
+    }
+
+
+def parse_message_template(raw, allow_cjk: bool = True, channel: str = "messenger") -> dict | None:
     """把客户的 message_template 输入归一为 page_welcome_message dict（02_附录 §四）。
 
     raw 可能是：
       - dict（已含 text + ice_breakers，或完整 VISUAL_EDITOR）
       - JSON 字符串（完整 VISUAL_EDITOR 或简略）
       - 纯文本字符串（→ welcome_text）
+    channel="whatsapp"（MessageTemplate.type=whatsapp / conv_location=whatsapp）→ CTW 预填
+    形态（build_wa_welcome_message，忽略 ice_breakers）；messenger → ice_breakers 形态。
     返回 VISUAL_EDITOR dict，或 None（空输入）。
     """
     import json
@@ -727,14 +965,19 @@ def parse_message_template(raw, allow_cjk: bool = True) -> dict | None:
     if raw is None or raw == "":
         return None
 
+    def _wa(text: str) -> dict:
+        return build_wa_welcome_message(text, allow_cjk=allow_cjk)
+
     # dict 直接用
     if isinstance(raw, dict):
         # 已是完整 VISUAL_EDITOR
         if raw.get("type") == "VISUAL_EDITOR":
             return raw
-        # 简略：text + ice_breakers
+        text = raw.get("text") or raw.get("welcome_text") or ""
+        if channel == "whatsapp":
+            return _wa(text)
         return build_welcome_message(
-            welcome_text=raw.get("text") or raw.get("welcome_text") or "",
+            welcome_text=text,
             ice_breakers=raw.get("ice_breakers") or [],
             allow_cjk=allow_cjk,
         )
@@ -750,8 +993,11 @@ def parse_message_template(raw, allow_cjk: bool = True) -> dict | None:
             obj = json.loads(s)
             if obj.get("type") == "VISUAL_EDITOR":
                 return obj
+            text = obj.get("text") or obj.get("welcome_text") or ""
+            if channel == "whatsapp":
+                return _wa(text)
             return build_welcome_message(
-                welcome_text=obj.get("text") or obj.get("welcome_text") or "",
+                welcome_text=text,
                 ice_breakers=obj.get("ice_breakers") or [],
                 allow_cjk=allow_cjk,
             )
@@ -759,4 +1005,6 @@ def parse_message_template(raw, allow_cjk: bool = True) -> dict | None:
             pass  # 不是合法 JSON → 当纯文本
 
     # 纯文本 → welcome_text（无 ice_breakers）
+    if channel == "whatsapp":
+        return _wa(s)
     return build_welcome_message(welcome_text=s, ice_breakers=[], allow_cjk=allow_cjk)

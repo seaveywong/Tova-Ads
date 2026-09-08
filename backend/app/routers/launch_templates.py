@@ -9,14 +9,17 @@ import re
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from ..core.database import get_db, SessionLocal, SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.deps import CurrentUser, require_permission
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account, client_for_account_page
 from ..core.fb_client import FbApiError
-from ..core.ad_builder import build_targeting, build_campaign, build_adset, build_creative
+from ..core.ad_builder import (build_targeting, build_campaign, build_adset, build_creative,
+                               resolve_adset_destination, is_messaging_destination,
+                               normalize_objective, CONV_LOCATIONS_BY_OBJECTIVE,
+                               OPT_GOALS_BY_OBJECTIVE, OPT_GOALS_BY_LOCATION)
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
                            ensure_video_id_for_account, usd_to_fb_amount, pick_cta)
 from ..core.tt_client import TtApiError
@@ -73,6 +76,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "minimum_roas": t.minimum_roas, "special_ad_categories": t.special_ad_categories or "",
         "link_description": t.link_description or "",
         "spend_cap_usd": t.spend_cap_usd, "instagram_actor_id": t.instagram_actor_id or "",
+        "whatsapp_phone_number": t.whatsapp_phone_number or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
     }
@@ -87,6 +91,131 @@ _TREE_ASSETS_PER_NODE_MAX = 50
 # 每账户展开广告总数硬顶（素材组节点展开计入；超 = 400 快失败——FB 单账户上百条
 # 新广告既炸账户结构也炸部署时长/reap 心跳窗口）
 _TREE_ADS_MAX = 200
+
+# ── 批次I：转化位置/版位（组节点字段校验用枚举；矩阵本体在 ad_builder）──
+_CONV_LOC_ALL = ("website", "on_ad", "on_ad_messenger", "messenger", "whatsapp",
+                 "instagram_direct", "phone_call", "on_page")
+_PLACEMENT_PLATFORMS = ("facebook", "instagram", "messenger", "audience_network")  # threads P1
+_PLACEMENT_DEVICES = ("desktop", "mobile")
+_SLUG_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _node_placements(snode: dict) -> dict | None:
+    """组节点 → 结构化版位 dict（build_adset placements 形参）。
+    placement_mode=manual 才产出；auto/空 = None（省略全部版位键 = Advantage+ 自动版位）。"""
+    if (snode.get("placement_mode") or "") != "manual":
+        return None
+    out: dict = {}
+    pp = [p for p in (snode.get("publisher_platforms") or []) if p]
+    if pp:
+        out["publisher_platforms"] = pp
+    dp = [d for d in (snode.get("device_platforms") or []) if d]
+    if dp:
+        out["device_platforms"] = dp
+    return out or None
+
+
+# ── 批次I：部署时自动建链（每广告一子码；方案_落地页自动链接 §4 + 用户拍板 P2=每广告）──
+
+def _auto_slug_base(tpl_id: int, node_key: str, asset, act_id: str) -> str:
+    """语义 slug 基底：lt{模板id}-{节点key}-{素材id|s}-{账户尾4}（总方案：模板短码-节点key-账户尾4位）。
+    字符集限 [A-Za-z0-9_-]（guard 创意反查正则口径），长度 ≤44（<64 上限，留碰撞后缀位）。"""
+    key = _SLUG_SAFE_RE.sub("", str(node_key or ""))[:20]
+    disc = str(asset.id) if asset is not None else "s"
+    act4 = re.sub(r"\D", "", str(act_id or ""))[-4:] or "0"
+    return f"lt{tpl_id}-{key or 'node'}-{disc}-{act4}"[:44]
+
+
+def _create_auto_subcode(sdb, tenant_id: int, landing_page_id: int, act_id: str, base_slug: str):
+    """自动建链：建 reserved LandingAdLink（复用 subcodes 生成语义——tenant/page/act/status）。
+    语义 slug 碰撞加 -N 后缀（N≤9），语义位耗尽退随机 6 位（subcodes._gen_slug 同源字符集）。"""
+    import secrets
+    import string as _string
+    slug = ""
+    for i in range(10):
+        cand = base_slug if i == 0 else f"{base_slug[:40]}-{i}"
+        if not sdb.query(LandingAdLink).filter(LandingAdLink.slug == cand).first():
+            slug = cand
+            break
+    if not slug:
+        for _ in range(10):
+            cand = "".join(secrets.choice(_string.ascii_lowercase + _string.digits)
+                           for _ in range(6))
+            if not sdb.query(LandingAdLink).filter(LandingAdLink.slug == cand).first():
+                slug = cand
+                break
+    if not slug:
+        raise RuntimeError("自动建链 slug 生成碰撞过多")
+    link = LandingAdLink(tenant_id=tenant_id, slug=slug, act_id=act_id,
+                         page_id=landing_page_id, status="reserved")
+    sdb.add(link)
+    sdb.flush()
+    return link
+
+
+def _resolve_landing_base(sdb, tenant_id: int, landing_page_id: int) -> tuple[str, object]:
+    """落地页行 → (公网 base, 页对象)。口径=subcodes._resolve_page_base（自动建链不信
+    landing_url 快照——方案 B5：页换域名/加子域后快照死链）。"""
+    from .subcodes import _resolve_page_base
+    return _resolve_page_base(sdb, tenant_id, landing_page_id)
+
+
+def _flat_auto_subcode(sdb, tpl: LaunchTemplate, item: LaunchJobItem, asset):
+    """平铺链自动建链（单模板/批量逐系列/重试共用；FB only）：绑了落地页且未手选子码 →
+    建 reserved 子码，返 (slug, link, base_url, warn)。
+    base_url 非空 = 调用方应以它作 landing_url（deploy_one_account 会拼 /a/{slug}?ad={{ad.id}}，
+    不信 landing_url 快照——方案 B5）；warn 非空 = 建链失败已降级直投（调用方写 item 留痕，不静默）。
+    前提门已在 deploy/preflight 端点拦（未发布/redirect 页 400），此处 except 兜运行期失败。"""
+    slug, link, base, warn = "", None, "", ""
+    if (not tpl.subcode_slug) and (tpl.landing_page_id or 0):
+        try:
+            _base, _lp = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))
+            if not (_lp and (_lp.status or "") == "published"
+                    and (_lp.redirect_mode or "display") == "display" and _base):
+                raise ValueError("落地页未发布或为直接跳转模式")
+            link = _create_auto_subcode(sdb, tpl.tenant_id, _lp.id, item.act_id,
+                                        _auto_slug_base(tpl.id, "", asset, item.act_id))
+            slug = link.slug
+            sdb.commit()
+            base = _base
+            item.subcode_slug = slug   # 激活死列（B10）
+        except Exception as e:
+            sdb.rollback()
+            warn = f"自动建链失败降级直投：{str(e)[:120]}"
+            write_log(sdb, tenant_id=tpl.tenant_id, trace_id=new_trace_id(), actor_type="system",
+                      target_type="ad", target_id="", action_type="deploy", source="launch",
+                      result="fail", friendly_error=f"自动建链失败：{str(e)[:180]}",
+                      metadata={"act_id": item.act_id, "template_id": tpl.id, "stage": "auto_subcode"})
+    return slug, link, base, warn
+
+
+def _auto_landing_gate(db, adsets: list, tenant_id: int) -> None:
+    """自动建链前提门（deploy/preflight 共用，400 快失败）：绑了落地页且未手选子码的广告节点——
+    页必须存在/已发布/display 模式。redirect 页建链无意义（方案 B11：跳转模式不 fire 像素），
+    未发布页不该进 FB——提交前拦，而不是部署中途逐广告失败 N 轮。树节点与平铺模板同口径。
+    平铺模板由调用方包成单节点 adsets 传入。"""
+    from ..models.launch import LandingPage
+    bad: list[str] = []
+    seen_lp: set[int] = set()
+    for s in adsets:
+        for ad in (s.get("ads") or []):
+            lpid = int(ad.get("landing_page_id") or 0)
+            if not lpid or ad.get("subcode_slug"):
+                continue
+            if lpid not in seen_lp:
+                seen_lp.add(lpid)
+                lp = db.query(LandingPage).filter(
+                    LandingPage.id == lpid, LandingPage.tenant_id == tenant_id).first()
+                if not lp:
+                    bad.append(f"落地页 #{lpid} 不存在")
+                elif (lp.status or "") != "published":
+                    bad.append(f"落地页「{lp.title}」未发布")
+                elif (lp.redirect_mode or "display") != "display":
+                    bad.append(f"落地页「{lp.title}」为直接跳转模式（建链无追踪意义）")
+    if bad:
+        raise HTTPException(400, "自动建链前提不满足：" + "；".join(bad[:3])
+                            + ("…" if len(bad) > 3 else "")
+                            + "（发布落地页/改为展示模式，或手动选择子码）")
 
 
 def _validate_structure(raw) -> tuple[dict, str]:
@@ -164,6 +293,35 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 "link_description": str(ad.get("link_description") or "")[:200],
             })
         aud_id = adset.get("audience_id")
+        # ── 批次I：转化位置 + 版位（组节点结构化字段；conv_location×objective 兼容在
+        # TemplateIn 模型级校验——此处不知 objective，只做枚举/形状白名单）──
+        conv_loc = str(adset.get("conv_location") or "").strip().lower()
+        if conv_loc and conv_loc not in _CONV_LOC_ALL:
+            return {}, f"广告组「{name or si}」转化位置「{conv_loc}」非法（可用：{list(_CONV_LOC_ALL)}）"
+        placement_mode = str(adset.get("placement_mode") or "").strip().lower()
+        if placement_mode not in ("", "auto", "manual"):
+            return {}, f"广告组「{name or si}」版位模式非法（auto/manual）"
+        pp_raw = adset.get("publisher_platforms") or []
+        dp_raw = adset.get("device_platforms") or []
+        if not isinstance(pp_raw, list) or not isinstance(dp_raw, list):
+            return {}, f"广告组「{name or si}」版位平台/设备需为数组"
+        pp = []
+        for p in pp_raw:
+            if p not in _PLACEMENT_PLATFORMS:
+                return {}, f"广告组「{name or si}」版位平台非法：{p!r}（可用：{list(_PLACEMENT_PLATFORMS)}）"
+            if p not in pp:
+                pp.append(p)
+        dp = []
+        for d in dp_raw:
+            if d not in _PLACEMENT_DEVICES:
+                return {}, f"广告组「{name or si}」设备平台非法：{d!r}（可用：{list(_PLACEMENT_DEVICES)}）"
+            if d not in dp:
+                dp.append(d)
+        # auto/空 = 省略全部版位键（Advantage+ 自动版位官方语义）——残留的勾选值清掉防歧义
+        if placement_mode != "manual":
+            pp, dp = [], []
+        elif not pp:
+            return {}, f"广告组「{name or si}」手动版位必须至少选择一个平台"
         out_adsets.append({
             "key": str(adset.get("key") or f"as_{si}")[:40],
             "name": name,
@@ -175,6 +333,10 @@ def _validate_structure(raw) -> tuple[dict, str]:
             "optimization_goal": str(adset.get("optimization_goal") or ""),
             "billing_event": str(adset.get("billing_event") or ""),
             "advanced_config": str(adset.get("advanced_config") or ""),
+            "conv_location": conv_loc,
+            "placement_mode": (placement_mode if placement_mode == "manual" else ""),
+            "publisher_platforms": pp,
+            "device_platforms": dp,
             "budget_type": ("lifetime" if str(adset.get("budget_type") or "").lower() == "lifetime" else "daily"),
             "lifetime_budget_usd": (float(adset["lifetime_budget_usd"])
                                     if adset.get("lifetime_budget_usd") not in (None, "", 0) else None),
@@ -318,6 +480,8 @@ class TemplateIn(BaseModel):
     # 1:1 尾巴小件（0091）
     spend_cap_usd: Optional[float] = None   # 系列支出上限（USD；达到即停整系列，区别于预算）
     instagram_actor_id: str = ""            # IG 账号 ID（空=用主页关联 IG）
+    # 批次I：Click-to-WhatsApp 显式号码（仅 ENGAGEMENT 下发 promoted_object；Traffic/Sales 随主页不传）
+    whatsapp_phone_number: str = ""
 
 
 
@@ -409,6 +573,52 @@ class TemplateIn(BaseModel):
             raise ValueError("Instagram 账号 ID 应为数字（如 17841400000000）")
         return v
 
+    @field_validator("whatsapp_phone_number")
+    @classmethod
+    def _check_wa_number(cls, v: str) -> str:
+        """CTW 号码：带国家码的完整号码（E.164 宽松口径——+8613800138000 / 8613800138000）。
+        留空=不传（随主页绑定号）。位数 8-15（E.164 上限），多余分隔符清掉。"""
+        v = (v or "").strip()
+        if not v:
+            return ""
+        digits = re.sub(r"\D", "", v)
+        if not (8 <= len(digits) <= 15):
+            raise ValueError("WhatsApp 号码应为带国家码的完整号码（8-15 位数字，如 +85512345678）")
+        return ("+" if v.startswith("+") else "") + digits
+
+    @model_validator(mode="after")
+    def _check_conv_matrix(self):
+        """转化位置/优化目标 × 目标 兼容校验（批次I；蓝图 §2.1/§2.2/§5.2 矩阵）。
+        _validate_structure 只做形状白名单（不知 objective），这里在模型级拿到 objective 后逐组校验：
+        ① conv_location 必须在该 objective 的合法集合（蓝图转化位置全表）；
+        ② 组 optimization_goal 覆盖必须与 objective 兼容（审计 S8/C4：旧 UI 全集下拉可选出 FB 必拒组合）；
+        ③ 两者都显式时交叉校验（方案 §4.1：显式 conv_location 优先，不兼容的优化目标 400/422）。"""
+        if not self.structure:
+            return self
+        try:
+            data = json.loads(self.structure)
+        except Exception:
+            return self  # 形状错误由 structure 字段校验器拦
+        obj = normalize_objective(self.objective or "")
+        allowed_loc = CONV_LOCATIONS_BY_OBJECTIVE.get(obj, set())
+        allowed_goal = OPT_GOALS_BY_OBJECTIVE.get(obj, set())
+        for si, s in enumerate(data.get("adsets") or [], 1):
+            nm = s.get("name") or f"组{si}"
+            loc = (s.get("conv_location") or "").strip().lower()
+            og = (s.get("optimization_goal") or "").strip().upper()
+            if loc and loc not in allowed_loc:
+                raise ValueError(f"广告组「{nm}」转化位置「{loc}」不适用于目标 {self.objective}"
+                                 + (f"（可用：{sorted(allowed_loc)}）" if allowed_loc else "（该目标无可选转化位置）"))
+            if og and og not in allowed_goal:
+                raise ValueError(f"广告组「{nm}」优化目标「{og}」与目标 {self.objective} 不兼容"
+                                 f"（可用：{sorted(allowed_goal)}）")
+            if loc and og:
+                loc_ok = OPT_GOALS_BY_LOCATION.get(loc, set())
+                if og not in loc_ok:
+                    raise ValueError(f"广告组「{nm}」转化位置「{loc}」下优化目标「{og}」不兼容"
+                                     f"（该位置可用：{sorted(loc_ok & allowed_goal) or ['无']}）")
+        return self
+
 
 @router.get("")
 def list_templates(user: CurrentUser = Depends(require_permission("ads.create")),
@@ -480,7 +690,7 @@ _COPY_COLS = [
     "post_source", "reuse_post_ref", "structure",
     "budget_type", "lifetime_budget_usd", "schedule_start", "schedule_end", "pacing",
     "bid_amount_usd", "minimum_roas", "special_ad_categories", "link_description",
-    "spend_cap_usd", "instagram_actor_id",
+    "spend_cap_usd", "instagram_actor_id", "whatsapp_phone_number",
 ]
 
 
@@ -546,6 +756,16 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
             raise HTTPException(400, "结构模板的素材已在树内按广告节点配置，不支持再叠加「按素材批量生成系列」")
         _validate_tree_assets(db, _parse_structure(t), user.tenant_id)
     _budget_guard_400(t)
+    # 自动建链前提门（批次I，方案_落地页自动链接 §4.1）：绑了落地页且未选子码的广告 → 部署时
+    # 会自动建链，页须已发布+展示模式。树=逐节点检查；平铺=模板级三件套同口径。提交前 400，
+    # 不让坏前提进 job 逐广告失败 N 轮
+    if (t.platform or "fb") == "fb":
+        if _is_tree:
+            _auto_landing_gate(db, _parse_structure(t), user.tenant_id)
+        elif (not t.subcode_slug) and (t.landing_page_id or 0):
+            _auto_landing_gate(db, [{"name": t.name or "模板", "ads": [
+                {"landing_page_id": int(t.landing_page_id or 0), "subcode_slug": ""}]}],
+                user.tenant_id)
     # 账户归属 + managed 校验 + 去重（保序）
     seen, clean_items = set(), []
     for it in body.items:
@@ -792,6 +1012,12 @@ def preflight_deploy(tid: int, body: PreflightIn,
         ).first()
         if not _link:
             subcode_warn_slug = t.subcode_slug  # 前端按 i18n 渲染完整提示
+    # 自动建链前提门 + 预告（批次I）：绑了落地页且未选子码 → 部署时每广告自动建子码（FB 平铺口径）
+    auto_subcode = False
+    if (not t.subcode_slug) and (t.landing_page_id or 0):
+        _auto_landing_gate(db, [{"name": t.name or "模板", "ads": [
+            {"landing_page_id": int(t.landing_page_id or 0), "subcode_slug": ""}]}], user.tenant_id)
+        auto_subcode = True
     # 汇率预检：非 USD 账户缺汇率时 _resolve_budget_fb 抛 ValueError——
     # 原在 try 之外直接 500，预检该给友好 400（部署 runner 同异常是 fail item）
     try:
@@ -878,6 +1104,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
         "budget_usd": t.budget_usd, "fx_rate": (cr.rate if cr else None),
         "daily_budget_fb": daily_budget_fb, "budget_mode": t.budget_mode,
         "subcode_warn_slug": subcode_warn_slug,
+        "auto_subcode": auto_subcode,
         "budget_type": (t.budget_type or "daily"),
         "lifetime_budget_usd": t.lifetime_budget_usd, "lifetime_budget_fb": _p_lifetime_fb,
         "schedule_start": (t.schedule_start or ""), "schedule_end": (t.schedule_end or ""),
@@ -914,6 +1141,10 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
     """结构模式预检（0088）：整树概览（组/广告/开关/绑定）+ 逐组预算按目标账户本币换算
     + 将消耗节点清单（FBInsider 预检横幅同款）+ 首组首广告 payload 样例。不调 FB、不花钱。"""
     from types import SimpleNamespace
+    # 自动建链前提门（批次I）：绑了落地页未选子码的节点 → 页须已发布+展示模式（与 deploy 端点同口径）
+    _auto_landing_gate(db, adsets, tenant_id)
+    _auto_nodes = [ad for s in adsets for ad in (s.get("ads") or [])
+                   if (ad.get("landing_page_id") or 0) and not ad.get("subcode_slug")]
     acc = db.query(Account).filter(Account.tenant_id == tenant_id,
                                    Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
@@ -992,6 +1223,11 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             "minimum_roas": (snode.get("minimum_roas") or t.minimum_roas),
             "audience_id": snode.get("audience_id") or 0,
             "optimization_goal": snode.get("optimization_goal") or "",
+            # 批次I：转化位置/版位（组节点结构化字段，前端树概览展示用）
+            "conv_location": (snode.get("conv_location") or ""),
+            "placement_mode": ("manual" if (snode.get("placement_mode") or "") == "manual" else ""),
+            "publisher_platforms": (snode.get("publisher_platforms") or []),
+            "device_platforms": (snode.get("device_platforms") or []),
             "ads": ads_out,
         })
     # 首组首广告 payload 样例（与部署 runner 同构；占位符在保存时已校验）
@@ -1023,7 +1259,12 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=(adsets[0].get("optimization_goal") or t.optimization_goal or ""),
             billing_event=(adsets[0].get("billing_event") or t.billing_event or ""),
-            destination_type_override=t.destination_type or "", extra=_parse_advanced(t))
+            destination_type_override=t.destination_type or "", extra=_parse_advanced(t),
+            # 批次I：组节点转化位置/版位/CTW 号码（与部署 runner 同构；destination_type_override
+            # 在 conv_location 非空时被 builder 忽略——隐患A 修复同口径）
+            conv_location=(adsets[0].get("conv_location") or ""),
+            placements=_node_placements(adsets[0] or {}),
+            whatsapp_phone_number=(t.whatsapp_phone_number or ""))
         creative_payload = build_creative(
             page_id=(body.page_id or t.page_id or ""), objective=t.objective,
             conversion_goal=t.conversion_goal, landing_url=_lp_url,
@@ -1061,6 +1302,7 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         "account_count": max(body.account_count or 0, 1),
         "tree": tree_out,
         "will_spend": will_spend,   # 整链开启（部署后立即消耗）的节点；空 = 全部暂停建好待开
+        "auto_subcode_nodes": len(_auto_nodes),   # 将自动建链（每广告一子码）的节点数（批次I）
         "objective": t.objective, "conversion_goal": t.conversion_goal or "",
         "campaign": campaign_payload, "adset": adset_payload, "creative": creative_payload,
         "notes": [
@@ -1134,7 +1376,16 @@ def _budget_guard_400(t: LaunchTemplate) -> None:
         if not ((t.lifetime_budget_usd or 0) > 0):
             raise HTTPException(400, "总预算模式必须填写总预算金额")
         if not (t.schedule_start and t.schedule_end):
-            raise HTTPException(400, "总预算必须设置排期（开始+结束时间）——FB 硬约束")
+            # 树模式排期打通（批次I，审计 C1/P0-3）：树模式没有模板级排期输入（组级排期不回写
+            # 模板列），原先报错指向一个不存在的字段=可存不可部署死路。语义：排期随组下发
+            # （build_adset 逐组带 start/end），守卫放宽为「任一启用组带完整排期」即视为满足。
+            _tree = _parse_structure(t)
+            _grp_sched = any(s.get("enabled") and s.get("schedule_start") and s.get("schedule_end")
+                             for s in _tree)
+            if not _grp_sched:
+                raise HTTPException(400, "总预算必须设置排期（开始+结束时间）——FB 硬约束。"
+                                          "树模式请在「启用广告组」的预算排期里填开始+结束时间"
+                                          "（任一启用组带完整排期即可），或改用单日预算")
         if t.lifetime_budget_usd > 50000:
             raise HTTPException(400, "总预算超安全上限 $50000")
     if (t.budget_mode or "ABO").upper() != "ABO":
@@ -1878,13 +2129,18 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         _cats = json.loads(tpl.special_ad_categories or "[]")
     except Exception:
         _cats = []
-    return deploy_one_account(
+    # 自动建链（批次I，每广告一子码——平铺/批量口径同树）：绑了落地页且未手选子码 → 本系列
+    # 自动建 reserved 子码，base 用落地页行解析；失败降级直投 + warn（不静默）
+    _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, item, asset)
+    if _a_base:
+        _lp_url = _a_base
+    r = deploy_one_account(
         fb, act_id=item.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
         page_id=page_id, pixel_id=pixel_id, landing_url=_lp_url,
         daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
         name_prefix=series_name or tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
         image_hash=image_hash, video_id=video_id,
-        subcode_slug=tpl.subcode_slug, subcode_link=link,
+        subcode_slug=(_a_slug or tpl.subcode_slug), subcode_link=(_a_link if _a_slug else link),
         targeting=targeting, ad_language=tpl.ad_language,
         dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
         optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
@@ -1898,7 +2154,11 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         minimum_roas=(tpl.minimum_roas if tpl.minimum_roas else None),
         special_ad_categories=_cats, description=(tpl.link_description or ""),
         spend_cap=_spend_cap_fb, instagram_actor_id=(tpl.instagram_actor_id or ""),
+        whatsapp_phone_number=(tpl.whatsapp_phone_number or ""),
     )
+    if _a_warn:
+        r["auto_subcode_warn"] = _a_warn   # 调用方在 item 上留痕（success 也会带 error）
+    return r
 
 
 def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
@@ -2006,6 +2266,9 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     _acc_name = (_acc.name if _acc else "") or ""
     _tpl_adv = _parse_advanced(tpl) or {}
     _subcode_cache: dict = {}
+    _lp_base_cache: dict = {}      # landing_page_id → 公网 base（自动建链用，页行解析）
+    _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
+    auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     _page_id = item.page_id or tpl.page_id or ""
 
     def _fail_group(sname: str, snode: dict, msg: str):
@@ -2073,26 +2336,45 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             except Exception:
                 adv_node = {}
         merged_adv = {**_tpl_adv, **adv_node}
+        # 组级转化位置/成效目标派生（批次I 统一链）：is_messaging 门、消息分流、CTA app_destination
+        # 都以此为准；destination_type_override 传模板残留值——builder 在 conv_location 非空时
+        # 忽略它（修隐患A：覆盖派生 MESSENGER 后被 ON_PAGE 顶掉）
+        s_conv_loc = (snode.get("conv_location") or "").strip().lower()
+        s_opt_goal = (snode.get("optimization_goal") or tpl.optimization_goal or "")
+        try:
+            grp_dest, grp_opt = resolve_adset_destination(tpl.objective, s_conv_loc,
+                                                          tpl.conversion_goal, s_opt_goal)
+        except ValueError as e:
+            _fail_group(sname, snode, f"转化位置解析失败：{e}")
+            continue
+        grp_is_msg = is_messaging_destination(grp_dest, grp_opt)
         # 组 landing_url 取第一广告节点的（build_adset 的 WEBSITE 类 promoted_object 用；
         # 真正逐广告的链接在创意层覆盖）——占位符此时无组名上下文，用稳定插值
         _first_ad = (snode.get("ads") or [{}])[0]
-        adset_payload = build_adset(
-            name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
-            objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-            page_id=_page_id,
-            pixel_id=(str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
-            landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
-                                            tpl.name or "", "fb"),
-            bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
-            targeting=targeting, dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
-            optimization_goal=(snode.get("optimization_goal") or tpl.optimization_goal or ""),
-            billing_event=(snode.get("billing_event") or tpl.billing_event or ""),
-            destination_type_override=tpl.destination_type or "",
-            extra=merged_adv or None,
-            budget_type=node_btype, lifetime_budget=adset_lifetime_fb,
-            start_time=s_sched_start, end_time=s_sched_end, pacing=s_pacing,
-            bid_amount=s_bid_fb,
-            minimum_roas=(float(s_min_roas) if s_min_roas else None))
+        try:
+            adset_payload = build_adset(
+                name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
+                objective=tpl.objective, conversion_goal=tpl.conversion_goal,
+                page_id=_page_id,
+                pixel_id=(str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
+                landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
+                                                tpl.name or "", "fb"),
+                bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
+                targeting=targeting, dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
+                optimization_goal=s_opt_goal,
+                billing_event=(snode.get("billing_event") or tpl.billing_event or ""),
+                destination_type_override=tpl.destination_type or "",
+                extra=merged_adv or None,
+                budget_type=node_btype, lifetime_budget=adset_lifetime_fb,
+                start_time=s_sched_start, end_time=s_sched_end, pacing=s_pacing,
+                bid_amount=s_bid_fb,
+                minimum_roas=(float(s_min_roas) if s_min_roas else None),
+                conv_location=s_conv_loc,
+                placements=_node_placements(snode),
+                whatsapp_phone_number=(tpl.whatsapp_phone_number or ""))
+        except ValueError as e:
+            _fail_group(sname, snode, f"参数校验失败：{e}")
+            continue
         adset_payload["status"] = "ACTIVE" if s_enabled else "PAUSED"
         try:
             adset = fb.post(f"act_{item.act_id}/adsets", adset_payload)
@@ -2120,15 +2402,25 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     post_content = _fetch_post_content(sdb, tenant_id, anode["reuse_post_ref"]) or {}
                 except Exception:
                     post_content = {}
-            # 节点级子码链接（缓存复用；无效 slug = link None = 静默丢追踪，预检已拦）
+            # 节点级子码链接（缓存复用；status 过滤 reserved/active——archived/deleted 的 slug
+            # 不再被解析使用（批次I 修 B4，口径=平铺预检）；无效 slug 预检已拦）
             node_slug = anode.get("subcode_slug") or ""
             node_link = None
             if node_slug:
                 if node_slug not in _subcode_cache:
                     _subcode_cache[node_slug] = sdb.query(LandingAdLink).filter(
                         LandingAdLink.slug == node_slug,
-                        LandingAdLink.tenant_id == tenant_id).first()
+                        LandingAdLink.tenant_id == tenant_id,
+                        LandingAdLink.status.in_(["reserved", "active"])).first()
                 node_link = _subcode_cache[node_slug]
+            # 自动建链（批次I，每广告一子码）：绑了落地页且未手选 slug 的节点 → 部署时逐展开
+            # 广告自动建 reserved 子码；base 从落地页行解析（不信 landing_url 快照——B5）
+            node_lpid = int(anode.get("landing_page_id") or 0)
+            node_lp_base = ""
+            if not node_slug and node_lpid:
+                if node_lpid not in _lp_base_cache:
+                    _lp_base_cache[node_lpid] = _resolve_landing_base(sdb, tenant_id, node_lpid)[0] or ""
+                node_lp_base = _lp_base_cache[node_lpid]
             aname_base = (anode.get("name") or "").strip()
 
             for asset in assets:
@@ -2180,6 +2472,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
                     # 消息模板：节点选的 MessageTemplate > 模板级 raw JSON > AI 从素材文案生成
                     message_template = ""
+                    _mt_type = "messenger"   # MessageTemplate.type（批次I 消费位：whatsapp 分流）
                     _mt_id = int(anode.get("message_template_id") or 0)
                     if _mt_id:
                         from ..models.lead_form_template import MessageTemplate
@@ -2187,6 +2480,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             MessageTemplate.id == _mt_id,
                             MessageTemplate.tenant_id == tenant_id).first()
                         if mt:
+                            _mt_type = (mt.type or "messenger")
                             try:
                                 _ibs = json.loads(mt.ice_breakers_json or "[]")
                             except Exception:
@@ -2223,28 +2517,51 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         adset_name=sname, account_name=_acc_name, account_id=item.act_id,
                         asset_name=((asset.name or asset.filename or "") if asset is not None else ""),
                         template_name=tpl.name or "", platform="fb")
-                    # 子码 effective_url（与 deploy_one_account 同构）
+                    # 子码 effective_url（与 deploy_one_account 同构；自动建的用落地页行 base）
                     effective_url = _lp_url
+                    auto_link, auto_slug = None, ""
                     if node_slug and node_link is not None:
                         base = _lp_url or "https://tovaads.com"
                         effective_url = f"{base}/a/{node_slug}?ad=" + "{{ad.id}}"
-                    # Messenger 欢迎语 + 主页 messaging 能力检查（deploy_one_account 同构）
+                    elif node_lp_base:
+                        # 自动建链（每广告）：建 reserved LandingAdLink → URL 立即进 FB（先 commit，
+                        # worker 必须能查到）；失败降级裸 URL 直投 + 记录（不静默——铁律）
+                        try:
+                            _sb = _auto_slug_base(tpl.id, anode.get("key") or "", asset, item.act_id)
+                            auto_link = _create_auto_subcode(sdb, tenant_id, node_lpid, item.act_id, _sb)
+                            auto_slug = auto_link.slug
+                            sdb.commit()
+                            effective_url = f"{node_lp_base}/a/{auto_slug}?ad=" + "{{ad.id}}"
+                            _auto_slugs.append(auto_slug)
+                        except Exception as e:
+                            sdb.rollback()
+                            auto_warns.append(f"{ad_name}: 自动建链失败降级直投（{str(e)[:80]}）")
+                            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(),
+                                      actor_type="system", target_type="ad", target_id="",
+                                      action_type="deploy", source="launch", result="fail",
+                                      friendly_error=f"自动建链失败：{str(e)[:180]}",
+                                      metadata={"act_id": item.act_id, "template_id": tpl.id,
+                                                "landing_page_id": node_lpid, "stage": "auto_subcode"})
+                    # 欢迎语 + 主页 messaging 能力检查（批次I 门统一：按派生目的地/成效目标判定——
+                    # 旧门查 conversion_goal 词表 = UI 永远给不出 = 死链（盘点 A1）；
+                    # MessageTemplate.type/conv_location 分流 Messenger（ice_breakers）与 WA（预填））
                     from ..core.ad_builder import parse_message_template
                     welcome_msg = None
-                    is_messaging = (tpl.objective.upper() in ("OUTCOME_ENGAGEMENT", "OUTCOME_MESSAGES", "MESSAGES")
-                                    and tpl.conversion_goal.lower() in ("conversations", "messaging_purchase_conversion",
-                                                                        "messaging_appointment_conversion"))
-                    if is_messaging and _page_id:
-                        try:
-                            pf = fb.get(_page_id, {"fields": "messaging_feature_status"})
-                            mfs = (pf.get("messaging_feature_status") or {})
-                            if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
-                                raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
-                        except FbApiError:
-                            raise
-                        except Exception:
-                            pass
-                        welcome_msg = parse_message_template(message_template, allow_cjk=True)
+                    if grp_is_msg and _page_id:
+                        if grp_dest == "MESSENGER":
+                            try:
+                                pf = fb.get(_page_id, {"fields": "messaging_feature_status"})
+                                mfs = (pf.get("messaging_feature_status") or {})
+                                if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
+                                    raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
+                            except FbApiError:
+                                raise
+                            except Exception:
+                                pass
+                        _msg_channel = ("whatsapp" if (grp_dest == "WHATSAPP"
+                                                       or _mt_type == "whatsapp") else "messenger")
+                        welcome_msg = parse_message_template(message_template, allow_cjk=True,
+                                                             channel=_msg_channel)
                     creative = build_creative(
                         page_id=_page_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                         landing_url=effective_url, headline=_headline, body=_body,
@@ -2252,7 +2569,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         image_hash=image_hash, video_id=video_id,
                         lead_form_id=lead_form_id, welcome_message=welcome_msg,
                         description=(anode.get("link_description") or tpl.link_description or ""),
-                        instagram_actor_id=(tpl.instagram_actor_id or ""))
+                        instagram_actor_id=(tpl.instagram_actor_id or ""),
+                        app_destination=(grp_dest if grp_is_msg else ""))
                     if page_post_id:
                         _cta_t = (anode.get("cta_type") or tpl.cta_type or "") or pick_cta(_body, tpl.objective)
                         _cta_val = ({"page": _page_id} if _cta_t == "LIKE_PAGE"
@@ -2276,7 +2594,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     ad_id = ad.get("id")
                     if not ad_id:
                         raise FbApiError("no_id", f"FB 创建 ad 未返回 id（响应：{str(ad)[:150]}）")
-                    # 子码标注广告名 + 回绑 ad_id（deploy_one_account 同构）
+                    # 子码标注广告名 + 回绑 ad_id（deploy_one_account 同构；手动选的与自动建的同一模式）
                     if node_slug and node_link is not None:
                         try:
                             fb.post(ad_id, {"name": f"[子码:{node_slug}] {ad_name}"})
@@ -2284,6 +2602,13 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             pass
                         node_link.ad_id = ad_id
                         node_link.status = "active"
+                    elif auto_link is not None:
+                        try:
+                            fb.post(ad_id, {"name": f"[子码:{auto_slug}] {ad_name}"})
+                        except Exception:
+                            pass
+                        auto_link.ad_id = ad_id
+                        auto_link.status = "active"
                     ok += 1
                     last = {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id,
                             "page_post_id": page_post_id}
@@ -2292,6 +2617,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                               action_type="deploy", source="launch", result="success",
                               metadata={"act_id": item.act_id, "campaign_id": campaign_id,
                                         "adset_id": adset_id, "template_id": tpl.id,
+                                        "subcode_slug": (auto_slug or node_slug or ""),
                                         "tree": f"{sname}/{ad_name}"})
                 except FbApiError as e:
                     fails.append(f"{sname}/{ad_name}: {(e.friendly or str(e))[:110]}")
@@ -2307,8 +2633,14 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                               result="fail", friendly_error=str(e)[:200],
                               metadata={"act_id": item.act_id, "template_id": tpl.id,
                                         "tree": f"{sname}/{ad_name}"})
+    if _auto_slugs:
+        item.subcode_slug = ",".join(_auto_slugs)[:250]   # 激活死列（B10）：本 item 自动建的子码清单
     _apply_batch_result(job, item, _tree_expanded_count(adsets), ok, fails, last,
                         is_retry=is_retry, unit="广告")
+    if auto_warns and item.status == "success":
+        # 降级不静默（铁律 bare-except-silent-failure）：广告照建（裸 URL 直投），item 留痕
+        item.error = f"自动建链失败 {len(auto_warns)} 条已降级直投：{auto_warns[0][:150]}"[:300]
+        item.error_code = "auto_subcode_degraded"
 
 
 def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
@@ -2426,7 +2758,10 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                                       targeting, advanced, post_content)
                 item.campaign_id = r["campaign_id"]; item.adset_id = r["adset_id"]; item.ad_id = r["ad_id"]
                 item.page_post_id = r.get("page_post_id") or ""
-                item.status = "success"; item.error = None
+                item.status = "success"
+                # 自动建链降级留痕（批次I）：success item 也可带 error note（不静默铁律）
+                item.error = (r.get("auto_subcode_warn") or None)
+                item.error_code = ("auto_subcode_degraded" if r.get("auto_subcode_warn") else None)
                 job.succeeded = (job.succeeded or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id=str(r.get("ad_id","")),
@@ -2871,6 +3206,10 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 account_name=(_rt_acc.name if _rt_acc else ""), account_id=it.act_id,
                 asset_name=((asset.name or asset.filename or "") if asset else ""),
                 template_name=tpl.name, platform="fb")
+            # 自动建链（批次I，与 _deploy_series_fb 同口径；重试=全新部署等价）
+            _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, it, asset)
+            if _a_base:
+                _lp_url = _a_base
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
@@ -2880,7 +3219,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
                 video_id=video_id,
-                subcode_slug=tpl.subcode_slug, subcode_link=link, targeting=targeting, ad_language=tpl.ad_language,
+                subcode_slug=(_a_slug or tpl.subcode_slug), subcode_link=(_a_link if _a_slug else link),
+                targeting=targeting, ad_language=tpl.ad_language,
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
                 optimization_goal=tpl.optimization_goal or "", billing_event=tpl.billing_event or "",
                 destination_type_override=tpl.destination_type or "",
@@ -2902,10 +3242,13 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 special_ad_categories=(json.loads(tpl.special_ad_categories or "[]")
                                        if tpl.special_ad_categories else None),
                 description=(tpl.link_description or ""),
+                whatsapp_phone_number=(tpl.whatsapp_phone_number or ""),
             )
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.page_post_id = r.get("page_post_id") or page_post_id
-            it.status = "success"; it.error = None
+            it.status = "success"
+            it.error = (_a_warn or None)   # 自动建链降级留痕（批次I，不静默）
+            it.error_code = ("auto_subcode_degraded" if _a_warn else None)
             if job:
                 job.succeeded = (job.succeeded or 0) + 1
                 if (job.failed or 0) > 0:

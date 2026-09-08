@@ -10,7 +10,8 @@ ensure_tt_file_id_for_account / deploy_one_account_tt —— FB 函数零改动�
 import json
 from .fb_client import FbClient, FbApiError
 from .tt_client import TtApiError
-from .ad_builder import build_campaign, build_adset, build_creative
+from .ad_builder import (build_campaign, build_adset, build_creative,
+                         resolve_adset_destination, is_messaging_destination)
 
 # Meta 官方零小数币种，全仓唯一真相源（FB amount 单位 = 整本币，其余 ×100 进分）。
 # 全仓引用：services/ad_ops._NO_DECIMAL / guard_engine._NO_DECIMAL_CURRENCIES / tt_client._TT_ZERO_DECIMAL。
@@ -173,14 +174,22 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        special_ad_categories: list | None = None,
                        description: str = "",
                        spend_cap: int | None = None,
-                       instagram_actor_id: str = "") -> dict:
+                       instagram_actor_id: str = "",
+                       conv_location: str = "",
+                       whatsapp_phone_number: str = "",
+                       placements: dict | None = None) -> dict:
     """Campaign → AdSet → Creative → Ad。返回 {campaign_id, adset_id, ad_id, page_post_id}。失败 raise FbApiError。
 
     subcode_link：预先解析好的 LandingAdLink（或 None）；用于 effective_url + 回绑 ad_id。
     page_post_id：dev app 走 object_story_id（调用方已建/复用主页帖传入）；空=走 object_story_spec（standard app）。
+    conv_location / placements / whatsapp_phone_number：批次I 转化位置/版位/CTW 号码（空=存量行为）。
     """
     from .ad_builder import parse_message_template  # 局部 import 避免循环
     act = f"act_{act_id}"
+    # 统一派生目的地/成效目标（批次I）：is_messaging 门与消息类 CTA 都以此为准——
+    # 旧门只看 conversion_goal 词表（UI 永远给不出）导致欢迎语死链（盘点 A1）
+    _dest, _opt = resolve_adset_destination(objective, conv_location, conversion_goal,
+                                            optimization_goal)
 
     # 1. Campaign（目标感知）
     camp_payload = build_campaign(
@@ -213,6 +222,8 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         budget_type=budget_type, lifetime_budget=lifetime_budget,
         start_time=start_time, end_time=end_time, pacing=pacing,
         bid_amount=bid_amount, minimum_roas=minimum_roas,
+        conv_location=conv_location, placements=placements,
+        whatsapp_phone_number=whatsapp_phone_number,
     )
     adset = fb.post(f"{act}/adsets", adset_payload)
     adset_id = adset.get("id")
@@ -225,23 +236,24 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         base = landing_url or "https://tovaads.com"
         effective_url = f"{base}/a/{subcode_slug}?ad=" + "{{ad.id}}"  # FB 宏（双花括号——Meta 文档/1.0 生产口径；单花括号 FB 不替换=归因全死，2026-09-08 调研实证）
 
-    # 3b. Messenger 欢迎语（私信广告前置）
+    # 3b. 欢迎语（消息类广告前置；批次I 门统一：按派生目的地/成效目标判定，不再查 conversion_goal 词表）
     welcome_msg = None
-    is_messaging = (objective.upper() in ("OUTCOME_ENGAGEMENT", "OUTCOME_MESSAGES", "MESSAGES")
-                    and conversion_goal.lower() in ("conversations", "messaging_purchase_conversion",
-                                                     "messaging_appointment_conversion"))
-    if is_messaging and page_id:
-        try:
-            pf = fb.get(page_id, {"fields": "messaging_feature_status"})
-            mfs = (pf.get("messaging_feature_status") or {})
-            if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
-                raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
-        except FbApiError:
-            raise
-        except Exception:
-            pass
-        allow_cjk = True  # FB 接受 Messenger 消息里的中日韩字符；原 ad_language code 不匹配 bug 已移除
-        welcome_msg = parse_message_template(message_template, allow_cjk=allow_cjk)
+    _is_msg = is_messaging_destination(_dest, _opt)
+    _msg_channel = "whatsapp" if (_dest == "WHATSAPP" or conv_location.strip().lower() == "whatsapp") else "messenger"
+    if _is_msg and page_id:
+        if _dest == "MESSENGER":
+            try:
+                pf = fb.get(page_id, {"fields": "messaging_feature_status"})
+                mfs = (pf.get("messaging_feature_status") or {})
+                if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
+                    raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
+            except FbApiError:
+                raise
+            except Exception:
+                pass
+        allow_cjk = True  # FB 接受消息里的中日韩字符；原 ad_language code 不匹配 bug 已移除
+        welcome_msg = parse_message_template(message_template, allow_cjk=allow_cjk,
+                                             channel=_msg_channel)
 
     creative = build_creative(
         page_id=page_id, objective=objective, conversion_goal=conversion_goal,
@@ -250,6 +262,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
         description=description,
         instagram_actor_id=instagram_actor_id,
+        app_destination=(_dest if _is_msg else ""),
     )
     if page_post_id:
         # dev app：object_story_id（引用调用方已建/复用的主页帖）→ 先 /adcreatives 拿 creative_id

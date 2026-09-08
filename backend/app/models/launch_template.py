@@ -67,6 +67,9 @@ class LaunchTemplate(Base):
     # 1:1 尾巴小件（0091）：系列支出上限（累计花到达即停整系列，区别于预算）+ IG 身份
     spend_cap_usd = Column(Float)                      # 系列支出上限（USD，可选；部署时按账户本币换算 spend_cap）
     instagram_actor_id = Column(Text)                  # IG 账号 ID（可选，空=用主页关联 IG）
+    # 批次I（0092）：Click-to-WhatsApp 显式号码——仅 ENGAGEMENT 目标进 promoted_object.whatsapp_phone_number
+    # （蓝图 §3.1/§5.2：Traffic/Sales 用「与主页绑定的 WA 号」，选主页即隐式选定，不传此字段）
+    whatsapp_phone_number = Column(Text)
     platform = Column(Text, nullable=False, server_default="fb")  # fb / tt（模板按平台隔离字段集）
     # 1:1 FB 三层结构（0088）：{adsets:[{key,name,enabled,budget_usd?,audience_id?,
     # audience_json?,optimization_goal?,billing_event?,advanced_config?,ads:[{key,name,
