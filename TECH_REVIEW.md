@@ -1446,3 +1446,11 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 **批I（P0 数据口径）**：生产实证——系列 Te（BSCH-TD-O324，OUTCOME_TRAFFIC）旗下 6 组全为 CONVERSATIONS/WHATSAPP（Click-to-WhatsApp），FB「成效」=WhatsApp 会话数（今日=1），旧口径按系列目标数成链接点击（=6），直接污染 CPA 止损判定。修复：kpi_resolver 新增 `_OPT_GOAL_FIELD_DEFAULTS` 确定性映射层（矩阵 obj|og 之后、objective fallback 之前：CONVERSATIONS→messaging_conversation_started_7d / LINK_CLICKS→link_click / LANDING_PAGE_VIEWS→landing_page_view / LEAD_GENERATION|QUALITY_LEAD→lead_grouped / PAGE_LIKES→like）；guard_engine 新增 `_adset_optgoals`（ads_cache adsets_json，零额外 API 调用）三处 resolve_kpi 调用点传组 optimization_goal；ads.py 细分/诊断端点同步。smoke（生产真实 acts 断言）8/8：CONVERSATIONS→1 会话、og 空=旧行为回归、系列汇总=FB 对齐 1。下一轮巡检（5min）起快照/管理器成效自动纠正。
 **批J（功能）**：①已部署模板 force 删除——DELETE /{tid}/hard?force=1：job 行保留（template_name 快照在）仅解除关联，投放记录不丢；无 force 仍 400 拒删。smoke 5/5（临时模板+job 自建自清）。②投放模板素材选择器内直传：抽屉顶部「↑ 上传素材」（多文件，复用 /assets/upload 白名单+去重），上传完成自动选中新素材。i18n zh/en 成对。
 生产：后端 restart 双门过 health ok journal 零 err；前端 CF 部署（产物 grep 验证）。commit b1aa032。
+
+### 2026-09-09 批K：时间戳不被死令牌账户钉死 + 批I 重启事故复盘（已上线）
+
+**批K**：/ads/list 的 cached_at/last_sync 与前端「缓存 X 分钟前」只统计令牌可用的账户——令牌断掉的账户 cache 恒冻结（拉不动），把它算进「数据更新至」会让整页时间戳被僵尸账户钉死（Roly-V21 令牌过期后页头停在 9/8 06:36，用户多次误解为系统不更新）。死令牌账户的冻结状态继续由行内「快照」标+顶部警示条表达；全部账户都死时回退全量。token_status 计算前移（cached_at 需要它）。
+
+**批I 复盘（重启静默失败）**：批I+J 上传后 commit 命令在 toveads/ 目录下执行 `node _sshx.js`（模块在仓库根）→ Node 报错退出，但 git commit 已成功、错误被误读——**服务实际没重启，跑了 40 分钟旧代码**，成效口径修复延迟生效。教训已固化：部署重启命令必须与上传同 cwd 执行，且重启后用行为证据（journal 新行为/进程时间）验证，health ok 不代表加载了新代码。修复后 21:55 巡检实证：Te 系列 3 广告 kpi 全部切到 messaging_conversation_started_7d，系列成效 6→**1**（与 FB 一致）；广告实况 CAMPAIGN_PAUSED/DISAPPROVED，评估 0 为正确过滤非盲区。
+
+生产：双门过、restart×2（21:49/21:50）、health ok；前端 CF 部署。commit 见 git log。
