@@ -957,9 +957,14 @@ const _audFromJson = (j) => {
   } catch {}
   return a
 }
+// Advantage+ 受众派生态（系列 chip 用）：树=所有组全开才亮；平铺=模板启发式（无手动兴趣=开）
+const advAudOn = computed(() => editMode.value === 'tree'
+  ? tree.value.adsets.length > 0 && tree.value.adsets.every(s => s.advantage_audience !== false)
+  : advantage_audience.value)
 const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
+  advantage_audience: true,
   conv_location: '', placement_mode: '', publisher_platforms: [], device_platforms: [],
   pixel_id: '',
   facebook_positions: [], instagram_positions: [], messenger_positions: [],
@@ -992,6 +997,8 @@ const normalizeTree = (adsets) => adsets.map(s => ({
   pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
   budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
   audience_id: s.audience_id || 0,
+  // Advantage+ 受众（FB 组层）：旧节点无此字段 → 有手动兴趣默认关（原启发式），否则开
+  advantage_audience: s.advantage_audience ?? !((s.aud && s.aud.interests) || []).length,
   conv_location: (CONV_LOCATIONS_BY_OBJECTIVE[form.value.objective] || []).includes(s.conv_location) ? s.conv_location : '',
   pixel_id: s.pixel_id || '',
   placement_mode: s.placement_mode === 'manual' ? 'manual' : '',
@@ -1258,6 +1265,7 @@ const _synthTreeFromFlat = () => {
     age_max: form.value.audience_age_max || 65,
     gender: form.value.audience_gender || 0,
   }
+  s.advantage_audience = !(form.value.audience_interests || []).length
   s.optimization_goal = form.value.optimization_goal || ''
   s.billing_event = form.value.billing_event || ''
   s.ads = [adFromFlat()]
@@ -1303,6 +1311,7 @@ const _cleanTreeForSave = () => tree.value.adsets.map(s => {
     pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
     budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
     audience_id: s.audience_id || 0,
+    advantage_audience: s.advantage_audience !== false,
     // 选了受众库 → 清内联 audience_json（部署走 SavedAudience 分支）；否则内联生效
     audience_json: s.audience_id ? '' : JSON.stringify({
       countries: (aud?.countries || []), interests: (aud?.interests || []),
@@ -2357,19 +2366,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-if="!isTt" class="advp-row">
           <span class="advp-label">{{ t('launch.advpSeries') }}</span>
           <span :class="['advp-chip', { on: cboOn }]" :title="t('launch.advpChipBudgetHint')">{{ t('launch.advpChipBudget') }}</span>
-          <span :class="['advp-chip', { on: advantage_audience }]" :title="t('launch.advpChipAudienceHint')">{{ t('launch.advpChipAudience') }}</span>
+          <span :class="['advp-chip', { on: advAudOn }]" :title="t('launch.advpChipAudienceHint')">{{ t('launch.advpChipAudience') }}</span>
           <span :class="['advp-chip', { on: placementAutoAll }]" :title="t('launch.advpChipPlacementHint')">{{ t('launch.advpChipPlacement') }}</span>
           <span class="advp-note">{{ t('launch.advpDerived') }}</span>
-</div>
-        <!-- Advantage+ 受众开关（模板级；原平铺组段迁入——控制上方受众 chip，不进部署 payload） -->
-        <div v-if="!isTt" class="advantage-box">
-          <div class="adv-row">
-            <div class="adv-info">
-              <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
-              <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
-</div>
-            <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-</div>
 </div>
         <template v-if="!isTt">
         <!-- special ad categories (multi, empty = none) + buying type (read-only: auction) -->
@@ -2547,6 +2546,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <div v-show="!audFoldKeys.has(s.key)" class="node-sec-body">
                     <!-- 特殊广告类别已声明：受众定向被 FB 强制收窄 -->
                     <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
+                    <!-- Advantage+ 受众（FB 组层受众区顶部 1:1）：开=AI 扩展（国家/年龄/性别为基础约束，
+                         兴趣隐藏）；关=原始受众（下方手动定向全量生效，部署发 targeting_automation=0） -->
+                    <div class="advantage-box">
+                      <div class="adv-row">
+                        <div class="adv-info">
+                          <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
+                          <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
+</div>
+                        <el-switch v-model="s.advantage_audience" size="small" />
+</div>
+</div>
                     <!-- 消息类转化位置：受众自动 Advantage+（仅国家硬约束），定向字段隐藏但保留数据 -->
                     <div v-if="locIsMsg(s)" class="msg-aud-hint">{{ t('launch.msgAudAutoHint') }}</div>
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audienceSource') }}</label>
@@ -2569,7 +2579,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
                     <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
-                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.interestLabel') }}</label>
+                    <div v-show="!locIsMsg(s) && !s.advantage_audience" class="row"><label>{{ t('launch.interestLabel') }}</label>
                       <div class="interest-search">
                         <input v-model="nodeInterestQ[s.key]" class="inp" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterestsForNode(s)" />
                         <button class="btn sm" :disabled="interestSearching || hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="searchInterestsForNode(s)">{{ interestSearching ? '…' : t('common.search') }}</button>
@@ -2585,7 +2595,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
 </div>
-                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
+                    <div v-show="!locIsMsg(s) && !s.advantage_audience" class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
                       <div class="interest-list">
                         <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>
                         <span v-if="!(s.aud.interests||[]).length" class="hint">{{ t('launch.addViaSearch') }}</span>
@@ -2667,7 +2677,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <div class="row" style="flex-direction:column;align-items:stretch">
                       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                         <label style="margin:0">{{ t('launch.daypartLabel') }}</label>
-                        <el-switch v-model="s.advx_dpa" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+                        <el-switch v-model="s.advx_dpa" size="small" />
                       </div>
                       <template v-if="s.advx_dpa">
                         <div class="dpa-tools">
@@ -2836,7 +2846,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span class="adv-title">{{ t('launch.advPlusCreative') }}</span>
               <span class="adv-desc">{{ t('launch.advPlusCreativeDesc') }}</span>
 </div>
-            <el-switch v-model="advantage_creative" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+            <el-switch v-model="advantage_creative" size="small" />
 </div>
 </div>
         <div v-if="editingAsset && (editingAsset.ai_copy?.headlines||[]).length" class="ai-copy">
@@ -2983,7 +2993,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <div class="row"><label>{{ t('launch.treeMultiAsset') }}</label>
                   <div class="adv-row">
                     <div class="adv-info"><span class="hint">{{ t('launch.treeMultiAssetHint') }}</span></div>
-                    <el-switch v-model="a.multi" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+                    <el-switch v-model="a.multi" size="small" />
 </div>
 </div>
                 <div v-if="a.multi" class="row">
@@ -3481,7 +3491,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dep-ad-id:hover{text-decoration:underline}
 .dep-live{font-size:11px;white-space:nowrap}
 /* 受众来源选择器 */
-.saved-aud-card{border:1px solid var(--ac);background:rgba(10,132,255,.06);border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.saved-aud-card{border:1px solid var(--bd);background:var(--bg2);border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
 .sa-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .sa-name{font-size:13px;font-weight:600;color:var(--ac)}
 .sa-warn{font-size:11px;color:var(--warning)}
@@ -3511,11 +3521,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .scat-warn{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(249,115,22,.1);color:var(--warning);border:1px solid rgba(249,115,22,.35)}
 .seg{display:flex;gap:4px}
 .seg button{flex:1;padding:6px;border:1px solid var(--bd);background:var(--bg3);color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit}
-.seg button.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}
+.seg button.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 .age-row{display:flex;align-items:center;gap:6px}
 .age-row .inp.sm{width:80px}
 .sep{border:none;border-top:1px solid var(--bd);margin:6px 0}
-.sec-title{font-size:12px;color:var(--ac);font-weight:600;margin:-2px 0 2px}
+.sec-title{font-size:12px;color:var(--t2);font-weight:600;margin:-2px 0 2px}
 .sec-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .sec-title-row .sec-title{margin:0}
 
@@ -3544,7 +3554,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .ai-copy-t{font-size:11px;color:var(--t3);margin-bottom:2px}
 .ai-pick{font-size:12px;color:var(--t2);cursor:pointer;padding:3px 6px;border-radius:4px;line-height:1.4}
 .ai-pick:hover{background:var(--bg2);color:var(--t1)}
-.ai-tag{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--ac);background:rgba(10,132,255,.15);padding:1px 4px;border-radius:3px;margin-right:4px}
+.ai-tag{font-size:10px;color:var(--ac);background:var(--acg);padding:1px 4px;border-radius:3px;margin-right:4px}
 
 .picker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .picker-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;overflow:hidden;cursor:pointer;content-visibility:auto;contain-intrinsic-size:140px}
@@ -3578,12 +3588,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
 .deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
 .deploy-video-hint{padding:8px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2);margin:8px 0}
-.reuse-select-card{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.reuse-select-card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
 .reuse-card-hint{font-size:12px;color:var(--t3);line-height:1.5}
 .reuse-input-row{display:flex;gap:6px}
 .reuse-input-row .inp{flex:1}
 .reuse-manual-page{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:rgba(255,159,10,.08);border:1px solid rgba(255,159,10,.25);border-radius:6px;padding:8px}
-.reuse-preview-banner{background:rgba(10,132,255,.06);border:1px solid rgba(10,132,255,.2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--ac);line-height:1.6;margin-bottom:12px}
+.reuse-preview-banner{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:12px}
 .post-readonly-preview{display:flex;flex-direction:column;gap:8px;border:1px solid var(--bd);border-radius:8px;padding:12px;background:var(--bg2)}
 .post-preview-text{font-size:13px;color:var(--t1);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 /* 跟帖预览：内容卡（缩略图+标题/域名 头部，文案，CTA）—— 宽敞不挤 */
@@ -3603,7 +3613,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .acc-batch-row{display:flex;gap:6px;margin-bottom:2px}
 .acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
 .acc-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}
-.acc-row.on{background:rgba(10,132,255,.08)}
+.acc-row.on{background:var(--acg)}
 .acc-name{font-size:13px;color:var(--t1);flex:1}
 .acc-id{font-size:11px;color:var(--t3);font-family:monospace}
 .acc-status{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;white-space:nowrap}
@@ -3619,14 +3629,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dm-label{font-size:12px;color:var(--t3);flex:none}
 .dm-seg{flex:none;width:280px}
 .dm-seg button{flex:none;padding:5px 14px}
-.batch-hint{margin:8px 0;background:rgba(10,132,255,.08);border-color:rgba(10,132,255,.25);color:var(--t2)}
+.batch-hint{margin:8px 0;background:var(--bg2);border-color:var(--bd);color:var(--t2)}
 .batch-bar{display:flex;gap:6px;align-items:center;margin:8px 0}
 .batch-count{font-size:12px;color:var(--t2);margin-right:auto}
 .batch-grid{max-height:300px;overflow-y:auto;padding:1px}
 .batch-card{position:relative}
 .batch-card.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}
 .batch-check{position:absolute;top:6px;right:6px;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:var(--ac);color:#fff;font-size:11px}
-.batch-preview{margin-top:8px;padding:8px 12px;background:rgba(10,132,255,.08);border:1px solid rgba(10,132,255,.25);border-radius:6px;font-size:12px;color:var(--t2)}
+.batch-preview{margin-top:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2)}
 .pi-err.wrap{white-space:normal;overflow:visible;text-overflow:clip;flex-basis:100%;line-height:1.45;font-size:11px}
 .pf-series-count{padding:8px 0 0;font-size:13px;color:var(--ac)}
 .deploy-search-row .inp{flex:1}
@@ -3704,7 +3714,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .platform-chips{display:flex;gap:6px;flex-wrap:wrap}
 .platform-chip{font-size:12px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:4px}
 .platform-chip input{margin:0}
-.platform-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}
+.platform-chip.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 
 /* 兴趣区域加宽 */
 .interest-search{display:flex;gap:6px;align-items:center}
@@ -3717,7 +3727,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .ss-status.pending{color:var(--warning);background:rgba(255,159,10,.13)}
 
 /* Advantage+ 盒子 */
-.advantage-box{border:1px solid var(--ac);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:10px 14px;margin:4px 0;background:rgba(10,132,255,.05)}
+.advantage-box{border:1px solid var(--bd);border-radius:var(--rs);padding:10px 14px;margin:4px 0;background:var(--bg2)}
 .adv-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .adv-info{display:flex;flex-direction:column;gap:2px;flex:1}
 .adv-title{font-size:13px;font-weight:600;color:var(--ac)}
@@ -3738,7 +3748,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dpa-cell:hover{outline:1px solid var(--t3)}
 .placement-chip{font-size:12px;padding:4px 10px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:4px}
 .placement-chip input{margin:0}
-.placement-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1)}
+.placement-chip.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 .placement-tree{display:flex;flex-direction:column;gap:2px;border:1px solid var(--bd);border-radius:8px;padding:4px}
 .pt-node{border-radius:4px}
 .pt-head{display:flex;align-items:center;gap:4px;padding:4px 6px;cursor:pointer}
@@ -3751,7 +3761,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pt-positions{padding:4px 8px 6px 22px;display:flex;gap:4px;flex-wrap:wrap}
 .pos-chip{font-size:11px;padding:2px 8px;border:1px solid var(--bd);border-radius:6px;cursor:pointer;color:var(--t3);display:flex;align-items:center;gap:3px}
 .pos-chip input{margin:0;width:12px;height:12px}
-.pos-chip.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.08)}
+.pos-chip.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 
 /* 表单/消息模板选择 */
 .new-link{font-size:11px;color:var(--ac);text-decoration:none;margin-left:auto}
@@ -3806,7 +3816,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .bid-ctrl-val{margin-left:auto;font-weight:500;color:var(--ac)}
 
 /* 部署抽屉：结构模板树概览卡 */
-.deploy-tree-card{border:1px solid var(--ac);background:rgba(10,132,255,.06);border-radius:8px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:4px}
+.deploy-tree-card{border:1px solid var(--bd);background:var(--bg2);border-radius:8px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:4px}
 .dtc-title{font-size:12px;font-weight:600;color:var(--ac)}
 .dtc-line{font-size:12px;color:var(--t2)}
 .dtc-line.warn{color:var(--warning);font-weight:600}
@@ -3815,7 +3825,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .convloc-opts{display:flex;flex-wrap:wrap;gap:6px}
 .convloc-opt{padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg3);color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit}
 .convloc-opt:hover{border-color:var(--ac);color:var(--ac)}
-.convloc-opt.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1);font-weight:600}
+.convloc-opt.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 /* 组卡折叠子区（受众/版位；受众默认展开=折叠集，版位默认收起=展开集，仿出价控制） */
 .node-sec{border:1px solid var(--bd);border-radius:8px;padding:6px 10px;background:var(--bg3)}
 .node-sec-head{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;font-family:inherit}
@@ -3827,7 +3837,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pl-cards{display:flex;gap:8px}
 .pl-card{flex:1;text-align:left;border:1px solid var(--bd);border-radius:8px;padding:8px 10px;cursor:pointer;background:var(--bg2);display:flex;flex-direction:column;gap:2px;font-family:inherit}
 .pl-card:hover{border-color:var(--ac)}
-.pl-card.on{border-color:var(--ac);background:rgba(10,132,255,.08)}
+.pl-card.on{border-color:var(--ac);background:var(--acg)}
 .pl-card-t{font-size:12px;font-weight:600;color:var(--t1)}
 .pl-card.on .pl-card-t{color:var(--ac)}
 .pl-card-d{font-size:10px;color:var(--t3);line-height:1.4}
@@ -3870,7 +3880,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 /* 组卡头摘要链（目标 · 转化位置 · 优化目标）+ 动态引擎提示框 */
 .as-card-chain{flex:none;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t3)}
 .loc-hint{padding:8px 10px;border:1px dashed var(--bd2);border-radius:6px;font-size:12px;color:var(--t3);background:var(--bg3);line-height:1.5}
-.msg-aud-hint{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(10,132,255,.08);color:var(--t2);border:1px solid rgba(10,132,255,.3)}
+.msg-aud-hint{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:var(--bg2);color:var(--t2);border:1px solid var(--bd)}
 /* 只读字段 + CBO 行 + 必填标记 + 禁用输入（特殊广告类别联动） */
 .ro-field{padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);font-size:13px}
 .inp:disabled{opacity:.55;cursor:not-allowed}
@@ -3900,7 +3910,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .objp-list{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
 .objp-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--t2);font-size:14px;cursor:pointer;font-family:inherit;text-align:left}
 .objp-item:hover{border-color:var(--ac);color:var(--t1)}
-.objp-item.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.08);font-weight:600}
+.objp-item.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
 .objp-radio{width:16px;height:16px;border-radius:50%;border:2px solid var(--bd);flex:none;box-sizing:border-box}
 .objp-item.on .objp-radio{border-color:var(--ac);border-width:5px}
 .objp-detail{flex:1;min-width:0;border-left:1px solid var(--bd);padding-left:14px;display:flex;flex-direction:column;gap:8px}

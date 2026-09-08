@@ -208,28 +208,35 @@ const fmtCpaCol = (a) => mixedCur.value ? (a.cpa_usd ? fmtMoney(a.cpa_usd) : '-'
 // 数据时间戳统一在工具条「数据 X 分钟前」一处表达（批M：页头绝对时间 chip 移除，绝对值进 hover）
 
 
-// 缓存新鲜度标签：/ads 顶层 last_sync（广告层由巡检 ~5min 回写、系列/组 ~15min 全量同步，见 cacheAgeTip）；30s 心跳让「X 分钟前」自动走字
+// 缓存新鲜度标签（批P3 双层诚实显示）：广告层 = 巡检 ~5min 回写（/ads 顶层 last_sync，
+// 存活账户最新值）；系列/组结构层 = ~15min 全量同步（存活账户 campaign/adset snapshot_at 最新值）。
+// 不随 Tab 暗变、不取最旧行——之前在系列/组 Tab 显示结构层龄被误解为"数据 14 分钟没更新"。
+// 30s 心跳让「X 分钟前」自动走字
 const nowTick = ref(Date.now())
 let _ageTimer = null
-const cacheAgeMin = computed(() => {
-  void nowTick.value
-  // 死令牌账户的行恒冻结（拉不动）——不算进聚合缓存龄，否则整页被僵尸行钉死（批K）
-  const dead = new Set(deadAccounts.value)
-  let rows = curList.value.filter(a => !dead.has(a.act_id))
-  if (!rows.length) rows = curList.value
-  const times = rows.map(a => a.snapshot_at).filter(Boolean).sort()
-  const ls = times[0]
-  if (!ls) return null
-  const ts = new Date(ls).getTime()
+const _ageMin = (iso) => {
+  if (!iso) return null
+  const ts = new Date(iso).getTime()
   if (isNaN(ts)) return null
-  return Math.floor((Date.now() - ts) / 60000)
+  return Math.max(0, Math.floor((Date.now() - ts) / 60000))
+}
+const adsAgeMin = computed(() => { void nowTick.value; return _ageMin(data.value.last_sync) })
+const structAgeMin = computed(() => {
+  void nowTick.value
+  // 死令牌账户恒冻结（拉不动）——不算进聚合，否则整页被僵尸行钉死（批K）
+  const dead = new Set(deadAccounts.value)
+  const ts = [...(data.value.campaigns || []), ...(data.value.adsets || [])]
+    .filter(a => !dead.has(a.act_id))
+    .map(a => a.snapshot_at).filter(Boolean).sort()
+  return ts.length ? _ageMin(ts[ts.length - 1]) : null
 })
+const _ageTxt = (m) => m == null ? '—' : (m < 1 ? t('adm.cacheAgeLt1Short') : t('adm.cacheAgeShort', { n: m }))
 const cacheAgeText = computed(() => {
-  const m = cacheAgeMin.value
-  if (m == null) return t('adm.cacheAgeNone')
-  return m < 1 ? t('adm.cacheAgeLt1') : t('adm.cacheAge', { n: m })
+  const a = adsAgeMin.value, s = structAgeMin.value
+  if (a == null && s == null) return t('adm.cacheAgeNone')
+  return t('adm.cacheAgeDual', { a: _ageTxt(a), s: _ageTxt(s) })
 })
-const cacheAgeStale = computed(() => cacheAgeMin.value != null && cacheAgeMin.value >= 60)
+const cacheAgeStale = computed(() => adsAgeMin.value != null && adsAgeMin.value >= 60)
 
 // 实时核验：对选中账户逐个调 GET /ads/live-status?act_id=，用返回 {ads:[{id,effective_status}]} 逐条 patch 本地行
 // 失败 toast；同账户 10s 防抖（后端另有缓存，双保险）
@@ -825,7 +832,7 @@ const unsubscribeLeads = async () => {
       <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
-      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
+      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheAdsStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
     </div>
     <div v-if="loadError" class="page-error-bar">
       ⚠ {{ t('adm.loadFailed') }}：{{ loadError }}

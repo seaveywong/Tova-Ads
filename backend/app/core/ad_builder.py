@@ -349,6 +349,7 @@ def build_adset(
     conv_location: str = "",                # 转化位置（组节点字段；空=存量推导路径，行为不变）
     placements: dict | None = None,         # 结构化版位 {publisher_platforms,device_platforms,facebook/instagram/messenger_positions}；None=省略（Advantage+ 自动版位）
     whatsapp_phone_number: str = "",        # CTW 显式号码（仅 ENGAGEMENT 下进 promoted_object；蓝图：Traffic/Sales 随主页不传）
+    advantage_audience: bool = True,        # Advantage+ 受众（组级）：FB 默认开=省略字段；显式 False=原始受众（targeting_automation.advantage_audience=0，手动定向全量生效）
 ) -> dict:
     obj = normalize_objective(objective)
     loc = (conv_location or "").strip().lower()
@@ -374,6 +375,10 @@ def build_adset(
         "targeting": _deep_copy(targeting) if targeting else {"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65},
         "status": "ACTIVE",
     }
+
+    # Advantage+ 受众（组级开关）：FB 默认开=不发字段；显式关=原始受众（0），手动定向全量生效
+    if advantage_audience is False:
+        payload["targeting_automation"] = {"advantage_audience": 0}
 
     # 受益人/付款人披露（EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制；不填 FB 会拒）
     if dsa_beneficiary:

@@ -257,6 +257,8 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         optimization_goal=optimization_goal, billing_event=billing_event,
         destination_type_override=destination_type_override,
         extra=_adv,
+        # 平铺模式 Advantage+ 受众启发式：手动兴趣（flexible_spec）存在=原始受众（发 0），否则 FB 默认开
+        advantage_audience=not bool((targeting or {}).get("flexible_spec")),
         budget_type=budget_type, lifetime_budget=lifetime_budget,
         start_time=start_time, end_time=end_time, pacing=pacing,
         bid_amount=bid_amount, minimum_roas=minimum_roas,

@@ -1183,6 +1183,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
             optimization_goal=t.optimization_goal or "", billing_event=t.billing_event or "",
             destination_type_override=t.destination_type or "",
             extra=_strip_adv_bid(advanced, _p_bid_fb),   # 出价单一管道（G2②）：与部署 runner 同口径
+            advantage_audience=not bool((targeting or {}).get("flexible_spec")),  # 平铺启发式：手动兴趣=原始受众
             budget_type=_p_btype, lifetime_budget=_p_lifetime_fb,
             start_time=(t.schedule_start or ""), end_time=(t.schedule_end or ""),
             pacing=(t.pacing or ""), bid_amount=_p_bid_fb,
@@ -1397,6 +1398,7 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             conv_location=(adsets[0].get("conv_location") or ""),
             placements=_node_placements(adsets[0] or {}),
             whatsapp_phone_number=(t.whatsapp_phone_number or ""),
+            advantage_audience=(adsets[0].get("advantage_audience") is not False),
             bid_amount=_pf_bid_fb)
         creative_payload = build_creative(
             page_id=(body.page_id or t.page_id or ""), objective=t.objective,
@@ -2527,6 +2529,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 extra=merged_adv or None,
                 budget_type=node_btype, lifetime_budget=adset_lifetime_fb,
                 start_time=s_sched_start, end_time=s_sched_end, pacing=s_pacing,
+                advantage_audience=(snode.get("advantage_audience") is not False),
                 bid_amount=s_bid_fb,
                 minimum_roas=(float(s_min_roas) if s_min_roas else None),
                 conv_location=s_conv_loc,
