@@ -237,6 +237,19 @@ def _auto_landing_gate(db, adsets: list, tenant_id: int) -> None:
                             + "（发布落地页/改为展示模式，或手动选择子码）")
 
 
+def _resolve_tree_pixel(sdb, tenant_id: int, act_id: str, val: str) -> str:
+    """组像素解析（批O-3）：值=random → 从该账户已绑像素随机轮换一个（多像素分摊防单像素过热）；
+    其余（自动=空/指定 ID）原样返回走既有链路（节点 > 部署抽屉按账户 > 模板默认）。"""
+    if (val or "").strip().lower() != "random":
+        return val
+    import random as _random
+    from ..models.landing_lib import LandingPixel
+    rows = sdb.query(LandingPixel).filter(
+        LandingPixel.tenant_id == tenant_id, LandingPixel.act_id == act_id,
+        LandingPixel.platform == "fb", LandingPixel.status == "active").all()
+    return str(_random.choice(rows).pixel_id) if rows else ""
+
+
 def _validate_structure(raw) -> tuple[dict, str]:
     """结构 JSON 形状校验 + 规范化。返 (规范化 dict, 错误信息)。错误信息空 = 通过。
 
@@ -307,6 +320,7 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 "message_template_id": int(ad.get("message_template_id") or 0),
                 "lead_form_template_id": int(ad.get("lead_form_template_id") or 0),
                 "pixel_id": str(ad.get("pixel_id") or ""),
+                "page_id": str(ad.get("page_id") or "")[:64],   # 批O-2：FB 身份在广告层——节点级主页
                 "post_source": post_source,
                 "reuse_post_ref": reuse_ref,
                 "link_description": str(ad.get("link_description") or "")[:200],
@@ -2405,6 +2419,16 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
     auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     _page_id = item.page_id or tpl.page_id or ""
+    # 主页自动识别（批O-2）：抽屉/模板都没指定且非跟帖 → 该账户可用主页里选第一个有广告权限的
+    # （me/accounts tasks 含 ADVERTISE；拉不到不阻断——空主页会在下游原错误路径暴露）
+    if not _page_id and (tpl.post_source or "new") != "reuse":
+        try:
+            _pgs = fb.get_pages()
+            _adv_pgs = [p for p in _pgs if "ADVERTISE" in (p.get("tasks") or [])] or _pgs
+            if _adv_pgs:
+                _page_id = str(_adv_pgs[0].get("id") or "")
+        except Exception:
+            pass
 
     def _fail_group(sname: str, snode: dict, msg: str):
         nonlocal fails
@@ -2491,7 +2515,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
                 objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=_page_id,
-                pixel_id=(str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
+                pixel_id=_resolve_tree_pixel(sdb, tenant_id, item.act_id,
+                                             str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
                 landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
                                                 tpl.name or "", "fb"),
                 bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
@@ -2597,11 +2622,13 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         message_template=(tpl.message_template or ""),
                     )
                     # Instant Form（LEADS）：节点表单模板 > 模板级 > AI 自动生成
+                    # 批O-2：广告身份用节点级主页（无=基础链：抽屉/模板/账户自动识别）
+                    _ad_page = str(anode.get("page_id") or "") or _page_id
                     lead_form_id = ""
-                    if tpl.objective == "OUTCOME_LEADS" and _page_id:
+                    if tpl.objective == "OUTCOME_LEADS" and _ad_page:
                         try:
                             lead_form_id = _resolve_lead_form(
-                                fb, sdb, vtpl, asset, _page_id,
+                                fb, sdb, vtpl, asset, _ad_page,
                                 _stable_landing_url(vtpl.landing_url or "", tpl.name or ""),
                                 post_content=post_content)
                         except Exception:
@@ -2643,8 +2670,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     _headline, _body = pick_ad_copy(
                         asset, anode.get("headline") or "", anode.get("body") or "",
                         tpl.headline or "", tpl.body or "")
-                    # 主页帖（new=每素材建 / reuse=节点引用帖）
-                    page_post_id = _resolve_page_post(sdb, fb, tenant_id, vtpl, asset, _page_id, body=_body)
+                    # 主页帖（new=每素材建 / reuse=节点引用帖）——_ad_page 已在表单解析前定义
+                    page_post_id = _resolve_page_post(sdb, fb, tenant_id, vtpl, asset, _ad_page, body=_body)
                     if page_post_id:
                         sdb.commit()
                     # 落地 URL：节点占位符逐组/逐账户解值（组名真实传入）；绑了落地页的节点
@@ -2689,10 +2716,10 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     # MessageTemplate.type/conv_location 分流 Messenger（ice_breakers）与 WA（预填））
                     from ..core.ad_builder import parse_message_template
                     welcome_msg = None
-                    if grp_is_msg and _page_id:
+                    if grp_is_msg and _ad_page:
                         if grp_dest == "MESSENGER":
                             try:
-                                pf = fb.get(_page_id, {"fields": "messaging_feature_status"})
+                                pf = fb.get(_ad_page, {"fields": "messaging_feature_status"})
                                 mfs = (pf.get("messaging_feature_status") or {})
                                 if (mfs.get("USER_MESSAGING") or "").upper() != "ENABLED":
                                     raise FbApiError("no_id", "主页未开启 messaging，无法投放私信广告")
@@ -2705,7 +2732,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         welcome_msg = parse_message_template(message_template, allow_cjk=True,
                                                              channel=_msg_channel)
                     creative = build_creative(
-                        page_id=_page_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
+                        page_id=_ad_page, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                         landing_url=effective_url, headline=_headline, body=_body,
                         cta_type=(anode.get("cta_type") or tpl.cta_type or ""),
                         image_hash=image_hash, video_id=video_id,
@@ -2715,8 +2742,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         app_destination=(grp_dest if grp_is_msg else ""))
                     if page_post_id:
                         _cta_t = (anode.get("cta_type") or tpl.cta_type or "") or pick_cta(_body, tpl.objective)
-                        _cta_val = ({"page": _page_id} if _cta_t == "LIKE_PAGE"
-                                    else {"link": effective_url or f"https://facebook.com/{_page_id}"})
+                        _cta_val = ({"page": _ad_page} if _cta_t == "LIKE_PAGE"
+                                    else {"link": effective_url or f"https://facebook.com/{_ad_page}"})
                         cr = fb.post(f"act_{item.act_id}/adcreatives", {
                             "name": f"{ad_name} creative", "object_story_id": page_post_id,
                             "call_to_action": json.dumps({"type": _cta_t, "value": _cta_val}),

@@ -24,6 +24,7 @@ const editing = ref(null)
 const form = ref({})
 const saving = ref(false)
 const tplPages = ref([])  // 模板编辑器主页下拉选项（从 FB 拉）
+const tplPixels = ref([])  // 组卡像素下拉选项（像素库；批O-3）
 // Advantage+ 开关（对齐 FB Ads Manager 2025）
 const advantage_audience = ref(true)   // Advantage+ 受众（开=只设国家+AI扩展；关=手动定向）
 const advantage_creative = ref(true)   // Advantage+ 创意（开=FB自动生成文案变体/裁切；关=固定1套）
@@ -388,7 +389,7 @@ const onLandingChange = async () => {
   }
 }
 onMounted(() => {
-  load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages(); loadAudiences()
+  load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages(); loadAudiences(); loadPixels()
   // 广告列表「复用此帖铺放」入口 → 预填跟帖模板
   const rp = route.query.reuse_post
   if (rp) {
@@ -542,6 +543,12 @@ const liveStatusColor = (s) => {
 
 // 受众库选择器
 const loadAudiences = async () => { try { savedAudiences.value = await GET('/audiences') } catch {} }
+const loadPixels = async () => {   // 批O-3：像素库（组卡下拉「已识别像素」选项）
+  try {
+    const r = await GET('/landing/pixels')
+    tplPixels.value = (r.items || r || []).filter(p => (p.platform || 'fb') === 'fb')
+  } catch {}
+}
 const selectedSavedAud = computed(() => savedAudiences.value.find(a => a.id === form.value.audience_id) || null)
 const hasManualAudience = computed(() =>
   (form.value.audience_countries || []).length > 0 || (form.value.audience_interests || []).length > 0)
@@ -1470,7 +1477,12 @@ const clearNodePost = (node) => {
 }
 // 小卡内打开选择器：先把 treeSel 锚到该节点（pickAsset/pickPost 写 selAd）
 const openAssetPickerForAd = (si, ai) => { selectTreeNode('ad', si, ai); openAssetPicker() }
-const openPostPickerForAd = (si, ai) => { selectTreeNode('ad', si, ai); openPostPicker() }
+const openPostPickerForAd = (si, ai) => {
+  selectTreeNode('ad', si, ai)
+  // 浏览选帖需要具体主页：节点选了主页而模板级为空 → 借用节点主页拉帖
+  if (selAd.value?.page_id && !form.value.page_id) form.value.page_id = selAd.value.page_id
+  openPostPicker()
+}
 
 // 编辑（openNew(p)：p='fb'/'tt' 建模板时定平台；缺省 fb=跟帖预填流用，不弹目标选择）
 // 新建 FB 模板先弹目标选择（对齐 FB Objective Picker）；TT 新建与跟帖预填直接进编辑器
@@ -2408,12 +2420,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
         </template>
         <div class="row"><label>{{ t('launch.namePrefix') }}</label><input v-model="form.name_prefix" class="inp" /></div>
-        <div v-if="!isTt" class="row"><label>{{ t('launch.pageId') }}</label>
-          <el-select v-model="form.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.pageIdPh')" :disabled="editMode === 'flat' && form.post_source==='reuse'" :title="editMode === 'flat' && form.post_source==='reuse' ? t('launch.pageLockedByPost') : ''">
-            <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
-          </el-select>
-          <span class="hint">{{ t('launch.pageIdHint') }}</span>
-</div>
+        <!-- 主页已移到广告卡「身份」区（批O-2：FB 的身份在广告层，不在系列层） -->
         <!-- Click-to-WhatsApp 显式号码（批次I）：仅互动目标部署进 promoted_object；其他目标随主页绑定号 -->
         <div v-if="!isTt && form.objective === 'OUTCOME_ENGAGEMENT'" class="row"><label>{{ t('launch.waPhoneLabel') }}</label>
           <input v-model.trim="form.whatsapp_phone_number" class="inp" :placeholder="t('launch.waPhonePh')" />
@@ -2469,9 +2476,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   </el-select>
                   <span class="hint">{{ t('launch.convEventHint') }}</span>
 </div>
-                <!-- 像素（promoted_object，广告组层 · 节点级）：部署链 snode.pixel_id > 部署抽屉按账户 > 模板默认 -->
+                <!-- 像素（promoted_object，广告组层 · 节点级 · 批O-3 三态）：自动（部署抽屉按账户/
+                     模板默认）· 随机轮换（该账户已绑像素分摊）· 指定（像素库下拉/手动输入）。
+                     部署链 snode.pixel_id > 部署抽屉按账户 > 模板默认 -->
                 <div v-show="s.conv_location === 'website'" class="row"><label>{{ t('launch.treePixelLabel') }}</label>
-                  <el-input v-model="s.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+                  <el-select v-model="s.pixel_id" filterable allow-create default-first-option size="small" style="width:100%" :placeholder="t('launch.pixelAutoOpt')">
+                    <el-option value="" :label="t('launch.pixelAutoOpt')" />
+                    <el-option value="random" :label="t('launch.pixelRandomOpt')" />
+                    <el-option v-for="p in tplPixels" :key="p.pixel_id" :value="p.pixel_id" :label="(p.pixel_name || p.pixel_id) + ' (' + p.pixel_id + ')'" />
+                  </el-select>
                   <span class="hint">{{ t('launch.treePixelHint') }}</span>
 </div>
                 <!-- budget & schedule (ABO: per-set; CBO: budget sits on the campaign) -->
@@ -2923,8 +2936,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div v-if="expandedAdKeys.has(a.key)" class="ad-card-body form">
                 <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="a.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
-                <!-- 身份（FB 广告层）：主页在系列段选定；IG 为模板级全局身份（structure 无节点字段，不加节点级） -->
+                <!-- 身份（FB 广告层 · 批O-2 对齐 FB）：主页节点级选择——自动识别（部署时按账户选
+                     可用主页）或指定；IG 仍为模板级全局身份 -->
                 <div class="sec-title">{{ t('launch.adIdentitySec') }}</div>
+                <div class="row"><label>{{ t('launch.adPageLabel') }}</label>
+                  <el-select v-model="a.page_id" filterable clearable size="small" style="width:100%" :placeholder="t('launch.adPageAuto')">
+                    <el-option value="" :label="t('launch.adPageAuto')" />
+                    <el-option v-for="p in tplPages" :key="p.id" :value="p.id" :label="(p.name||p.id) + ' (' + p.id + ')'" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.adPageHint') }}</span>
+</div>
                 <div class="row"><label>{{ t('launch.instagramActor') }}</label>
                   <input v-model.trim="form.instagram_actor_id" class="inp" :placeholder="t('launch.instagramActorPh')" />
                   <span class="hint">{{ t('launch.treeIgGlobalHint') }}</span>
@@ -2941,7 +2962,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <div class="reuse-input-row">
                     <input v-model="nodeReuseInputs[a.key]" class="inp" :disabled="nodeResolving" :placeholder="t('launch.manualPostPh')" @keyup.enter="confirmNodePost(a)" />
                     <button class="btn sm primary" :disabled="nodeResolving || !(nodeReuseInputs[a.key]||'').trim()" @click="confirmNodePost(a)">{{ nodeResolving ? t('launch.resolving') : t('launch.recognize') }}</button>
-                    <button class="btn sm" :disabled="!form.page_id" @click="openPostPickerForAd(si, ai)">{{ t('launch.browsePosts') }}</button>
+                    <button class="btn sm" :disabled="!(a.page_id || form.page_id)" :title="!(a.page_id || form.page_id) ? t('launch.postPickerNeedPage') : ''" @click="openPostPickerForAd(si, ai)">{{ t('launch.browsePosts') }}</button>
                   </div>
 </div>
                 <div v-if="a.reuse_post_ref" class="reuse-selected-block">
