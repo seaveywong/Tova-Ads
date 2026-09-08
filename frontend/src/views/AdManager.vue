@@ -252,6 +252,9 @@ const curList = computed(() => {
   else if (tab.value === 'adset') { arr = data.value.adsets || []; if (drillCampaign.value) arr = arr.filter(a => _idOf(a.campaign_id) === drillCampaign.value) }
   else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => _idOf(a.adset_id) === drillAdset.value) }
   arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatch(a.effective_status))
+  // 脱管/被禁账户排后面（用户反馈：不好区分，正常在前异常在后）
+  const _deadRank = (a) => accStateTag(a) ? 1 : 0
+  arr = arr.slice().sort((a, b) => _deadRank(a) - _deadRank(b))
   if (searchQ.value.trim()) {
     const q = searchQ.value.trim().toLowerCase()
     arr = arr.filter(a => (a.name || '').toLowerCase().includes(q) || String(a.id || '').includes(q))
