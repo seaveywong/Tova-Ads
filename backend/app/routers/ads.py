@@ -658,6 +658,8 @@ _BREAKDOWN_DIMS = {
     "age": "age",
     "gender": "gender",
     "placement": "publisher_platform,platform_position,impression_device",
+    # 转化发生位置（FB 细分→按操作）：action 级维度，走 action_breakdowns 参数（非 breakdowns）
+    "conversion_location": "conversion_destination",
 }
 _FB_DATE_PRESETS = {"today", "yesterday", "last_3d", "last_7d", "last_14d", "last_30d",
                     "last_90d", "this_month", "last_month", "maximum"}
@@ -711,9 +713,12 @@ def ads_insights_breakdown(
 
     params = {
         "fields": "spend,impressions,clicks,ctr,reach,frequency,campaign_id,actions",
-        "breakdowns": _BREAKDOWN_DIMS[dim],
         "limit": "100",
     }
+    if dim == "conversion_location":
+        params["action_breakdowns"] = "conversion_destination"
+    else:
+        params["breakdowns"] = _BREAKDOWN_DIMS[dim]
     if date_from and date_to:
         params["time_range"] = json.dumps({"since": date_from, "until": date_to})
     else:
@@ -739,6 +744,32 @@ def ads_insights_breakdown(
             pass
     from ..services.kpi_resolver import resolve_kpi
     out = []
+    if dim == "conversion_location":
+        # action 级维度：消耗/展示等行级指标无法按转化位置拆分（FB 同口径——只拆成效），
+        # 行内 actions 逐条过 resolve_kpi 判定是否计入成效口径，按 conversion_destination 分桶
+        buckets: dict[str, int] = {}
+        for r in rows:
+            for a in (r.get("actions") or []):
+                dest = str(a.get("conversion_destination") or "").strip() or "-"
+                try:
+                    kpi = resolve_kpi(db, user.tenant_id, r.get("campaign_id", ""),
+                                      obj_map.get(str(r.get("campaign_id") or ""), ""),
+                                      "", [a])
+                    v = int(kpi.get("results_fb") or 0)
+                except Exception:
+                    v = 0
+                if v:
+                    buckets[dest] = buckets.get(dest, 0) + v
+        for dest, v in sorted(buckets.items(), key=lambda x: -x[1]):
+            out.append({"dimension_value": dest, "spend": None, "impressions": None,
+                        "clicks": None, "ctr": None, "reach": None, "frequency": None,
+                        "results": v})
+        resp = {"act_id": aid, "ad_id": _ad, "dimension": dim,
+                "currency": acc.currency or "USD",
+                "date_from": date_from, "date_to": date_to, "date_preset": date_preset,
+                "rows": out}
+        _BREAKDOWN_CACHE[key] = (_now, resp)
+        return resp
     for r in rows:
         try:
             kpi = resolve_kpi(db, user.tenant_id, r.get("campaign_id", ""),

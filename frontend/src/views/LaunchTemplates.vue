@@ -133,14 +133,16 @@ const OPT_GOALS = [
   {v:'THRUPLAY',l:'launch.opt_thruplay'},{v:'APP_INSTALLS',l:'launch.opt_app_installs'},{v:'VALUE',l:'launch.opt_value'},
   {v:'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS',l:'launch.opt_two_second_video_views'},{v:'MESSAGING_PURCHASE_CONVERSION',l:'launch.opt_messaging_purchase'},
   {v:'MESSAGING_APPOINTMENT_CONVERSION',l:'launch.opt_messaging_appointment'},{v:'EVENT_RESPONSES',l:'launch.opt_event_responses'},
-  {v:'QUALITY_LEAD',l:'launch.opt_quality_lead'},
+  {v:'QUALITY_LEAD',l:'launch.opt_quality_lead'},{v:'LEAD_FROM_IG_DIRECT',l:'launch.opt_lead_from_ig'},
+  {v:'QUALITY_CALL',l:'launch.opt_quality_call'},{v:'VISIT_INSTAGRAM_PROFILE',l:'launch.opt_visit_ig_profile'},
 ]
 // ── 批次I 前端镜像常量（同源 backend/app/core/ad_builder.py——后端矩阵变更时此处必须同步）──
-// 转化位置合法值按 objective（ad_builder.CONV_LOCATIONS_BY_OBJECTIVE）；顺序=下拉展示序
+// 转化位置合法值按 objective（ad_builder.CONV_LOCATIONS_BY_OBJECTIVE）；顺序=下拉展示序。
+// 批H 对齐 Meta 官方矩阵（2035196643270）：销量无单独通话位；流量的 Instagram 位=Instagram 主页
 const CONV_LOCATIONS_BY_OBJECTIVE = {
-  OUTCOME_SALES: ['website', 'messenger', 'whatsapp', 'phone_call'],
+  OUTCOME_SALES: ['website', 'messenger', 'whatsapp'],
   OUTCOME_LEADS: ['website', 'on_ad', 'on_ad_messenger', 'messenger', 'whatsapp', 'instagram_direct', 'phone_call'],
-  OUTCOME_TRAFFIC: ['website', 'messenger', 'whatsapp', 'instagram_direct', 'phone_call'],
+  OUTCOME_TRAFFIC: ['website', 'messenger', 'whatsapp', 'instagram_profile', 'phone_call'],
   OUTCOME_ENGAGEMENT: ['website', 'on_page', 'messenger', 'whatsapp', 'instagram_direct'],
   OUTCOME_AWARENESS: [],
   OUTCOME_APP_PROMOTION: [],
@@ -148,12 +150,12 @@ const CONV_LOCATIONS_BY_OBJECTIVE = {
 // 优化目标 × objective 兼容表（ad_builder.OPT_GOALS_BY_OBJECTIVE）：组卡优化目标下拉按此过滤
 const OPT_GOALS_BY_OBJECTIVE = {
   OUTCOME_AWARENESS: ['REACH', 'IMPRESSIONS', 'THRUPLAY', 'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS'],
-  OUTCOME_TRAFFIC: ['LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS', 'CONVERSATIONS'],
+  OUTCOME_TRAFFIC: ['LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS', 'CONVERSATIONS', 'VISIT_INSTAGRAM_PROFILE'],
   OUTCOME_ENGAGEMENT: ['REACH', 'IMPRESSIONS', 'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'POST_ENGAGEMENT',
     'PAGE_LIKES', 'CONVERSATIONS', 'MESSAGING_PURCHASE_CONVERSION', 'MESSAGING_APPOINTMENT_CONVERSION',
     'THRUPLAY', 'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS', 'EVENT_RESPONSES', 'OFFSITE_CONVERSIONS'],
   OUTCOME_LEADS: ['LEAD_GENERATION', 'QUALITY_LEAD', 'OFFSITE_CONVERSIONS', 'CONVERSATIONS',
-    'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS'],
+    'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS', 'LEAD_FROM_IG_DIRECT', 'QUALITY_CALL'],
   OUTCOME_SALES: ['OFFSITE_CONVERSIONS', 'VALUE', 'CONVERSATIONS', 'LINK_CLICKS',
     'LANDING_PAGE_VIEWS', 'IMPRESSIONS', 'REACH', 'MESSAGING_PURCHASE_CONVERSION'],
   OUTCOME_APP_PROMOTION: ['APP_INSTALLS', 'VALUE', 'LINK_CLICKS'],

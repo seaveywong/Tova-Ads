@@ -10,8 +10,11 @@ export default {
     fbNotCollected: '该日期范围早于成效采集上线（2026-09-08），无 FB 口径实测数据——请看「综合转化」列',
     breakdown: '细分', breakdownTitle: '细分 · {name}', breakdownAge: '年龄',
     breakdownGender: '性别', breakdownPlacement: '版位', breakdownDim: '维度',
+    breakdownConvLoc: '转化位置',
+    breakdownConvNote: '转化位置只细分成效；消耗、展示等行级指标无法按此维度拆分（FB 同口径）',
     breakdownResults: '成效', breakdownEmpty: '该维度暂无数据（日期范围内无投放或无消耗）',
     breakdownFail: '细分加载失败：{msg}',
+    createAd: '创建',
   },
   en: {
     columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined conversions',
@@ -24,7 +27,10 @@ export default {
     fbNotCollected: 'This date range predates FB results collection (2026-09-08) — see the Combined conversions column',
     breakdown: 'Breakdown', breakdownTitle: 'Breakdown · {name}', breakdownAge: 'Age',
     breakdownGender: 'Gender', breakdownPlacement: 'Placement', breakdownDim: 'Segment',
+    breakdownConvLoc: 'Conversion location',
+    breakdownConvNote: 'Conversion location splits results only; row-level metrics like spend cannot be split by this dimension (same as FB)',
     breakdownResults: 'Results', breakdownEmpty: 'No data for this breakdown (no delivery or spend in range)',
     breakdownFail: 'Breakdown failed: {msg}',
+    createAd: 'Create',
   },
 }

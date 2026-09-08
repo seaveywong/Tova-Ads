@@ -72,14 +72,17 @@ def normalize_objective(objective: str) -> str:
 # ❓ phone_call / instagram_direct 的 optimization_goal 组合未经真部署实测（蓝图无逐格矩阵）。
 # ══════════════════════════════════════════════════════════════════════════
 
-# conv_location 合法值（按 objective；蓝图 §2.1 全表收窄到本批已建链路；app 链路未建故不含）
+# conv_location 合法值（按 objective）。对齐 Meta 官方「Available Conversion Locations by Objective」
+# 矩阵（business/help/2035196643270，2026-09 核对）：销量无单独「通话」位（只有 API 未确认的
+# 「网站和通话」组合位）；流量下的 Instagram 位是「Instagram 主页」（进主页资料页）而非 IG 私信
+# （IG 私信只出现在 潜客「Instagram」与 互动「消息应用」）；app 链路未建故不含应用位。
 CONV_LOCATIONS_BY_OBJECTIVE = {
-    "OUTCOME_SALES": {"website", "messenger", "whatsapp", "phone_call"},
+    "OUTCOME_SALES": {"website", "messenger", "whatsapp"},
     "OUTCOME_LEADS": {"website", "on_ad", "on_ad_messenger", "messenger",
                       "whatsapp", "instagram_direct", "phone_call"},
-    "OUTCOME_TRAFFIC": {"website", "messenger", "whatsapp", "instagram_direct", "phone_call"},
+    "OUTCOME_TRAFFIC": {"website", "messenger", "whatsapp", "instagram_profile", "phone_call"},
     "OUTCOME_ENGAGEMENT": {"website", "on_page", "messenger", "whatsapp", "instagram_direct"},
-    "OUTCOME_AWARENESS": set(),        # 无转化位置（蓝图 §2.1）
+    "OUTCOME_AWARENESS": set(),        # 无转化位置（官方：广告中，唯一且自动）
     "OUTCOME_APP_PROMOTION": set(),    # 应用链路未建（审计 C3）
 }
 CONV_LOCATION_ALL = {loc for s in CONV_LOCATIONS_BY_OBJECTIVE.values() for loc in s}
@@ -90,7 +93,6 @@ _CONV_MATRIX = {
     ("OUTCOME_SALES", "website"):     ("WEBSITE", "OFFSITE_CONVERSIONS", "pixel"),
     ("OUTCOME_SALES", "messenger"):   ("MESSENGER", "MESSAGING_PURCHASE_CONVERSION", "page"),
     ("OUTCOME_SALES", "whatsapp"):    ("WHATSAPP", "CONVERSATIONS", "page"),
-    ("OUTCOME_SALES", "phone_call"):  ("PHONE_CALL", "LINK_CLICKS", "page"),
     ("OUTCOME_LEADS", "website"):     ("WEBSITE", "OFFSITE_CONVERSIONS", "pixel"),
     ("OUTCOME_LEADS", "on_ad"):       ("ON_AD", "LEAD_GENERATION", "page"),
     # Leads 组合位「即时表单+Messenger」（蓝图 §2.1：二选一自动分配）：API 侧与 on_ad 同构
@@ -98,12 +100,15 @@ _CONV_MATRIX = {
     ("OUTCOME_LEADS", "on_ad_messenger"): ("ON_AD", "LEAD_GENERATION", "page"),
     ("OUTCOME_LEADS", "messenger"):   ("MESSENGER", "LEAD_GENERATION", "page"),
     ("OUTCOME_LEADS", "whatsapp"):    ("WHATSAPP", "CONVERSATIONS", "page"),
-    ("OUTCOME_LEADS", "instagram_direct"): ("INSTAGRAM_DIRECT", "CONVERSATIONS", "page"),
-    ("OUTCOME_LEADS", "phone_call"):  ("PHONE_CALL", "LINK_CLICKS", "page"),
+    # 官方：Leads 的 Instagram 位优化 LEAD_FROM_IG_DIRECT（IG 私信收线索），非 CONVERSATIONS
+    ("OUTCOME_LEADS", "instagram_direct"): ("INSTAGRAM_DIRECT", "LEAD_FROM_IG_DIRECT", "page"),
+    # 官方：Calls 位优化 QUALITY_CALL、billing IMPRESSIONS（Call Ads 指南 v26）
+    ("OUTCOME_LEADS", "phone_call"):  ("PHONE_CALL", "QUALITY_CALL", "page"),
     ("OUTCOME_TRAFFIC", "website"):   ("WEBSITE", "LINK_CLICKS", None),
     ("OUTCOME_TRAFFIC", "messenger"): ("MESSENGER", "CONVERSATIONS", "page"),
     ("OUTCOME_TRAFFIC", "whatsapp"):  ("WHATSAPP", "CONVERSATIONS", "page"),
-    ("OUTCOME_TRAFFIC", "instagram_direct"): ("INSTAGRAM_DIRECT", "CONVERSATIONS", "page"),
+    # 官方：Traffic 的 Instagram 位 = Instagram 主页（进资料页），destination INSTAGRAM_PROFILE
+    ("OUTCOME_TRAFFIC", "instagram_profile"): ("INSTAGRAM_PROFILE", "VISIT_INSTAGRAM_PROFILE", "page"),
     ("OUTCOME_TRAFFIC", "phone_call"): ("PHONE_CALL", "LINK_CLICKS", "page"),
     ("OUTCOME_ENGAGEMENT", "website"): ("WEBSITE", "LINK_CLICKS", None),
     ("OUTCOME_ENGAGEMENT", "on_page"): ("ON_PAGE", "PAGE_LIKES", "page"),
@@ -116,14 +121,16 @@ _CONV_MATRIX = {
 # 校验树节点 optimization_goal 用——非法值保存时 422，不再等 FB 400）
 OPT_GOALS_BY_OBJECTIVE = {
     "OUTCOME_AWARENESS": {"REACH", "IMPRESSIONS", "THRUPLAY", "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS"},
-    "OUTCOME_TRAFFIC": {"LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS", "CONVERSATIONS"},
+    "OUTCOME_TRAFFIC": {"LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS", "CONVERSATIONS",
+                        "VISIT_INSTAGRAM_PROFILE"},
     "OUTCOME_ENGAGEMENT": {"REACH", "IMPRESSIONS", "LINK_CLICKS", "LANDING_PAGE_VIEWS",
                            "POST_ENGAGEMENT", "PAGE_LIKES", "CONVERSATIONS",
                            "MESSAGING_PURCHASE_CONVERSION", "MESSAGING_APPOINTMENT_CONVERSION",
                            "THRUPLAY", "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS", "EVENT_RESPONSES",
                            "OFFSITE_CONVERSIONS"},
     "OUTCOME_LEADS": {"LEAD_GENERATION", "QUALITY_LEAD", "OFFSITE_CONVERSIONS", "CONVERSATIONS",
-                      "LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS"},
+                      "LINK_CLICKS", "LANDING_PAGE_VIEWS", "REACH", "IMPRESSIONS",
+                      "LEAD_FROM_IG_DIRECT", "QUALITY_CALL"},
     "OUTCOME_SALES": {"OFFSITE_CONVERSIONS", "VALUE", "CONVERSATIONS", "LINK_CLICKS",
                       "LANDING_PAGE_VIEWS", "IMPRESSIONS", "REACH", "MESSAGING_PURCHASE_CONVERSION"},
     "OUTCOME_APP_PROMOTION": {"APP_INSTALLS", "VALUE", "LINK_CLICKS"},
@@ -139,8 +146,10 @@ OPT_GOALS_BY_LOCATION = {
                   "MESSAGING_PURCHASE_CONVERSION", "LINK_CLICKS"},
     "whatsapp": {"CONVERSATIONS", "OFFSITE_CONVERSIONS", "LINK_CLICKS", "IMPRESSIONS",
                  "REACH", "LANDING_PAGE_VIEWS", "POST_ENGAGEMENT"},
-    "instagram_direct": {"CONVERSATIONS", "LEAD_GENERATION"},
-    "phone_call": {"LINK_CLICKS", "CONVERSATIONS", "REACH", "IMPRESSIONS"},
+    "instagram_direct": {"CONVERSATIONS", "LEAD_FROM_IG_DIRECT"},
+    "instagram_profile": {"VISIT_INSTAGRAM_PROFILE", "LINK_CLICKS", "LANDING_PAGE_VIEWS",
+                          "IMPRESSIONS", "REACH"},
+    "phone_call": {"LINK_CLICKS", "QUALITY_CALL", "CONVERSATIONS", "REACH", "IMPRESSIONS"},
     "on_page": {"PAGE_LIKES", "REACH", "IMPRESSIONS"},
 }
 

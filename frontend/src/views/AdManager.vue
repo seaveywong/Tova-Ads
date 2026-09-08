@@ -272,6 +272,7 @@ const BREAKDOWN_DIMS = computed(() => [
   { id: 'age', label: t('adm.breakdownAge') },
   { id: 'gender', label: t('adm.breakdownGender') },
   { id: 'placement', label: t('adm.breakdownPlacement') },
+  { id: 'conversion_location', label: t('adm.breakdownConvLoc') },
 ])
 const _bdGuard = useLatest()   // 快速切维度连发——旧响应后到丢弃
 const openBreakdown = (item) => {
@@ -304,6 +305,9 @@ watch(breakdownDim, () => { if (breakdownOpen.value) loadBreakdown() })
 // 版位行值：fb/ig/an/msg 是 FB 内部码，翻译成品牌名；其余段（feed/story 等）原样
 const _PLAT_NAMES = { fb: 'Facebook', ig: 'Instagram', an: 'Audience Network', msg: 'Messenger' }
 const bdLabel = (v) => String(v || '').split(' · ').map(seg => _PLAT_NAMES[seg.toLowerCase()] || seg).filter(Boolean).join(' · ')
+// 转化位置行值（conversion_destination，FB 返英文显示名）中文映射；en 原样
+const _CONV_DEST_ZH = { Website: '网站', App: '应用', Shop: '店铺', 'Instant Experience': '即时体验', 'On your ad': '广告中' }
+const bdConvLabel = (v) => (locale.value === 'en' || !v) ? String(v || '') : (_CONV_DEST_ZH[v] || v)
 
 const curList = computed(() => {
   let arr
@@ -773,7 +777,8 @@ const unsubscribeLeads = async () => {
           {{ accStateTag({ act_id: selectedActs[0] }).cls === 'banned' ? t('adm.accBannedBanner') : t('adm.accUnmanagedBanner') }}
         </div>
         <div class="ctrl-bar">
-      <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
+      <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
+      <button class="ctrl-btn create-btn" @click="router.push({ name: 'launch-templates' })">＋ {{ t('adm.createAd') }}</button>
       <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
@@ -783,12 +788,19 @@ const unsubscribeLeads = async () => {
           <span v-if="accStateTag(a)" :class="['mini-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span>
         </el-option>
       </el-select>
-      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
-      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
-      <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
+      <DatePresetBar :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
+      <el-popover v-if="tab !== 'lead'" trigger="click" width="250" placement="bottom-end">
+        <template #reference><button class="ctrl-btn">{{ t('adm.columns') }}</button></template>
+        <el-checkbox-group v-model="viewPrefs[tab].columns" class="column-options">
+          <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
+        </el-checkbox-group>
+      </el-popover>
+      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
+      <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
+      <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="cacheAgeStale ? t('adm.cacheStaleTip') : t('adm.cacheAgeTip')">{{ cacheAgeText }}</span>
     </div>
     <div v-if="loadError" class="page-error-bar">
       ⚠ {{ t('adm.loadFailed') }}：{{ loadError }}
@@ -824,12 +836,6 @@ const unsubscribeLeads = async () => {
         <template v-if="drillCampaign"><span>›</span><button class="ctrl-btn sm" @click="tab = 'adset'; drillAdset = ''">{{ campaignCrumb }}</button></template>
         <template v-if="drillAdset"><span>›</span><span>{{ adsetCrumb }}</span></template>
       </nav>
-      <el-popover trigger="click" width="250" placement="bottom-end">
-        <template #reference><button class="ctrl-btn sm">{{ t('adm.columns') }}</button></template>
-        <el-checkbox-group v-model="viewPrefs[tab].columns" class="column-options">
-          <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
-        </el-checkbox-group>
-      </el-popover>
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
       <table class="manager-table" :style="{ minWidth: tableWidth + 'px' }">
@@ -985,7 +991,7 @@ const unsubscribeLeads = async () => {
           </tr></thead>
           <tbody>
             <tr v-for="(r, i) in breakdownRows" :key="i">
-              <td>{{ bdLabel(r.dimension_value) }}</td>
+              <td>{{ breakdownDim === 'conversion_location' ? bdConvLabel(r.dimension_value) : bdLabel(r.dimension_value) }}</td>
               <td>{{ r.spend ? fmtAmount(r.spend, breakdownTarget?.currency) : '—' }}</td>
               <td>{{ r.impressions ? r.impressions.toLocaleString() : '—' }}</td>
               <td>{{ r.clicks ? r.clicks.toLocaleString() : '—' }}</td>
@@ -997,6 +1003,7 @@ const unsubscribeLeads = async () => {
           </tbody>
         </table>
         <div v-if="!breakdownRows.length && !breakdownLoading" class="empty">{{ t('adm.breakdownEmpty') }}</div>
+        <div v-if="breakdownDim === 'conversion_location' && breakdownRows.length" class="bd-note">{{ t('adm.breakdownConvNote') }}</div>
       </div>
     </el-dialog>
 
@@ -1270,7 +1277,11 @@ const unsubscribeLeads = async () => {
 .inline-budget label { display:flex; align-items:center; gap:12px }
 .inline-budget input { width:180px }
 .stale-snapshot { color:var(--warning, #b87917) }
-/* 细分弹窗（年龄/性别/版位维度表） */
+/* 细分弹窗（年龄/性别/版位/转化位置维度表） */
 .bd-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px }
 .bd-table td { padding:8px 10px; font-size:12px }
+.bd-note { margin-top:8px; font-size:11px; color:var(--t3); line-height:1.5 }
+/* FB 顶栏式工具条：绿色创建按钮（同 FB Ads Manager 主操作位） */
+.ctrl-btn.create-btn { background:var(--success, #34c759); color:#fff; border-color:var(--success, #34c759); font-weight:600 }
+.ctrl-btn.create-btn:hover { filter:brightness(1.06); color:#fff }
 </style>
