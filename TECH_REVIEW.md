@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-09-08 — 批次 II：P1 资金与断层（出价双管道/AI文案/URL跟随/TT像素/错误定位）
+
+### 概述
+《总方案_v2_FB对齐》批次 II 全 7 项（后端 4 文件 + 前端 2 文件，零迁移）。两个 commit（35996ba + 8a4e8c7），回退点 = 93bb6e0（批次I前端补漏）+ 服务器备份 /opt/toveads/backups/batchII_0908/（4 后端文件）。**已上传服务器+双门过，未 restart（用户统一部署）**。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| 1 出价双管道（G2②，资金） | `ad_ops.py` + `launch_templates.py` | adv.bid_amount（旧 CPA 性能目标=美分原始值）深合并覆盖 bid_amount_usd 本币换算值（非 USD 账户错一个汇率量级）。保守修法=模板出价控制非空时剥离：`_strip_adv_bid()`（浅拷贝不动共享 dict）用于树 runner merged_adv/平铺预检/树预检三处 + deploy_one_account 内联剥离（平铺/批量/重试三链单点）；两者都空维持旧行为（adv 直通）；树预检补 bid_amount 形参使其与 runner 同构 | smoke：未剥离基线复现覆盖行为 + 剥离后换算值生效 + fake-Fb 端到端 adsets payload 断言 + 调用方 dict 未篡改 |
+| 2 AI 文案不覆盖手填（A3） | `ad_ops.py` + `launch_templates.py` | 新 `pick_ad_copy(asset, manual, fallback)` 统一优先级 手填>素材AI随机>模板兜底；树节点/平铺/重试/TT 四链全部改用（旧序 AI>手填 静默顶掉用户文案）；TT 链 pick_random_copy 死 import 清理 | smoke 4 断言（手填胜/空白AI填/无AI兜底/半填混合） |
+| 3 落地 URL 跟随（B9/B5） | `launch_templates.py` + `landing.py` + `ad_ops.py` | ①树 runner：绑落地页节点一律从页行实时解析 base（原仅自动建链分支解析），`_lp_url` 被页行 base 覆盖（快照仅作占位符容器）；平铺/重试链同口径（manual slug/降级场景也跟随）；平铺+树预检同口径跟随（预检=所见即所发）②`_page_to_dict` public_url 回退链 custom_domain>bound_subdomains[0]>pages.dev（无自定义域页回填不再空串）③禁 tovaads.com 死链兜底：deploy_one_account/树 runner 手选 slug 无 base 时 FbApiError 快失败（文案指明补救） | smoke：public_url 三级回退 + resolve base pages.dev + 树预检 creative URL=页行 base 且不含快照 + 死链 raise 且 payload 无 tovaads.com/a/ |
+| 4 TT 三级像素（方案 B6） | `landing_events.py` | 新 `_resolve_tt_pixel_ids(db, page, link, ad_id, explicit_act)`：候选账户（ads_cache 反查 ad 所在 act > ?act= > link.act_id）的 platform='tt' active 像素 > 页级 tt_pixel_ids（对齐 FB 三级分流；TT 无 adset pixel 层——绑的是 code 非 FB 数字 id）；route_next 接线替换原页级-only 块 | smoke 5 断言（显式/反查/link/页级回退/fb 像素不串台）；**补丁 commit 修 _json 局部导入 NameError 被裸 except 吞（smoke 实测抓出，铁律再实证）** |
+| 5 保存错误定位（G1） | `LaunchTemplates.vue` | validateTree/validateTemplate 结构化（`{msg, sec, key}`：sec=三段手风琴、key=组/广告卡）；树广告级错误补节点名（treeErrReuseRef/ReuseMulti/AssetsMax 三键 zh/en 加 {name}）；保存失败=组卡/广告卡红边(.err)+展开段与双层折叠卡+滚动到首个出错对象；后端 422 文案按「节点名」回锚（_anchorBackendSaveErrs）；编辑器重开/保存成功清锚 | build ✓（i18n 扫描 zh/en 2874=2874 对称，无新增问题项） |
+| 6 TT Instant Form 门（盘点 A2） | `LaunchTemplates.vue` | 去掉 `!isTt` 门（后端 _resolve_lead_form TT 分支现成）；新增 formTplPlatScope 平台范围标注（平铺+树节点两处下拉） | build ✓；**未尽：TT 部署链（deploy_one_account_tt）尚未消费 lead_form（creative 无表单挂点）——见结论** |
+| 7 og 残留兜底（C4 后端侧） | `launch_templates.py` | TemplateIn 模型级：模板级 optimization_goal 非空且不在 OPT_GOALS_BY_OBJECTIVE[objective] → ValueError 422 带可用清单；置于 structure 早退之前（平铺模式也覆盖；组级校验已有，防回归断言保留） | smoke 4 断言（TRAFFIC+VALUE 拒+清单/合法过/组级防回归） |
+
+### DB 迁移
+- 无（纯代码批次）。
+
+### 生产环境变更
+- **代码已上传**（4 后端文件 + `_smoke_batch_ii.py`），py_compile+import 双门 ✓，**服务未 restart**（生产仍跑批次I代码，磁盘为批次II——用户统一部署时 restart 即生效）。备份 /opt/toveads/backups/batchII_0908/（4 文件）。
+- 验证方式：8011 端口临时起第二 uvicorn 实例（新代码）跑全套 smoke 后已关：批次II 32/32 + 批次I 回归 + 树 29 回归 + 批G 26 回归全 PASS；smoke 测试行零残留（pages/pixels/ads_cache/templates/links 全 0）；前端 build ✓ 未部署 CF。
+
+### 复审结论（已知限制/风险）
+- 出价双管道保守口径：仅模板出价控制（bid_amount_usd）非空时剥离 adv.bid_amount；只填 CPA（前端写美分进 adv.bid_amount）+无 bid_amount_usd 的存量组合维持旧行为——USD 账户正确、非 USD 账户仍是美分直通（单管道化留给后续批，需前端 CPA 也走 USD 输入）。
+- URL 跟随的降级语义：页行已删/解析失败 → 回落 landing_url 快照（最后手段）；手选 slug+无任何 URL → 该广告 fail 留痕（不再静默死链）。
+- TT Instant Form：UI 门已开但 TT 部署链未消费 lead_form_template_id（deploy_one_account_tt 无表单参数，build_tt_creative 无挂点）——TT 真链路消费待 TT sandbox 实测批；_resolve_lead_form TT 分支可直调已验证（批次I smoke）。
+- 保存错误定位的 422 回锚按「节点名」精确匹配（后端文案含名字），无名字的模板级 422 只 toast 不锚（行为同旧）。
+- 批次III 遗留（本批未动）：平铺组段死代码/细分版位/redirect fire 像素/TT event_id/link.ad_id last-wins/spend_cap 汇率兜底。
+
+### commit
+- `35996ba` 批次II：P1 资金与断层——出价双管道剥离+AI文案手填优先+落地URL跟随+TT三级像素+保存错误定位（已 push）
+- `8a4e8c7` 批次II补丁：_resolve_tt_pixel 命中 NameError 被裸 except 吞掉（_json 模块级化）（已 push）
+
+关联：[[tree-launch-templates]] [[bare-except-silent-failure]] [[tech-review-format]] [[landing-pixel-pipeline]] [[toveads-pause-state-2026-09]]
+
+---
+
+
 ## 2026-09-08 — 批次 I 后端：FB 广告管理器 1:1 对齐（转化位置矩阵/版位/WhatsApp/自动建链）
 
 ### 概述
