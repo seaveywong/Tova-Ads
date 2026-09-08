@@ -14,6 +14,7 @@ class PerfSnapshot(Base):
     spend_native = Column(Float, default=0)      # 本币原值
     currency = Column(Text)
     conversions = Column(Integer, default=0)
+    results_fb = Column(Integer, default=0)  # FB 口径成效（只算优化目标 action，展示用）
     cpa = Column(Float)
     roas = Column(Float)
     impressions = Column(Integer, default=0)

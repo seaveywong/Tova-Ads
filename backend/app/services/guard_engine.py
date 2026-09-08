@@ -2149,6 +2149,7 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
         snap.spend_native = spend
         snap.currency = acc.currency
         snap.conversions = conv
+        snap.results_fb = kpi.get("results_fb", 0)
         snap.cpa = cpa
         snap.roas = roas_val if roas_val > 0 else None
         snap.impressions = impressions
@@ -2166,7 +2167,7 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
             platform=platform,
             snapshot_date=snap_date, spend=spend_usd_snap,
             spend_native=spend, currency=acc.currency,
-            conversions=conv, cpa=cpa,
+            conversions=conv, results_fb=kpi.get("results_fb", 0), cpa=cpa,
             roas=roas_val if roas_val > 0 else None,
             impressions=impressions, clicks=clicks, reach=reach,
             frequency=frequency if frequency > 0 else None,

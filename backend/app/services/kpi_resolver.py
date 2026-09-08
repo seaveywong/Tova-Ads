@@ -181,7 +181,7 @@ def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[st
         return None
 
 
-def resolve_kpi(db: Session, tenant_id: int, campaign_id: str, objective: str,
+def _resolve_kpi_impl(db: Session, tenant_id: int, campaign_id: str, objective: str,
                 opt_goal: str = "", actions: list | None = None) -> dict:
     """返回 {kpi_field, kpi_label, conversions, source, target_cpa}。
 
@@ -271,3 +271,13 @@ def target_cpa_for(db: Session, tenant_id: int, campaign_id: str) -> Optional[fl
         KpiConfig.enabled == True,  # noqa: E712
     ).first()
     return (r.target_cpa if r and r.target_cpa else None)
+
+
+# ── 方案B 双列（0093）：wrapper 注入 results_fb（FB 口径成效）──
+# 只算 kpi_field 对应的 action 数量，不做任何兜底——与 FB Ads Manager 的「成效」列算法一致
+def resolve_kpi(db, tenant_id, campaign_id, objective, opt_goal="", actions=None):
+    result = _resolve_kpi_impl(db, tenant_id, campaign_id, objective, opt_goal, actions)
+    if "results_fb" not in result:
+        kf = result.get("kpi_field", "")
+        result["results_fb"] = _action_count(actions or [], kf) if kf else 0
+    return result

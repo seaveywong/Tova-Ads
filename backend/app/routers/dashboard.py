@@ -280,7 +280,7 @@ def dashboard(
                 "platform": None,   # 账户行已删，平台无从判定
                 "account_status": None, "is_managed": False, "removed": True,
                 "spend": round(spend_usd, 2), "spend_usd": round(spend_usd, 2),
-                "conversions": conv, "cpa": round(spend_usd / conv, 2) if conv > 0 else 0.0,
+                "conversions": conv, "results_fb": r.results_fb or 0, "cpa": round(spend_usd / conv, 2) if conv > 0 else 0.0,
                 "roas": round(float(r.avg_roas), 2) if r.avg_roas else 0.0,
                 "impressions": r.total_impressions or 0, "clicks": r.total_clicks or 0,
                 "reach": r.total_reach or 0,
