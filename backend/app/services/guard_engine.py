@@ -1034,6 +1034,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         # TopProperty/SD Web 两无令牌遗留账户把 streak 顶到 3 触发告警，而 Roly 正常）
                         if cred:
                             res["live_fallback"] = True  # cache 顶替 live（主循环降级 streak 统计+心跳后缀）
+                            res["fallback_name"] = f"{acc.name}({acc.act_id})"
                         logger.info(f"[Guard] 账户 {acc.act_id} 用 ads_cache 兜底: {len(_cache_ids)} ACTIVE"
                                     + ("" if cred else "（无令牌稳态，不计降级 streak）"))
             except Exception:
@@ -1978,6 +1979,14 @@ def run_inspection(force: bool = False):
             _loc = tenant_locale(db, 1)
             _t_lf, _b_lf = notify_text(_loc, "live_fetch_degraded",
                                        streak=_streak, n=_n_fallback)
+            # 带具体账户名单（用户反馈：只说"1 个账户"不可行动，跟 coverage_lost 同格式）
+            _fb_names = [_r.get("fallback_name") for _r in results
+                         if _r.get("live_fallback") and _r.get("fallback_name")]
+            if _fb_names:
+                _fb_lines = [f"· {x}" for x in _fb_names[:5]]
+                if len(_fb_names) > 5:
+                    _fb_lines.append(f"… 共 {len(_fb_names)} 个")
+                _b_lf = _b_lf + chr(10).join([''] + _fb_lines)
             emit_notification(db, tenant_id=1, level="warning",
                               event_type="live_fetch_degraded", trace_id=trace_id,
                               title=_t_lf, body=_b_lf, platform="fb")
