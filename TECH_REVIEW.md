@@ -1440,3 +1440,9 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 **验证**：_smoke_batch_h.py 33/33 ALL_PASS（矩阵自洽/新组合 payload/旧组合拒绝/回归）；adManagerView 5/5；health ok；journal 部署后零 err。
 
 **结论**：A 级错位（销量假通话位/流量假 IG 私信/潜客 IG 错优化目标）已修；细分四维与 FB 按投放+按操作对齐；菜单顺序照 FB。多渠道合并广告组/组合位/应用/店铺维持缓项（矩阵文档 §3）。commit f17f02d。
+
+### 2026-09-09 批I+J：成效口径按组优化目标 + 模板删除/上传（已上线）
+
+**批I（P0 数据口径）**：生产实证——系列 Te（BSCH-TD-O324，OUTCOME_TRAFFIC）旗下 6 组全为 CONVERSATIONS/WHATSAPP（Click-to-WhatsApp），FB「成效」=WhatsApp 会话数（今日=1），旧口径按系列目标数成链接点击（=6），直接污染 CPA 止损判定。修复：kpi_resolver 新增 `_OPT_GOAL_FIELD_DEFAULTS` 确定性映射层（矩阵 obj|og 之后、objective fallback 之前：CONVERSATIONS→messaging_conversation_started_7d / LINK_CLICKS→link_click / LANDING_PAGE_VIEWS→landing_page_view / LEAD_GENERATION|QUALITY_LEAD→lead_grouped / PAGE_LIKES→like）；guard_engine 新增 `_adset_optgoals`（ads_cache adsets_json，零额外 API 调用）三处 resolve_kpi 调用点传组 optimization_goal；ads.py 细分/诊断端点同步。smoke（生产真实 acts 断言）8/8：CONVERSATIONS→1 会话、og 空=旧行为回归、系列汇总=FB 对齐 1。下一轮巡检（5min）起快照/管理器成效自动纠正。
+**批J（功能）**：①已部署模板 force 删除——DELETE /{tid}/hard?force=1：job 行保留（template_name 快照在）仅解除关联，投放记录不丢；无 force 仍 400 拒删。smoke 5/5（临时模板+job 自建自清）。②投放模板素材选择器内直传：抽屉顶部「↑ 上传素材」（多文件，复用 /assets/upload 白名单+去重），上传完成自动选中新素材。i18n zh/en 成对。
+生产：后端 restart 双门过 health ok journal 零 err；前端 CF 部署（产物 grep 验证）。commit b1aa032。
