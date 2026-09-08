@@ -118,9 +118,9 @@ const loadAccounts = async () => {
   try { accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]; await load(); await loadRedirectMap() }
   catch (e) { ElMessage.error(e.message || t('adm.loadAccountsFail')) }
 }
-const load = async (refresh = false) => {
+const load = async (refresh = false, silent = false) => {
   const isLatest = _loadGuard.next()
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const params = new URLSearchParams(curRange.value)
     if (refresh) params.set('refresh', '1')
@@ -344,7 +344,16 @@ const drillToAdset = (c) => { drillCampaign.value = c.id; drillAdset.value = '';
 const drillToAd = (s) => { drillCampaign.value = _idOf(s.campaign_id) || ''; drillAdset.value = s.id; tab.value = 'ad'; selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
 onMounted(() => { loadAccounts(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
-onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null }; if (_ageTimer) { clearInterval(_ageTimer); _ageTimer = null } })
+// 自动跟随巡检（批N）：巡检 5min 一轮回写缓存，页面静默同步（不弹 loading、不清下钻）；
+// 页面在后台时跳过（回来后 30s 心跳仍会刷新「X 分钟前」走字，下次前台周期再拉）
+let _autoTimer = null
+onMounted(() => {
+  _autoTimer = setInterval(() => {
+    if (document.hidden || loading.value || tab.value === 'lead') return
+    load(false, true)
+  }, 5 * 60 * 1000)
+})
+onUnmounted(() => { if (_refreshPoller) { clearInterval(_refreshPoller); _refreshPoller = null }; if (_leadsTimer) { clearInterval(_leadsTimer); _leadsTimer = null }; if (_ageTimer) { clearInterval(_ageTimer); _ageTimer = null }; if (_autoTimer) { clearInterval(_autoTimer); _autoTimer = null } })
 
 const selected = ref(new Set())
 const opLoading = ref(false)

@@ -973,7 +973,7 @@ export default {
     mixedCurrencyTip: 'Selected accounts use multiple currencies — spend/CPA converted to USD',
     dataAsOf: 'Data as of {t}', cacheStaleTip: 'Data is over 1 hour old — refresh recommended',
     cacheAge: 'Data {n} min ago', cacheAgeLt1: 'Data <1 min', cacheAgeNone: 'Data —',
-    cacheAgeTip: 'Ad status/creative refresh ~every 5 min via inspection; campaign/adset structure full-syncs ~every 15 min. Use "Live Verify" to fetch platform statuses now',
+    cacheAgeTip: 'Ad status/creative refresh ~every 5 min via inspection (page auto-syncs every 5 min); campaign/adset structure full-syncs ~every 15 min. Use "Live Verify" to fetch platform statuses now',
     emptyAdsHint: 'No data — try widening the date range or switching the account filter; deploy new ads from "Launch Templates"',
     tokenDeadBar: '{n} accounts have no usable token — their statuses are last-known snapshots. Re-authorize in Token Management',
     tokenDeadTip: 'With the token expired, inspection/sync stop updating; statuses below are stale snapshots, not live. Re-authorizing restores live data',
