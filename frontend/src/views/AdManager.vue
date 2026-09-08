@@ -262,6 +262,49 @@ const verifyLive = async () => {
   ElMessage.success(t('adm.liveVerifyOk', { n: patched }))
 }
 
+// 细分（Breakdowns）：广告行按年龄/性别/版位拉 FB insights 分组弹窗（FB 账户专属，TT 无此结构）
+const breakdownOpen = ref(false)
+const breakdownLoading = ref(false)
+const breakdownRows = ref([])
+const breakdownDim = ref('age')
+const breakdownTarget = ref(null)
+const BREAKDOWN_DIMS = computed(() => [
+  { id: 'age', label: t('adm.breakdownAge') },
+  { id: 'gender', label: t('adm.breakdownGender') },
+  { id: 'placement', label: t('adm.breakdownPlacement') },
+])
+const _bdGuard = useLatest()   // 快速切维度连发——旧响应后到丢弃
+const openBreakdown = (item) => {
+  breakdownTarget.value = { act_id: item.act_id, id: item.id, name: item.name, currency: item.currency || 'USD' }
+  breakdownDim.value = 'age'
+  breakdownRows.value = []
+  breakdownOpen.value = true
+  loadBreakdown()
+}
+const loadBreakdown = async (refresh = false) => {
+  if (!breakdownTarget.value) return
+  const isLatest = _bdGuard.next()
+  breakdownLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      act_id: breakdownTarget.value.act_id, ad_id: breakdownTarget.value.id,
+      dimension: breakdownDim.value, ...curRange.value,
+    })
+    if (refresh) params.set('refresh', '1')
+    const r = await GET('/ads/insights/breakdown?' + params.toString())
+    if (!isLatest()) return
+    breakdownRows.value = r.rows || []
+    if (r.currency) breakdownTarget.value.currency = r.currency
+  } catch (e) {
+    if (isLatest()) { breakdownRows.value = []; ElMessage.error(t('adm.breakdownFail', { msg: e.message || '' })) }
+  }
+  if (isLatest()) breakdownLoading.value = false
+}
+watch(breakdownDim, () => { if (breakdownOpen.value) loadBreakdown() })
+// 版位行值：fb/ig/an/msg 是 FB 内部码，翻译成品牌名；其余段（feed/story 等）原样
+const _PLAT_NAMES = { fb: 'Facebook', ig: 'Instagram', an: 'Audience Network', msg: 'Messenger' }
+const bdLabel = (v) => String(v || '').split(' · ').map(seg => _PLAT_NAMES[seg.toLowerCase()] || seg).filter(Boolean).join(' · ')
+
 const curList = computed(() => {
   let arr
   if (tab.value === 'campaign') arr = data.value.campaigns || []
@@ -359,7 +402,7 @@ const saveBudget = async () => {
   try {
     const r = await POST('/ads/budget', payload)
     if (r.success && (r.verified === false || r.warning)) {
-      ElMessage.warning(r.warning || t('adm.fakePauseWarn'))
+      ElMessage.warning(r.warning || t('adm.budgetUnverified'))
       opLoading.value = false
       return
     }
@@ -487,7 +530,7 @@ const renameItem = async (item) => {
   } catch (e) { /* 用户取消 */ }
   opLoading.value = false
 }
-const onAction = (cmd, item) => { if (cmd === 'toggle') toggleStatus(item); else if (cmd === 'rename') renameItem(item); else if (cmd === 'budget') openBudget(item); else if (cmd === 'delete') deleteItem(item); else if (cmd === 'redirect') openRedirect(item); else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', ad_id: item.id } }); else if (cmd === 'diagnose') openDiagnose(item); else if (cmd === 'reuse') router.push({ name: 'launch-templates', query: { reuse_post: item.object_story_id } }) }
+const onAction = (cmd, item) => { if (cmd === 'toggle') toggleStatus(item); else if (cmd === 'rename') renameItem(item); else if (cmd === 'budget') openBudget(item); else if (cmd === 'delete') deleteItem(item); else if (cmd === 'redirect') openRedirect(item); else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', ad_id: item.id } }); else if (cmd === 'diagnose') openDiagnose(item); else if (cmd === 'breakdown') openBreakdown(item); else if (cmd === 'reuse') router.push({ name: 'launch-templates', query: { reuse_post: item.object_story_id } }) }
 
 // 广告诊断
 const diagOpen = ref(false)
@@ -548,6 +591,8 @@ const adsetCrumb = computed(() => (data.value.adsets || []).find(a => String(a.i
 const tableWidth = computed(() => 600 + visibleColumns.value.reduce((n, c) => n + c.width, 0))
 const snapshotStale = a => a.snapshot_at && nowTick.value - new Date(a.snapshot_at).getTime() > 86400e3
 const snapshotText = a => a.snapshot_at ? t(snapshotStale(a) ? 'adm.staleSnapshot' : 'adm.snapshot', { time: fmtTime(a.snapshot_at) }) : t('adm.snapshotUnknown')
+// 成效（FB）列缺失成因区分：早于采集上线（迁移默认 0）vs 日期范围无完整数据
+const fbTip = (a) => a.results_fb_available === false ? t('adm.fbNotCollected') : (a.results_fb_complete === false || a.results_fb == null ? t('adm.fbMissing') : '')
 const metricText = (a, id) => {
   if (id === 'objective') return objLabel(a.objective)
   if (id === 'optimization_goal') return optLabel(a.optimization_goal)
@@ -812,13 +857,13 @@ const unsubscribeLeads = async () => {
               <td v-for="col in visibleColumns" :key="col.id">
                 <button v-if="col.id === 'budget'" class="budget-cell sort-button" :disabled="!hasBudget(a) || !!accStateTag(a) || opLoading" @click="openBudget(a)">{{ fmtBudget(a, tab) }}</button>
                 <code v-else-if="col.id === 'slug' && a.slug" class="ad-slug" @click="goLandingLogs(a.slug, a.id)">/a/{{ a.slug }}</code>
-                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? t('adm.fbMissing') : ''">{{ metricText(a, col.id) }}</span>
+                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : ''">{{ metricText(a, col.id) }}</span>
               </td>
               <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
                 <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item>
                 <el-dropdown-item command="rename" :disabled="!!accStateTag(a)">{{ t('adm.rename') }}</el-dropdown-item>
                 <el-dropdown-item v-if="hasBudget(a)" command="budget" :disabled="!!accStateTag(a)">{{ t('adm.editBudget') }}</el-dropdown-item>
-                <template v-if="tab === 'ad'"><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">{{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">{{ t('adm.reuseThisPost') }}</el-dropdown-item></template>
+                <template v-if="tab === 'ad'"><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">{{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.platform !== 'tt'" command="breakdown">{{ t('adm.breakdown') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">{{ t('adm.reuseThisPost') }}</el-dropdown-item></template>
                 <el-dropdown-item command="delete" :disabled="!!accStateTag(a)" divided>{{ t('common.delete') }}</el-dropdown-item>
               </el-dropdown-menu></template></el-dropdown></td>
             </tr>
@@ -916,6 +961,42 @@ const unsubscribeLeads = async () => {
           <button class="ctrl-btn sm" :disabled="opLoading" @click="removeRedirect(r.ad_id)">{{ t('common.remove') }}</button>
         </div>
         <div v-if="!redirectList.length" class="empty" style="padding:30px">{{ t('adm.redirectMgmtEmpty') }}</div>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="breakdownOpen" :title="t('adm.breakdownTitle', { name: breakdownTarget?.name || '' })" width="680px" :destroy-on-close="true" append-to-body>
+      <div class="bd-bar">
+        <div class="sf-group">
+          <button v-for="d in BREAKDOWN_DIMS" :key="d.id" class="ctrl-btn sm" :class="{ on: breakdownDim === d.id }" @click="breakdownDim = d.id">{{ d.label }}</button>
+        </div>
+        <button class="ctrl-btn sm" :disabled="breakdownLoading" @click="loadBreakdown(true)">⟳ {{ t('common.refresh') }}</button>
+      </div>
+      <div class="tbl" v-loading="breakdownLoading">
+        <table class="manager-table bd-table">
+          <thead><tr>
+            <th>{{ t('adm.breakdownDim') }}</th>
+            <th>{{ t('adm.colSpend') }} ({{ breakdownTarget?.currency }})</th>
+            <th>{{ t('adm.diagImpressions') }}</th>
+            <th>{{ t('adm.diagClicks') }}</th>
+            <th>{{ t('adm.ctrLabel') }}</th>
+            <th>{{ t('adm.colReach') }}</th>
+            <th>{{ t('adm.colFrequency') }}</th>
+            <th>{{ t('adm.breakdownResults') }}</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in breakdownRows" :key="i">
+              <td>{{ bdLabel(r.dimension_value) }}</td>
+              <td>{{ r.spend ? fmtAmount(r.spend, breakdownTarget?.currency) : '—' }}</td>
+              <td>{{ r.impressions ? r.impressions.toLocaleString() : '—' }}</td>
+              <td>{{ r.clicks ? r.clicks.toLocaleString() : '—' }}</td>
+              <td>{{ r.ctr ? Number(r.ctr).toFixed(2) + '%' : '—' }}</td>
+              <td>{{ r.reach ? r.reach.toLocaleString() : '—' }}</td>
+              <td>{{ r.frequency ? Number(r.frequency).toFixed(2) : '—' }}</td>
+              <td>{{ r.results ? r.results.toLocaleString() : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!breakdownRows.length && !breakdownLoading" class="empty">{{ t('adm.breakdownEmpty') }}</div>
       </div>
     </el-dialog>
 
@@ -1189,4 +1270,7 @@ const unsubscribeLeads = async () => {
 .inline-budget label { display:flex; align-items:center; gap:12px }
 .inline-budget input { width:180px }
 .stale-snapshot { color:var(--warning, #b87917) }
+/* 细分弹窗（年龄/性别/版位维度表） */
+.bd-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px }
+.bd-table td { padding:8px 10px; font-size:12px }
 </style>

@@ -2,7 +2,7 @@
 import pathlib
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 root = pathlib.Path(__file__).resolve().parent
@@ -46,6 +46,36 @@ class ReadModelChecks(unittest.TestCase):
         self.assertIsNone(result['results_fb'])
         self.assertFalse(result['results_fb_complete'])
         self.assertEqual(result['conversions'], 99)
+
+    def test_results_fb_availability_flag(self):
+        """0093 前迁移默认 0 不可冒充实测；新行/非零行/TT 行口径判定。"""
+        from app.routers.ads import _FB_RESULTS_EPOCH
+        db = Mock()
+        query = db.query.return_value
+        query.filter.return_value = query
+        query.group_by.return_value = query
+        pre_epoch = _FB_RESULTS_EPOCH - timedelta(days=7)
+        fresh = datetime.now(timezone.utc)
+        naive_old = (_FB_RESULTS_EPOCH - timedelta(days=1)).replace(tzinfo=None)
+        query.all.return_value = [
+            # ad id, USD, native, combined, impressions, clicks, reach, FB,
+            # measured row count, total row count, updated, account, platform
+            ('old0', 10, 10, 1, 1, 1, 1, 0, 1, 1, pre_epoch, 'a', 'fb'),
+            ('oldnaive', 10, 10, 1, 1, 1, 1, 0, 1, 1, naive_old, 'a', 'fb'),
+            ('new0', 10, 10, 1, 1, 1, 1, 0, 1, 1, fresh, 'a', 'fb'),
+            ('oldnonzero', 10, 10, 1, 1, 1, 1, 3, 1, 1, pre_epoch, 'a', 'fb'),
+            ('ttfresh', 10, 10, 1, 1, 1, 1, 0, 1, 1, fresh, 'a', 'tt'),
+        ]
+        perf = _perf_map(db, 1, '', '2026-09-01', '2026-09-09')
+        self.assertFalse(perf[('fb', 'a', 'old0')]['results_fb_available'])
+        self.assertFalse(perf[('fb', 'a', 'oldnaive')]['results_fb_available'])
+        self.assertTrue(perf[('fb', 'a', 'new0')]['results_fb_available'])
+        self.assertTrue(perf[('fb', 'a', 'oldnonzero')]['results_fb_available'])
+        self.assertFalse(perf[('tt', 'a', 'ttfresh')]['results_fb_available'])
+        row = _attach_perf([{'id': 'old0', 'act_id': 'a', 'platform': 'fb'}], perf)[0]
+        self.assertFalse(row['results_fb_available'])
+        self.assertEqual(row['results_fb'], 0)  # 原始值保留，呈现由前端按 available 判定
+        self.assertTrue(_attach_perf([{'id': 'ghost', 'act_id': 'a', 'platform': 'fb'}], perf)[0]['results_fb_available'] is False)
 
 
 if __name__ == '__main__':

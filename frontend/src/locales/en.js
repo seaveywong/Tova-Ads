@@ -257,7 +257,7 @@ export default {
     themeToLight: 'Light theme',
     themeToDark: 'Dark theme',
     langToEn: 'Switch to English',
-    langToZh: '切换到中文',
+    langToZh: 'Switch to Chinese',
     notMember: 'No team',
   },
   login: {

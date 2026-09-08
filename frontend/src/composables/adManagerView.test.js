@@ -28,6 +28,12 @@ test('missing FB results never fall back to combined conversions', () => {
   assert.equal(fbResult({ results_fb: 5, results_fb_complete: false }), null)
 })
 
+test('pre-collection zeros are not presented as measured FB results', () => {
+  assert.equal(fbResult({ results_fb: 0, results_fb_available: false }), null)
+  assert.equal(fbResult({ results_fb: 0, results_fb_available: true }), 0)
+  assert.equal(fbResult({ results_fb: 4, results_fb_available: false }), null)
+})
+
 test('persisted settings reject removed columns and invalid sort keys per level', () => {
   const prefs = normalizeViewPreferences({ ad: { columns: ['budget','spend','spend','bad'], sortKey:'budget', sortDir:'bad' } })
   assert.deepEqual(prefs.ad.columns, ['spend'])

@@ -44,7 +44,7 @@ export function searchMatches(row, query, context) {
   return terms.every(term => haystack.includes(term))
 }
 
-export const fbResult = row => row.results_fb_complete === false || row.results_fb == null ? null : Number(row.results_fb)
+export const fbResult = row => row.results_fb_complete === false || row.results_fb == null || row.results_fb_available === false ? null : Number(row.results_fb)
 
 export function compareRows(a, b, { key, direction, mixedCurrency, blocked, statusRank }) {
   const availability = Number(blocked(a)) - Number(blocked(b))

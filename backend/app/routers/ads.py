@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
@@ -168,6 +168,12 @@ def _ad_act_lookup(db: Session, tenant_id: int) -> dict:
     return m
 
 
+# FB 口径成效（results_fb）采集上线时刻：0093 迁移部署（0e1f61d，2026-09-08 23:46 CST）。
+# 此前写入的快照行 results_fb 为迁移 server_default 0（非实测）。巡检每轮滚动刷新近 7 天
+# 行并 bump updated_at，故 updated_at 晚于该时刻即代表该行由采集代码真实写入。
+_FB_RESULTS_EPOCH = datetime(2026, 9, 8, 16, 0, tzinfo=timezone.utc)
+
+
 def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to: str) -> dict:
     """ad 级 perf 聚合 → {ad_id: {spend(本币), spend_usd, conv, ...}}。act_id 空=跨账户全部。
 
@@ -194,10 +200,21 @@ def _perf_map(db: Session, tenant_id: int, act_id: str, date_from: str, date_to:
         native = float(r[2] or 0)
         if native == 0 and usd > 0:
             native = usd  # 旧快照行缺 spend_native（列上线前写入）——按 USD 金额兜底展示
+        _upd = r[10]
+        if _upd is not None and _upd.tzinfo is None:
+            _upd = _upd.replace(tzinfo=timezone.utc)
+        # results_fb_available：范围内确有 FB 口径采集（非 0093 迁移默认 0）。任一行非零 → 真；
+        # 否则要求全部行都晚于采集上线时刻（0093 部署 2026-09-09 00:00 CST）——更早的行
+        # results_fb 是 server_default 0（迁移回填，非实测），不能冒充实测 0。TT 行无 FB 口径
+        # 采集（报表 actions 非 FB 格式，恒 0）→ 恒 False，前端按缺失呈现并看综合转化列。
+        _avail = ((r[12] or "fb") == "fb"
+                  and (int(r[7] or 0) > 0
+                       or (_upd is not None and _upd >= _FB_RESULTS_EPOCH)))
         out[(r[12] or "fb", str(r[11]), str(r[0]))] = {
             "spend": native, "spend_usd": usd, "conv": int(r[3] or 0),
             "impressions": int(r[4] or 0), "clicks": int(r[5] or 0), "reach": int(r[6] or 0),
             "results_fb": int(r[7] or 0), "results_fb_complete": r[8] == r[9],
+            "results_fb_available": _avail,
             "metrics_updated_at": r[10].isoformat() if r[10] else None}
     return out
 
@@ -217,6 +234,7 @@ def _attach_perf(items: list, perf_map: dict) -> list:
         fb = p.get("results_fb") if p.get("results_fb_complete") else None
         out.append({**it, "spend": round(spend, 2), "spend_usd": round(usd, 2), "conversions": conv,
                     "results_fb": fb, "results_fb_complete": fb is not None,
+                    "results_fb_available": bool(p.get("results_fb_available")),
                     "metrics_updated_at": p.get("metrics_updated_at"),
                     "cost_per_result": round(spend / fb, 2) if fb else None,
                     "cost_per_result_usd": round(usd / fb, 2) if fb else None,
@@ -394,11 +412,14 @@ def list_ads(
             d = tgt.setdefault(key, {"spend": 0.0, "spend_usd": 0.0, "conv": 0,
                                      "impressions": 0, "clicks": 0, "reach": 0,
                                      "results_fb": 0, "results_fb_complete": True,
+                                     "results_fb_available": True,
                                      "metrics_updated_at": None})
             d["spend"] += p["spend"]; d["spend_usd"] += p["spend_usd"]; d["conv"] += p["conv"]
             d["impressions"] += p["impressions"]; d["clicks"] += p["clicks"]; d["reach"] += p["reach"]
             d["results_fb"] += p["results_fb"]
             d["results_fb_complete"] = d["results_fb_complete"] and p["results_fb_complete"]
+            # 父层口径可采：任一子广告缺实测 FB 口径 → 合计被默认 0 稀释，整体按不可用呈现
+            d["results_fb_available"] = d["results_fb_available"] and p.get("results_fb_available", False)
             times = [v for v in (d["metrics_updated_at"], p["metrics_updated_at"]) if v]
             d["metrics_updated_at"] = min(times) if times else None
     def _conv_budget(items):
@@ -631,6 +652,128 @@ def ads_live_status(
     return resp
 
 
+# ── 细分（Breakdowns）：广告行按年龄/性别/版位拉 FB insights 分组（弹窗按需直连，0 缓存表）──
+
+_BREAKDOWN_DIMS = {
+    "age": "age",
+    "gender": "gender",
+    "placement": "publisher_platform,platform_position,impression_device",
+}
+_FB_DATE_PRESETS = {"today", "yesterday", "last_3d", "last_7d", "last_14d", "last_30d",
+                    "last_90d", "this_month", "last_month", "maximum"}
+# 弹窗结果 60s 内存缓存（防连点/切维度重复打 FB；refresh=1 绕过）
+_BREAKDOWN_CACHE: dict = {}
+_BREAKDOWN_CACHE_TTL = 60
+
+
+@router.get("/insights/breakdown")
+def ads_insights_breakdown(
+    act_id: str = "",
+    ad_id: str = "",
+    dimension: str = "age",
+    date_preset: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    refresh: int = 0,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """单条广告的 FB insights 细分（age/gender/placement）。按需直连 FB（读令牌）。
+
+    date_from/date_to 优先（与列表页日期筛选同源，账户本地日）；否则用 FB date_preset 白名单。
+    TT 账户不支持（报表无 FB breakdowns 结构）。每行成效走 resolve_kpi（与列表 FB 口径同源）。
+    """
+    aid = (act_id or "").replace("act_", "").replace("ACT_", "").strip()
+    dim = (dimension or "age").strip()
+    _ad = str(ad_id or "").strip()
+    if not aid or not _ad:
+        raise HTTPException(400, "缺 act_id/ad_id")
+    if dim not in _BREAKDOWN_DIMS:
+        raise HTTPException(400, "不支持的细分维度")
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == aid,
+        Account.is_managed == True,  # noqa: E712
+    ).first()
+    if not acc:
+        raise HTTPException(404, "账户未纳管")
+    if _acc_platform(acc) == "tt":
+        raise HTTPException(400, "TikTok 账户暂不支持细分")
+    fb = client_for_account(db, user.tenant_id, aid, "read")
+    if not fb:
+        raise HTTPException(400, "该账户无可用读令牌")
+
+    key = f"bd:{user.tenant_id}:{aid}:{_ad}:{dim}:{date_preset}:{date_from}:{date_to}"
+    _now = time.time()
+    if not refresh:
+        _ent = _BREAKDOWN_CACHE.get(key)
+        if _ent and _now - _ent[0] < _BREAKDOWN_CACHE_TTL:
+            return _ent[1]
+
+    params = {
+        "fields": "spend,impressions,clicks,ctr,reach,frequency,campaign_id,actions",
+        "breakdowns": _BREAKDOWN_DIMS[dim],
+        "limit": "100",
+    }
+    if date_from and date_to:
+        params["time_range"] = json.dumps({"since": date_from, "until": date_to})
+    else:
+        preset = (date_preset or "today").strip()
+        if preset not in _FB_DATE_PRESETS:
+            raise HTTPException(400, "不支持的日期预设")
+        params["date_preset"] = preset
+    try:
+        rows = fb.get_paged(f"{_ad}/insights", params, limit=100)
+    except FbApiError as e:
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+
+    # 目标反查（同 guard obj_map：AdsCache campaigns 的 objective——insights 行不请求该字段）
+    obj_map = {}
+    _cr = db.query(AdsCache).filter(
+        AdsCache.tenant_id == user.tenant_id, AdsCache.act_id == aid,
+        AdsCache.platform == "fb").first()
+    if _cr:
+        try:
+            for c in json.loads(_cr.campaigns_json or "[]"):
+                obj_map[str(_id_of(c.get("id")))] = c.get("objective") or ""
+        except Exception:
+            pass
+    from ..services.kpi_resolver import resolve_kpi
+    out = []
+    for r in rows:
+        try:
+            kpi = resolve_kpi(db, user.tenant_id, r.get("campaign_id", ""),
+                              obj_map.get(str(r.get("campaign_id") or ""), ""),
+                              "", r.get("actions") or [])
+            results = int(kpi.get("results_fb") or 0)
+        except Exception:
+            results = 0
+        if dim == "placement":
+            label = " · ".join(str(r.get(k) or "")
+                               for k in ("publisher_platform", "platform_position",
+                                         "impression_device")).strip(" ·")
+        else:
+            label = str(r.get(dim) or "-")
+        out.append({
+            "dimension_value": label,
+            "spend": round(float(r.get("spend") or 0), 2),
+            "impressions": int(r.get("impressions") or 0),
+            "clicks": int(r.get("clicks") or 0),
+            "ctr": float(r.get("ctr") or 0),
+            "reach": int(r.get("reach") or 0),
+            "frequency": float(r.get("frequency") or 0),
+            "results": results,
+        })
+    out.sort(key=lambda x: -x["spend"])
+    resp = {"act_id": aid, "ad_id": _ad, "dimension": dim,
+            "currency": acc.currency or "USD",
+            "date_from": date_from, "date_to": date_to, "date_preset": date_preset,
+            "rows": out}
+    if len(_BREAKDOWN_CACHE) > 200:
+        _BREAKDOWN_CACHE.clear()
+    _BREAKDOWN_CACHE[key] = (_now, resp)
+    return resp
+
+
 # ── 写操作（Phase D2）──
 
 class StatusIn(BaseModel):
@@ -684,22 +827,42 @@ def batch_set_status(
     user: CurrentUser = Depends(require_permission("ads.update")),
     db: Session = Depends(get_db),
 ):
-    """批量改状态（≤100）。逐条执行，返回每条结果。逐条按账户 platform 分发（FB/TT 可混批）。"""
+    """批量改状态（≤100）。逐条异常隔离：任一条失败/异常不影响其余条目执行；每条统一返回
+    act_id/node_id/level/success/verified，失败带 error。逐条按账户 platform 分发（FB/TT 可混批）。"""
     from ..services.ad_ops import set_status_any
     if len(body.items) > 100:
         raise HTTPException(400, "批量操作上限 100 条")
     results = []
     for item in body.items[:100]:
-        # is_managed 门（全库审查 P2）：单端点都有，批量曾绕过——软删账户广告仍可被批量操作
-        if not db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.act_id == item.act_id,
-            Account.is_managed == True,  # noqa: E712
-        ).first():
-            results.append({"success": False, "act_id": item.act_id, "node_id": item.node_id,
-                            "error": "account not managed"})
-            continue
-        r = set_status_any(db, user.tenant_id, item.act_id, item.node_id, item.level, item.status, operator=user.email)
-        results.append({"node_id": item.node_id, "level": item.level, **r})
+        entry = {"act_id": item.act_id, "node_id": item.node_id, "level": item.level,
+                 "success": False, "verified": None}
+        try:
+            # is_managed 门（全库审查 P2）：单端点都有，批量曾绕过——软删账户广告仍可被批量操作
+            if not db.query(Account).filter(
+                Account.tenant_id == user.tenant_id, Account.act_id == item.act_id,
+                Account.is_managed == True,  # noqa: E712
+            ).first():
+                entry["error"] = "account not managed"
+            else:
+                r = set_status_any(db, user.tenant_id, item.act_id, item.node_id,
+                                   item.level, item.status, operator=user.email)
+                entry.update({k: v for k, v in r.items() if k != "act_id"})
+                entry["success"] = bool(r.get("success"))
+                entry.setdefault("verified", None)
+        except Exception as e:
+            # 单条异常不拖垮整批：回滚该条未提交写入后继续（结果逐条带 error 回传，不静默）
+            try:
+                db.rollback()
+                # rollback 会连同依赖注入时事务内的 set_config 一起回滚（RLS 租户上下文丢失，
+                # rls-setconfig-rollback-pitfall）——必须重设，否则后续条目 RLS 下静默查空
+                db.execute(text("SELECT set_config('app.tenant_id', :tid, false)"),
+                           {"tid": str(user.tenant_id or "")})
+                db.execute(text("SELECT set_config('app.is_superadmin', :s, false)"),
+                           {"s": "true" if user.is_superadmin else "false"})
+            except Exception:
+                pass
+            entry["error"] = str(e)[:200]
+        results.append(entry)
     return {"results": results, "success_count": sum(1 for r in results if r.get("success"))}
 
 
