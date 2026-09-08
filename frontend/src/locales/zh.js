@@ -986,7 +986,7 @@ export default {
     emptyAdsHint: '暂无数据——试试放宽日期范围 / 切换账户筛选；新广告可到「投放模板」一键部署',
     tokenDeadBar: '{n} 个账户数据源已断（无可用令牌），其状态为最后快照——请到「令牌管理」重新授权',
     tokenDeadTip: '令牌失效后巡检/同步停更，列表里的状态停留在最后快照，不代表实时投放状态；重新授权后自动恢复实时',
-    snapTag: '快照', snapTagTip: '该账户无可用令牌，此状态为缓存快照（非实时）；操作前请先到令牌管理重新授权', accUnmanaged: '脱管', accBanned: '已禁', accUnmanagedTip: '此账户令牌已移除或失效，系统无法管理其广告（数据为最后快照），请重新绑令牌或移除纳管', accBannedTip: '此账户已被 Facebook 禁用，所有广告已停止', accUnmanagedBanner: '此账户已脱管（无可用令牌）——系统无法暂停/监控这些广告，数据为最后快照。请重新绑定令牌或到 FB 后台处理', accBannedBanner: '此账户已被 Facebook 禁用——所有广告已停止投放',
+    snapTag: '快照', snapTagTip: '该账户无可用令牌，此状态为缓存快照（非实时）；操作前请先到令牌管理重新授权', accUnmanaged: '脱管', accBanned: '已禁', accUnmanagedTip: '此账户令牌已移除或失效，系统无法管理其广告（数据为最后快照），请重新绑令牌或移除纳管', accBannedTip: '此账户已被 Facebook 禁用，所有广告已停止', accUnmanagedBanner: '此账户已脱管（无可用令牌）——系统无法暂停/监控这些广告，数据为最后快照。请重新绑定令牌或到 FB 后台处理', accBannedBanner: '此账户已被 Facebook 禁用——所有广告已停止投放', convDual: 'FB成效 {fb} / 综合转化 {total}（含兜底，止损口径）',
     belongsToCampaign: '所属系列：{name}（点击行名查看该系列下的广告组）',
     refreshTip: '全量重拉：系列 + 组 + 广告三层全部刷新（后台跑 1-2 分钟，完成后自动更新）。只秒查广告开/关状态请用工具栏「⚡ 实时核验」',
     liveVerify: '实时核验', liveVerifying: '核验中…', liveVerifyTip: '只查广告的开/关状态（秒级，绕过缓存逐条改状态开关）——不拉名称/创意/消耗。三层全量重拉请用页头「刷新」',
