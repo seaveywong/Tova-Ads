@@ -405,7 +405,9 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 </template>
 
 <style scoped>
-.date-bar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-bottom: 14px }
+.date-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px }
+.date-bar > :first-child { align-self: center }
+.date-bar .acc-search { margin-left: auto }
 .title { margin-right: auto; font-size: 18px }
 .date-btn { padding: 0 14px; height: 32px; line-height: 30px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; cursor: pointer; transition: all .15s; box-sizing: border-box }
 .date-btn:hover { color: var(--t1); border-color: var(--bd2) }
