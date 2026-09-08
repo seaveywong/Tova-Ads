@@ -223,7 +223,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
     effective_url = landing_url
     if subcode_slug and subcode_link is not None:
         base = landing_url or "https://tovaads.com"
-        effective_url = f"{base}/a/{subcode_slug}?ad=" + "{ad.id}"  # FB 宏，上线后自动替换
+        effective_url = f"{base}/a/{subcode_slug}?ad=" + "{{ad.id}}"  # FB 宏（双花括号——Meta 文档/1.0 生产口径；单花括号 FB 不替换=归因全死，2026-09-08 调研实证）
 
     # 3b. Messenger 欢迎语（私信广告前置）
     welcome_msg = None

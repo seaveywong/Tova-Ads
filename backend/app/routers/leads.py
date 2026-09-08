@@ -484,7 +484,7 @@ def run_stale_page_cleanup():
     from ..core.notify_utils import emit_notification
     from ..core.i18n import tenant_locale, notify_text
     from ..models.fb import FbCredential
-    lock = acquire_run_lock(117)
+    lock = acquire_run_lock(119)  # 117 与 leads_poll 撞号（系统全景调研实锤），清理改 119
     if not lock:
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
@@ -524,7 +524,7 @@ def run_stale_page_cleanup():
         return {"error": str(e)}
     finally:
         db.close()
-        release_run_lock(lock, 117)
+        release_run_lock(lock, 119)
 
 
 @router.post("/purge-stale-pages")

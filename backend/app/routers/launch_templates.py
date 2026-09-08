@@ -1037,6 +1037,16 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             instagram_actor_id=(t.instagram_actor_id or ""))
     except ValueError as e:
         raise HTTPException(400, f"参数校验失败：{e}")
+    # 树预检子码存在性（平铺有、树没有——审计/落地页调研双实锤）：坏 slug 部署静默丢追踪
+    _bad_slugs = []
+    _all_slugs = {ad.get("subcode_slug") for s2 in adsets for ad in (s2.get("ads") or []) if ad.get("subcode_slug")}
+    for _slug in _all_slugs:
+        if not db.query(LandingAdLink).filter(
+                LandingAdLink.tenant_id == tenant_id, LandingAdLink.slug == _slug,
+                LandingAdLink.status.in_(["reserved", "active"])).first():
+            _bad_slugs.append(_slug)
+    if _bad_slugs:
+        raise HTTPException(400, f"树内引用的子码不存在或已归档：{_bad_slugs[:5]}（部署会静默丢追踪，请更新广告节点的子码）")
     return {
         "act_id": body.act_id, "platform": "fb", "mode": "tree",
         "currency": currency, "fx_rate": (cr.rate if cr else None),
@@ -2217,7 +2227,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     effective_url = _lp_url
                     if node_slug and node_link is not None:
                         base = _lp_url or "https://tovaads.com"
-                        effective_url = f"{base}/a/{node_slug}?ad=" + "{ad.id}"
+                        effective_url = f"{base}/a/{node_slug}?ad=" + "{{ad.id}}"
                     # Messenger 欢迎语 + 主页 messaging 能力检查（deploy_one_account 同构）
                     from ..core.ad_builder import parse_message_template
                     welcome_msg = None
