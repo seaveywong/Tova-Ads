@@ -1454,3 +1454,32 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 **批I 复盘（重启静默失败）**：批I+J 上传后 commit 命令在 toveads/ 目录下执行 `node _sshx.js`（模块在仓库根）→ Node 报错退出，但 git commit 已成功、错误被误读——**服务实际没重启，跑了 40 分钟旧代码**，成效口径修复延迟生效。教训已固化：部署重启命令必须与上传同 cwd 执行，且重启后用行为证据（journal 新行为/进程时间）验证，health ok 不代表加载了新代码。修复后 21:55 巡检实证：Te 系列 3 广告 kpi 全部切到 messaging_conversation_started_7d，系列成效 6→**1**（与 FB 一致）；广告实况 CAMPAIGN_PAUSED/DISAPPROVED，评估 0 为正确过滤非盲区。
 
 生产：双门过、restart×2（21:49/21:50）、health ok；前端 CF 部署。commit 见 git log。
+
+---
+
+## 批O — 投放编辑器对齐 FB 操作逻辑（7 点）｜2026-09-09
+
+### 概述
+用户 7 点指令：①组预算放组里 ②主页不该在系列层、要能自动识别 ③像素要自动/随机/指定三态 ④落地页子码/广告ID参数/S2S/动态像素链路确认 ⑤真浏览器验证 ⑥整体对齐 FB 操作逻辑 ⑦复审到自认无问题。
+
+### 变更表
+| 文件 | 变更 |
+|---|---|
+| launch_templates.py（后端） | 树 runner 身份链：`_ad_page = anode.page_id ‖ item.page_id ‖ tpl.page_id ‖ 自动识别`（fb.get_pages 取首个 ADVERTISE task，非跟帖才自动）；out_ads 透传 page_id；`_resolve_tree_pixel(sdb,tenant,act,val)`——''=部署抽屉/模板默认、'random'=该账户已绑 LandingPixel 轮换、指定=直用；adset promoted_object.pixel_id 包一层 |
+| LaunchTemplates.vue | 系列段主页行移除（FB 身份在广告层）；广告卡新增「身份」节：主页下拉（''=自动识别 + tplPages）；组卡像素改 el-select 三态（allow-create 保留手输）；browse-posts disabled 条件改 `a.page_id ‖ form.page_id`；openPostPickerForAd 同步节点→表单主页 |
+| locales/views/launch.js | adPageLabel/adPageAuto/adPageHint/pixelAutoOpt/pixelRandomOpt（zh/en 成对）；treeBudgetOverride 改「日预算（本组）USD」；treeDefaultDailyBudget 改「ABO 兜底值」语义；treePixelHint 三态说明 |
+
+### 链路核验（O4，代码证据）
+- 子码自动生成：节点绑落地页未选子码 → `_create_auto_subcode` 每广告预留 LandingAdLink（先 commit 后调 FB，worker 可见）→ `effective_url={base}/a/{slug}?ad={{ad.id}}`（launch_templates.py:2694-2703）；失败降级直投+审计日志（不静默）
+- 广告 ID 参数：FB 建广告返回 ad_id → `bind_link_ad_id(link, ad_id)` 回绑 + 广告名标 `[子码:{slug}]` + last-wins 守卫（:2773-2790）；手动选子码同构
+- 动态像素：worker display 模式调 route_next（landing_events.py:335）→ pixel 优先级 = **adset promoted_object.pixel_id（ads_cache，即部署时真实写入 FB 的那个）** > LandingPixel by act_id > 页级——像素跟随部署选择动态解析，非写死
+- S2S：TT Events API 默认开（tk_events.py）；FB CAPI 按像素 `fb_capi_enabled` 灰度（**默认 false**，同 event_id 浏览器端去重）
+
+### 真浏览器验证（O5，Playwright 1.61.1 + Chromium 打生产 tovaads.com）
+17/17 断言 PASS、0 JS 错误。流程：注入超管 JWT（addInitScript——hash 路由+模块级 _token 必须页面前注入，load 后 evaluate 无效）→ /#/launch-templates → 新建→Facebook 模板→目标弹窗(销售)→继续 → 编辑抽屉：系列 Tab 无主页字段+ABO 兜底值文案；组卡字段序=名称→转化发生位置→优化目标→转化事件→转化像素→预算类型→日预算（本组）→排期→投放方式（截图视觉复核）；像素下拉展开含 自动/随机轮换/像素库；广告卡 身份(主页=自动识别)+IG+素材+文案+落地页；/#/ad-manager ＋创建+「数据 X 分钟前」相对时间+无「数据更新至」页头。截图 _pw/shots/1-8。
+验证脚本迭代修的 3 个自身问题（非产品 bug）：hash 路由导航、广告 Tab 需全标签匹配（'广告 Ad'，否则匹配到'广告组'）、像素选项在下拉需展开读。
+
+### 复审（O7）
+代码面：组卡像素 v-show=website（与 FB 仅网站转化位有像素一致）；跟帖模式不受自动主页影响（非 reuse 才 auto）；模板级 page_id 保留向后兼容。视觉面：截图逐张复核，视觉模型报的「素材：auto×3 重复」经 DOM 核实为误读（广告卡头无链路文本）。遗留已知项：部署真花钱链路（结构树真部署）仍待用户授权实测。
+
+生产：批O 后端已随 1dd47e0 部署（双门+restart+health ok），前端 CF Pages 已部署。commit：1dd47e0（已推送）。
