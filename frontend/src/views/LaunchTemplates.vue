@@ -35,8 +35,7 @@ const previewAsset = ref(null)
 const assetPickerOpen = ref(false)
 const pickerAssets = ref([])
 const pickerLoading = ref(false)
-// 兴趣搜索
-const interestQ = ref('')
+// 兴趣搜索（结果共享；组卡内联受众按节点添加——searchInterestsForNode/addNodeInterest）
 const interestSearching = ref(false)
 const interestResults = ref([])
 // 部署抽屉
@@ -132,15 +131,36 @@ const OPT_GOALS = [
   {v:'IMPRESSIONS',l:'launch.opt_impressions'},{v:'OFFSITE_CONVERSIONS',l:'launch.opt_offsite_conversions'},{v:'LEAD_GENERATION',l:'launch.opt_lead_generation'},
   {v:'PAGE_LIKES',l:'launch.opt_page_likes'},{v:'POST_ENGAGEMENT',l:'launch.opt_post_engagement'},{v:'CONVERSATIONS',l:'launch.opt_conversations'},
   {v:'THRUPLAY',l:'launch.opt_thruplay'},{v:'APP_INSTALLS',l:'launch.opt_app_installs'},{v:'VALUE',l:'launch.opt_value'},
+  {v:'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS',l:'launch.opt_two_second_video_views'},{v:'MESSAGING_PURCHASE_CONVERSION',l:'launch.opt_messaging_purchase'},
+  {v:'MESSAGING_APPOINTMENT_CONVERSION',l:'launch.opt_messaging_appointment'},{v:'EVENT_RESPONSES',l:'launch.opt_event_responses'},
+  {v:'QUALITY_LEAD',l:'launch.opt_quality_lead'},
 ]
-const BILLING_EVENTS = [
-  {v:'IMPRESSIONS',l:'launch.bill_impressions'},{v:'LINK_CLICKS',l:'launch.bill_link_clicks'},{v:'APP_INSTALLS',l:'launch.bill_app_installs'},
-  {v:'PAGE_LIKES',l:'launch.bill_page_likes'},{v:'POST_ENGAGEMENT',l:'launch.bill_post_engagement'},{v:'THRUPLAY',l:'launch.bill_thruplay'},
-]
-const DEST_TYPES = [
-  {v:'WEBSITE',l:'launch.dest_website'},{v:'ON_AD',l:'launch.dest_on_ad'},{v:'ON_PAGE',l:'launch.dest_on_page'},{v:'MESSENGER',l:'launch.dest_messenger'},
-  {v:'APP',l:'launch.dest_app'},{v:'WHATSAPP',l:'launch.dest_whatsapp'},{v:'INSTAGRAM_DIRECT',l:'launch.dest_instagram_direct'},
-]
+// ── 批次I 前端镜像常量（同源 backend/app/core/ad_builder.py——后端矩阵变更时此处必须同步）──
+// 转化位置合法值按 objective（ad_builder.CONV_LOCATIONS_BY_OBJECTIVE）；顺序=下拉展示序
+const CONV_LOCATIONS_BY_OBJECTIVE = {
+  OUTCOME_SALES: ['website', 'messenger', 'whatsapp', 'phone_call'],
+  OUTCOME_LEADS: ['website', 'on_ad', 'on_ad_messenger', 'messenger', 'whatsapp', 'instagram_direct', 'phone_call'],
+  OUTCOME_TRAFFIC: ['website', 'messenger', 'whatsapp', 'instagram_direct', 'phone_call'],
+  OUTCOME_ENGAGEMENT: ['website', 'on_page', 'messenger', 'whatsapp', 'instagram_direct'],
+  OUTCOME_AWARENESS: [],
+  OUTCOME_APP_PROMOTION: [],
+}
+// 优化目标 × objective 兼容表（ad_builder.OPT_GOALS_BY_OBJECTIVE）：组卡优化目标下拉按此过滤
+const OPT_GOALS_BY_OBJECTIVE = {
+  OUTCOME_AWARENESS: ['REACH', 'IMPRESSIONS', 'THRUPLAY', 'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS'],
+  OUTCOME_TRAFFIC: ['LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS', 'CONVERSATIONS'],
+  OUTCOME_ENGAGEMENT: ['REACH', 'IMPRESSIONS', 'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'POST_ENGAGEMENT',
+    'PAGE_LIKES', 'CONVERSATIONS', 'MESSAGING_PURCHASE_CONVERSION', 'MESSAGING_APPOINTMENT_CONVERSION',
+    'THRUPLAY', 'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS', 'EVENT_RESPONSES', 'OFFSITE_CONVERSIONS'],
+  OUTCOME_LEADS: ['LEAD_GENERATION', 'QUALITY_LEAD', 'OFFSITE_CONVERSIONS', 'CONVERSATIONS',
+    'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS'],
+  OUTCOME_SALES: ['OFFSITE_CONVERSIONS', 'VALUE', 'CONVERSATIONS', 'LINK_CLICKS',
+    'LANDING_PAGE_VIEWS', 'IMPRESSIONS', 'REACH', 'MESSAGING_PURCHASE_CONVERSION'],
+  OUTCOME_APP_PROMOTION: ['APP_INSTALLS', 'VALUE', 'LINK_CLICKS'],
+}
+const convLocationsForObj = computed(() => CONV_LOCATIONS_BY_OBJECTIVE[form.value.objective] || [])
+const optGoalsForObj = computed(() =>
+  (OPT_GOALS_BY_OBJECTIVE[form.value.objective] || []).map(v => OPT_GOALS.find(o => o.v === v)).filter(Boolean))
 // 转化目标（按 objective 联动）—— FB custom_event_type 枚举
 const CONV_GOAL_LABELS = {
   Purchase:'launch.conv_purchase', AddToCart:'launch.conv_add_to_cart', InitiateCheckout:'launch.conv_initiate_checkout', AddPaymentInfo:'launch.conv_add_payment_info',
@@ -180,8 +200,18 @@ watch(() => form.value.objective, (newObj, oldObj) => {
     form.value.billing_event = d.bill
   if (!form.value.destination_type || form.value.destination_type === oldD?.dest)
     form.value.destination_type = d.dest
-  if (!form.value.conversion_goal || form.value.conversion_goal === oldD?.conv)
+  // 转化事件：空 / 旧默认 / 不在新目标词表（跨目标残留）→ 重置（审计 C4）
+  const cgOk = CONV_GOALS[newObj] || []
+  if (!form.value.conversion_goal || form.value.conversion_goal === oldD?.conv
+    || !cgOk.includes(form.value.conversion_goal))
     form.value.conversion_goal = d.conv
+  // 组节点不兼容的转化位置/优化目标按新目标白名单清（后端保存 422 同口径前置）
+  const _locs = CONV_LOCATIONS_BY_OBJECTIVE[newObj] || []
+  const _goals = OPT_GOALS_BY_OBJECTIVE[newObj] || []
+  for (const s of tree.value.adsets || []) {
+    if (s.conv_location && !_locs.includes(s.conv_location)) s.conv_location = ''
+    if (s.optimization_goal && !_goals.includes(s.optimization_goal)) s.optimization_goal = ''
+  }
 })
 // 版位选项
 const PLATFORMS = [
@@ -202,49 +232,9 @@ const PLATFORMS = [
   ]},
 ]
 const DEVICES = [{v:'desktop',l:'launch.dev_desktop'}, {v:'mobile',l:'launch.dev_mobile'}]
-// 展开的平台
-const expandedPlatforms = ref(new Set(['facebook']))
-const togglePlatformExpand = (v) => {
-  const s = new Set(expandedPlatforms.value)
-  s.has(v) ? s.delete(v) : s.add(v)
-  expandedPlatforms.value = s
-}
-// 平台选中（全选/取消整平台）
-const isPlatformOn = (pv) => (form.value.placement_platforms||[]).includes(pv)
-const togglePlatformSel = (pv) => {
-  const arr = form.value.placement_platforms || []
-  const i = arr.indexOf(pv)
-  if (i >= 0) {
-    arr.splice(i, 1)
-    // 移除该平台的所有 positions
-    const key = pv + '_positions'
-    form.value[key] = []
-  } else {
-    arr.push(pv)
-    expandedPlatforms.value.add(pv); expandedPlatforms.value = new Set(expandedPlatforms.value)
-  }
-  form.value.placement_platforms = [...arr]
-}
-// 版位选中
-const posKey = (pv) => pv + '_positions'
-const isPosOn = (pv, posv) => {
-  const arr = form.value[posKey(pv)] || []
-  return arr.includes(posv)
-}
-const togglePos = (pv, posv) => {
-  const key = posKey(pv)
-  const arr = form.value[key] || []
-  const i = arr.indexOf(posv)
-  if (i >= 0) arr.splice(i, 1); else arr.push(posv)
-  form.value[key] = [...arr]
-}
-// 设备
-const toggleDevice = (dv) => {
-  const arr = form.value.placement_devices || []
-  const i = arr.indexOf(dv)
-  if (i >= 0) arr.splice(i, 1); else arr.push(dv)
-  form.value.placement_devices = [...arr]
-}
+// 版位平台选项（publisher_platforms 合法值 = backend _PLACEMENT_PLATFORMS）
+const PUB_PLATFORMS = ['facebook', 'instagram', 'messenger', 'audience_network']
+const PUB_PLATFORM_LABELS = { facebook: 'Facebook', instagram: 'Instagram', messenger: 'Messenger', audience_network: 'Audience Network' }
 const BID_STRATEGIES = [
   { v: 'LOWEST_COST_WITHOUT_CAP', l: 'launch.bid_lowest_without_cap' },
   { v: 'COST_CAP', l: 'launch.bid_cost_cap' },
@@ -263,7 +253,7 @@ const CTAS = [
   { v: 'ADD_TO_CART', l: 'launch.cta_add_to_cart' },{ v: 'BUY_TICKETS', l: 'launch.cta_buy_tickets' },
 ]
 const LANGS = [
-  { v: '', l: 'launch.lang_any' },{ v: '24', l: 'launch.lang_en_us' },{ v: '6', l: 'launch.lang_en_gb' },{ v: '37', l: 'launch.lang_en_all' },
+  { v: '24', l: 'launch.lang_en_us' },{ v: '6', l: 'launch.lang_en_gb' },{ v: '37', l: 'launch.lang_en_all' },
   { v: '5', l: 'launch.lang_zh_cn' },{ v: '2', l: 'launch.lang_zh_tw' },{ v: '1', l: 'launch.lang_zh_all' },
   { v: '31', l: 'launch.lang_vi' },{ v: '34', l: 'launch.lang_th' },{ v: '32', l: 'launch.lang_id' },{ v: '27', l: 'launch.lang_ja' },
   { v: '28', l: 'launch.lang_ko' },{ v: '12', l: 'launch.lang_es' },{ v: '14', l: 'launch.lang_pt' },{ v: '15', l: 'launch.lang_ar' },
@@ -403,11 +393,10 @@ const cboOn = computed({
   get: () => (form.value.budget_mode || 'ABO').toUpperCase() === 'CBO',
   set: (v) => { form.value.budget_mode = v ? 'CBO' : 'ABO' },
 })
-// 转化位置（按目标自动，只读展示）：显式 destination_type 优先，否则目标推荐值
-const convLocationText = computed(() => {
-  const d = form.value.destination_type || OBJ_DEFAULTS[form.value.objective]?.dest || ''
-  return d ? (t(DEST_TYPES.find(x => x.v === d)?.l || '') || d) : t('launch.autoOpt')
-})
+// Advantage+ 版位派生态（蓝图 §4：非开关）：树模式=全部组卡 auto；平铺=无手动版位
+const placementAutoAll = computed(() => editMode.value === 'tree'
+  ? (tree.value.adsets || []).every(s => s.placement_mode !== 'manual')
+  : !form.value.manual_placement)
 
 // #5 部署历史
 const historyOpen = ref(false)
@@ -585,6 +574,8 @@ const blankForm = () => ({
   special_ad_categories: '', link_description: '',
   // 1:1 尾巴小件（0091）：系列支出上限 + IG 身份
   spend_cap_usd: null, instagram_actor_id: '',
+  // 批次I：Click-to-WhatsApp 显式号码（模板级列；仅 ENGAGEMENT 部署进 promoted_object）
+  whatsapp_phone_number: '',
   // 组 AdSet
   optimization_goal: '', billing_event: 'IMPRESSIONS', destination_type: '',
   audience_id: 0,
@@ -776,9 +767,25 @@ const specialCatsSel = computed({
 })
 // 已声明特殊广告类别 → 年龄/性别定向被 FB 强制忽略（组卡受众区警告 + 输入禁用）
 const hasSpecialCats = computed(() => specialCatsSel.value.length > 0)
+// 组节点内联受众（audience_json 的编辑态；保存时序列化回 audience_json 列）
+const blankNodeAud = () => ({ countries: [], interests: [], age_min: 18, age_max: 65, gender: 0 })
+const _audFromJson = (j) => {
+  const a = blankNodeAud()
+  try {
+    const p = typeof j === 'string' ? JSON.parse(j || '{}') : (j || {})
+    a.countries = Array.isArray(p.countries) ? p.countries : []
+    a.interests = (Array.isArray(p.interests) ? p.interests : []).map(i => ({ id: String(i.id ?? ''), name: i.name || '' })).filter(i => i.id)
+    a.age_min = p.age_min || 18
+    a.age_max = p.age_max || 65
+    a.gender = p.gender || 0
+  } catch {}
+  return a
+}
 const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
+  conv_location: '', placement_mode: '', publisher_platforms: [], device_platforms: [],
+  aud: blankNodeAud(),
   budget_type: 'daily', lifetime_budget_usd: null, schedule_start: '', schedule_end: '', pacing: '',
   bid_amount_usd: null, minimum_roas: null,
   ads: [],
@@ -805,6 +812,11 @@ const normalizeTree = (adsets) => adsets.map(s => ({
   pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
   budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
   audience_id: s.audience_id || 0,
+  conv_location: (CONV_LOCATIONS_BY_OBJECTIVE[form.value.objective] || []).includes(s.conv_location) ? s.conv_location : '',
+  placement_mode: s.placement_mode === 'manual' ? 'manual' : '',
+  publisher_platforms: [...(s.publisher_platforms || [])],
+  device_platforms: [...(s.device_platforms || [])],
+  aud: _audFromJson(s.audience_json),
   ads: (s.ads || []).map(a => ({
     ...blankTreeAd(), ...a,
     key: a.key || _nk('ad'),
@@ -865,6 +877,67 @@ const bidCtrlSummary = (s) => {
   if (BID_NEEDS_ROAS.includes(form.value.bid_strategy) && s.minimum_roas !== null && s.minimum_roas !== '') parts.push('ROAS ' + s.minimum_roas)
   return parts.join(' · ')
 }
+// ── 组卡新区块（批次I）：受众折叠区（默认展开）/ 版位折叠区（默认收起）──
+const audFoldKeys = ref(new Set())   // 有 key = 收起（默认展开——受众是 P0 必经设置，不藏）
+const plOpenKeys = ref(new Set())    // 有 key = 展开（默认收起，同出价控制）
+const toggleAudSec = (key) => {
+  const s = new Set(audFoldKeys.value)
+  s.has(key) ? s.delete(key) : s.add(key)
+  audFoldKeys.value = s
+}
+const togglePlSec = (key) => {
+  const s = new Set(plOpenKeys.value)
+  s.has(key) ? s.delete(key) : s.add(key)
+  plOpenKeys.value = s
+}
+// 受众摘要（折叠头 chip）：受众库名 / 国家·兴趣数 / 未设置（默认 US 警示色）
+const nodeAudienceEmpty = (s) => !s.audience_id && !(s.aud?.countries || []).length && !(s.aud?.interests || []).length
+const nodeAudSummary = (s) => {
+  if (s.audience_id) {
+    const a = savedAudiences.value.find(x => x.id === s.audience_id)
+    return a ? a.name : '#' + s.audience_id
+  }
+  const c = (s.aud?.countries || []).join(',') || ''
+  const n = (s.aud?.interests || []).length
+  if (!c && !n) return ''
+  return (c || '—') + ' · ' + t('launch.interestCount', { n })
+}
+// 版位摘要：自动（Advantage+）/ 手动 · N 平台
+const nodePlSummary = (s) => s.placement_mode === 'manual'
+  ? t('launch.plSumManual') + ' · ' + t('launch.plSumPlatforms', { n: (s.publisher_platforms || []).length })
+  : t('launch.plSumAuto')
+// 组节点版位勾选（平台/设备；auto 时省略全部版位键）
+const toggleNodePlatform = (s, pv) => {
+  const arr = s.publisher_platforms || []
+  const i = arr.indexOf(pv)
+  if (i >= 0) arr.splice(i, 1); else arr.push(pv)
+  s.publisher_platforms = [...arr]
+}
+const toggleNodeDevice = (s, dv) => {
+  const arr = s.device_platforms || []
+  const i = arr.indexOf(dv)
+  if (i >= 0) arr.splice(i, 1); else arr.push(dv)
+  s.device_platforms = [...arr]
+}
+// 组节点兴趣搜索：查询词按节点存（nodeInterestQ），结果共享、只渲染在发起搜索的组卡
+const nodeInterestQ = ref({})
+const interestNodeKey = ref('')
+const searchInterestsForNode = async (s) => {
+  const q = (nodeInterestQ.value[s.key] || '').trim()
+  if (!q) return
+  interestNodeKey.value = s.key
+  interestSearching.value = true
+  try { interestResults.value = await GET('/audiences/search?q=' + encodeURIComponent(q) + '&limit=10') }
+  catch (e) { showError(e, t('launch.interestSearchFail')) }
+  interestSearching.value = false
+}
+const addNodeInterest = (s, it) => {
+  if (!s.aud) s.aud = blankNodeAud()
+  if (!s.aud.interests.some(x => x.id === String(it.id))) s.aud.interests.push({ id: String(it.id), name: it.name })
+}
+const removeNodeInterest = (s, i) => s.aud.interests.splice(i, 1)
+const nodeInterestAdded = (s, id) => (s.aud?.interests || []).some(x => x.id === String(id))
+const clearNodeInterestSearch = (s) => { interestNodeKey.value = ''; interestResults.value = []; nodeInterestQ.value = { ...nodeInterestQ.value, [s.key]: '' } }
 const expandAllTree = () => { expandedTreeKeys.value = new Set(tree.value.adsets.map(s => s.key)) }
 const addTreeAdset = () => {
   if (tree.value.adsets.length >= TREE_ADSETS_MAX) return ElMessage.warning(t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }))
@@ -960,6 +1033,13 @@ const flatFromTree = () => {
 const _synthTreeFromFlat = () => {
   const s = blankTreeAdset()
   s.audience_id = form.value.audience_id || 0
+  s.aud = {
+    countries: [...(form.value.audience_countries || [])],
+    interests: [...(form.value.audience_interests || [])],
+    age_min: form.value.audience_age_min || 18,
+    age_max: form.value.audience_age_max || 65,
+    gender: form.value.audience_gender || 0,
+  }
   s.optimization_goal = form.value.optimization_goal || ''
   s.billing_event = form.value.billing_event || ''
   s.ads = [adFromFlat()]
@@ -990,21 +1070,36 @@ const onModeSwitch = async (nv) => {
     selectTreeNode('campaign')
   }
 }
-// 保存前树净化：空输入的数字字段 '' → null（后端 float('') 会 400）+ 浅拷贝防中途变更
-const _cleanTreeForSave = () => tree.value.adsets.map(s => ({
-  ...s,
-  budget_usd: (s.budget_usd === '' || s.budget_usd === undefined) ? null : s.budget_usd,
-  lifetime_budget_usd: _numOrNull(s.lifetime_budget_usd),
-  bid_amount_usd: _numOrNull(s.bid_amount_usd),
-  minimum_roas: _numOrNull(s.minimum_roas),
-  schedule_start: s.schedule_start || '', schedule_end: s.schedule_end || '',
-  pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
-  budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
-  ads: (s.ads || []).map(a => {
-    const { multi, ...rest } = a   // multi 是 UI 态，不入 structure
-    return { ...rest, asset_ids: [...(a.asset_ids || [])] }
-  }),
-}))
+// 保存前树净化：空输入的数字字段 '' → null（后端 float('') 会 400）+ 浅拷贝防中途变更；
+// aud（内联受众编辑态）序列化回 audience_json；auto 版位省略全部版位键（Advantage+ 语义）
+const _cleanTreeForSave = () => tree.value.adsets.map(s => {
+  const { aud, ...rest } = s   // aud 是 UI 态，不入 structure
+  const _manual = s.placement_mode === 'manual' && (s.publisher_platforms || []).length > 0
+  return {
+    ...rest,
+    budget_usd: (s.budget_usd === '' || s.budget_usd === undefined) ? null : s.budget_usd,
+    lifetime_budget_usd: _numOrNull(s.lifetime_budget_usd),
+    bid_amount_usd: _numOrNull(s.bid_amount_usd),
+    minimum_roas: _numOrNull(s.minimum_roas),
+    schedule_start: s.schedule_start || '', schedule_end: s.schedule_end || '',
+    pacing: s.pacing === 'accelerated' ? 'accelerated' : '',
+    budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
+    audience_id: s.audience_id || 0,
+    // 选了受众库 → 清内联 audience_json（部署走 SavedAudience 分支）；否则内联生效
+    audience_json: s.audience_id ? '' : JSON.stringify({
+      countries: (aud?.countries || []), interests: (aud?.interests || []),
+      age_min: (aud?.age_min || 18), age_max: (aud?.age_max || 65), gender: (aud?.gender || 0),
+    }),
+    conv_location: s.conv_location || '',
+    placement_mode: _manual ? 'manual' : '',
+    publisher_platforms: _manual ? [...(s.publisher_platforms || [])] : [],
+    device_platforms: _manual ? [...(s.device_platforms || [])] : [],
+    ads: (s.ads || []).map(a => {
+      const { multi, ...arest } = a   // multi 是 UI 态，不入 structure
+      return { ...arest, asset_ids: [...(a.asset_ids || [])] }
+    }),
+  }
+})
 // 模板级预算校验（批G）：日预算恒必填（部署守卫口径）；lifetime 另需金额与上限；出价额/ROAS 正数
 const _budgetErrors = () => {
   const errs = []
@@ -1052,6 +1147,11 @@ const validateTree = () => {
       errs.push(t('launch.treeErrMinRoas', { name: adsetNodeLabel(s, si) }))
     if (s.budget_usd !== null && s.budget_usd !== '' && Number(s.budget_usd) > 5000)
       errs.push(t('launch.treeErrBudgetCap', { name: adsetNodeLabel(s, si), n: 5000 }))
+    // 批次I：转化位置 × 目标 / 手动版位至少一平台（后端保存 422 同口径，提前给清晰提示）
+    if (s.conv_location && !convLocationsForObj.value.includes(s.conv_location))
+      errs.push(t('launch.treeErrConvLoc', { name: adsetNodeLabel(s, si), loc: s.conv_location }))
+    if (s.placement_mode === 'manual' && !(s.publisher_platforms || []).length)
+      errs.push(t('launch.treeErrPlacement', { name: adsetNodeLabel(s, si) }))
     ;(s.ads || []).forEach(a => {
       if ((a.asset_ids || []).length > TREE_ASSETS_PER_NODE_MAX) errs.push(t('launch.treeErrAssetsMax', { n: TREE_ASSETS_PER_NODE_MAX }))
       total += Math.max((a.asset_ids || []).length, 1)
@@ -1305,39 +1405,7 @@ const openAssetPicker = async () => {
   pickerLoading.value = false
 }
 const openPreview = (a) => { previewAsset.value = a; previewOpen.value = true }
-// 兴趣搜索
-const searchInterests = async () => {
-  if (!interestQ.value.trim()) return
-  interestSearching.value = true
-  try { interestResults.value = await GET('/audiences/search?q=' + encodeURIComponent(interestQ.value.trim()) + '&limit=10') }
-  catch (e) { showError(e, t('launch.interestSearchFail')) }
-  interestSearching.value = false
-}
-const addInterest = (it) => {
-  if (!form.value.audience_interests.find(x => x.id === String(it.id))) form.value.audience_interests.push({ id: String(it.id), name: it.name })
-  // 不清结果——用户可能要连续选多个相关兴趣
-}
-const removeInterest = (i) => form.value.audience_interests.splice(i, 1)
-const clearInterestSearch = () => { interestResults.value = []; interestQ.value = '' }
-const isInterestAdded = (id) => form.value.audience_interests.some(x => x.id === String(id))
-const togglePlatform = (v) => {
-  const arr = form.value.placement_platforms || []
-  const i = arr.indexOf(v)
-  if (i >= 0) arr.splice(i, 1); else arr.push(v)
-  form.value.placement_platforms = [...arr]
-}
 const fmtSize = (n) => { if (!n) return ''; if (n >= 1e9) return (n/1e9).toFixed(1)+'B'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return Math.floor(n/1e3)+'K'; return String(n) }
-const importAiInterests = async () => {
-  if (!editingAsset.value?.ai_audience?.interests?.length) return ElMessage.warning(t('launch.noAiInterests'))
-  let added = 0
-  for (const kw of editingAsset.value.ai_audience.interests) {
-    try {
-      const r = await GET('/audiences/search?q=' + encodeURIComponent(kw) + '&limit=1')
-      if (r[0]) { if (!form.value.audience_interests.find(x => x.id === String(r[0].id))) { form.value.audience_interests.push({ id: String(r[0].id), name: r[0].name }); added++ } }
-    } catch {}
-  }
-  ElMessage.success(t('launch.importedInterests', { n: added }))
-}
 // 保存
 const buildAudienceJson = () => {
   const a = { countries: form.value.audience_countries||[], interests: form.value.audience_interests||[], age_min: form.value.audience_age_min||18, age_max: form.value.audience_age_max||65, gender: form.value.audience_gender||0 }
@@ -1377,6 +1445,7 @@ const saveTpl = async () => {
       link_description: form.value.link_description || '',
       spend_cap_usd: _numOrNull(form.value.spend_cap_usd),
       instagram_actor_id: (form.value.instagram_actor_id || '').trim(),
+      whatsapp_phone_number: (form.value.whatsapp_phone_number || '').trim(),
       optimization_goal: form.value.optimization_goal, billing_event: form.value.billing_event,
       destination_type: form.value.destination_type, audience_id: form.value.audience_id || 0,
       // 选了保存受众 → 清内联 audience_json，部署走 SavedAudience 分支（内联非空会优先生效）
@@ -1417,7 +1486,16 @@ const saveTpl = async () => {
         delete adv.is_dynamic_creative
       }
       // 版位（关时清掉结构化版位键，避免残留进 payload）
-      if (form.value.manual_placement) {
+      if (editMode.value === 'tree') {
+        // 树模式：版位在组节点 structure（placement_mode/publisher_platforms/device_platforms），
+        // advanced_config 残留版位键会在部署深合并时顶掉节点设置——一律剥离
+        if (adv.targeting) {
+          delete adv.targeting.publisher_platforms
+          delete adv.targeting.device_platforms
+          for (const p of PLATFORMS) delete adv.targeting[p.v + '_positions']
+          if (!Object.keys(adv.targeting).length) delete adv.targeting
+        }
+      } else if (form.value.manual_placement) {
         adv.targeting = adv.targeting || {}
         const plats = form.value.placement_platforms || []
         if (plats.length) adv.targeting.publisher_platforms = plats
@@ -1987,10 +2065,29 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </button>
 </div>
         <div v-else class="row"><label>{{ t('launch.objective') }}</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" /></el-select></div>
-        <div class="row" v-if="convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
+        <!-- FB：转化事件随组卡「转化位置=网站」出现（ad set 层 Conversion 面板）；TT 仍在系列段 -->
+        <div class="row" v-if="isTt && convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
             <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
           </el-select>
+</div>
+        <!-- Advantage+ 系列派生态（蓝图 §4：无单一开关，由 预算/受众/版位 三项默认派生；只读展示不发字段） -->
+        <div v-if="!isTt" class="advp-row">
+          <span class="advp-label">{{ t('launch.advpSeries') }}</span>
+          <span :class="['advp-chip', { on: cboOn }]" :title="t('launch.advpChipBudgetHint')">{{ t('launch.advpChipBudget') }}</span>
+          <span :class="['advp-chip', { on: advantage_audience }]" :title="t('launch.advpChipAudienceHint')">{{ t('launch.advpChipAudience') }}</span>
+          <span :class="['advp-chip', { on: placementAutoAll }]" :title="t('launch.advpChipPlacementHint')">{{ t('launch.advpChipPlacement') }}</span>
+          <span class="advp-note">{{ t('launch.advpDerived') }}</span>
+</div>
+        <!-- Advantage+ 受众开关（模板级；原平铺组段迁入——控制上方受众 chip，不进部署 payload） -->
+        <div v-if="!isTt" class="advantage-box">
+          <div class="adv-row">
+            <div class="adv-info">
+              <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
+              <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
+</div>
+            <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+</div>
 </div>
         <template v-if="!isTt">
         <!-- special ad categories (multi, empty = none) + buying type (read-only: auction) -->
@@ -2047,6 +2144,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           </el-select>
           <span class="hint">{{ t('launch.pageIdHint') }}</span>
 </div>
+        <!-- Click-to-WhatsApp 显式号码（批次I）：仅互动目标部署进 promoted_object；其他目标随主页绑定号 -->
+        <div v-if="!isTt && form.objective === 'OUTCOME_ENGAGEMENT'" class="row"><label>{{ t('launch.waPhoneLabel') }}</label>
+          <input v-model.trim="form.whatsapp_phone_number" class="inp" :placeholder="t('launch.waPhonePh')" />
+          <span class="hint">{{ t('launch.waPhoneHint') }}</span>
+</div>
 </div>
 </div>
 </div><!-- /sec1 -->
@@ -2074,12 +2176,22 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div v-if="expandedTreeKeys.has(s.key)" class="as-card-body form">
                 <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="s.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
-                <!-- 转化设置（FB 广告组层）：转化发生位置 + 转化像素 -->
+                <!-- 转化设置（FB 广告组层）：转化位置（按目标出选项，批次I）→ 转化事件（网站位）→ 转化像素 -->
                 <div class="sec-title">{{ t('launch.convSettingsTitle') }}</div>
-                <!-- conversion location: auto by objective (read-only) -->
                 <div class="row"><label>{{ t('launch.convLocation') }}</label>
-                  <div class="ro-field">{{ convLocationText }}</div>
+                  <div v-if="convLocationsForObj.length" class="convloc-opts">
+                    <button type="button" :class="['convloc-opt', { on: !s.conv_location }]" @click="s.conv_location = ''">{{ t('launch.convLocAuto') }}</button>
+                    <button v-for="l in convLocationsForObj" :key="l" type="button" :class="['convloc-opt', { on: s.conv_location === l }]" @click="s.conv_location = l">{{ t('launch.conv_loc_' + l) }}</button>
+                  </div>
+                  <div v-else class="ro-field">{{ t('launch.convLocNone') }}</div>
                   <span class="hint">{{ t('launch.convLocationHint') }}</span>
+</div>
+                <!-- 转化事件：转化位置=网站 且 SALES/LEADS（写系列级 conversion_goal → 部署映射 custom_event_type） -->
+                <div v-if="s.conv_location === 'website' && convGoalsForObjective.length" class="row"><label>{{ t('launch.conversionGoal') }}</label>
+                  <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
+                    <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
+                  </el-select>
+                  <span class="hint">{{ t('launch.convEventHint') }}</span>
 </div>
                 <!-- 像素（promoted_object，广告组层）：模板级默认值——部署链按 item.pixel_id > 模板取，绑定模板字段 -->
                 <div class="row"><label>{{ t('launch.treePixelLabel') }}</label>
@@ -2135,20 +2247,104 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
                   </template>
 </div>
-                <div class="row"><label>{{ t('launch.treeAudienceOverride') }}</label>
-                  <el-select v-model="s.audience_id" filterable size="small" style="width:100%">
-                    <el-option :value="0" :label="t('launch.treeAudienceDefault')" />
-                    <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
-                      :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
-                  </el-select>
-                  <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
+                <!-- 受众区（批次I · 审计P0-1）：受众库下拉 + 内联编辑（国家/年龄/性别/兴趣）进组卡，节点级绑定 -->
+                <div class="node-sec">
+                  <button type="button" class="node-sec-head" @click="toggleAudSec(s.key)">
+                    <span class="t-arrow" :class="{ open: !audFoldKeys.has(s.key) }">▶</span>
+                    <span>{{ t('launch.audienceTargeting') }}</span>
+                    <span :class="['node-sec-val', { warn: nodeAudienceEmpty(s) }]">{{ nodeAudSummary(s) || t('launch.audNotSet') }}</span>
+                  </button>
+                  <div v-show="!audFoldKeys.has(s.key)" class="node-sec-body">
+                    <!-- 特殊广告类别已声明：受众定向被 FB 强制收窄 -->
+                    <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
+                    <div class="row"><label>{{ t('launch.audienceSource') }}</label>
+                      <el-select v-model="s.audience_id" filterable size="small" style="width:100%">
+                        <el-option :value="0" :label="t('launch.audienceCustom')" />
+                        <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
+                          :label="a.name + (a.status !== 'active' ? ' · ' + t('launch.audInactive') : '')" />
+                      </el-select>
+                      <span class="hint">{{ t('launch.treeAudHint') }}</span>
 </div>
-                <!-- 特殊广告类别已声明：受众定向被 FB 强制收窄（树模式组卡受众区提示） -->
-                <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
+                    <div v-if="s.audience_id && (savedAudiences.find(a => a.id === s.audience_id) || {}).status !== 'active'"
+                      class="hint" style="color:var(--warning)">{{ t('launch.audInactiveWarn') }}</div>
+                    <template v-if="!s.audience_id">
+                    <div class="row"><label>{{ t('launch.countries') }}</label>
+                      <el-select v-model="s.aud.countries" multiple filterable collapse-tags collapse-tags-tooltip
+                        :placeholder="t('launch.countriesPlaceholder')" style="width:100%" size="small">
+                        <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
+                      </el-select>
+</div>
+                    <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
+                    <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
+                    <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
+                    <div class="row"><label>{{ t('launch.interestLabel') }}</label>
+                      <div class="interest-search">
+                        <input v-model="nodeInterestQ[s.key]" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterestsForNode(s)" />
+                        <button class="btn sm" :disabled="interestSearching" @click="searchInterestsForNode(s)">{{ interestSearching ? '…' : t('common.search') }}</button>
+</div>
+                      <div v-if="interestSearching && interestNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
+                      <div v-else-if="interestResults.length && interestNodeKey === s.key" class="search-results">
+                        <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearNodeInterestSearch(s)">{{ t('launch.clear') }} ✕</button></div>
+                        <div v-for="r in interestResults" :key="r.id" :class="['search-item', { added: nodeInterestAdded(s, r.id) }]" @click="!nodeInterestAdded(s, r.id) && addNodeInterest(s, r)">
+                          <span>{{ r.name }}</span>
+                          <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
+                          <span class="add" v-if="!nodeInterestAdded(s, r.id)">+</span>
+                          <span class="added-mark" v-else>✓</span>
+</div>
+</div>
+</div>
+                    <div class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
+                      <div class="interest-list">
+                        <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>
+                        <span v-if="!(s.aud.interests||[]).length" class="hint">{{ t('launch.addViaSearch') }}</span>
+</div>
+</div>
+                    </template>
+                    <div v-if="nodeAudienceEmpty(s)" class="aud-empty-warn">{{ t('launch.audEmptyWarn') }}</div>
+                  </div>
+                </div>
+                <!-- 版位区（批次I）：自动版位（Advantage+）/ 手动（平台+设备）双卡；auto=省略全部版位键 -->
+                <div class="node-sec">
+                  <button type="button" class="node-sec-head" @click="togglePlSec(s.key)">
+                    <span class="t-arrow" :class="{ open: plOpenKeys.has(s.key) }">▶</span>
+                    <span>{{ t('launch.placement') }}</span>
+                    <span class="node-sec-val">{{ nodePlSummary(s) }}</span>
+                  </button>
+                  <div v-show="plOpenKeys.has(s.key)" class="node-sec-body">
+                    <div class="pl-cards">
+                      <button type="button" :class="['pl-card', { on: s.placement_mode !== 'manual' }]" @click="s.placement_mode = ''">
+                        <span class="pl-card-t">{{ t('launch.plModeAuto') }}</span>
+                        <span class="pl-card-d">{{ t('launch.plModeAutoDesc') }}</span>
+</button>
+                      <button type="button" :class="['pl-card', { on: s.placement_mode === 'manual' }]" @click="s.placement_mode = 'manual'">
+                        <span class="pl-card-t">{{ t('launch.plModeManual') }}</span>
+                        <span class="pl-card-d">{{ t('launch.plModeManualDesc') }}</span>
+</button>
+</div>
+                    <template v-if="s.placement_mode === 'manual'">
+                      <div class="row"><label>{{ t('launch.plPlatformsLabel') }}</label>
+                        <div class="platform-chips">
+                          <label v-for="pv in PUB_PLATFORMS" :key="pv" class="platform-chip" :class="{on:(s.publisher_platforms||[]).includes(pv)}">
+                            <input type="checkbox" :checked="(s.publisher_platforms||[]).includes(pv)" @change="toggleNodePlatform(s, pv)" /> {{ PUB_PLATFORM_LABELS[pv] }}
+                          </label>
+</div>
+</div>
+                      <div class="row"><label>{{ t('launch.device') }}</label>
+                        <div class="platform-chips">
+                          <label v-for="d in DEVICES" :key="d.v" class="platform-chip" :class="{on:(s.device_platforms||[]).includes(d.v)}">
+                            <input type="checkbox" :checked="(s.device_platforms||[]).includes(d.v)" @change="toggleNodeDevice(s, d.v)" /> {{ t(d.l) }}
+                          </label>
+</div>
+</div>
+                      <div v-if="!(s.publisher_platforms||[]).length" class="hint" style="color:var(--warning)">{{ t('launch.plNeedPlatform') }}</div>
+                    </template>
+                  </div>
+                </div>
+                <!-- 优化目标覆盖：按 OPT_GOALS_BY_OBJECTIVE×objective 过滤（空=按转化位置矩阵自动） -->
                 <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
                   <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
-                    <el-option value="" :label="t('launch.autoByObj')" />
-                    <el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" />
+                    <el-option value="" :label="t('launch.optAutoByLoc')" />
+                    <el-option v-for="g in optGoalsForObj" :key="g.v" :value="g.v" :label="t(g.l)" />
                   </el-select>
                   <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
@@ -2161,67 +2357,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             </div>
             <button class="t-add-adset" @click="addTreeAdset">{{ t('launch.treeAddGroup') }}</button>
           </template>
-          <!-- flat mode: single card, no add/remove -->
+          <!-- flat mode: single card, no add/remove（FB 恒树模式——平铺卡仅 TT 可达；
+               FB 组段能力（转化位置/受众/版位/预算排期/出价）已在组卡，此处只留 TT 定向/像素残壳） -->
           <div v-else class="as-card">
             <div class="as-card-body form">
-              <!-- budget & schedule + pacing (FB only; TT budget sits on the campaign section) -->
-              <template v-if="!isTt">
-              <div class="row"><label>{{ t('launch.convLocation') }}</label>
-                <div class="ro-field">{{ convLocationText }}</div>
-                <span class="hint">{{ t('launch.convLocationHint') }}</span>
-</div>
-              <template v-if="!cboOn">
-              <div class="row"><label>{{ t('launch.budgetType') }}</label>
-                <div class="seg">
-                  <button :class="{on:form.budget_type!=='lifetime'}" @click="form.budget_type='daily'">{{ t('launch.btDaily') }}</button>
-                  <button :class="{on:form.budget_type==='lifetime'}" @click="form.budget_type='lifetime'">{{ t('launch.btLifetime') }}</button>
-                </div>
-</div>
-              <div v-if="form.budget_type!=='lifetime'" class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span></div>
-              <template v-else>
-              <div class="row"><label>{{ t('launch.lifetimeBudgetUsd') }}<span class="req-mark">*</span></label><input v-model.number="form.lifetime_budget_usd" type="number" min="1" step="0.5" class="inp" :placeholder="t('launch.lifetimeBudgetPh')" /><span class="hint">{{ t('launch.lifetimeScheduleHint') }}</span></div>
-              <div class="row"><label>{{ t('launch.dailyBudgetUsd') }}</label><input v-model.number="form.budget_usd" type="number" min="1" max="5000" step="0.5" class="inp" :placeholder="t('launch.lifetimeDailyKeepPh')" /><span class="hint">{{ t('launch.lifetimeDailyKeepHint') }}</span></div>
-              </template>
-              </template>
-              <div class="row"><label>{{ t('launch.scheduleLabel') }}<span v-if="form.budget_type==='lifetime' && !cboOn" class="req-mark">*</span></label>
-                <div class="sched-row">
-                  <el-date-picker v-model="form.schedule_start" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.scheduleStartPh')" />
-                  <span class="sched-sep">—</span>
-                  <el-date-picker v-model="form.schedule_end" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.scheduleEndPh')" />
-                </div>
-                <span class="hint">{{ form.budget_type==='lifetime' ? t('launch.scheduleLifetimeHint') : t('launch.scheduleHint') }}</span>
-</div>
-              <div class="row"><label>{{ t('launch.pacingMode') }}</label>
-                <div class="seg">
-                  <button :class="{on:form.pacing!=='accelerated'}" @click="form.pacing=''">{{ t('launch.pacingStandard') }}</button>
-                  <button :class="{on:form.pacing==='accelerated'}" @click="form.pacing='accelerated'">{{ t('launch.pacingAccelerated') }}</button>
-                </div>
-</div>
-              </template>
-              <!-- existing flat ad-set form below (optimization / audience / placements / disclosure / pacing / advanced) -->
-        <template v-if="!isTt">
-        <div class="row"><label>{{ t('launch.optimizationGoal') }}</label><el-select v-model="form.optimization_goal" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoByObj')" /><el-option v-for="g in OPT_GOALS" :key="g.v" :value="g.v" :label="t(g.l)" /></el-select></div>
-        <div class="row"><label>{{ t('launch.billingEvent') }}</label><el-select v-model="form.billing_event" style="width:100%" size="small"><el-option v-for="b in BILLING_EVENTS" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
-        <div class="row"><label>{{ t('launch.conversionDest') }}</label><el-select v-model="form.destination_type" style="width:100%" size="small" filterable><el-option value="" :label="t('launch.autoOpt')" /><el-option v-for="d in DEST_TYPES" :key="d.v" :value="d.v" :label="t(d.l)" /></el-select></div>
-        <hr class="sep" />
-        <div class="sec-title">{{ t('launch.perfGoalOptional') }}</div>
-        <div class="row"><label>{{ t('launch.cpaGoalLabel') }}</label>
-          <input v-model.number="performance_goal_cpa" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.cpaGoalPlaceholder')" />
-          <span class="hint">{{ t('launch.cpaGoalHint') }}</span>
-</div>
-</template>
-        <div v-else class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
-        <!-- 像素（广告组层转化设置；FB/TT 的转化追踪像素都配置在组层，自广告段移入） -->
-        <div class="row"><label>{{ isTt ? t('launch.ttPixelId') : t('launch.pixelId') }}</label>
-          <el-input v-if="isTt" v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
-          <el-input v-else v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
-          <span class="hint">{{ isTt ? t('launch.ttPixelIdHint') : t('launch.pixelIdHint') }}</span>
+        <div class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttOptimizeHint') }}</div>
+        <!-- TikTok 像素（广告组层转化设置；FB 像素在组卡「转化设置」） -->
+        <div class="row"><label>{{ t('launch.ttPixelId') }}</label>
+          <el-input v-model="form.pixel_id" :placeholder="t('launch.ttPixelIdPh')" size="small" clearable />
+          <span class="hint">{{ t('launch.ttPixelIdHint') }}</span>
 </div>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.audienceTargeting') }}</div>
-        <!-- 特殊广告类别已声明：FB 强制忽略年龄/性别/部分兴趣定向（合规收窄，提前告知） -->
-        <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
-        <!-- 受众来源：保存的受众（SavedAudience，部署时用） / 自定义（下方手动定向） -->
+        <!-- 受众来源：保存的受众（SavedAudience，部署时用） / 自定义（下方手动定向）；
+             FB 内联受众编辑已进组卡（受众编辑只留组卡一份），此处为 TT 定向残壳 -->
         <div class="row"><label>{{ t('launch.audienceSource') }}</label>
           <el-select v-model="form.audience_id" filterable size="small" style="width:100%" :placeholder="t('launch.audienceCustom')">
             <el-option :value="0" :label="t('launch.audienceCustom')" />
@@ -2242,16 +2391,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <button class="btn sm ghost" :disabled="!hasManualAudience" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ t('launch.saveAsAudience') }}</button>
 </div>
         <template v-if="!form.audience_id">
-        <!-- Advantage+ 受众开关（对齐 FB Ads Manager 默认行为；FB 专属） -->
-        <div v-if="!isTt" class="advantage-box">
-          <div class="adv-row">
-            <div class="adv-info">
-              <span class="adv-title">{{ t('launch.advPlusAudience') }}</span>
-              <span class="adv-desc">{{ t('launch.advPlusAudienceDesc') }}</span>
-</div>
-            <el-switch v-model="advantage_audience" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
-</div>
-</div>
         <div class="row"><label>{{ t('launch.countries') }}</label>
           <el-select v-model="form.audience_countries" multiple filterable collapse-tags collapse-tags-tooltip
             :placeholder="t('launch.countriesPlaceholder')" style="width:100%" size="small">
@@ -2260,76 +2399,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
         <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="form.audience_age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="form.audience_age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
         <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:form.audience_gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:form.audience_gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:form.audience_gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="form.audience_gender=2">{{ t('launch.genderFemale') }}</button></div></div>
-        <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
-        <div v-if="isTt" class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttAudienceHint') }}</div>
-        <div v-if="!isTt" class="row"><label>{{ t('launch.languageLabel') }}</label>
-          <el-select v-model="form.audience_language" filterable clearable :placeholder="t('launch.langAny')" style="width:100%" size="small">
-            <el-option v-for="l in LANGS.filter(x=>x.v)" :key="l.v" :value="l.v" :label="t(l.l)" />
-</el-select>
-</div>
-        <template v-if="!advantage_audience && !isTt">
-        <div class="row"><label>{{ t('launch.interestLabel') }}</label>
-          <div class="interest-search">
-            <input v-model="interestQ" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterests" />
-            <button class="btn sm" :disabled="interestSearching" @click="searchInterests">{{ interestSearching ? '…' : t('common.search') }}</button>
-            <button class="btn sm ghost" @click="importAiInterests" v-if="editingAsset?.ai_audience?.interests?.length">{{ t('launch.importFromAssetAi') }}</button>
-</div>
-          <div v-if="interestSearching" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
-          <div v-else-if="interestResults.length" class="search-results">
-            <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearInterestSearch">{{ t('launch.clear') }} ✕</button></div>
-            <div v-for="r in interestResults" :key="r.id" :class="['search-item', { added: isInterestAdded(r.id) }]" @click="!isInterestAdded(r.id) && addInterest(r)">
-              <span>{{ r.name }}</span>
-              <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
-              <span class="add" v-if="!isInterestAdded(r.id)">+</span>
-              <span class="added-mark" v-else>✓</span>
-</div>
-</div>
-</div>
-        <div class="row"><label>{{ t('launch.selectedInterests', { n: form.audience_interests.length }) }}</label>
-          <div class="interest-list">
-            <span v-for="(it,i) in form.audience_interests" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeInterest(i)">✕</button></span>
-            <span v-if="!form.audience_interests.length" class="hint">{{ t('launch.addViaSearch') }}</span>
-</div>
-</div>
-</template>
-</template>
+        <div class="hint" style="padding:6px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttAudienceHint') }}</div>
+        </template>
         <hr class="sep" />
         <div class="sec-title">{{ t('launch.placement') }}</div>
-        <div v-if="isTt" class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttPlacementHint') }}</div>
-        <template v-else>
-        <div class="row"><label>{{ t('launch.adPlacement') }}</label>
-          <div class="seg">
-            <button :class="{on:!form.manual_placement}" @click="form.manual_placement=false">{{ t('launch.advPlusPlacement') }}</button>
-            <button :class="{on:form.manual_placement}" @click="form.manual_placement=true">{{ t('launch.manualSelect') }}</button>
-</div>
-</div>
-        <div v-if="form.manual_placement">
-          <div class="row"><label>{{ t('launch.device') }}</label>
-            <div class="placement-chips">
-              <label v-for="d in DEVICES" :key="d.v" class="placement-chip" :class="{on:(form.placement_devices||[]).includes(d.v)}">
-                <input type="checkbox" :checked="(form.placement_devices||[]).includes(d.v)" @change="toggleDevice(d.v)" /> {{ t(d.l) }}
-</label>
-</div>
-</div>
-          <div class="row"><label>{{ t('launch.platformsAndPlacements') }}</label>
-            <div class="placement-tree">
-              <div v-for="p in PLATFORMS" :key="p.v" class="pt-node">
-                <div class="pt-head" @click="togglePlatformExpand(p.v)">
-                  <span class="pt-arrow" :class="{open:expandedPlatforms.has(p.v)}">▶</span>
-                  <label class="pt-label" :class="{on:isPlatformOn(p.v)}" @click.stop="togglePlatformSel(p.v)">
-                    <input type="checkbox" :checked="isPlatformOn(p.v)" @change="togglePlatformSel(p.v)" /> {{ p.l }}
-</label>
-</div>
-                <div v-if="expandedPlatforms.has(p.v) && isPlatformOn(p.v)" class="pt-positions">
-                  <label v-for="pos in p.positions" :key="pos.v" class="pos-chip" :class="{on:isPosOn(p.v,pos.v)}">
-                    <input type="checkbox" :checked="isPosOn(p.v,pos.v)" @change="togglePos(p.v,pos.v)" /> {{ t(pos.l) }}
-</label>
-</div>
-</div>
-</div>
-</div>
-</div>
-</template>
+        <div class="hint" style="padding:8px 10px;background:var(--bg3);border-radius:6px">{{ t('launch.ttPlacementHint') }}</div>
         <template v-if="!isTt">
         <div class="sec-title">{{ t('launch.disclosure') }}</div>
         <div class="row"><label>{{ t('launch.beneficiary') }}</label><input v-model="form.beneficiary" class="inp" :placeholder="t('launch.beneficiaryPlaceholder')" /></div>
@@ -3350,6 +3424,34 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dtc-line{font-size:12px;color:var(--t2)}
 .dtc-line.warn{color:var(--warning);font-weight:600}
 
+/* 批次I：组卡转化位置单选组（按钮 chip，可换行） */
+.convloc-opts{display:flex;flex-wrap:wrap;gap:6px}
+.convloc-opt{padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg3);color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit}
+.convloc-opt:hover{border-color:var(--ac);color:var(--ac)}
+.convloc-opt.on{border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.1);font-weight:600}
+/* 组卡折叠子区（受众/版位；受众默认展开=折叠集，版位默认收起=展开集，仿出价控制） */
+.node-sec{border:1px solid var(--bd);border-radius:8px;padding:6px 10px;background:var(--bg3)}
+.node-sec-head{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;font-family:inherit}
+.node-sec-head:hover{color:var(--ac)}
+.node-sec-val{margin-left:auto;font-weight:500;color:var(--ac);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+.node-sec-val.warn{color:var(--warning)}
+.node-sec-body{padding:8px 0 2px;display:flex;flex-direction:column;gap:10px}
+/* 版位双卡（自动=Advantage+ / 手动） */
+.pl-cards{display:flex;gap:8px}
+.pl-card{flex:1;text-align:left;border:1px solid var(--bd);border-radius:8px;padding:8px 10px;cursor:pointer;background:var(--bg2);display:flex;flex-direction:column;gap:2px;font-family:inherit}
+.pl-card:hover{border-color:var(--ac)}
+.pl-card.on{border-color:var(--ac);background:rgba(10,132,255,.08)}
+.pl-card-t{font-size:12px;font-weight:600;color:var(--t1)}
+.pl-card.on .pl-card-t{color:var(--ac)}
+.pl-card-d{font-size:10px;color:var(--t3);line-height:1.4}
+/* 受众未设置黄色警示（P0-1：空=FB 默认定向（US），不静默） */
+.aud-empty-warn{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(255,159,10,.1);color:var(--warning);border:1px solid rgba(255,159,10,.3)}
+/* Advantage+ 系列派生 chip 行（蓝图 §4：只读展示不发字段） */
+.advp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;border:1px dashed var(--bd);border-radius:8px}
+.advp-label{font-size:12px;font-weight:600;color:var(--t2)}
+.advp-chip{font-size:10px;padding:2px 8px;border-radius:8px;border:1px solid var(--bd);color:var(--t3);white-space:nowrap}
+.advp-chip.on{color:var(--success);border-color:rgba(52,199,89,.45);background:rgba(52,199,89,.1);font-weight:600}
+.advp-note{font-size:10px;color:var(--t3);margin-left:auto}
 /* 预检：树模式横幅 + 结构树表 */
 .pf-banner{padding:8px 12px;border-radius:6px;font-size:12px;line-height:1.6;border:1px solid}
 .pf-banner.warn{color:var(--error);background:rgba(255,69,58,.08);border-color:rgba(255,69,58,.3)}
@@ -3461,5 +3563,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
   .pf-k{min-width:0}
   .pft-adset,.pft-ad{flex-wrap:wrap}
   .pft-name{white-space:normal;word-break:break-all}
+  /* 批次I 新区块：Advantage+ 派生行/版位双卡/组卡折叠子区头（可点区 ≥40px，元信息换行） */
+  .advp-note{flex-basis:100%;margin-left:0}
+  .pl-cards{flex-direction:column}
+  .node-sec-head{min-height:40px;flex-wrap:wrap}
+  .node-sec-val{max-width:100%;flex-basis:100%;text-align:left}
 }
 </style>

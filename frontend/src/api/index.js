@@ -21,6 +21,17 @@ function headers() {
   return h
 }
 
+// FastAPI 校验错误（422）的 detail 是 [{msg, loc, ...}] 数组——展开成可读文本（不是 [object Object]）
+function _errMsg(detail) {
+  if (detail == null) return ''
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && typeof d === 'object' && (d.msg || d.message)) || JSON.stringify(d)).join('\n')
+  }
+  if (typeof detail === 'object') return detail.msg || detail.message || JSON.stringify(detail)
+  return String(detail)
+}
+
 export async function api(method, path, body) {
   const opts = { method, headers: headers() }
   if (body) opts.body = JSON.stringify(body)
@@ -52,7 +63,7 @@ export async function api(method, path, body) {
     const text = await res.text()
     let data = {}
     try { data = JSON.parse(text) } catch {}
-    if (!res.ok) throw new Error(data.detail || data.message || text || `HTTP ${res.status}`)
+    if (!res.ok) throw new Error(_errMsg(data.detail) || data.message || text || `HTTP ${res.status}`)
     return data
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(i18n.global.t('error.timeout'))
