@@ -148,7 +148,7 @@ export default {
     treeAssetGroupHint: '素材组×{n}：部署时每个素材展开一个广告',
     treePostSource: '创意来源', treeAdLang: '广告语言',
     convSettingsTitle: '转化设置', treePixelLabel: '转化像素',
-    treePixelHint: '模板级默认，所有广告组共用（逐组像素暂不支持）；留空 = 部署时按账户选择',
+    treePixelHint: '本广告组像素（仅网站转化位出现）；留空 = 部署时按账户选择（模板默认兜底）',
     treeDisclosureHint: '模板级，所有广告组共用',
     bidControlTitle: '出价控制',
     bidDefaultHint: '模板默认；各广告组可在组卡「出价控制」覆盖，留空的组用此默认',
@@ -171,7 +171,7 @@ export default {
     treeAssetCount: '素材 {n}', pfAdsetCount: '广告组', pfAdTotal: '展开广告数', pfAboTotal: '启用组合计',
     pfBindMsg: '消息', pfBindForm: '表单',
     // FB 创建流 1:1（批G）：目标选择弹窗 + 三段手风琴 + 预算排期/出价/特殊类别/描述
-    objpTitle: '选择广告目标', objpNameOptional: '命名广告系列（可选）', objpNamePh: '广告系列名（留空自动命名）', objpContinue: '继续', objpChange: '更换',
+    objpTitle: '选择广告目标', objpNameOptional: '命名广告系列（可选）', objpNamePh: '广告系列名（留空自动命名）', objpContinue: '继续',
     obj_desc_awareness: '寻找更可能记住你广告的用户，提升品牌知名度。',
     obj_desc_traffic: '吸引更多用户访问网站、应用或落地页。',
     obj_desc_engagement: '适用于 Messenger、Instagram 和 WhatsApp 的互动场景。',
@@ -230,6 +230,12 @@ export default {
     advpChipPlacement: '自动版位', advpChipPlacementHint: '所有广告组均为自动版位时亮',
     treeErrConvLoc: '「{name}」转化位置「{loc}」不适用于当前目标',
     treeErrPlacement: '「{name}」手动版位需至少选择一个平台',
+    // 动态逻辑引擎 + 三层 Tab（批次IV）
+    objChangeHint: '更换目标后，组级不兼容的转化位置/优化目标自动重置',
+    locPickHint: '选择转化位置后配置对应设置（像素/转化事件按位置出现）',
+    msgAudAutoHint: '消息类转化位置：受众由 Advantage+ 自动扩展，仅国家为硬约束（年龄/性别/兴趣被 FB 忽略）',
+    cboBudgetAtCampaign: '预算在系列层设置（Advantage+ 系列预算）；此处仅排期与出价控制',
+    noMsgTplForType: '暂无 {type} 类型的消息模板，去「表单模板」页新建',
   },
   en: {
     title: 'Launch Templates', tplCount: '{n} templates', subtitle: 'Pick a template + pick accounts → one-click batch deploy to multiple accounts.',
@@ -379,7 +385,7 @@ export default {
     treeAssetGroupHint: 'Asset group ×{n}: each asset expands into one ad at deploy time',
     treePostSource: 'Creative source', treeAdLang: 'Ad language',
     convSettingsTitle: 'Conversion settings', treePixelLabel: 'Conversion pixel',
-    treePixelHint: 'Template-level default shared by all ad sets (per-set pixels not supported yet); blank = picked per account at deploy',
+    treePixelHint: 'Pixel for this ad set (shown for the Website conversion location only); blank = picked per account at deploy (template default as fallback).',
     treeDisclosureHint: 'Template-level, shared by all ad sets',
     bidControlTitle: 'Bid control',
     bidDefaultHint: 'Template default; each ad set can override in its "Bid control" area — blank sets use this default',
@@ -402,7 +408,7 @@ export default {
     treeAssetCount: '{n} assets', pfAdsetCount: 'Ad sets', pfAdTotal: 'Expanded ads', pfAboTotal: 'Enabled set total',
     pfBindMsg: 'Msg', pfBindForm: 'Form',
     // FB creation flow 1:1 (batch G): objective picker + three-section accordion + budget/schedule/bid/special categories/description
-    objpTitle: 'Choose an Ad Objective', objpNameOptional: 'Name this campaign (optional)', objpNamePh: 'Campaign name (blank = auto-named)', objpContinue: 'Continue', objpChange: 'Change',
+    objpTitle: 'Choose an Ad Objective', objpNameOptional: 'Name this campaign (optional)', objpNamePh: 'Campaign name (blank = auto-named)', objpContinue: 'Continue',
     obj_desc_awareness: 'Find people more likely to remember your ads and build brand awareness.',
     obj_desc_traffic: 'Get more people to visit your website, app or landing page.',
     obj_desc_engagement: 'Works with Messenger, Instagram and WhatsApp.',
@@ -460,5 +466,11 @@ export default {
     advpChipPlacement: 'Auto placements', advpChipPlacementHint: 'Lit when every ad set uses automatic placements',
     treeErrConvLoc: 'Ad set "{name}" conversion location "{loc}" is not available for this objective',
     treeErrPlacement: 'Ad set "{name}" manual placements need at least one platform',
+    // Dynamic logic engine + three-level tabs (batch IV)
+    objChangeHint: 'Changing the objective resets incompatible conversion locations / optimization goals on ad sets.',
+    locPickHint: 'Pick a conversion location to configure its settings (pixel / conversion event appear by location).',
+    msgAudAutoHint: 'Messaging conversion location: the audience is auto-expanded by Advantage+; only countries are hard constraints (age/gender/interests are ignored by FB).',
+    cboBudgetAtCampaign: 'Budget is set on the campaign (Advantage+ campaign budget); only schedule and bid control remain here.',
+    noMsgTplForType: 'No {type} message templates yet — create one on the Form Templates page.',
   },
 }

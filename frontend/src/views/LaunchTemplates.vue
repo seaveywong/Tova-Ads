@@ -418,9 +418,9 @@ const onEditBeforeClose = (done) => {
 
 // #1 保存前校验
 const validationErrors = ref([])
-// 校验错误定位（批次II 修审计 G1）：结构化错误 { msg, sec, key }——sec=三段手风琴段名
-// （campaign/adset/ad），key=组/广告节点 key（''=段级，滚动到段即可）。保存失败时展开
-// 对应段+双层折叠卡、组卡/广告卡标红边并滚动到首个出错对象（不只在 toast 里列文本）。
+// 校验错误定位（批次II 修审计 G1）：结构化错误 { msg, sec, key }——sec=三层 Tab 段名
+// （campaign/adset/ad），key=组/广告节点 key（''=段级，滚动到段即可）。保存失败时切换到
+// 对应 Tab+双层折叠卡、组卡/广告卡标红边并滚动到首个出错对象（不只在 toast 里列文本）。
 const saveErrKeys = ref(new Set())
 const _validateFlatEx = () => {
   const errs = []
@@ -439,7 +439,7 @@ const _focusErrs = (errs) => {
   saveErrKeys.value = new Set(errs.map(e => e.key).filter(Boolean))
   const first = errs.find(e => e.key) || errs[0]
   if (!first) return
-  secOpen.value = { ...secOpen.value, [first.sec]: true }
+  editTab.value = first.sec   // 切到出错层 Tab 再定位滚动
   if (first.key) {
     for (const s of (tree.value.adsets || [])) {
       if (s.key === first.key) {
@@ -480,6 +480,24 @@ const _anchorBackendSaveErrs = (msg) => {
 const editStatus = computed(() => {
   const errs = editMode.value === 'tree' ? validateTree() : validateTemplate()
   return errs.length ? { ready: false, missing: errs } : { ready: true, missing: [] }
+})
+// 三层 Tab 完备度指示：系列=段级错误数（0 显 ✓）；组/广告=完备节点数/总数
+// （组=含广告且无组级校验错；广告=有素材或跟帖引用即绿点口径 adDot）
+const secStats = computed(() => {
+  const errs = editMode.value === 'tree' ? _validateTreeEx() : _validateFlatEx()
+  const campErrs = errs.filter(e => e.sec === 'campaign').length
+  let setOk = 0, setN = 0, adOk = 0, adN = 0
+  if (editMode.value === 'tree') {
+    for (const s of tree.value.adsets) {
+      setN++
+      if ((s.ads || []).length && !errs.some(e => e.key === s.key)) setOk++
+      for (const a of (s.ads || [])) { adN++; if (adDot(a) === 'g') adOk++ }
+    }
+  } else {
+    setN = 1; setOk = errs.some(e => e.sec === 'adset') ? 0 : 1
+    adN = 1; adOk = (form.value.post_source === 'reuse' ? !!form.value.reuse_post_ref : !!form.value.asset_id) ? 1 : 0
+  }
+  return { campErrs, setOk, setN, adOk, adN }
 })
 // CBO 开关（budget_mode 语义映射：开=CBO 系列预算；关=ABO 组预算）
 const cboOn = computed({
@@ -636,7 +654,8 @@ const loadFormMsgTemplates = async () => {
   try { formTemplates.value = await GET('/form-templates/forms') } catch {}
   try { msgTemplates.value = await GET('/form-templates/messages') } catch {}
 }
-// 消息模板不做类型过滤（WHATSAPP 相关目标也允许复用任一模板文案）；列表展示走摘要卡 msgTplSummary
+// 消息模板类型过滤按转化位置（msgTplsForLoc：WhatsApp 位=WhatsApp 模板、其余消息位=Messenger）；
+// 转化位置为空（自动）时不滤——允许复用任一模板文案；列表展示走摘要卡 msgTplSummary
 const onFormTplChange = (id) => {
   if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; form.value.lead_form_template_id = 0; return }
   const t = formTemplates.value.find(f => f.id === id)
@@ -837,6 +856,41 @@ const isTt = computed(() => form.value.platform === 'tt')
 // 平台编辑器内只读 → 不存在中途切平台后引用失效的问题）
 const formTemplatesForPlat = computed(() =>
   formTemplates.value.filter(f => (f.platform || 'fb') === (form.value.platform || 'fb')))
+// ── 动态逻辑引擎（FB 真实行为：选了什么才出什么；显隐一律 v-show 防丢已填数据）──
+// 消息类转化位置：受众走 Advantage+（仅国家硬约束），无像素/落地页/表单
+const MSG_LOCS = ['messenger', 'whatsapp', 'instagram_direct']
+// 表单类转化位置：广告卡出表单模板（on_ad_messenger 另出消息模板）
+const FORM_LOCS = ['on_ad', 'on_ad_messenger']
+const locIsMsg = (s) => MSG_LOCS.includes(s?.conv_location || '')
+// 广告卡显隐（基于所属组卡 conv_location；空=自动，按目标回退旧行为防已有模板丢入口）：
+// website=完整链（描述/CTA/落地页/子码/URL）；消息类=CTA+消息模板；on_ad*=表单(+消息)；
+// on_page/phone_call=无模板绑定（on_page 连 CTA 也不出——主页互动按钮由 FB 固定）
+const nodeAdShow = (s) => {
+  const l = s?.conv_location || ''
+  if (!l) {
+    const obj = form.value.objective
+    return {
+      landing: !['OUTCOME_AWARENESS'].includes(obj), desc: true, cta: true,
+      form: obj === 'OUTCOME_LEADS', msg: obj === 'OUTCOME_ENGAGEMENT' && !isTt.value,
+    }
+  }
+  const msg = MSG_LOCS.includes(l)
+  return {
+    landing: l === 'website',
+    desc: l === 'website',
+    cta: msg || l === 'website' || l === 'phone_call',
+    form: FORM_LOCS.includes(l),
+    msg: msg || l === 'on_ad_messenger',
+  }
+}
+// 消息模板类型过滤（匹配转化位置；空=全量）：WhatsApp 位只列 WhatsApp 模板，
+// Messenger/IG 私信/表单+Messenger 位只列 Messenger 模板（后端部署链同口径分流）
+const msgTplsForLoc = (loc) => {
+  if (loc === 'whatsapp') return msgTemplates.value.filter(m => (m.type || 'messenger') === 'whatsapp')
+  if (MSG_LOCS.includes(loc) || loc === 'on_ad_messenger') return msgTemplates.value.filter(m => (m.type || 'messenger') === 'messenger')
+  return msgTemplates.value
+}
+const msgLocTypeLabel = (loc) => loc === 'whatsapp' ? 'WhatsApp' : 'Messenger'
 const clearReusePost = () => { form.value.reuse_post_ref = ''; reusePostPreview.value = null; reuseNeedManualPage.value = false }
 // 卡片完整性判断（列表用，不需打开编辑器）
 const _tplMissing = (tpl) => {
@@ -858,10 +912,13 @@ const _nk = (p) => `${p}_${++_keySeq}`
 const tree = ref({ adsets: [] })
 const treeSel = ref({ type: 'campaign', si: -1, ai: -1 })   // campaign / adset / ad（现仅作选择器目标锚点）
 const expandedTreeKeys = ref(new Set())
-// FB 创建流三段手风琴（campaign/adset/ad 各段可折叠，默认全展）
-const secOpen = ref({ campaign: true, adset: true, ad: true })
-const resetSecOpen = () => { secOpen.value = { campaign: true, adset: true, ad: true } }
-const toggleSec = (k) => { secOpen.value = { ...secOpen.value, [k]: !secOpen.value[k] } }
+// 三层 Tab（系列/广告组/广告；同一时间只显示一层——面包屑合进 Tab，各 Tab 带完备度指示）
+const editTab = ref('campaign')
+const EDIT_TABS = [
+  { v: 'campaign', l: 'launch.levelCampaign' },
+  { v: 'adset', l: 'launch.levelAdSet' },
+  { v: 'ad', l: 'launch.levelAd' },
+]
 // 广告小卡展开态（key=节点 key）；跟帖输入框按节点存（nodeReuseInputs）
 const expandedAdKeys = ref(new Set())
 const toggleAdExpand = (key) => {
@@ -895,6 +952,7 @@ const blankTreeAdset = () => ({
   key: _nk('as'), name: '', enabled: false, budget_usd: null,
   audience_id: 0, audience_json: '', optimization_goal: '', billing_event: '', advanced_config: '',
   conv_location: '', placement_mode: '', publisher_platforms: [], device_platforms: [],
+  pixel_id: '',
   facebook_positions: [], instagram_positions: [], messenger_positions: [],
   aud: blankNodeAud(),
   // 高级设置 UI 态（批次III 迁组卡）：保存时序列化进节点 advanced_config，不进 structure payload
@@ -926,6 +984,7 @@ const normalizeTree = (adsets) => adsets.map(s => ({
   budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
   audience_id: s.audience_id || 0,
   conv_location: (CONV_LOCATIONS_BY_OBJECTIVE[form.value.objective] || []).includes(s.conv_location) ? s.conv_location : '',
+  pixel_id: s.pixel_id || '',
   placement_mode: s.placement_mode === 'manual' ? 'manual' : '',
   publisher_platforms: [...(s.publisher_platforms || [])],
   device_platforms: [...(s.device_platforms || [])],
@@ -963,6 +1022,14 @@ const adAsset0 = (a) => ((a && (a.asset_ids || []).length) ? treeAssetById(a.ass
 const adsetNodeLabel = (s, si) => s.name || t('launch.treeGroupN', { n: si + 1 })
 const adNodeLabel = (a, ai) => a.name || ((a.asset_ids || []).length > 1
   ? t('launch.treeAssetGroupN', { n: a.asset_ids.length }) : t('launch.treeAdN', { n: ai + 1 }))
+// 组卡头摘要链（实时反馈，不展开即见配置状态）：目标 · 转化位置 · 优化目标
+const adsetChain = (s) => {
+  const parts = [objLabel(form.value.objective)]
+  if (s.conv_location) parts.push(t('launch.conv_loc_' + s.conv_location))
+  const og = s.optimization_goal ? OPT_GOALS.find(o => o.v === s.optimization_goal) : null
+  parts.push(og ? t(og.l) : t('launch.optAutoByLoc'))
+  return parts.join(' · ')
+}
 // 完备度圆点：广告 绿=有素材/跟帖引用 黄=只有文案 灰=全空；组 绿=含绿广告 黄=有广告无绿 灰=无广告
 const adDot = (a) => {
   if ((a.asset_ids || []).length || (a.post_source === 'reuse' && a.reuse_post_ref)) return 'g'
@@ -1344,12 +1411,13 @@ const formPreviewTpl = ref(null)
 const msgPreviewTpl = ref(null)
 const openFormPreview = (tpl) => { formPreviewTpl.value = tpl; formPreviewOpen.value = true }
 const openMsgPreview = (tpl) => { msgPreviewTpl.value = tpl; msgPreviewOpen.value = true }
-// 选择器弹窗（kind=form|msg；node=null 单模式，非空=结构广告节点）
+// 选择器弹窗（kind=form|msg；node=null 单模式，非空=结构广告节点；loc=消息类转化位置→类型过滤）
 const tplPickerOpen = ref(false)
 const tplPickerKind = ref('form')
 const tplPickerNode = ref(null)
-const tplPickerList = computed(() => tplPickerKind.value === 'form' ? formTemplatesForPlat.value : msgTemplates.value)
-const openTplPicker = (kind, node = null) => { tplPickerKind.value = kind; tplPickerNode.value = node; tplPickerOpen.value = true }
+const tplPickerLoc = ref('')
+const tplPickerList = computed(() => tplPickerKind.value === 'form' ? formTemplatesForPlat.value : msgTplsForLoc(tplPickerLoc.value))
+const openTplPicker = (kind, node = null, loc = '') => { tplPickerKind.value = kind; tplPickerNode.value = node; tplPickerLoc.value = loc || ''; tplPickerOpen.value = true }
 const pickTpl = (tpl) => {
   if (tplPickerKind.value === 'form') tplPickerNode.value ? setNodeFormTpl(tplPickerNode.value, tpl.id) : onFormTplChange(tpl.id)
   else tplPickerNode.value ? setNodeMsgTpl(tplPickerNode.value, tpl.id) : onMsgTplChange(tpl.id)
@@ -1409,12 +1477,10 @@ const objPickerOpen = ref(false)
 const objPickSel = ref('OUTCOME_AWARENESS')
 const objPickName = ref('')
 const objNameShow = ref(false)
-const objPickerFromEditor = ref(false)   // true=编辑器内点目标 chip 重开（不重开编辑器，只换目标）
 const openNew = (p) => {
   if (p === 'fb') {   // 下拉显式建 FB → 先选目标（跟帖预填 openNew() 无参不进这里）
     objPickSel.value = 'OUTCOME_AWARENESS'
     objPickName.value = ''; objNameShow.value = false
-    objPickerFromEditor.value = false
     objPickerOpen.value = true
     return
   }
@@ -1434,27 +1500,17 @@ const _startNew = (p) => { editing.value = null; form.value = blankForm();
     expandedAdKeys.value = new Set([s.ads[0].key])
     ensureTreeAssets()
   }
-  resetSecOpen()
+  editTab.value = 'campaign'
   snapshotForm() }
 const objPickerContinue = async () => {
   if (!objPickSel.value) return
   objPickerOpen.value = false
+  _startNew('fb')
   form.value.objective = objPickSel.value
   if (objPickName.value.trim()) form.value.name = objPickName.value.trim()
   objPickName.value = ''
-  if (!objPickerFromEditor.value) {
-    _startNew('fb')
-    form.value.objective = objPickSel.value
-    if (objPickName.value.trim()) form.value.name = objPickName.value.trim()
-    await nextTick()
-    snapshotForm()   // 目标弹窗带入值不标 dirty（objective watcher 默认填充在 nextTick 后落地）
-  }
-}
-const objOpenFromEditor = () => {
-  objPickSel.value = form.value.objective || 'OUTCOME_AWARENESS'
-  objPickName.value = ''; objNameShow.value = false
-  objPickerFromEditor.value = true
-  objPickerOpen.value = true
+  await nextTick()
+  snapshotForm()   // 目标弹窗带入值不标 dirty（objective watcher 默认填充在 nextTick 后落地）
 }
 const openEdit = async (tpl) => {
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：无条件归零（原仅在有配置时恢复，缺失时残留上一模板）
@@ -1550,7 +1606,7 @@ const openEdit = async (tpl) => {
       }
     } catch {}
   }
-  resetSecOpen()
+  editTab.value = 'campaign'
   saveErrKeys.value = new Set()
   // FB 模板一律结构模式（平铺模式已移除；无 structure 的旧模板自动合成 1 组 1 广告视图，保存即升级）
   if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
@@ -2200,37 +2256,33 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? 'TikTok' : 'Facebook' }}</span>
 </div>
       <div v-if="isTt" class="tt-hint">ℹ {{ t('launch.ttSwitchNote') }}</div>
-      <!-- 顶部：面包屑（系列 › 组 › 广告）+ 模板名/完备状态（FB 创建流单页三段） -->
+      <!-- 顶部：模板完备状态 + 三层 Tab（系列 › 广告组 › 广告——面包屑合进 Tab，带完备度指示） -->
       <div class="fb-top">
-        <div class="fb-crumb">
-          <span class="crumb-item">{{ t('launch.levelCampaign') }}</span>
-          <span class="crumb-sep">›</span>
-          <span class="crumb-item">{{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</span>
-          <span class="crumb-sep">›</span>
-          <span class="crumb-item">{{ t('launch.levelAd') }}</span>
-        </div>
         <span :class="['ss-status', editStatus.ready ? 'ready' : 'pending']" :title="editStatus.ready ? '' : editStatus.missing.join('、')">
           {{ editStatus.ready ? '✓ ' + t('launch.ready') : t('launch.pendingColon') + editStatus.missing.length }}
         </span>
       </div>
-      <!-- 段1 广告系列（FB 创建流：目标/特殊类别/购买类型/CBO 预算/出价策略/前缀/主页） -->
-      <div class="fb-sec" data-sec="campaign">
-        <div class="fb-sec-head" @click="toggleSec('campaign')">
-          <span class="fb-sec-arrow" :class="{open:secOpen.campaign}">▶</span>
-          <span class="fb-sec-title">{{ t('launch.levelCampaign') }}</span>
-          <span class="fb-sec-meta">{{ form.name || t('launch.notSelected') }}</span>
-</div>
-        <div v-show="secOpen.campaign" class="fb-sec-body">
+      <div class="fb-tabs">
+        <button v-for="tb in EDIT_TABS" :key="tb.v" type="button" :class="['fb-tab', { on: editTab === tb.v }]" @click="editTab = tb.v">
+          <span class="fb-tab-label">{{ t(isTt && tb.v === 'adset' ? 'launch.levelAdGroup' : tb.l) }}</span>
+          <span v-if="tb.v === 'campaign'" :class="['fb-tab-badge', secStats.campErrs ? 'bad' : 'ok']">{{ secStats.campErrs ? secStats.campErrs : '✓' }}</span>
+          <span v-else-if="tb.v === 'adset'" :class="['fb-tab-badge', secStats.setOk === secStats.setN ? 'ok' : 'bad']">{{ secStats.setOk }}/{{ secStats.setN }}</span>
+          <span v-else :class="['fb-tab-badge', secStats.adOk === secStats.adN ? 'ok' : 'bad']">{{ secStats.adOk }}/{{ secStats.adN }}</span>
+        </button>
+      </div>
+      <!-- Tab1 广告系列（FB 创建流：目标/特殊类别/购买类型/CBO 预算/出价策略/前缀/主页） -->
+      <div v-show="editTab === 'campaign'" data-sec="campaign" class="tab-panel">
 
       <div class="form">
         <div class="row"><label>{{ t('launch.fieldTplName') }}</label><input v-model="form.name" class="inp" :placeholder="t('launch.tplNamePlaceholder')" /></div>
-        <!-- objective: FB = read-only chip (click reopens the objective picker); TT = dropdown -->
-        <div v-if="!isTt" class="row"><label>{{ t('launch.objective') }}</label>
-          <button type="button" class="obj-chip" :title="t('launch.objpChange')" @click="objOpenFromEditor()">
-            {{ objLabel(form.objective) }}<span class="obj-chip-edit">{{ t('launch.objpChange') }}</span>
-          </button>
+        <!-- objective: 编辑器内直接下拉（FB/TT 同控件；目标选择弹窗仅新建入口用）——
+             watcher 自动清组级不兼容的转化位置/优化目标 -->
+        <div class="row"><label>{{ t('launch.objective') }}</label>
+          <el-select v-model="form.objective" style="width:100%" size="small" filterable>
+            <el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" />
+          </el-select>
+          <span class="hint">{{ t('launch.objChangeHint') }}</span>
 </div>
-        <div v-else class="row"><label>{{ t('launch.objective') }}</label><el-select v-model="form.objective" style="width:100%" size="small"><el-option v-for="o in OBJECTIVES" :key="o.v" :value="o.v" :label="t(o.l)" /></el-select></div>
         <!-- FB：转化事件随组卡「转化位置=网站」出现（ad set 层 Conversion 面板）；TT 仍在系列段 -->
         <div class="row" v-if="isTt && convGoalsForObjective.length"><label>{{ t('launch.conversionGoal') }}</label>
           <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
@@ -2316,17 +2368,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <span class="hint">{{ t('launch.waPhoneHint') }}</span>
 </div>
 </div>
-</div>
-</div><!-- /sec1 -->
+</div><!-- /tab-campaign -->
 
-      <!-- section 2: ad sets -->
-      <div class="fb-sec" data-sec="adset">
-        <div class="fb-sec-head" @click="toggleSec('adset')">
-          <span class="fb-sec-arrow" :class="{open:secOpen.adset}">▶</span>
-          <span class="fb-sec-title">{{ isTt ? t('launch.levelAdGroup') : t('launch.levelAdSet') }}</span>
-          <span v-if="editMode === 'tree'" class="fb-sec-meta">{{ t('launch.treeOverviewLine', { n: tree.adsets.length, m: treeExpandedTotal() }) }}</span>
-</div>
-        <div v-show="secOpen.adset" class="fb-sec-body">
+      <!-- Tab2 广告组 -->
+      <div v-show="editTab === 'adset'" data-sec="adset" class="tab-panel">
+        <div v-if="editMode === 'tree'" class="tab-meta">{{ t('launch.treeOverviewLine', { n: tree.adsets.length, m: treeExpandedTotal() }) }}</div>
           <!-- structure mode: one collapsible card per ad set -->
           <template v-if="editMode === 'tree'">
             <div v-for="(s, si) in tree.adsets" :key="s.key" :class="['as-card', { err: saveErrKeys.has(s.key) }]" :data-err="s.key">
@@ -2335,6 +2381,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <span @click.stop><el-switch v-model="s.enabled" size="small" /></span>
                 <span :class="['tdot', adsetDot(s)]"></span>
                 <span class="as-card-name">{{ adsetNodeLabel(s, si) }}</span>
+                <span class="as-card-chain" :title="adsetChain(s)">{{ adsetChain(s) }}</span>
                 <span class="as-card-ops" @click.stop>
                   <button class="t-op" :title="t('launch.treeCopyNode')" @click="copyTreeAdset(si)"><el-icon><CopyDocument /></el-icon></button>
                   <button class="t-op danger" :title="t('launch.treeDelNode')" @click="removeTreeAdset(si)"><el-icon><Delete /></el-icon></button>
@@ -2342,7 +2389,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div v-if="expandedTreeKeys.has(s.key)" class="as-card-body form">
                 <div class="row"><label>{{ t('launch.treeNodeName') }}</label><input v-model="s.name" class="inp" :placeholder="t('launch.treeNodeNamePh')" /></div>
-                <!-- 转化设置（FB 广告组层）：转化位置（按目标出选项，批次I）→ 转化事件（网站位）→ 转化像素 -->
+                <!-- 转化设置（FB 广告组层 · 动态引擎）：选了转化位置才出对应字段——
+                     website=转化事件+像素；消息/表单/主页/电话位不出像素；未选=提示而非全量字段 -->
                 <div class="sec-title">{{ t('launch.convSettingsTitle') }}</div>
                 <div class="row"><label>{{ t('launch.convLocation') }}</label>
                   <div v-if="convLocationsForObj.length" class="convloc-opts">
@@ -2352,16 +2400,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <div v-else class="ro-field">{{ t('launch.convLocNone') }}</div>
                   <span class="hint">{{ t('launch.convLocationHint') }}</span>
 </div>
+                <div v-if="!s.conv_location && convLocationsForObj.length" class="loc-hint">{{ t('launch.locPickHint') }}</div>
                 <!-- 转化事件：转化位置=网站 且 SALES/LEADS（写系列级 conversion_goal → 部署映射 custom_event_type） -->
-                <div v-if="s.conv_location === 'website' && convGoalsForObjective.length" class="row"><label>{{ t('launch.conversionGoal') }}</label>
+                <div v-show="s.conv_location === 'website' && convGoalsForObjective.length" class="row"><label>{{ t('launch.conversionGoal') }}</label>
                   <el-select v-model="form.conversion_goal" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectConvEvent')">
                     <el-option v-for="g in convGoalsForObjective" :key="g" :value="g" :label="t(CONV_GOAL_LABELS[g]||g) + ' (' + g + ')'" />
                   </el-select>
                   <span class="hint">{{ t('launch.convEventHint') }}</span>
 </div>
-                <!-- 像素（promoted_object，广告组层）：模板级默认值——部署链按 item.pixel_id > 模板取，绑定模板字段 -->
-                <div class="row"><label>{{ t('launch.treePixelLabel') }}</label>
-                  <el-input v-model="form.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
+                <!-- 像素（promoted_object，广告组层 · 节点级）：部署链 snode.pixel_id > 部署抽屉按账户 > 模板默认 -->
+                <div v-show="s.conv_location === 'website'" class="row"><label>{{ t('launch.treePixelLabel') }}</label>
+                  <el-input v-model="s.pixel_id" :placeholder="t('launch.pixelIdPh')" size="small" clearable />
                   <span class="hint">{{ t('launch.treePixelHint') }}</span>
 </div>
                 <!-- budget & schedule (ABO: per-set; CBO: budget sits on the campaign) -->
@@ -2381,6 +2430,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <span class="hint">{{ t('launch.lifetimeScheduleHint') }}</span>
 </div>
                 </template>
+                <div v-if="cboOn" class="loc-hint">{{ t('launch.cboBudgetAtCampaign') }}</div>
                 <div class="row"><label>{{ t('launch.scheduleLabel') }}<span v-if="s.budget_type==='lifetime' && !cboOn" class="req-mark">*</span></label>
                   <div class="sched-row">
                     <el-date-picker v-model="s.schedule_start" type="datetime" size="small" style="width:100%" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" :placeholder="t('launch.treeUseDefault')" />
@@ -2423,7 +2473,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <div v-show="!audFoldKeys.has(s.key)" class="node-sec-body">
                     <!-- 特殊广告类别已声明：受众定向被 FB 强制收窄 -->
                     <div v-if="hasSpecialCats" class="scat-warn">{{ t('launch.scatAudienceWarn') }}</div>
-                    <div class="row"><label>{{ t('launch.audienceSource') }}</label>
+                    <!-- 消息类转化位置：受众自动 Advantage+（仅国家硬约束），定向字段隐藏但保留数据 -->
+                    <div v-if="locIsMsg(s)" class="msg-aud-hint">{{ t('launch.msgAudAutoHint') }}</div>
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audienceSource') }}</label>
                       <el-select v-model="s.audience_id" filterable size="small" style="width:100%">
                         <el-option :value="0" :label="t('launch.audienceCustom')" />
                         <el-option v-for="a in savedAudiences" :key="a.id" :value="a.id"
@@ -2440,13 +2492,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
                       </el-select>
 </div>
-                    <div class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
-                    <div class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
                     <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
-                    <div class="row"><label>{{ t('launch.interestLabel') }}</label>
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.interestLabel') }}</label>
                       <div class="interest-search">
-                        <input v-model="nodeInterestQ[s.key]" class="inp" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterestsForNode(s)" />
-                        <button class="btn sm" :disabled="interestSearching" @click="searchInterestsForNode(s)">{{ interestSearching ? '…' : t('common.search') }}</button>
+                        <input v-model="nodeInterestQ[s.key]" class="inp" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterestsForNode(s)" />
+                        <button class="btn sm" :disabled="interestSearching || hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="searchInterestsForNode(s)">{{ interestSearching ? '…' : t('common.search') }}</button>
 </div>
                       <div v-if="interestSearching && interestNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
                       <div v-else-if="interestResults.length && interestNodeKey === s.key" class="search-results">
@@ -2459,7 +2511,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
 </div>
-                    <div class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
                       <div class="interest-list">
                         <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>
                         <span v-if="!(s.aud.interests||[]).length" class="hint">{{ t('launch.addViaSearch') }}</span>
@@ -2635,16 +2687,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
              （披露已在组卡；频次/归因/Dayparting 迁组卡「高级」折叠区绑节点 advanced_config；高级 JSON 纯死删除） -->
 </div>
 </div>
-</div>
-</div><!-- /sec2 -->
+</div><!-- /tab-adset -->
 
-      <!-- section 3: ads -->
-      <div class="fb-sec" data-sec="ad">
-        <div class="fb-sec-head" @click="toggleSec('ad')">
-          <span class="fb-sec-arrow" :class="{open:secOpen.ad}">▶</span>
-          <span class="fb-sec-title">{{ t('launch.levelAd') }}</span>
-</div>
-        <div v-show="secOpen.ad" class="fb-sec-body">
+      <!-- Tab3 广告 -->
+      <div v-show="editTab === 'ad'" data-sec="ad" class="tab-panel">
         <!-- flat mode: creative source seg + follow-post card + single ad form -->
         <template v-if="editMode === 'flat'">
       <div v-if="!isTt" class="post-mode-seg">
@@ -2885,11 +2931,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <div v-if="(a.asset_ids||[]).length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: a.asset_ids.length }) }}</div>
                 <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="a.headline" class="inp" /></div>
                 <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="a.body" class="inp ta" rows="3"></textarea></div>
-                <div class="row"><label>{{ t('launch.descLabel') }}</label>
+                <!-- 动态引擎（按组卡 conv_location）：描述仅网站位；CTA 网站/消息/电话位出（表单/主页位 FB 固定按钮） -->
+                <div v-show="nodeAdShow(s).desc" class="row"><label>{{ t('launch.descLabel') }}</label>
                   <input v-model="a.link_description" class="inp" :placeholder="t('launch.descPh')" />
                   <span class="hint">{{ t('launch.descHint') }}</span>
 </div>
-                <div class="row"><label>{{ t('launch.ctaLabel') }}</label>
+                <div v-show="nodeAdShow(s).cta" class="row"><label>{{ t('launch.ctaLabel') }}</label>
                   <el-select v-model="a.cta_type" style="width:100%" size="small" filterable clearable :placeholder="t('launch.treeUseDefault')">
                     <el-option v-for="c in CTAS" :key="c.v" :value="c.v" :label="t(c.l) + '（' + c.v + '）'" />
                   </el-select>
@@ -2901,21 +2948,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   </el-select>
                   <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
-                <div class="row"><label>{{ t('launch.landing') }}</label>
+                <!-- 落地页/URL/子码（含追踪参数占位符）：仅网站位（消息/表单/主页/电话位目的地不在网站） -->
+                <div v-show="nodeAdShow(s).landing" class="row"><label>{{ t('launch.landing') }}</label>
                   <el-select :model-value="a.landing_page_id || 0" size="small" style="width:100%" @change="v => { a.landing_page_id = v || 0; onNodeLandingChange(a) }">
                     <el-option :value="0" :label="t('launch.manualUrl')" />
                     <el-option v-for="pg in landingPages" :key="pg.id" :value="pg.id" :label="pg.title + '（' + (pg.public_url || t('launch.noUrl')) + '）'" />
                   </el-select>
 </div>
-                <div class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="a.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
-                <div class="row"><label>{{ t('launch.subcode') }}</label>
+                <div v-show="nodeAdShow(s).landing" class="row"><label>{{ t('launch.landingUrl') }}</label><input v-model="a.landing_url" class="inp" placeholder="https://..." :title="t('launch.urlPhHint')" /></div>
+                <div v-show="nodeAdShow(s).landing" class="row"><label>{{ t('launch.subcode') }}</label>
                   <el-select v-model="a.subcode_slug" filterable clearable size="small" style="width:100%" :placeholder="t('launch.subcodePlaceholder')">
                     <el-option v-for="sd in subcodesForNode(a)" :key="sd.slug" :value="sd.slug" :label="sd.slug + ' (' + subcodeStatus(sd.status).label + ')'" />
                   </el-select>
                   <span v-if="a.landing_page_id && !subcodesForNode(a).length" class="hint">{{ t('launch.noSubcodeHint') }}</span>
 </div>
-                <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
-                <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
+                <!-- 消息模板：消息类/表单+Messenger 位（按组卡 conv_location；类型过滤匹配位置） -->
+                <div v-show="nodeAdShow(s).msg">
+                <hr class="sep" /><div class="sec-title-row"><span class="sec-title">{{ t('launch.messageAd') }}</span>
+                  <router-link to="/form-templates" class="new-link">{{ t('launch.manageMsgTpl') }} →</router-link>
+</div>
                 <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
                   <div v-if="nodeMsgTpl(a)" class="tpl-sel-card">
                     <div class="tsc-head">
@@ -2925,15 +2976,19 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <div class="tsc-sum">{{ msgTplSummary(nodeMsgTpl(a)) }}</div>
                     <div class="tsc-ops">
                       <button class="op" @click="openMsgPreview(nodeMsgTpl(a))">{{ t('common.preview') }}</button>
-                      <button class="op" @click="openTplPicker('msg', a)">{{ t('launch.change') }}</button>
+                      <button class="op" @click="openTplPicker('msg', a, s.conv_location)">{{ t('launch.change') }}</button>
                       <button class="op danger" :title="t('launch.clearTpl')" @click="setNodeMsgTpl(a, 0)">✕</button>
 </div>
 </div>
-                  <button v-else class="tpl-sel-empty" @click="openTplPicker('msg', a)">+ {{ t('launch.pickMsgTpl') }}</button>
+                  <button v-else class="tpl-sel-empty" @click="openTplPicker('msg', a, s.conv_location)">+ {{ t('launch.pickMsgTpl') }}</button>
+                  <span v-if="!msgTplsForLoc(s.conv_location).length" class="hint">{{ t('launch.noMsgTplForType', { type: msgLocTypeLabel(s.conv_location) }) }}</span>
 </div>
-                </template>
-                <template v-if="form.objective === 'OUTCOME_LEADS'">
-                <hr class="sep" /><div class="sec-title">Instant Form</div>
+                </div>
+                <!-- 表单模板：即时表单 / 表单+Messenger 位 -->
+                <div v-show="nodeAdShow(s).form">
+                <hr class="sep" /><div class="sec-title-row"><span class="sec-title">Instant Form</span>
+                  <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
+</div>
                 <div class="row"><label>{{ t('launch.formTemplate') }}</label>
                   <div v-if="nodeFormTpl(a)" class="tpl-sel-card">
                     <div class="tsc-head">
@@ -2951,14 +3006,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                   <button v-else class="tpl-sel-empty" @click="openTplPicker('form', a)">+ {{ t('launch.pickFormTpl') }}</button>
                   <span class="hint">{{ t('launch.formTplPlatScope', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
 </div>
-                </template>
+                </div>
                 </template>
               </div>
             </div>
           </template>
         </template>
-        </div><!-- /sec3-body -->
-      </div><!-- /sec3 -->
+      </div><!-- /tab-ad -->
 </div><!-- /edit-body -->
 
       <template #footer>
@@ -3306,7 +3360,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
           <div class="tsc-sum">{{ tplPickerKind==='form' ? formTplSummary(tpl) : msgTplSummary(tpl) }}</div>
         </button>
-        <div v-if="!tplPickerList.length" class="empty-sm">{{ tplPickerKind==='form' ? t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) : t('launch.noMsgTpl') }}</div>
+        <div v-if="!tplPickerList.length" class="empty-sm">{{ tplPickerKind==='form' ? t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) : (tplPickerLoc ? t('launch.noMsgTplForType', { type: msgLocTypeLabel(tplPickerLoc) }) : t('launch.noMsgTpl')) }}</div>
       </div>
     </el-dialog>
 </div>
@@ -3384,6 +3438,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .age-row .inp.sm{width:80px}
 .sep{border:none;border-top:1px solid var(--bd);margin:6px 0}
 .sec-title{font-size:12px;color:var(--ac);font-weight:600;margin:-2px 0 2px}
+.sec-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sec-title-row .sec-title{margin:0}
 
 .interest-search{display:flex;gap:6px}
 .search-results{margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid var(--bd);border-radius:6px}
@@ -3721,23 +3777,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pft-budget{margin-left:auto;color:var(--t3);font-size:11px;white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
 .pft-meta{color:var(--t3);font-size:11px;white-space:nowrap;flex:none}
 
-/* FB 创建流：编辑器顶栏（面包屑 + 完备状态）+ 三段手风琴 */
-.fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-.fb-crumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t2);font-weight:500;flex-wrap:wrap}
-.crumb-sep{color:var(--t3);font-size:11px}
-.fb-sec{border:1px solid var(--bd);border-radius:8px;background:var(--bg2);margin-bottom:12px;overflow:hidden}
-.fb-sec-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg3);user-select:none}
-.fb-sec-head:hover{background:var(--bg2)}
-.fb-sec-arrow{font-size:10px;color:var(--t3);transition:transform .15s;display:inline-block}
-.fb-sec-arrow.open{transform:rotate(90deg)}
-.fb-sec-title{font-size:13px;font-weight:600;color:var(--t1)}
-.fb-sec-meta{font-size:11px;color:var(--t3);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
-.fb-sec-body{padding:12px}
-/* 目标只读 chip（点击重开目标弹窗）+ 只读字段 + CBO 行 + 必填标记 */
-.obj-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg3);border:1px solid var(--ac);color:var(--t1);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;width:fit-content}
-.obj-chip:hover{background:rgba(10,132,255,.08)}
-.obj-chip-edit{font-size:10px;color:var(--ac);font-weight:500}
+/* FB 创建流：编辑器顶栏（完备状态）+ 三层 Tab（系列/组/广告——面包屑合进 Tab） */
+.fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.fb-tabs{display:flex;gap:6px;margin-bottom:12px}
+.fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
+.fb-tab:hover{color:var(--t1);border-color:var(--bd2)}
+.fb-tab.on{border-color:var(--ac);color:var(--ac);background:var(--acg);font-weight:600}
+.fb-tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fb-tab-badge{font-size:10px;font-weight:600;padding:0 7px;border-radius:8px;line-height:16px;flex:none}
+.fb-tab-badge.ok{color:var(--success);background:rgba(52,199,89,.13)}
+.fb-tab-badge.bad{color:var(--warning);background:rgba(255,159,10,.15)}
+.tab-panel{padding-bottom:4px}
+.tab-meta{font-size:11px;color:var(--t3);margin-bottom:8px}
+/* 组卡头摘要链（目标 · 转化位置 · 优化目标）+ 动态引擎提示框 */
+.as-card-chain{flex:none;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t3)}
+.loc-hint{padding:8px 10px;border:1px dashed var(--bd2);border-radius:6px;font-size:12px;color:var(--t3);background:var(--bg3);line-height:1.5}
+.msg-aud-hint{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(10,132,255,.08);color:var(--t2);border:1px solid rgba(10,132,255,.3)}
+/* 只读字段 + CBO 行 + 必填标记 + 禁用输入（特殊广告类别联动） */
 .ro-field{padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t2);font-size:13px}
+.inp:disabled{opacity:.55;cursor:not-allowed}
 .cbo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .cbo-seg button{flex:none;padding:5px 14px}
 .req-mark{color:var(--error);font-weight:700;margin-left:2px}
@@ -3789,9 +3847,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
   /* 排期起止纵向（datetime 输入已内联 width:100%；EP 面板 322px < 375px 屏宽不裁切） */
   .sched-row{flex-direction:column;align-items:stretch}
   .sched-sep{display:none}
-  /* 三段手风琴段头：可点区域 ≥40px，元信息换行到第二行不与标题挤压 */
-  .fb-sec-head{min-height:44px;flex-wrap:wrap}
-  .fb-sec-meta{max-width:100%;flex-basis:100%}
+  /* 三层 Tab：三等分横排（label 过长截断），完备度徽标缩小 */
+  .fb-tabs{gap:4px}
+  .fb-tab{flex-direction:column;gap:2px;padding:8px 4px;font-size:12px}
+  /* 组卡头摘要链移动端隐藏（组名/开关已占满头部） */
+  .as-card-chain{display:none}
   /* 组卡/广告卡头：点区 ≥40px；展开箭头/图标小钮放大可点 */
   .as-card-head{min-height:44px}
   .ad-card-head{min-height:40px}
