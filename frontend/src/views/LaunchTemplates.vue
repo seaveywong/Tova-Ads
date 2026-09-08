@@ -1765,6 +1765,18 @@ const saveTpl = async () => {
   }
   saving.value = false
 }
+const hardDeleteTpl = async (tpl) => {
+  try {
+    await ElMessageBox.confirm(
+      t('launch.hardDeleteConfirm', { name: tpl.name }),
+      t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
+  } catch { return }
+  try {
+    await DELETE('/launch-templates/' + tpl.id + '/hard')
+    ElMessage.success(t('launch.hardDeleted')); await load()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+
 const removeTpl = async (tpl) => {
   try {
     await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
@@ -1785,6 +1797,7 @@ const onCardCmd = (cmd, tpl) => {
   else if (cmd === 'copy') copyTpl(tpl)
   else if (cmd === 'preflight') preflight(tpl)
   else if (cmd === 'archive') removeTpl(tpl)
+  else if (cmd === 'hard-delete') hardDeleteTpl(tpl)
 }
 // 预检
 const preflighting = ref(false)
@@ -2214,6 +2227,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
                 <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
                 <el-dropdown-item command="archive" divided class="danger">{{ t('launch.archive') }}</el-dropdown-item>
+                <el-dropdown-item command="hard-delete" class="danger">{{ t('launch.hardDelete') }}</el-dropdown-item>
 </el-dropdown-menu>
 </template>
 </el-dropdown>

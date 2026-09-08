@@ -716,6 +716,26 @@ def update_template(tid: int, body: TemplateIn,
     return _tpl_dict(t)
 
 
+@router.delete("/{tid}/hard")
+def hard_delete_template(tid: int, user: CurrentUser = Depends(require_permission("ads.create")),
+                         db: Session = Depends(get_db)):
+    """永久删除模板（真删行，非归档）。有部署历史的拒删（FK 挡），无历史的直接删。"""
+    t = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not t:
+        raise HTTPException(404, "模板不存在")
+    _has_jobs = db.query(LaunchJob).filter(
+        LaunchJob.template_id == tid, LaunchJob.tenant_id == user.tenant_id).first()
+    if _has_jobs:
+        raise HTTPException(400, f"该模板有 {1} 次部署历史——永久删除会丢失投放记录，建议用「归档」（归档后不再显示但保留历史）。如确要删除请先清理部署记录")
+    db.delete(t)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="launch_template", target_id=str(tid),
+              action_type="hard_delete", source="user", result="success", metadata={"name": t.name})
+    db.commit()
+    return {"id": tid, "deleted": True}
+
+
 @router.delete("/{tid}")
 def delete_template(tid: int, user: CurrentUser = Depends(require_permission("ads.create")),
                     db: Session = Depends(get_db)):
