@@ -147,7 +147,7 @@ const AI_PRESETS = {
   'https://api.deepseek.com/v1': { label: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] },
   'https://api.openai.com/v1': { label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'] },
   'https://generativelanguage.googleapis.com/v1beta/openai': { label: t('settings.aiPresetGemini'), models: ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'] },
-  'https://api.x.ai/v1': { label: 'Grok (xAI)', models: ['grok-3', 'grok-3-mini', 'grok-2-vision-1212'] },
+  'https://api.x.ai/v1': { label: 'Grok (xAI)', models: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning'] },
 }
 const aiBaseOptions = Object.entries(AI_PRESETS).map(([url, p]) => ({ url, label: p.label }))
 const aiCfg = ref({ ai_base_url: '', ai_api_key_masked: '', ai_api_key_set: false, ai_model: '',
