@@ -209,6 +209,9 @@ const removeForm = async (item) => {   // 参数曾用 t 遮蔽 i18n 导致归�
   catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }   // 被引用等真报错要提示
 }
 const previewForm = (item) => { previewType.value = 'form'; previewData.value = item.config || {}; previewOpen.value = true }
+// 卡片 ⋯ 菜单（归档/永久删除；与 Assets/LaunchTemplates 卡操作同模式）
+const onFormCmd = (cmd, item) => cmd === 'delete' ? hardDelete(item, 'form') : removeForm(item)
+const onMsgCmd = (cmd, item) => cmd === 'delete' ? hardDelete(item, 'msg') : removeMsg(item)
 
 // ── AI 生成（表单/消息都从素材文案生成）──
 const pickerMode = ref('form')  // 'form' | 'msg'：素材选择器服务哪个抽屉
@@ -312,21 +315,31 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
       <div v-for="item in filteredForms" :key="item.id" class="card">
         <div class="card-head">
           <span class="card-name"><span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>{{ item.name }}</span>
-          <span v-if="item.fb_form_id" class="badge ok">{{ t('formtpl.deployed') }}</span>
+          <span :class="['card-badge', item.fb_form_id ? 'ready' : 'draft']">{{ item.fb_form_id ? '✓ ' + t('formtpl.deployed') : t('formtpl.draft') }}</span>
         </div>
+        <div class="card-copy">{{ (item.config||{}).form_title || '—' }}</div>
         <div class="card-meta">
-          <span>{{ (item.config||{}).form_title || '—' }}</span>
           <span>{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
           <span>{{ item.locale }}</span>
         </div>
         <div class="card-ops">
+          <button class="op primary" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
           <button class="op" @click="previewForm(item)">{{ t('common.preview') }}</button>
-          <button class="op" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
-          <button class="op danger" @click="removeForm(item)">{{ t('formtpl.archive') }}</button>
-          <button class="op sm" style="color:var(--error)" @click="hardDelete(item, 'form')">{{ t('common.delete') }}</button>
+          <el-dropdown trigger="click" @command="cmd => onFormCmd(cmd, item)">
+            <button class="op dots" @click.stop>⋯</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="archive" class="danger">{{ t('formtpl.archive') }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided class="danger">{{ t('common.delete') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
-      <div v-if="!filteredForms.length && !loading" class="empty">{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
+      <div v-if="!filteredForms.length && !loading" class="empty">
+        <div>{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
+        <button v-if="formPlatFilter==='all' || !forms.length" class="btn primary empty-cta" @click="formPlatDialog = true">{{ t('formtpl.emptyCtaForm') }}</button>
+      </div>
     </div>
 
     <!-- 消息列表（Messenger / WhatsApp） -->
@@ -335,19 +348,37 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <div class="card-head">
           <span class="card-name"><span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>{{ item.name }}</span>
         </div>
-        <div class="card-msg-preview">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
+        <div class="card-copy">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
         <div class="card-meta"><span>{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
         <div class="card-ops">
+          <button class="op primary" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
           <button class="op" @click="previewMsg(item)">{{ t('common.preview') }}</button>
-          <button class="op" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
-          <button class="op danger" @click="removeMsg(item)">{{ t('formtpl.archive') }}</button><button class="op sm" style="color:var(--error)" @click="hardDelete(item, 'msg')">{{ t('common.delete') }}</button>
+          <el-dropdown trigger="click" @command="cmd => onMsgCmd(cmd, item)">
+            <button class="op dots" @click.stop>⋯</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="archive" class="danger">{{ t('formtpl.archive') }}</el-dropdown-item>
+                <el-dropdown-item command="delete" divided class="danger">{{ t('common.delete') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
-      <div v-if="!messages.length && !loading" class="empty">{{ t('formtpl.noMessages') }}</div>
+      <div v-if="!messages.length && !loading" class="empty">
+        <div>{{ t('formtpl.noMessages') }}</div>
+        <button class="btn primary empty-cta" @click="openMsgNew()">{{ t('formtpl.emptyCtaMsg') }}</button>
+      </div>
     </div>
 
-    <!-- 表单编辑抽屉：左手机实时预览 + 右设置分区 -->
-    <el-drawer v-model="formOpen" :title="editingForm?t('formtpl.editForm'):t('formtpl.newForm')" direction="rtl" size="min(1120px, 96vw)" :destroy-on-close="true">
+    <!-- 表单编辑抽屉：左手机实时预览 + 右设置分区（Header=标题+平台/类型 chip，与投放模板编辑器一致） -->
+    <el-drawer v-model="formOpen" direction="rtl" size="min(1120px, 96vw)" :destroy-on-close="true">
+      <template #header>
+        <div class="dr-head">
+          <span class="dr-title">{{ editingForm ? t('formtpl.editForm') : t('formtpl.newForm') }}</span>
+          <span :class="['plat-chip', isTtForm ? 'tt' : 'fb']">{{ isTtForm ? 'TT' : 'FB' }}</span>
+          <span class="type-chip">{{ t('formtpl.chipForm') }}</span>
+        </div>
+      </template>
       <div class="fx-editor">
         <!-- 左：手机壳实时预览（与列表「预览」弹窗同结构，改一处记得同步另一处） -->
         <div class="fx-left">
@@ -387,7 +418,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
             <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="fMeta.name" class="inp" :placeholder="t('formtpl.tplNamePh')" /></div>
             <div class="row">
               <label>{{ t('formtpl.platform') }}</label>
-              <div><span :class="['plat-ro', isTtForm ? 'tt' : 'fb']">{{ isTtForm ? '🎵 TikTok' : '📘 Facebook' }}</span></div>
+              <div><span :class="['plat-ro', isTtForm ? 'tt' : 'fb']">{{ isTtForm ? 'TikTok' : 'Facebook' }}</span></div>
               <span v-if="isTtForm" class="hint">{{ t('formtpl.ttFieldNote') }}</span>
             </div>
             <div class="row"><label>{{ t('formtpl.language') }}</label><el-select v-model="fMeta.locale" style="width:100%" size="small"><el-option v-for="l in LOCALES" :key="l.v" :value="l.v" :label="l.l" /></el-select></div>
@@ -504,8 +535,14 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
       </template>
     </el-drawer>
 
-    <!-- 消息编辑抽屉（Messenger / WhatsApp 按类型切换文案） -->
-    <el-drawer v-model="msgOpen" :title="editingMsg?t('formtpl.editMsg'):t('formtpl.newMsg')" direction="rtl" size="560px" :destroy-on-close="true">
+    <!-- 消息编辑抽屉（Messenger / WhatsApp 按类型切换文案；宽度与投放模板资产选择器对齐） -->
+    <el-drawer v-model="msgOpen" direction="rtl" size="min(560px, 100vw)" :destroy-on-close="true">
+      <template #header>
+        <div class="dr-head">
+          <span class="dr-title">{{ editingMsg ? t('formtpl.editMsg') : t('formtpl.newMsg') }}</span>
+          <span :class="['type-chip', isWaMsg ? 'wa' : 'ms']">{{ isWaMsg ? 'WhatsApp' : 'Messenger' }}</span>
+        </div>
+      </template>
       <div class="form">
         <button class="btn ai-top-btn" :disabled="aiLoading" @click="openAssetPicker('msg')">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAssetMsg') }}</button>
         <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="mCfg.name" class="inp" /></div>
@@ -536,7 +573,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </el-drawer>
 
     <!-- 素材选择器（AI 生成用） -->
-    <el-drawer v-model="assetPickerOpen" :title="t('formtpl.pickerTitle')" direction="rtl" size="520px" append-to-body>
+    <el-drawer v-model="assetPickerOpen" :title="t('formtpl.pickerTitle')" direction="rtl" size="min(520px, 100vw)" append-to-body>
       <div class="hint" style="margin-bottom:10px">{{ t('formtpl.pickerHint') }}</div>
       <div class="picker-grid">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
@@ -620,17 +657,27 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
-.card-head{display:flex;justify-content:space-between;align-items:center;gap:6px}
-.card-name{font-size:14px;font-weight:600;color:var(--t1)}
-.card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap}
-.card-msg-preview{font-size:12px;color:var(--t2);line-height:1.5;font-style:italic;max-height:40px;overflow:hidden}
-.badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600}
-.badge.ok{color:var(--success);background:rgba(52,199,89,.13)}
-.card-ops{display:flex;gap:3px}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-copy{font-size:11px;color:var(--t2);line-height:1.5;font-style:italic;max-height:32px;overflow:hidden}
+.card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap;align-items:center}
+.card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
+.card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
+.card-badge.draft{color:var(--t3);background:var(--bg3)}
+.card-ops{display:flex;gap:3px;margin-top:4px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
+.op.primary{color:var(--ac);border-color:var(--ac)}
 .op.danger{color:var(--error)}
+.op.dots{font-size:15px;line-height:1;padding:3px 10px}
 .op:hover{background:var(--bg3)}
-.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px}
+.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.empty-cta{align-self:center}
+/* 抽屉 Header：标题 + 平台/类型 chip（与投放模板编辑器头部一致；关闭钮为 EP 默认） */
+.dr-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.dr-title{font-size:15px;font-weight:600;color:var(--t1)}
+.type-chip{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;color:var(--t3);background:var(--bg3);border:1px solid var(--bd)}
+.type-chip.ms{color:#5aa2ff;background:rgba(24,119,242,.12);border-color:rgba(24,119,242,.35)}
+.type-chip.wa{color:#4ade80;background:rgba(37,211,102,.12);border-color:rgba(37,211,102,.4)}
 /* 消息模板类型 chip（Messenger 蓝 / WhatsApp 绿） */
 .msg-chip{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;margin-right:6px;vertical-align:1px}
 .msg-chip.ms{color:#5aa2ff;background:rgba(24,119,242,.12);border:1px solid rgba(24,119,242,.35)}
@@ -732,6 +779,10 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
   .fx-editor { gap: 14px; }
   .fx-left .phone-mockup { max-width: 340px; }
   .mv-btn, .del-btn { min-height: 32px; min-width: 32px; }
+  /* 列表卡片单列堆叠 + 卡操作按钮换行（对齐 LaunchTemplates 移动端） */
+  .grid { grid-template-columns: 1fr !important; }
   .card-ops { flex-wrap: wrap; }
+  .card-ops .op { min-height: 32px; }
+  .card-head { flex-wrap: wrap; }
 }
 </style>

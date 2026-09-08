@@ -636,8 +636,7 @@ const loadFormMsgTemplates = async () => {
   try { formTemplates.value = await GET('/form-templates/forms') } catch {}
   try { msgTemplates.value = await GET('/form-templates/messages') } catch {}
 }
-// 消息模板下拉 label：带类型 chip（Messenger/WhatsApp，产品名不译）；不做类型过滤（WHATSAPP 相关目标也允许复用任一模板文案）
-const msgTplLabel = (m) => '[' + ((m.type || 'messenger') === 'whatsapp' ? 'WhatsApp' : 'Messenger') + '] ' + m.name + ' · ' + (m.welcome_text || '').slice(0, 20)
+// 消息模板不做类型过滤（WHATSAPP 相关目标也允许复用任一模板文案）；列表展示走摘要卡 msgTplSummary
 const onFormTplChange = (id) => {
   if (!id) { selectedFormTpl.value = null; form.value.lead_form_id = ''; form.value.lead_form_template_id = 0; return }
   const t = formTemplates.value.find(f => f.id === id)
@@ -1333,6 +1332,29 @@ const onNodeLandingChange = async (node) => {
 }
 const setNodeMsgTpl = (node, v) => { node.message_template_id = v || 0 }
 const setNodeFormTpl = (node, v) => { node.lead_form_template_id = v || 0 }
+// ── 表单/消息模板选择摘要卡（广告卡内选择器与投放编辑器体验对齐）──
+// 节点当前选中模板（单模式走 selectedFormTpl/selectedMsgTpl）
+const nodeFormTpl = (a) => formTemplatesForPlat.value.find(f => f.id === a.lead_form_template_id) || null
+const nodeMsgTpl = (a) => msgTemplates.value.find(m => m.id === a.message_template_id) || null
+// 摘要行：表单=标题+问题数；消息=类型+开场白首行（截 40 字）
+const formTplSummary = (f) => ((f.config || {}).form_title || f.name) + ' · ' + t('formtpl.questionsCount', { n: (((f.config || {}).custom_questions) || []).length })
+const msgTplSummary = (m) => ((m.type || 'messenger') === 'whatsapp' ? 'WhatsApp' : 'Messenger') + ' · ' + String(m.welcome_text || '').split('\n')[0].slice(0, 40)
+// 预览数据（单模式/结构节点共用弹窗；独立 ref 防两态互串）
+const formPreviewTpl = ref(null)
+const msgPreviewTpl = ref(null)
+const openFormPreview = (tpl) => { formPreviewTpl.value = tpl; formPreviewOpen.value = true }
+const openMsgPreview = (tpl) => { msgPreviewTpl.value = tpl; msgPreviewOpen.value = true }
+// 选择器弹窗（kind=form|msg；node=null 单模式，非空=结构广告节点）
+const tplPickerOpen = ref(false)
+const tplPickerKind = ref('form')
+const tplPickerNode = ref(null)
+const tplPickerList = computed(() => tplPickerKind.value === 'form' ? formTemplatesForPlat.value : msgTemplates.value)
+const openTplPicker = (kind, node = null) => { tplPickerKind.value = kind; tplPickerNode.value = node; tplPickerOpen.value = true }
+const pickTpl = (tpl) => {
+  if (tplPickerKind.value === 'form') tplPickerNode.value ? setNodeFormTpl(tplPickerNode.value, tpl.id) : onFormTplChange(tpl.id)
+  else tplPickerNode.value ? setNodeMsgTpl(tplPickerNode.value, tpl.id) : onMsgTplChange(tpl.id)
+  tplPickerOpen.value = false
+}
 const setNodePostSource = (node, src) => {
   node.post_source = src === 'reuse' ? 'reuse' : 'new'
   if (node.post_source === 'reuse' && (node.asset_ids || []).length > 1) {
@@ -2738,13 +2760,19 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageMsgTpl') }} →</router-link>
 </div>
           <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
-            <el-select v-model="form.message_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="onMsgTplChange">
-              <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="msgTplLabel(m)" />
-</el-select>
+            <div v-if="selectedMsgTpl" class="tpl-sel-card">
+              <div class="tsc-head">
+                <span :class="['msg-chip', (selectedMsgTpl.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (selectedMsgTpl.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>
+                <span class="tsc-name">{{ selectedMsgTpl.name }}</span>
 </div>
-          <div v-if="selectedMsgTpl" class="tpl-preview-bar" @click="msgPreviewOpen = true">
-            <span>{{ (selectedMsgTpl.welcome_text||'').slice(0,50) }}…</span>
-            <span class="preview-link">{{ t('common.preview') }}</span>
+              <div class="tsc-sum">{{ msgTplSummary(selectedMsgTpl) }}</div>
+              <div class="tsc-ops">
+                <button class="op" @click="openMsgPreview(selectedMsgTpl)">{{ t('common.preview') }}</button>
+                <button class="op" @click="openTplPicker('msg')">{{ t('launch.change') }}</button>
+                <button class="op danger" :title="t('launch.clearTpl')" @click="onMsgTplChange(0)">✕</button>
+</div>
+</div>
+            <button v-else class="tpl-sel-empty" @click="openTplPicker('msg')">+ {{ t('launch.pickMsgTpl') }}</button>
 </div>
 </template>
         <!-- 表单类（LEADS + Instant Forms；FB/TT 双平台——下拉按模板平台过滤，payload 部署时按平台构建；
@@ -2754,15 +2782,22 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <router-link to="/form-templates" class="new-link">{{ t('launch.manageFormTpl') }} →</router-link>
 </div>
           <div class="row"><label>{{ t('launch.formTemplate') }}</label>
-            <el-select v-model="form.lead_form_template_id" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="onFormTplChange">
-              <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
-</el-select>
+            <div v-if="selectedFormTpl" class="tpl-sel-card">
+              <div class="tsc-head">
+                <span :class="['plat-chip', (selectedFormTpl.platform||'fb')==='tt'?'tt':'fb']">{{ (selectedFormTpl.platform||'fb')==='tt'?'TT':'FB' }}</span>
+                <span class="tsc-name">{{ selectedFormTpl.name }}</span>
+                <span v-if="selectedFormTpl.fb_form_id" class="tsc-badge">{{ t('formtpl.deployed') }}</span>
+</div>
+              <div class="tsc-sum">{{ formTplSummary(selectedFormTpl) }}</div>
+              <div class="tsc-ops">
+                <button class="op" @click="openFormPreview(selectedFormTpl)">{{ t('common.preview') }}</button>
+                <button class="op" @click="openTplPicker('form')">{{ t('launch.change') }}</button>
+                <button class="op danger" :title="t('launch.clearTpl')" @click="onFormTplChange(0)">✕</button>
+</div>
+</div>
+            <button v-else class="tpl-sel-empty" @click="openTplPicker('form')">+ {{ t('launch.pickFormTpl') }}</button>
             <span class="hint">{{ t('launch.formTplPlatScope', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
             <span v-if="!formTemplatesForPlat.length" class="hint">{{ t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
-</div>
-          <div v-if="selectedFormTpl" class="tpl-preview-bar" @click="formPreviewOpen = true">
-            <span>{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</span>
-            <span class="preview-link">{{ t('common.preview') }}</span>
 </div>
 </template>
 </template>
@@ -2882,17 +2917,38 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <template v-if="form.objective === 'OUTCOME_ENGAGEMENT'">
                 <hr class="sep" /><div class="sec-title">{{ t('launch.messageAd') }}</div>
                 <div class="row"><label>{{ t('launch.messengerWelcomeTpl') }}</label>
-                  <el-select :model-value="a.message_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectMsgTpl')" @change="v => setNodeMsgTpl(a, v)">
-                    <el-option v-for="m in msgTemplates" :key="m.id" :value="m.id" :label="msgTplLabel(m)" />
-                  </el-select>
+                  <div v-if="nodeMsgTpl(a)" class="tpl-sel-card">
+                    <div class="tsc-head">
+                      <span :class="['msg-chip', (nodeMsgTpl(a).type||'messenger')==='whatsapp'?'wa':'ms']">{{ (nodeMsgTpl(a).type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>
+                      <span class="tsc-name">{{ nodeMsgTpl(a).name }}</span>
+</div>
+                    <div class="tsc-sum">{{ msgTplSummary(nodeMsgTpl(a)) }}</div>
+                    <div class="tsc-ops">
+                      <button class="op" @click="openMsgPreview(nodeMsgTpl(a))">{{ t('common.preview') }}</button>
+                      <button class="op" @click="openTplPicker('msg', a)">{{ t('launch.change') }}</button>
+                      <button class="op danger" :title="t('launch.clearTpl')" @click="setNodeMsgTpl(a, 0)">✕</button>
+</div>
+</div>
+                  <button v-else class="tpl-sel-empty" @click="openTplPicker('msg', a)">+ {{ t('launch.pickMsgTpl') }}</button>
 </div>
                 </template>
                 <template v-if="form.objective === 'OUTCOME_LEADS'">
                 <hr class="sep" /><div class="sec-title">Instant Form</div>
                 <div class="row"><label>{{ t('launch.formTemplate') }}</label>
-                  <el-select :model-value="a.lead_form_template_id || undefined" style="width:100%" size="small" filterable clearable :placeholder="t('launch.selectFormTpl')" @change="v => setNodeFormTpl(a, v)">
-                    <el-option v-for="f in formTemplatesForPlat" :key="f.id" :value="f.id" :label="f.name + (f.fb_form_id ? ' ✓' : '')" />
-                  </el-select>
+                  <div v-if="nodeFormTpl(a)" class="tpl-sel-card">
+                    <div class="tsc-head">
+                      <span :class="['plat-chip', (nodeFormTpl(a).platform||'fb')==='tt'?'tt':'fb']">{{ (nodeFormTpl(a).platform||'fb')==='tt'?'TT':'FB' }}</span>
+                      <span class="tsc-name">{{ nodeFormTpl(a).name }}</span>
+                      <span v-if="nodeFormTpl(a).fb_form_id" class="tsc-badge">{{ t('formtpl.deployed') }}</span>
+</div>
+                    <div class="tsc-sum">{{ formTplSummary(nodeFormTpl(a)) }}</div>
+                    <div class="tsc-ops">
+                      <button class="op" @click="openFormPreview(nodeFormTpl(a))">{{ t('common.preview') }}</button>
+                      <button class="op" @click="openTplPicker('form', a)">{{ t('launch.change') }}</button>
+                      <button class="op danger" :title="t('launch.clearTpl')" @click="setNodeFormTpl(a, 0)">✕</button>
+</div>
+</div>
+                  <button v-else class="tpl-sel-empty" @click="openTplPicker('form', a)">+ {{ t('launch.pickFormTpl') }}</button>
                   <span class="hint">{{ t('launch.formTplPlatScope', { plat: isTt ? 'TikTok' : 'Facebook' }) }}</span>
 </div>
                 </template>
@@ -3215,11 +3271,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-drawer>
     <!-- 表单预览 -->
     <el-dialog v-model="formPreviewOpen" :title="t('launch.formPreview')" width="400px" append-to-body>
-      <div v-if="selectedFormTpl" class="phone-mockup">
+      <div v-if="formPreviewTpl" class="phone-mockup">
         <div class="pm-screen">
-          <div class="pm-header">{{ (selectedFormTpl.config||{}).form_title || selectedFormTpl.name }}</div>
-          <div v-if="(selectedFormTpl.config||{}).description" class="pm-desc">{{ selectedFormTpl.config.description }}</div>
-          <div v-for="(q,i) in ((selectedFormTpl.config||{}).custom_questions||[])" :key="i" class="pm-field">
+          <div class="pm-header">{{ (formPreviewTpl.config||{}).form_title || formPreviewTpl.name }}</div>
+          <div v-if="(formPreviewTpl.config||{}).description" class="pm-desc">{{ formPreviewTpl.config.description }}</div>
+          <div v-for="(q,i) in ((formPreviewTpl.config||{}).custom_questions||[])" :key="i" class="pm-field">
             <span class="pm-label">{{ q.label }}</span>
             <div v-if="q.options&&q.options.length" class="pm-options"><span v-for="(o,oi) in q.options" :key="oi" class="pm-option">{{ o.value }}</span></div>
             <div v-else class="pm-input-mock">—</div>
@@ -3229,13 +3285,30 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dialog>
     <!-- 消息预览 -->
     <el-dialog v-model="msgPreviewOpen" :title="t('launch.msgPreview')" width="380px" append-to-body>
-      <div v-if="selectedMsgTpl" class="messenger-mockup">
-        <div class="mm-bubble">{{ selectedMsgTpl.welcome_text }}</div>
-        <div v-if="(selectedMsgTpl.ice_breakers||[]).length" class="mm-quick-replies">
-          <span v-for="(ib,i) in selectedMsgTpl.ice_breakers" :key="i" class="mm-qr">{{ ib.title }}</span>
+      <div v-if="msgPreviewTpl" class="messenger-mockup">
+        <div class="mm-bubble">{{ msgPreviewTpl.welcome_text }}</div>
+        <div v-if="(msgPreviewTpl.ice_breakers||[]).length" class="mm-quick-replies">
+          <span v-for="(ib,i) in msgPreviewTpl.ice_breakers" :key="i" class="mm-qr">{{ ib.title }}</span>
 </div>
 </div>
 </el-dialog>
+    <!-- 表单/消息模板选择器（广告卡摘要卡「更换」/空态「+ 选择」入口共用） -->
+    <el-dialog v-model="tplPickerOpen" :title="tplPickerKind==='form' ? t('launch.pickFormTpl') : t('launch.pickMsgTpl')" width="560px" append-to-body>
+      <div class="tpl-picker-list">
+        <button v-for="tpl in tplPickerList" :key="tpl.id" type="button" class="tpl-picker-card" @click="pickTpl(tpl)">
+          <div class="tsc-head">
+            <template v-if="tplPickerKind==='form'">
+              <span :class="['plat-chip', (tpl.platform||'fb')==='tt'?'tt':'fb']">{{ (tpl.platform||'fb')==='tt'?'TT':'FB' }}</span>
+            </template>
+            <span v-else :class="['msg-chip', (tpl.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (tpl.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>
+            <span class="tsc-name">{{ tpl.name }}</span>
+            <span v-if="tplPickerKind==='form' && tpl.fb_form_id" class="tsc-badge">{{ t('formtpl.deployed') }}</span>
+</div>
+          <div class="tsc-sum">{{ tplPickerKind==='form' ? formTplSummary(tpl) : msgTplSummary(tpl) }}</div>
+        </button>
+        <div v-if="!tplPickerList.length" class="empty-sm">{{ tplPickerKind==='form' ? t('launch.noFormsForPlat', { plat: isTt ? 'TikTok' : 'Facebook' }) : t('launch.noMsgTpl') }}</div>
+      </div>
+    </el-dialog>
 </div>
 </template>
 
@@ -3549,9 +3622,23 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 /* 表单/消息模板选择 */
 .new-link{font-size:11px;color:var(--ac);text-decoration:none;margin-left:auto}
 .new-link:hover{text-decoration:underline}
-.tpl-preview-bar{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--t2);cursor:pointer;margin-top:4px}
-.tpl-preview-bar:hover{background:var(--bg2)}
-.preview-link{color:var(--ac);font-size:11px}
+/* 表单/消息模板选择摘要卡（广告卡内选择器；与 FormTemplates 列表卡同语言） */
+.tpl-sel-card{display:flex;flex-direction:column;gap:5px;padding:8px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px}
+.tsc-head{display:flex;align-items:center;gap:6px;min-width:0}
+.tsc-name{font-size:13px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tsc-badge{font-size:10px;padding:1px 8px;border-radius:8px;font-weight:600;color:var(--success);background:rgba(52,199,89,.13);white-space:nowrap;flex-shrink:0}
+.tsc-sum{font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tsc-ops{display:flex;gap:3px;margin-top:2px}
+.tpl-sel-empty{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;padding:10px;background:transparent;border:1px dashed var(--bd);border-radius:6px;color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit}
+.tpl-sel-empty:hover{border-color:var(--ac);color:var(--ac);background:var(--acg)}
+/* 消息模板类型 chip（Messenger 蓝 / WhatsApp 绿；与 FormTemplates 同款） */
+.msg-chip{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;flex-shrink:0}
+.msg-chip.ms{color:#5aa2ff;background:rgba(24,119,242,.12);border:1px solid rgba(24,119,242,.35)}
+.msg-chip.wa{color:#4ade80;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.4)}
+/* 选择器弹窗列表 */
+.tpl-picker-list{display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto}
+.tpl-picker-card{display:flex;flex-direction:column;gap:5px;padding:10px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;cursor:pointer;text-align:left;font-family:inherit}
+.tpl-picker-card:hover{border-color:var(--ac);background:var(--acg)}
 .phone-mockup{max-width:320px;margin:0 auto;border:3px solid var(--bd);border-radius:20px;overflow:hidden;background:var(--bg2)}
 .pm-screen{padding:14px;display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto}
 .pm-header{font-size:15px;font-weight:700;color:var(--t1);text-align:center}
@@ -3735,5 +3822,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
   .pl-cards{flex-direction:column}
   .node-sec-head{min-height:40px;flex-wrap:wrap}
   .node-sec-val{max-width:100%;flex-basis:100%;text-align:left}
+  /* 表单/消息模板摘要卡：操作钮换行放大可点，空态入口 ≥44px */
+  .tsc-ops{flex-wrap:wrap}
+  .tsc-ops .op{min-height:32px}
+  .tpl-sel-empty{min-height:44px}
 }
 </style>
