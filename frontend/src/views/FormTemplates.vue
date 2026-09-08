@@ -719,9 +719,18 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .pp-dot.fb { background: #1877f2; }
 .pp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%); }
 .pp-hint { font-size: 11px; color: var(--t3); margin-top: 10px; line-height: 1.5; }
+/* <900：编辑器左右 → 上下堆叠，左预览取消 sticky 跟随文档流（置于设置区下方） */
 @media (max-width: 900px) {
   .fx-editor { flex-direction: column-reverse; }
   .fx-left { position: static; flex: none; width: 100%; }
   .fx-left .phone-mockup { max-width: 360px; }
+}
+/* 手机（<768，抽屉已被 main.css 全局规则撑满 100%）：预览壳 340px 居中缩放；
+   问题卡 ↑↓/增删小钮放大到触屏可点，不挤出屏幕 */
+@media (max-width: 768px) {
+  .fx-editor { gap: 14px; }
+  .fx-left .phone-mockup { max-width: 340px; }
+  .mv-btn, .del-btn { min-height: 32px; min-width: 32px; }
+  .card-ops { flex-wrap: wrap; }
 }
 </style>

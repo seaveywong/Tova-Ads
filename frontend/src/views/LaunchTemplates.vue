@@ -3391,14 +3391,44 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pf-bs-label{font-weight:600;color:var(--ac);flex:none}
 .pf-bs-seg{padding:2px 8px;background:var(--bg2);border-radius:var(--rs);white-space:nowrap}
 
-/* #23 移动端适配 */
+/* #23 移动端适配（el-drawer 撑满 / el-dialog 92vw / .form .row 堆叠走 main.css 全局规则，此处只管本页结构） */
 @media (max-width: 768px) {
   .grid{grid-template-columns:1fr !important}
   .picker-grid{grid-template-columns:1fr !important}
   .acc-config{grid-template-columns:1fr !important}
+  /* 目标选择弹窗：左右 → 上下（列表+说明堆叠） */
   .objp{flex-direction:column}
   .objp-detail{border-left:none;padding-left:0;border-top:1px solid var(--bd);padding-top:10px}
+  /* 排期起止纵向（datetime 输入已内联 width:100%；EP 面板 322px < 375px 屏宽不裁切） */
   .sched-row{flex-direction:column;align-items:stretch}
-  .fb-sec-meta{max-width:100%}
+  .sched-sep{display:none}
+  /* 三段手风琴段头：可点区域 ≥40px，元信息换行到第二行不与标题挤压 */
+  .fb-sec-head{min-height:44px;flex-wrap:wrap}
+  .fb-sec-meta{max-width:100%;flex-basis:100%}
+  /* 组卡/广告卡头：点区 ≥40px；展开箭头/图标小钮放大可点 */
+  .as-card-head{min-height:44px}
+  .ad-card-head{min-height:40px}
+  .t-arrow{padding:8px}
+  .t-op{min-height:32px;min-width:32px;justify-content:center}
+  /* 结构模式分组标题行：加广告按钮允许换行 */
+  .ad-group-head{flex-wrap:wrap}
+  /* 兴趣搜索行：输入独占一行，按钮换行（「从素材AI导入」长按钮不挤爆） */
+  .interest-search{flex-wrap:wrap}
+  .interest-search .inp{flex:1 1 100%}
+  /* 部署模式行：label 与切换组堆叠，切换组撑满（dm-seg 定宽 280px 解除） */
+  .deploy-mode-row{flex-wrap:wrap}
+  .dm-seg{width:100%}
+  .batch-bar,.acc-batch-row{flex-wrap:wrap}
+  /* 权限总览折叠头 ≥40px 可点；表格列多，横向滚动不压扁 */
+  .pp-head{min-height:40px}
+  .pp-body{overflow-x:auto}
+  .pp-table{min-width:460px}
+  /* 已部署清单条目头 ≥40px */
+  .dep-job-head{min-height:40px}
+  /* 预检弹窗（92vw≈345px）：字段行 label 上置（对齐全局 .form .row 堆叠约定）；树表行换行不横向溢出 */
+  .pf-field{flex-direction:column;gap:2px}
+  .pf-k{min-width:0}
+  .pft-adset,.pft-ad{flex-wrap:wrap}
+  .pft-name{white-space:normal;word-break:break-all}
 }
 </style>
