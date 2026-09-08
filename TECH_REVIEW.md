@@ -1419,3 +1419,24 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 ### 2026-09-09 补充：创建与编辑配置及API可实现性规格
 
 新增 [实施规格_FB广告创建与编辑_配置及API映射.md](实施规格_FB广告创建与编辑_配置及API映射.md)，涵盖三层面板、Creative对象、逐字段配置与API映射、网站/表单/消息/应用分支、编辑限制、受控验证清单及交给其他AI的提示词。只读核对本地v25.0构建器、模板和表单路由，以及Meta官方Python SDK源码；开发者参考页429已如实标注。明确SDK main不等于v25可用、Instagram身份键差异、现有构建器ACTIVE测试风险。文档结构、JSON示例和本地链接检查通过。无应用代码修改、无广告写入、无部署。
+
+### 2026-09-09 批H：转化发生位置矩阵对齐 Meta 官方 + 管理器菜单顺序照 FB（已上线）
+
+**概述**：合并《实施规格》与 Meta 官方转化位置矩阵调研（business/help/2035196643270 + AdSet reference v25 + Call Ads v26），修正三处错位、补一缺失位；广告管理器工具条与列默认顺序照 FB Ads Manager 重排；细分新增转化位置维度。完整对标矩阵见 [对标矩阵_广告管理器_批H.md](对标矩阵_广告管理器_批H.md)。
+
+**变更**：
+| 文件 | 改动 |
+|---|---|
+| backend/app/core/ad_builder.py | 销量移除单独通话位；流量 instagram_direct→instagram_profile（INSTAGRAM_PROFILE+VISIT_INSTAGRAM_PROFILE）；潜客 instagram_direct 优化目标 CONVERSATIONS→LEAD_FROM_IG_DIRECT；潜客通话位→QUALITY_CALL；OPT_GOALS_BY_OBJECTIVE/LOCATION 同步扩枚举 |
+| backend/app/routers/ads.py | /ads/insights/breakdown 新增 dimension=conversion_location（action_breakdowns=conversion_destination；只拆成效，消耗/展示置空——与 FB 按操作细分同口径） |
+| frontend AdManager.vue | 工具条重排照 FB（＋创建→账户→日期→筛选→搜索→列→⚡核验→跳转链接→缓存龄）；细分弹窗加转化位置（含中文映射+口径说明）；绿色创建按钮跳投放模板 |
+| frontend adManagerView.js | 列默认序照 FB：成效→消耗→单次成效费用→预算→综合转化 |
+| frontend LaunchTemplates.vue + launch.js/admanager.js | 矩阵镜像同步；文案官方叫法（转化发生位置/Instagram 主页/Instagram/通话/Facebook 公共主页）+3 个新优化目标标签（zh/en 成对，en 零 CJK） |
+
+**迁移**：无 schema 变更。生产 182 个模板扫描确认 0 个使用 conv_location（批次I 昨日刚上线），矩阵收紧零存量影响。
+
+**生产变更**：后端 restart（双门过）；前端 CF Pages 部署（构建产物 grep 验证含新代码后才上传）。
+
+**验证**：_smoke_batch_h.py 33/33 ALL_PASS（矩阵自洽/新组合 payload/旧组合拒绝/回归）；adManagerView 5/5；health ok；journal 部署后零 err。
+
+**结论**：A 级错位（销量假通话位/流量假 IG 私信/潜客 IG 错优化目标）已修；细分四维与 FB 按投放+按操作对齐；菜单顺序照 FB。多渠道合并广告组/组合位/应用/店铺维持缓项（矩阵文档 §3）。commit f17f02d。
