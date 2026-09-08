@@ -169,6 +169,7 @@ def _validate_structure(raw) -> tuple[dict, str]:
             "name": name,
             "enabled": bool(adset.get("enabled")),
             "budget_usd": budget,
+            "pixel_id": str(adset.get("pixel_id") or ""),
             "audience_id": int(aud_id) if aud_id else 0,
             "audience_json": str(adset.get("audience_json") or ""),
             "optimization_goal": str(adset.get("optimization_goal") or ""),
@@ -2068,7 +2069,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         adset_payload = build_adset(
             name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
             objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-            page_id=_page_id, pixel_id=(item.pixel_id or tpl.pixel_id or ""),
+            page_id=_page_id,
+            pixel_id=(str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
             landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
                                             tpl.name or "", "fb"),
             bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
