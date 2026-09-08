@@ -1113,14 +1113,14 @@ const unsubscribeLeads = async () => {
 .ctrl-bar { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-bottom: 10px }
 .ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s }
 .ctrl-btn:hover { color: var(--t1); border-color: var(--bd2) }
-.ctrl-btn.active { background: var(--ac); color: #fff; border-color: var(--ac) }
+.ctrl-btn.active { background: var(--acg); color: var(--ac); border-color: var(--ac); font-weight: 600 }
 .ctrl-btn.apply { background: var(--ac); color: #fff; margin-left: 2px; padding: 0 8px }
 .ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac) }
 .ctrl-btn.primary:hover { filter: brightness(1.08) }
 .ctrl-btn.primary:disabled { opacity: .5; cursor: wait }
 .ctrl-btn.sm { padding: 0 8px; font-size: 12px }
 .ctrl-btn.ghost { background: transparent; color: var(--t3) }
-.ctrl-btn.on { background: var(--ac); color: #fff; border-color: var(--ac) }
+.ctrl-btn.on { background: var(--acg); color: var(--ac); border-color: var(--ac); font-weight: 600 }
 .search-input { width: 210px; text-align: left; color-scheme: dark }
 .custom-range { display: flex; align-items: center; gap: 4px }
 .date-input { height: 32px; padding: 0 8px; font-size: 13px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); color-scheme: dark; box-sizing: border-box }
@@ -1164,7 +1164,7 @@ const unsubscribeLeads = async () => {
 .sid { font-size: 10px; color: var(--t3); font-weight: 400 }
 /* 平台小标用 main.css 全局 .plat-chip */
 .lv { color: var(--ac); font-size: 11px; font-weight: 600 }
-.lp { color: var(--success); font-size: 11px; font-weight: 600 }
+.lp { color: var(--ac); font-size: 11px; font-weight: 600 }
 .lpr { color: var(--t2); font-size: 11px }
 .slug-cell { overflow: hidden }
 .ad-slug { color: var(--ac); font-size: 11px; font-family: monospace; cursor: pointer; white-space: nowrap }
@@ -1224,7 +1224,7 @@ const unsubscribeLeads = async () => {
 .pp-tag.mid { color: var(--warning) }
 .pp-tag.low { color: var(--t3) }
 .cache-at.live-ok { color: var(--success) }
-.rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--ac); color: #fff; border-radius: 8px }
+.rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd2); border-radius: 8px }
 .rd-form { display: flex; flex-direction: column; gap: 8px }
 .rd-form label { font-size: 12px; color: var(--t3) }
 .rd-hint { font-size: 11px; color: var(--t3); line-height: 1.5 }
@@ -1318,6 +1318,6 @@ const unsubscribeLeads = async () => {
 .bd-table td { padding:8px 10px; font-size:12px }
 .bd-note { margin-top:8px; font-size:11px; color:var(--t3); line-height:1.5 }
 /* FB 顶栏式工具条：绿色创建按钮（同 FB Ads Manager 主操作位） */
-.ctrl-btn.create-btn { background:var(--success, #34c759); color:#fff; border-color:var(--success, #34c759); font-weight:600 }
+.ctrl-btn.create-btn { background:var(--ac); color:#fff; border-color:var(--ac); font-weight:600 }
 .ctrl-btn.create-btn:hover { filter:brightness(1.06); color:#fff }
 </style>
