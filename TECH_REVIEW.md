@@ -1375,3 +1375,42 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 ### 2026-09-09 补充：后续AI执行建议与1:1验收目标
 
 按用户要求重写 `PROMPT_广告管理器重构.md`，将目标明确为FB广告管理器视觉/交互/真实数据/部署闭环，新增对标证据矩阵、推荐执行顺序、16项最低覆盖范围与严格成功定义；在本轮收尾交接追加历史0、reach去重、异目标成效汇总、实体规则范围等风险建议。代码检查点仍为f8dc294，应用代码与部署状态不变；本次仅文档更新。
+
+
+---
+
+## 2026-09-09 — 广告管理器深化批：FB口径可用标记 + 批量逐项隔离 + 细分(Breakdowns)弹窗（已上线）
+
+**状态：已部署验证。** 基线 f8dc294（前一AI重构，未部署）之上深化，不推翻其工作。commit 8559b5c + 2eddb20。
+
+### 概述
+1. **FB口径可用标记**：`/ads/list` 每行新增 `results_fb_available`。0093 前（迁移 server_default=0）与 TT 行（报表 actions 非 FB 格式，恒 0）不冒充实测——前端成效(FB)列按缺失呈现 '—'，tooltip 指引看综合转化列。
+2. **批量逐项异常隔离**：`/ads/batch-status` 单条失败/异常不拖垮整批；统一返回 act_id/node_id/level/success/verified；异常 rollback 后**重设 RLS 租户上下文**（set_config(is_local=false) 在事务内执行时随 rollback 回滚，曾致同请求后续查询静默丢租户——rls-setconfig-rollback-pitfall）。
+3. **细分端点**：`GET /ads/insights/breakdown`（age/gender/placement），单广告 FB insights breakdowns 直连，60s 内存缓存 + refresh=1 绕过；date_from/to（time_range）优先，否则 date_preset 白名单；TT 账户 400。成效列走 resolve_kpi 同口径（objective 从 AdsCache campaigns 反查，不请求 insights 的 objective 字段——本代码库无此先例，guard/1.0 均从 campaign 节点取）。
+4. **前端**：广告行「···」下拉新增「细分」（仅 FB 行）→ 弹窗维度切换(年龄/性别/版位)+刷新+表格；成效列缺失成因区分 tooltip（fbNotCollected vs fbMissing）；预算未核验换专用 budgetUnverified 文案（状态切换保留 fakePauseWarn 假停语义）。
+5. **修复 locale 死代码**：`views/admanager.js` 曾有重复 zh/en 键（JS 对象字面量后者覆盖前者），budgetUnverified 实际未生效——已合并。
+
+### 判定口径（availability epoch）
+`_FB_RESULTS_EPOCH = 2026-09-08T16:00Z`（0093 部署时刻，0e1f61d 2026-09-08 23:46 CST）。行级：非零 → 可用；否则要求 min(updated_at) ≥ epoch（巡检每轮滚动刷新近 7 天行并 bump updated_at，故旧区间自然落入不可用）。父层(系列/组) AND 传播。**与用户口头 spec 的偏差**：原话"metrics_updated_at 非空则 true"在实现上是恒真（快照行 updated_at 恒非空，标记失去区分力），故改为 epoch 判定——语义仍是"有真实采集则 true"，并在 TT 行上显式恒 False。
+
+### 生产变更
+- 后端：ads.py（+guard_engine.py 1行 updated_at bump，随批上传）上传 /opt/toveads/backend，py_compile + from app.main import app 双门过，restart，health ok（v1.3.5）。
+- 备份：/opt/toveads/backup_20260909/{ads.py,guard_engine.py}.bak。
+- 前端：CF Pages 部署成功，tovaads.com 已服务新产物 AdManager-BICcs9Pv.js（HTTP 200 验证）。
+- journal 干净（仅 gunicorn 重启 socket-close 噪音，无 traceback）。
+
+### 验证
+- node --test adManagerView.test.js：5/5（新增"采集前 0 值不冒充实测"）。
+- _smoke_ad_manager.py（隔离 venv + 服务器）：3/3（新增 availability：旧零行/naive 旧零行/新 0 行/旧非零行/TT 行）。
+- _smoke_ad_manager_live.py（服务器真实数据）：ALL_PASS——三层均带 results_fb_available；非零行必可用；09-02~03 旧零行全部不可用（128 行 min(updated_at)=09-03 < epoch，7 行非零）。细分端点真数据 SKIP（当前 cache 无 FB 广告——FB policy 限制未解，见 fb-business-policy-restriction）。
+- 路由注册验证：无鉴权 curl /ads/insights/breakdown → 401（非 404）。
+- i18n 门：zh/en 各 2931 键差集 0，en 0 CJK（layout.langToZh 一并修正）；剩余 4 项 BRACE 告警为存量合法转义。
+- build 产物 grep 命中 insights/breakdown / results_fb_available / budgetUnverified / fbNotCollected 后才部署。
+
+### 结论与遗留
+- 资金执行函数（暂停/预算/删除）零改动，仅批量入口包异常隔离。
+- 遗留：①细分端点未在真 FB 广告上跑通（账户侧无 FB 广告），FB 解封后需人工开一次弹窗验收；②跨 worker 的 LIVE_STALE_MARKS/refresh-status 进程内状态仍未修（沿用交接#7）；③浏览器人工验收（列记忆刷新/面包屑/窄屏）仍建议用户过一遍——本批已做代码级核对（curList 分层过滤/localStorage 键 admanager-view-v1 深度watch/潜客Tab完整/实时核验只 patch 广告层）。
+
+### commit
+- 8559b5c 广告管理器深化：FB口径可用标记+批量逐项隔离+细分弹窗
+- 2eddb20 线上数据断言 smoke
