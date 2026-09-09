@@ -25,8 +25,8 @@ export const METRIC_COLUMNS = [
   { id: 'pass_rate', label: 'colPassRate', levels: ['ad'], width: 110 },
 ]
 export const columnsFor = level => METRIC_COLUMNS.filter(c => !c.levels || c.levels.includes(level))
-// 批AO 修复：批AM 提交时此行少了收尾 ]，前端从批AM 起就 build 失败（改动从未上 CF）
-export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
+// 批AQ：广告层默认列补「访问量」——综合转化(=访问口径)+点击+访问 三个数并排（用户要求直观分开）
+export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass', 'landing_visits'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
 
 export function entityContext(data) {
   const campaigns = new Map((data.campaigns || []).map(row => [entityKey(row), row]))

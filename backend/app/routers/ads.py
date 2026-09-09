@@ -234,7 +234,11 @@ def _attach_perf(items: list, perf_map: dict) -> list:
         spend, usd, conv = p["spend"], p["spend_usd"], p["conv"]
         imp, clk, reach = p["impressions"], p["clicks"], p["reach"]
         fb = p.get("results_fb") if p.get("results_fb_complete") else None
-        out.append({**it, "spend": round(spend, 2), "spend_usd": round(usd, 2), "conversions": conv,
+        out.append({**it, "spend": round(spend, 2), "spend_usd": round(usd, 2),
+                    # 批AQ：不再直接覆盖——广告层的 conversions 已在上游算好
+                    # max(FB, 真人落地访问)（_attach_perf 在出口处曾把它整个覆盖回 FB perf 值，
+                    # 批AM/AO 的口径改动从未真正到过前端）。父层原始 dict 无此键 → 仍取 perf conv
+                    "conversions": max(int(it.get("conversions") or 0), int(conv or 0)),
                     "results_fb": fb, "results_fb_complete": fb is not None,
                     "results_fb_available": bool(p.get("results_fb_available")),
                     "metrics_updated_at": p.get("metrics_updated_at"),
@@ -592,6 +596,26 @@ def list_ads(
     except Exception:
         for ad in all_ads:
             ad.pop("_ih", None)
+    # 批AQ：父层（系列/组）综合转化=子广告终值汇总——广告层是 max(FB, 真人落地访问)，
+    # 父层若仍用 perf 的 FB-only 汇总会出现「系列 1 / 广告 4」上下不一致
+    _ads_out = _attach_perf(all_ads, perf)
+    _adset_conv, _camp_conv = {}, {}
+    for a in _ads_out:
+        _cv = int(a.get("conversions") or 0)
+        _k = ad_to_adset.get(_entity_key(a))
+        if _k:
+            _adset_conv[_k] = _adset_conv.get(_k, 0) + _cv
+        _k = ad_to_camp.get(_entity_key(a))
+        if _k:
+            _camp_conv[_k] = _camp_conv.get(_k, 0) + _cv
+
+    def _patch_conv(items, sums):
+        for it in items:
+            _v = sums.get(_entity_key(it))
+            if _v is not None:
+                it["conversions"] = _v
+        return items
+
     return {
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",
@@ -601,9 +625,9 @@ def list_ads(
         "refreshing": refreshing,
         "mixed_currency": mixed_currency,
         "currency": "USD" if mixed_currency else (next(iter(_curs)) if _curs else "USD"),
-        "campaigns": _conv_budget(_attach_perf(all_campaigns, camp_perf)),
-        "adsets": _conv_budget(_attach_perf(all_adsets, adset_perf)),
-        "ads": _attach_perf(all_ads, perf),
+        "campaigns": _patch_conv(_conv_budget(_attach_perf(all_campaigns, camp_perf)), _camp_conv),
+        "adsets": _patch_conv(_conv_budget(_attach_perf(all_adsets, adset_perf)), _adset_conv),
+        "ads": _ads_out,
     }
 
 
