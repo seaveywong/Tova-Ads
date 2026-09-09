@@ -1785,3 +1785,27 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 
 ### 未做（审计结论留档）
 后端 #4 ads/refresh 按新鲜度跳过 include_ads（3→2 次/账户）、#7 resolve-post 帖子内容缓存、#8 diagnose 读快照；前端 #7 /auth/me 共享 store、#8 Dashboard 通知去重、#12 批量移除并发化、#13/#15 低频管理页——价值中低或改动面大，待后续。
+
+## 批AF：四项大改（2026-09-10，双 agent 研究驱动）
+
+### ① 数据龄双层统一（用户问"为什么广告 1 分钟/系列组 30 分钟"）
+研究结论：巡检只写广告层，结构层由 15min cron 供数——分层是历史设计非必要。**方案 A**：guard 巡检顺带刷结构层（复用 `_sync_one` include_ads=False，函数级 import 防循环，try/except 隔离绝不碰止损主路径）；cron 撤 FB 部分（只剩 TT+停更探测）。成本 +16 次/h·账户（与提频 cron 相同）换结构层 5min 新鲜+并发自愈。前端 chip 简化为单层龄（取两层更旧者，cacheAgeSingle）。**生产验证**：FB 行结构层/广告层同一轮 5.0/5.1min。
+
+### ② 换素材跟随（编辑器显示与部署结果不一致是主坑）
+- 文案/标题「未自定义才跟随」：当前值为空或=旧素材 AI 首条 → 跟新素材（手改过永不覆盖）；树/平铺两模式
+- 受众国家跟随：组内联受众国家为空或=旧素材国家集 → 跟新素材国家（受众保真）
+- **AI 建议兴趣 chips**：组受众区展示素材 ai_audience.interests（自由文本），点击经 /audiences/search 解析成 FB 受众实体才入列——用户逐个确认，不自动注入
+
+### ③ 规则引擎对齐 1.0 KPI 细化（agent 全量研究 1.0 rules.py/guard_engine 4333 行）
+2.0 原有 10 类确认（研究纠正：trend_drop 已有、broader_conv 防误杀已有）。新增 4 类：
+- `cpm_high` 展示成本过高（默认 spend≥$10 + CPM>$15 + 0转化，imps≥1000 防噪声）
+- `cpc_high` 点价过高（spend≥$10 + CPC>$1 + 0转化，clicks≥20）
+- `click_fraud` 刷量嫌疑（clicks≥100 且去重点击占比≤50% 且 0转化——总点击高去重低=同批人反复点；1.0 unique_ctr 信号维度重定义）
+- `fast_scale` 激进扩量（1.0 原参数：0.7×目标/5转化/当日即扩/+25%，走通用 SCALE_RULE_TYPES 执行链）
+insights 字段补 cpm/unique_clicks。Guard.vue 类型/参数/human 卡片/i18n/AdManager 诊断 RULE_ZH 全套。**smoke 8/8**（四类型正反用例）。
+未做留档：账户级聚合规则、kpi_filter 按广告类型切片、reduce_budget 动作、静默时段（价值中低/改动面大，下批）。
+
+### ④ 批AE 遗留清账（用户点名"价值低的也一起做"）
+后端：_sync_one 广告层 <5min 跳过 /ads（3→2 次/账户）；resolve-post 帖子内容 1h 缓存（树编辑器逐节点解析不再重复打 FB）；diagnose 整响应 60s 缓存。
+前端：Ads 批量移除并发化（5/批+成功本地移除）；Members 改角色/移除原地；Settings email-routing 删/翻转本地；Ads/Landing 超管标志读 localStorage（省 /auth/me）；LandingLogs/FormTemplates mount 并行。
+未做：Dashboard 通知去重（需 store 重构，MainLayout 60s 已减半）。
