@@ -55,7 +55,7 @@ export default {
     fbBatchBlocked: '{blocked}/{total} 个子码被 FB 封禁', fbBatchAllNormal: '{total} 个子码全部 FB 正常', fbBatchFail: '批量检测失败',
     pixelLibTitle: '像素库', pixelSyncing: '同步中...', pixelSync: '从账户同步像素', pixelEdit: '编辑像素', pixelAdd: '添加像素',
     fPixelId: '像素 ID', fPixelIdPh: 'FB 像素 ID', pixelNamePh: '备注名', pixelList: '像素列表', pixelPages: '{n} 页', pixelEmpty: '暂无像素，点上方同步或手动添加',
-    pixelSynced: '同步新增 {n} 个', pixelCheckBtn: '像素体检', pixelChecking: '体检中…', pixelCheckTip: '逐账户比对 FB 实况，FB 侧已删/解绑的像素标记为失效（不再被随机轮换选中）', pixelCheckDead: '{n} 个像素已失效（FB 侧已删/解绑），已标记；覆盖 {acts} 个账户', pixelCheckClean: '体检完成：{acts} 个账户、{alive} 个像素全部健康', pixelCheckSkipped: '{n} 个账户的令牌暂时用不了，本次未检查（不会误标失效）', syncFail: '同步失败', delPixelConfirm: '删除像素 {id}？', warnPixelId: '填像素 ID',
+    pixelSynced: '同步新增 {n} 个', pixelCheckBtn: '像素体检', pixelChecking: '体检中…', pixelCheckTip: '逐账户比对 FB 实况，FB 侧已删/解绑的像素标记为失效（不再被随机轮换选中）', pixelCheckDead: '{n} 个像素已失效（FB 侧已删/解绑），已标记；覆盖 {acts} 个账户', pixelCheckClean: '体检完成：{acts} 个账户、{alive} 个像素全部健康', pixelCheckSkipped: '{n} 个账户的令牌暂时用不了，本次未检查（不会误标失效）', subStatTodayTip: '统计口径：北京业务日「今日」（自当天 00:00 起）', todayShort: '今', syncFail: '同步失败', delPixelConfirm: '删除像素 {id}？', warnPixelId: '填像素 ID',
     importableDomains: '可导入域名', searchDomains: '搜索域名...', zoneImported: '已导入', zoneAvailable: '可注册', zoneTaken: '已被占', zoneQueryFail: '查询失败',
     noImportableDomains: '无可导入域名', importSelected: '导入选中', importedDomains: '已导入域名', noDomainsImported: '尚未导入域名', imported: '已导入 {n} 个', warnCheckDomain: '勾选要导入的域名',
     tplDrawerTitle: '落地页模板', downloadRefTpl: '下载参考模板 zip', uploadNewTpl: '上传新模板（zip）', fTplName: '模板名', fTplNamePh: '如：简洁购买页', fTplDesc: '说明', fZipFile: 'zip 文件',

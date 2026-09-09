@@ -174,6 +174,7 @@ const loadStats = async () => {
   catch (e) { /* 静默：分布是辅助信息，失败不阻断 */ }
 }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
+const softRefresh = () => { offset.value = 0; load() }   // 批AL：小刷新——保留全部筛选条件只拉最新数据（F5 会重置）
 const load = async () => {
   const isLatest = _logGuard.next()
   loading.value = true
@@ -275,6 +276,9 @@ watch(() => route.query, (q) => {
         <span v-if="stats" class="ph-fresh">{{ stats.window === 'today' ? t('common.today') : t('lplogs.selectedRange') }} · {{ stats.total }}</span>
         <span v-if="fPage" class="ph-fresh">· {{ pageTitle() }}</span>
         <span v-if="fSlug" class="ph-fresh">/a/{{ fSlug }}</span>
+      </div>
+      <div class="ph-actions">
+        <button class="ctrl-btn" :disabled="loading" :title="t('lplogs.softRefreshTip')" @click="softRefresh">{{ loading ? t('common.loading') + '…' : '⟳ ' + t('common.refresh') }}</button>
       </div>
     </header>
     <div class="ctrl-bar">
@@ -389,7 +393,7 @@ watch(() => route.query, (q) => {
 .ctrl-btn.on { background: var(--ac); color: #fff; border-color: var(--ac) }
 .ctrl-btn:disabled { opacity: .5; cursor: not-allowed }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 140px 76px 130px 132px 86px 110px 112px 68px 80px 78px minmax(80px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1160px }
+.row { display: grid; grid-template-columns: 150px 76px 110px minmax(150px,1.4fr) minmax(140px,1.2fr) 100px 118px minmax(110px,1fr) minmax(88px,1fr) 82px minmax(90px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1280px }  /* 批AL：广告ID/目标列放宽自适应 */
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .row:hover { background: var(--bg2) }

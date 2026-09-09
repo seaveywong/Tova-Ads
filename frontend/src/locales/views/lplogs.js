@@ -1,7 +1,7 @@
 // LandingLogs namespace（落地页访问日志）。zh/en 同文件。
 export default {
   zh: {
-    pageTitle: '落地页日志', subcode: '子码', adId: '广告 ID', reset: '重置',
+    pageTitle: '落地页日志', subcode: '子码', adId: '广告 ID', reset: '重置', softRefreshTip: '保留当前筛选条件，只拉取最新数据（不会像整页刷新那样重置筛选）',
     allLandingPages: '全部落地页', allAccounts: '全部账户', allSources: '全部来源', searchPlaceholder: '搜索 国家/城市/来源',
     actionAll: '全部动作', actionVisit: '访问', actionClick: '点击', actionSubmit: '提交', actionRedirect: '跳转', actionBlock: '拦截', actionDisplay: '落地页',
     resultAll: '全部结果', reasonPass: '通过', reasonDeviceBlock: '设备拦截', reasonUaBlock: 'UA拦截', reasonCountryBlock: '国家拦截', reasonCountryAllow: '地区未放行', reasonDedup: '重复访客',
@@ -21,7 +21,7 @@ export default {
     redirectDialogDesc: '设了之后这条广告的访客都跳这；其他广告不变。', resetDefault: '恢复默认', redirectSet: '跳转链接已设', redirectReset: '已恢复默认',
   },
   en: {
-    pageTitle: 'Landing Page Logs', subcode: 'Subcode', adId: 'Ad ID', reset: 'Reset',
+    pageTitle: 'Landing Page Logs', subcode: 'Subcode', adId: 'Ad ID', reset: 'Reset', softRefreshTip: 'Keep current filters, fetch latest data only (unlike a full page refresh)',
     allLandingPages: 'All landing pages', allAccounts: 'All accounts', allSources: 'All sources', searchPlaceholder: 'Search country/city/source',
     actionAll: 'All actions', actionVisit: 'Visit', actionClick: 'Click', actionSubmit: 'Submit', actionRedirect: 'Redirect', actionBlock: 'Block', actionDisplay: 'Landing page',
     resultAll: 'All results', reasonPass: 'Pass', reasonDeviceBlock: 'Device blocked', reasonUaBlock: 'UA blocked', reasonCountryBlock: 'Country blocked', reasonCountryAllow: 'Region not allowed', reasonDedup: 'Duplicate visitor',

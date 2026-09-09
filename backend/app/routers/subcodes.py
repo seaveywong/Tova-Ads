@@ -60,6 +60,7 @@ def generate(
 
 @router.get("")
 def list_subcodes(
+    stats_range: str = "today",
     page_id: int | None = None,
     status: str = "all",      # all(=reserved+active) / unbound / active / archived / deleted / trash
     q: str = "",
@@ -95,10 +96,17 @@ def list_subcodes(
     stats = {}
     ad_counts: dict = {}
     slugs = [l.slug for l in links]
+    # 批AL：统计默认时间窗=北京业务日「今日」（range=all 才看全量）——看总数无运营意义
+    _stats_q = db.query(LandingEvent.slug, LandingEvent.event_type, func.count()).filter(
+        LandingEvent.slug.in_(slugs))
+    if stats_range != "all":
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        _BZ = _tz(_td(hours=8))
+        _today = _dt.now(_BZ).strftime("%Y-%m-%d")
+        _since = _dt.strptime(_today, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc)
+        _stats_q = _stats_q.filter(LandingEvent.created_at >= _since)
     if slugs:
-        rows = db.query(LandingEvent.slug, LandingEvent.event_type, func.count()).filter(
-            LandingEvent.slug.in_(slugs)
-        ).group_by(LandingEvent.slug, LandingEvent.event_type).all()
+        rows = _stats_q.group_by(LandingEvent.slug, LandingEvent.event_type).all()
         for slug, etype, cnt in rows:
             d = stats.setdefault(slug, {"visit": 0, "click": 0})
             if etype == "visit":

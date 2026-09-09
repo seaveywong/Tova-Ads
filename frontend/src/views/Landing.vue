@@ -973,7 +973,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <span class="sub-ad">{{ s.ad_count > 0 ? t('landing.subAds', { ads: s.ad_count, acts: s.act_count }) : t('landing.subUnboundAd') }}</span>
             <span class="sub-pass" v-if="s.click_count > 0">{{ t('landing.subPassed', { n: s.click_count }) }}</span>
             <span class="st-tag" :class="subcodeStatus(s.status).cls">{{ subcodeStatus(s.status).label }}</span>
-            <span class="sub-stat">{{ t('landing.subStat', { visit: s.visit_count||0, click: s.click_count||0 }) }}</span>
+            <span class="sub-stat" :title="t('landing.subStatTodayTip')">{{ t('landing.subStat', { visit: s.visit_count||0, click: s.click_count||0 }) }}<i style="font-style:normal;color:var(--t3);font-size:10px;margin-left:2px">{{ t('landing.todayShort') }}</i></span>
             <span v-if="subFbStatus[s.slug] && !subFbStatus[s.slug].loading" class="fb-badge" :class="subFbStatus[s.slug].status" :title="subFbStatus[s.slug].detail">{{ subFbStatus[s.slug].status === 'pass' ? t('landing.fbOk') : (subFbStatus[s.slug].status === 'fail' ? t('landing.fbBanned') : t('landing.fbUnknown')) }}</span>
             <template v-if="subStatus !== 'trash'">
               <div class="sub-ops">
