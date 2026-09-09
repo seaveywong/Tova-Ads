@@ -109,6 +109,11 @@ def oauth_start(app_pk: int, user: CurrentUser = Depends(require_permission("ads
         "scope": OAUTH_SCOPES,
         "state": state,
         "response_type": "code",
+        # 批AB：已授权 App 重新授权时 FB 默认跳过权限确认页、按用户当前已授予的
+        # 权限发令牌——用户在「业务集成」里收走过权限的话令牌会缩水（cred25 实况
+        # 9→2 个 scope：只剩 pages_manage_metadata+public_profile，全线瘫）。
+        # rerequest 强制 FB 重新弹权限勾选页，缺什么当场补。
+        "auth_type": "rerequest",
     }
     url = f"https://www.facebook.com/{GRAPH_VERSION}/dialog/oauth?{urlencode(params)}"
     return {"url": url}
