@@ -1649,3 +1649,25 @@ ad_ops/guard_engine 保活/launch_templates 三处建广告链、build_campaign/
 ### 待用户侧动作
 - **cred25 令牌缺 leads_retrieval scope**（App 已批但令牌未带；O322 自家广告读 leads 报 #100 Requires pages_manage_ads or leads_retrieval）→ BM→系统用户→重新生成令牌勾选 leads_retrieval，换进 2.0 后潜客轮询恢复
 - page_post /feed 发帖需 pages_manage_posts（未在已批权限单里）→ 下一轮 App Review 补申请；现有 object_story_spec 内嵌链路不受影响
+
+## 批X：潜客/webhook 断链诊断与补齐（2026-09-09）
+
+### 诊断链（铁证）
+- debug_token（app token 自查）列出 cred25 真实 scope=7 个：**缺 leads_retrieval + pages_manage_metadata**
+- 根因不在 FB 侧（App 8 权限全过审，用户后台实况），在**我们 OAuth 授权 URL 的 scope 清单**：pages_manage_metadata 曾因未过审期 Invalid Scopes 被摘、leads_retrieval 从未入列——授权时没要的 scope 令牌永远没有
+- 影响面（同一根因两条链）：①潜客拉取 GET /{ad|form}/leads → #200 Requires leads_retrieval ②页级 webhook 订阅 subscribed_apps → #200 Requires pages_manage_metadata
+
+### webhook 链路盘点
+| 环节 | 状态 |
+|---|---|
+| App 级 callback 配置 | ✅ api.tovaads.com/fb/webhook, active（GET /{app}/subscriptions 实证） |
+| 端点公网可达 | ✅ 错 token 返回 403（行为正确） |
+| X-Hub-Signature-256 验签 | ✅ app_secret 已存库，遍历 active App 比对 |
+| 页级 leadgen 订阅 | ❌ 令牌缺 pages_manage_metadata（唯一断点） |
+| webhook 收后回填 leads | ❌ 令牌缺 leads_retrieval |
+
+### 修复
+fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限已过审，OAuth 放行合法）
+
+### 恢复步骤（用户侧一步）
+令牌页对 Kritins Rae 走「重新授权」（OAuth 现带全 scope）→ 新令牌替换后：leads 轮询/同步自动恢复；POST /leads/subscribe 订阅页 leadgen webhook
