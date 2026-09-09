@@ -1254,6 +1254,9 @@ def preflight_deploy(tid: int, body: PreflightIn,
     # 预检不写 FB）——原行为是 400 硬拦，但部署链已能自建，预检不该拦住一条能成的部署
     pixel_id = body.pixel_id or t.pixel_id
     if not pixel_id:
+        # 批U2：与部署 runner 同序——抽屉/模板 > 账户像素库随机 > 只读绑定既有 > 占位符
+        pixel_id = _resolve_tree_pixel(db, user.tenant_id, body.act_id, "random")
+    if not pixel_id:
         try:
             pixel_id = _ensure_account_pixel(
                 db, user.tenant_id, body.act_id,
@@ -1527,8 +1530,10 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             spend_cap=_p_spend_cap_fb)
         _pf_t = _resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
                                    (adsets[0].get("audience_json") or t.audience_json or ""))
-        # 批U2 像素自愈（树预检侧，同平铺口径）：手选 > 模板 > 只读绑定既有；仍无 → 占位符
+        # 批U2 像素自愈（树预检侧，同平铺口径）：手选 > 模板 > 库随机 > 只读绑定既有；仍无 → 占位符
         _pf_px = (body.pixel_id or t.pixel_id or "")
+        if not _pf_px:
+            _pf_px = _resolve_tree_pixel(db, tenant_id, body.act_id, "random")
         if not _pf_px:
             try:
                 _pf_px = _ensure_account_pixel(
