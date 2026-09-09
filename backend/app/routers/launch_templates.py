@@ -312,6 +312,30 @@ def _auto_landing_gate(db, adsets: list, tenant_id: int) -> None:
                             + "（发布落地页/改为展示模式，或手动选择子码）")
 
 
+def _post_adset_with_fallback(fb, act_id: str, payload: dict) -> dict:
+    """建 adset + 1870227 自动降级（批U3，实测定论）。
+
+    dev App（无 Standard Access）下 FB 强制 Advantage+ 受众：年龄/性别/兴趣等
+    经典受众字段一律 1870227 拒收，显式 targeting_automation.advantage_audience=0 也被无视
+    （v19/v22/v25 同行为，O322/O324 同拒——非版本非账户问题）。降级 = 剥 targeting 至
+    纯 geo + Advantage+ 开重试一次；成功响应带 "_advantage_forced": True，调用方必须留痕
+    （受众语义从窄定向变为 AI 扩展，不静默铁律）。其余错误原样外抛。"""
+    try:
+        return fb.post(f"act_{act_id}/adsets", payload)
+    except FbApiError as e:
+        raw = getattr(e, "raw", None) or {}
+        if raw.get("error_subcode") != 1870227:
+            raise
+        p2 = dict(payload)
+        geo = (p2.get("targeting") or {}).get("geo_locations")
+        p2["targeting"] = ({"geo_locations": geo} if geo else {})
+        p2["targeting_automation"] = {"advantage_audience": 1}
+        r = fb.post(f"act_{act_id}/adsets", p2)
+        if isinstance(r, dict):
+            r["_advantage_forced"] = True
+        return r
+
+
 def _resolve_tree_pixel(sdb, tenant_id: int, act_id: str, val: str) -> str:
     """组像素解析（批O-3）：值=random → 从该账户已绑像素随机轮换一个（多像素分摊防单像素过热）；
     其余（自动=空/指定 ID）原样返回走既有链路（节点 > 部署抽屉按账户 > 模板默认）。"""
@@ -2730,7 +2754,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             continue
         adset_payload["status"] = "ACTIVE" if s_enabled else "PAUSED"
         try:
-            adset = fb.post(f"act_{item.act_id}/adsets", adset_payload)
+            adset = _post_adset_with_fallback(fb, item.act_id, adset_payload)
+            if adset.get("_advantage_forced"):
+                # 受众被强制 Advantage+：窄定向（年龄/性别/兴趣）被剥为纯 geo+AI 扩展——留痕不静默
+                auto_warns.append(f"{sname}: 受众被强制 Advantage+（App 未过审无经典定向权限），"
+                                  f"已按国家+AI 扩展投放")
         except FbApiError as e:
             _fail_group(sname, snode, (e.friendly or str(e)))
             continue
