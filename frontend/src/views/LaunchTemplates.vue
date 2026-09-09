@@ -3872,7 +3872,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 /* FB 创建流：编辑器顶栏（完备状态）+ 三层 Tab（系列/组/广告——面包屑合进 Tab） */
 .fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
-.fb-tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:var(--bg2);border-radius:10px}
+.fb-tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:rgba(0,0,0,.22);box-shadow:inset 0 0 0 1px var(--bd);border-radius:10px}
 .fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:none;border-radius:7px;background:transparent;color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
 .fb-tab:hover{color:var(--t1);border-color:var(--bd2)}
 .fb-tab.on{background:var(--bg3);color:var(--t1);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.25)}
