@@ -3235,14 +3235,18 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span v-if="pixelStrategy === 'create'" class="ps-hint">{{ t('launch.psCreateHint') }}</span>
       </div>
       <div v-if="deployTpl?.platform === 'tt' && !accLoading && !accounts.length" class="empty-sm">{{ t('launch.deployNoTtAccounts') }}</div>
+      <!-- 跟帖模式提示：账户灰化的原因显式说清（不让人猜）——可勾选数实时 -->
+      <div v-if="deployTpl?.post_source === 'reuse'" class="msg-aud-hint" style="margin-bottom:8px">
+        {{ t('launch.reuseAccHint', { n: filteredDeployAccounts.filter(a => accManagesReusePage(a.act_id)).length, m: filteredDeployAccounts.length }) }}
+      </div>
       <div class="acc-list" v-loading="accLoading">
-        <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: reuseDeployPage && !accManagesReusePage(a.act_id)}]">
+        <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
-            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="reuseDeployPage && !accManagesReusePage(a.act_id)" @change="toggleAcc(a.act_id)" />
+            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" @change="toggleAcc(a.act_id)" />
             <span class="acc-name">{{ a.name || a.act_id }}</span>
             <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
             <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
-            <span v-if="reuseDeployPage && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
+            <span v-if="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
 </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">
             <template v-if="accLoadingConfig.has(a.act_id)">
