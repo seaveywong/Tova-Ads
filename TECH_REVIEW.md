@@ -1867,3 +1867,31 @@ DB 覆盖行（WhatsApp 号）→ route_next 实测：带该 ad_id 返回 `mode=
 
 ### ③ 层级状态联动（FB effective_status 语义）
 用户报告：广告停了但所属系列仍显示「投放中」。修：`childPausedMap` computed 按 ads_cache 三层数据推导——广告全停 ⇒ 所属组显示已暂停；组全停 ⇒ 所属系列显示已暂停。单向推导（父 ACTIVE 但子全停 = 实质停投才降级显示）；父已停/被拒等 FB 真实态不覆盖。开关仍控制自身配置态（父层开关打开不代表子层开）。状态筛选（已暂停/投放中）同步按推导态匹配。
+
+## 批AJ：今日改动复审修复批（2026-09-10，agent 8 维度审计）
+
+### 审计范围与结论
+批AD-AI 全部改动（11 commit）。PASS 项：_managed_account 8 处替换全落位、__none__ 哨兵/_tnow 顺序、guard_engine _sync_one 线程 session 与时间戳解耦、kpi_scope 双重解析、迁移 0094 GRANT、created_by NULL 语义。发现 **10 类问题全修**：
+
+**高危 5（权鉴/功能死）**
+1. diagnose `_DIAG_CACHE` 键只有 tenant:ad_id 且缓存命中在归属检查前——owner 60s 内诊断过，operator 直接拿到完整面板（+ locale 互串）。修：键加 u{user.id}
+2. diagnose TT 分支漏归属闸（FB 分支过闸 TT 沿用旧查询）；_managed_account 补 platform 过滤（双平台同 act_id 取错行）
+3. ad_breakdown / dashboard_export「设 None 后继续执行」——operator 拿他人账户广告级明细。修：deny 直接 404
+4. landing_overview 完全无 operator 过滤（落地/消耗全租户泄漏）。修：_op_own_acts 交集 + 空集哨兵
+5. **前端层级状态联动两个 bug 导致功能全死**：集合存对象却按 id find（"[object Object]" 恒不匹配）→ 广告全停⇒组暂停永不生效；campaign 推导误写 adsetAllPaused 键 → 组全停⇒系列暂停永不生效。修：对象直存 + 键改写
+
+**中危 5**
+6. cpm_high/cpc_high 拿 FB 本币值直接比 USD 阈值（JPY 恒触发/EUR 漏触发）。修：to_usd 先折算
+7. create_account_pixel 真建像素后不失效缓存（5min 内下拉看不到新像素）。修：drop(pixels=True, act_id) + fbassets 键
+8. diagnose 评估未传 kpi_field——kpi_scope 限定规则面板按全类型评估与引擎不一致。修：补传
+9. redirects 五端点零归属（map/list 全租户泄漏、reset 可清全租户）。修：归属过滤+闸+reset 限名下
+10. 六资源写路径（改/删）只有 list 过滤——知道 id 即可跨用户写。修：require_owned 通用闸贯穿模板 7/素材 6/受众 2/表单 3+消息 2/落地页 6/规则 2 共 28 处
+
+**低危**：landing operator 分支补排序+tenant 过滤一致性
+
+### 实测（真 token，7/7）
+VV 落地看板 0 消耗 / redirects map 0 / owner 三页回归有数据 / VV 改他人规则 404 / **owner 诊断热缓存后 VV 同广告诊断 404**（缓存不喂）。生产 health ok、巡检正常、近 2h 无新增错误。
+
+### 教训（写入 memory 的根因模式）
+- 「deny 后继续执行」「缓存先于鉴权」是权鉴修复批的同根遗漏——deny 必须立即 return/raise，缓存键必须含用户域
+- 前端推导 computed 要有单测式冒烟（两个 bug 都是"看起来对但恒 false"）
