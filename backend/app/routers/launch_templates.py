@@ -352,18 +352,22 @@ def _ensure_account_pixel(sdb, tenant_id: int, act_id: str, fb, allow_create: bo
             pid = str(r.get("id") or "")
         if not pid:
             return ""
-        if not sdb.query(LandingPixel).filter(
-                LandingPixel.tenant_id == tenant_id, LandingPixel.pixel_id == pid,
-                LandingPixel.platform == "fb").first():
-            sdb.add(LandingPixel(tenant_id=tenant_id, act_id=act_id, platform="fb",
-                                 pixel_id=pid, pixel_name=name, status="active", source="deploy"))
-            sdb.commit()
+        # 入库用独立 SuperSession（RLS 坑：在请求 session 上 commit 会结束事务带走 SET LOCAL
+        # 租户上下文 → 之后访问调用方 ORM 对象刷新时 RLS 查不到行 → ObjectDeletedError）
+        _reg = SuperSessionLocal()
+        try:
+            if not _reg.query(LandingPixel).filter(
+                    LandingPixel.tenant_id == tenant_id, LandingPixel.pixel_id == pid,
+                    LandingPixel.platform == "fb").first():
+                _reg.add(LandingPixel(tenant_id=tenant_id, act_id=act_id, platform="fb",
+                                      pixel_id=pid, pixel_name=name, status="active", source="deploy"))
+                _reg.commit()
+        except Exception:
+            _reg.rollback()
+        finally:
+            _reg.close()
         return pid
     except Exception as e:
-        try:
-            sdb.rollback()
-        except Exception:
-            pass
         logging.getLogger("toveads.launch").warning(
             f"[Launch] pixel self-heal failed act_{act_id}: {e}")
         return ""
