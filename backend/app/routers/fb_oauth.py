@@ -87,7 +87,10 @@ def _done_page(ok: bool, msg: str = ""):
         "<title>Facebook " + title + "</title><style>" + css + "</style></head><body>"
         "<div class='c'><div class='i'>" + icon + "</div><h1>" + title + "</h1>"
         "<p class='d'>" + html.escape(detail) + "</p>"
-        "<a class='a' href='" + FRONTEND_URL + "/#/tokens'>返回令牌管理 →</a></div></body></html>"
+        # 成功=授权窗由令牌页打开，直接关掉即可（不跳回令牌管理）；失败=保留返回入口去重试
+        + ("<a class='a' href='javascript:void(0)' onclick=\"window.close()\">关闭此页面 ✕</a>" if ok
+           else "<a class='a' href='" + FRONTEND_URL + "/#/tokens'>返回令牌管理重试 →</a>")
+        + "</div></body></html>"
     )
 
 
