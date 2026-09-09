@@ -1932,3 +1932,18 @@ conversions 列改 either=max(FB, 落地通过)——与规则引擎完全同口
 爱尔兰那条 click（id 14188）前后事件：21:25:35 Boardman×2 block（FB审核爬虫被拦）→ 21:26:08 同一秒 5 连 US visit（Springfield/Gallatin/Social Circle，**全部 ASN 32934 = Meta**）→ 21:26:25 IE Clonee click（**也是 ASN 32934**，Clonee 是 Meta 爱尔兰数据中心）。
 **结论**：这是 **FB 广告审核机器人的同一个会话**——Meta 集群内部 IP 池出口轮换（US→IE），它加载了落地页（US 出口时过白名单），然后在页面上点了 CTA（审核必做，验证目标页），click beacon 记录的是当时的 IE 出口 IP。「只有点击没有访问」因为 visit beacon 在页面加载时已用 US IP 记了（就是那 5 条）。**防护没洞：worker 层白名单工作正常，IE 出口的直接访问会被拦。**
 **O337 纠偏**：我上一轮说错了——O337（=1052568664219129，就是部署成功那个账户）事件 8 条**全部带广告归因**（has_ad=6 visit + 2 click），不是爬虫无归因。它进的**落地页本体**（decision=display，非屏蔽页）。「全是爬虫」的印象来自日志来源标签把 Meta IP 集群标成"Facebook爬虫"——那是 FB 审核流量（真人流量未起来前先到）。
+
+## 批AO：综合转化真人口径 + cred25/26 疑团终审（2026-09-10）
+
+### ① 综合转化=真人落地访问（爬虫/审核机器人不计）
+用户定义收紧：只认真人从广告进入的。新建 `core/landing_source.py`（11 个 UA token + AS32934 单一清单），四处消费同源：landing.py 日志归因 / ads.py 管理器聚合(_agg_cached) / ads.py 诊断面板(landing_clicks+landing_visits) / guard_engine 规则口径（爬虫访问不再豁免空耗）。诊断面板顶层综合转化从点击口径对齐为访问口径（每条规则仍按自身 landing_metric）。
+实测（9/9-9/10 窗口）：广告…1670220 访问 19→8（11 条爬虫剔除）、通过 2→1；O337 批次 7 条广告访问 2-4 条/条 **全部是爬虫**（剔后归零——用户「全是爬虫」直觉正确）。
+
+### ② 「前端没改」根因：批AM 带病 commit
+adManagerView.js `defaultColumns` 少收尾 `]`（PARSE_ERROR）——批AM 起前端 build 即失败，**批AM/AJ/AK 的全部前端改动从未上过 CF**。已修复并重新 build+deploy（含 landing_pass 默认列、conversions 列 hover 口径说明）。教训：前端 commit 前必须过 build 门。
+
+### ③ cred25/26 终审：不是 22manager 残留（纠正批AK「外部App令牌」误判）
+铁证：①fb_apps 时间线——22manager(id=1) 07-30 已删，Tova Ads Manager(id=3) 08-05 起唯一 active；②OAuth code 兑换必须用 active App 的 client_secret（FB 校验 code 与 App 配对），09-07/09-09 建的 cred25/26 只能是 app 3 签发；③两令牌前缀同为 EAAWgWtImyawBS=同 App。批AK 的「外部App」证据（debug_token #100）实为自检限制：非 App 开发者用户 token 自 inspect 恒 #100（permission_snapshot=None 同理，所有 oauth 令牌皆然）——当时批量部署失败的真因是 BM/主页权限墙（用户已修）+ targeting_automation 嵌套（批P1 已修），候选兜底重试保留作安全网。两条令牌各绑 5 个 active 账户=正常在用，无需清理。
+
+### 部署
+后端 4 文件（双门+restart+health OK）+ 行为验证（新模块加载+新旧口径对比 SQL）+ 前端 build✓ + CF deploy。commit：b49dffe、a5de053。
