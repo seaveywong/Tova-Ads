@@ -3488,8 +3488,11 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     it = db.query(LaunchJobItem).filter(LaunchJobItem.id == item_id, LaunchJobItem.job_id == job_id).first()
     if not it:
         raise HTTPException(404, "item 不存在")
-    if it.status != "fail":
-        raise HTTPException(400, f"只能重试失败的 item（当前 {it.status}）")
+    # 批AP：pending/creating 也放行——job 已终态（上面守卫挡了 running）时它们=上次重试
+    # 中断的卡死行（09-09 job32 item33/34 卡 pending：按钮永远不出现、error 空、无原因）。
+    # 放行=用户自我修复入口
+    if it.status not in ("fail", "pending", "creating"):
+        raise HTTPException(400, f"只能重试失败或卡住的 item（当前 {it.status}）")
     # 结构模式部分成功守卫（0088）：item 已建出系列（部分广告失败）时整树重试 =
     # 已成功的广告再建一份双份预算。全败（系列未建成，campaign_id 空）才允许整树重跑。
     if _parse_structure(_tpl) and (it.campaign_id or ""):
@@ -3507,9 +3510,12 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     from sqlalchemy import text as _text
     # 清残留 ids（复审R2-P2）：批量全败重试时 item 还带着上一轮旧系列的 campaign/ad id——
     # 失败期间清单页显示旧系列跳转链接会误导"去 FB 后台核对"；重试成功会覆盖，全败则保持空
+    # 批AP：error_code 一并清（残留 'partial' 会在 pending 行误显旧失败）；
+    # WHERE 扩到 pending/creating（job 终态守卫已挡 running，此处命中=回收上次中断的卡死行）
     claimed = db.execute(
-        _text("UPDATE launch_job_items SET status='pending', error=NULL, campaign_id=NULL, "
-              "adset_id=NULL, ad_id=NULL WHERE id=:id AND status='fail'"),
+        _text("UPDATE launch_job_items SET status='pending', error=NULL, error_code=NULL, "
+              "campaign_id=NULL, adset_id=NULL, ad_id=NULL "
+              "WHERE id=:id AND status IN ('fail','pending','creating')"),
         {"id": item_id},
     ).rowcount
     db.commit()
@@ -3570,6 +3576,30 @@ def _find_existing_campaign(fb, act_id: str, name_prefix: str, prefer_id: str = 
     return ""
 
 
+def _close_job_if_done(sdb, job_id: int):
+    """重试收口：按 items 表实况重算 job 终态。
+
+    批AP 前的问题：①失败分支无条件把 job 标完——并发重试多个 item 时，先结束的把
+    job 关门、还在跑的 item 状态永远落不进进度（09-09 job32 就此卡死）；②succeeded/
+    failed 计数器在并发会话上互相丢更新。改为：无 pending/creating item 才收口，
+    计数以 items 表 FILTER 聚合为准（幂等，可重复调）。"""
+    from sqlalchemy import text as _text
+    row = sdb.execute(_text("""
+        SELECT count(*) FILTER (WHERE status IN ('pending','creating')) AS inflight,
+               count(*) FILTER (WHERE status = 'success') AS nok,
+               count(*) FILTER (WHERE status = 'fail') AS nfail
+        FROM launch_job_items WHERE job_id = :jid
+    """), {"jid": job_id}).first()
+    if not row or (row.inflight or 0) > 0:
+        return
+    sdb.execute(_text("""
+        UPDATE launch_jobs SET succeeded = :nok, failed = :nfail,
+            status = CASE WHEN :nfail > 0 THEN 'partial_failed' ELSE 'completed' END,
+            finished_at = now()
+        WHERE id = :jid
+    """), {"nok": row.nok, "nfail": row.nfail, "jid": job_id})
+
+
 def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
     """后台重跑单个 item（复用 deploy 逻辑，只跑这一个账户）。BYPASSRLS → 全部查询显式 tenant 过滤。"""
     sdb = SuperSessionLocal()
@@ -3577,11 +3607,24 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
         tpl = sdb.query(LaunchTemplate).filter(
             LaunchTemplate.id == template_id, LaunchTemplate.tenant_id == tenant_id).first()
         if not tpl:
+            # 批AP：原样 return 会把 item 永远留在 pending、job 永远 running（部署 409 锁死
+            # 到重启）——必须落 fail 带原因（不静默铁律）
+            from sqlalchemy import text as _t2
+            sdb.execute(_t2(
+                "UPDATE launch_job_items SET status='fail', error='模板不存在或已删除"
+                "（job 引用失效），无法重试', error_code='no_id' WHERE id=:iid"),
+                {"iid": item_id})
+            _close_job_if_done(sdb, job_id)
+            sdb.commit()
             return
         # 临时建一个只含该 item 的"job 视图"——直接调 deploy_one_account，更新该 item
         it = sdb.query(LaunchJobItem).filter(
             LaunchJobItem.id == item_id).first()
         if not it or it.tenant_id != tenant_id:
+            logging.getLogger("toveads.launch").warning(
+                f"[retry] item {item_id} 不存在或跨租户，仅收口 job {job_id}")
+            _close_job_if_done(sdb, job_id)
+            sdb.commit()
             return
         # 借用 _run_deploy_job 的单账户逻辑：把 job 的 total 固定，succeeded/failed 增量
         asset = (sdb.query(Asset).filter(Asset.id == tpl.asset_id, Asset.tenant_id == tenant_id).first()
@@ -3612,12 +3655,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     _deploy_item_tt(sdb, job, it, tpl, asset, tenant_id, link, is_retry=True)
             except Exception:
                 pass  # 执行器内部已消化为 item fail
-            if it.status == "fail" and job:
-                job.status = "partial_failed"   # 此 item 仍 fail → 必落 partial_failed
-                job.finished_at = datetime.now(timezone.utc)
-            elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
-                job.status = "partial_failed" if job.failed else "completed"
-                job.finished_at = datetime.now(timezone.utc)
+            _close_job_if_done(sdb, job_id)   # 批AP：按 items 实况收口（并发重试不提前关门）
             sdb.commit()
             return  # TT 不做 ads_cache 对账（P4 接）
         try:
@@ -3648,12 +3686,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             tree_adsets = _parse_structure(tpl)
             if tree_adsets:
                 _deploy_item_fb_tree(sdb, job, it, tpl, tree_adsets, tenant_id, fb, is_retry=True)
-                if it.status == "fail" and job:
-                    job.status = "partial_failed"   # 仍 fail → 必落 partial_failed
-                    job.finished_at = datetime.now(timezone.utc)
-                elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
-                    job.status = "partial_failed" if job.failed else "completed"
-                    job.finished_at = datetime.now(timezone.utc)
+                _close_job_if_done(sdb, job_id)
                 sdb.commit()
                 if it.status == "success" and it.ad_id:
                     try:
@@ -3668,12 +3701,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             if batch_assets:
                 _deploy_item_fb_batch(sdb, job, it, tpl, batch_assets, tenant_id, link,
                                       targeting, advanced, post_content, fb, is_retry=True)
-                if it.status == "fail" and job:
-                    job.status = "partial_failed"   # 仍 fail → 必落 partial_failed（与单模板口径一致）
-                    job.finished_at = datetime.now(timezone.utc)
-                elif job and (job.succeeded or 0) + (job.failed or 0) >= (job.total or 0):
-                    job.status = "partial_failed" if job.failed else "completed"
-                    job.finished_at = datetime.now(timezone.utc)
+                _close_job_if_done(sdb, job_id)
                 sdb.commit()
                 if it.status == "success" and it.ad_id:
                     try:
@@ -3690,13 +3718,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             if _dup_camp:
                 it.campaign_id = _dup_camp
                 it.status = "success"; it.error = None; it.error_code = None
-                if job:
-                    job.succeeded = (job.succeeded or 0) + 1
-                    if (job.failed or 0) > 0:
-                        job.failed -= 1
-                    if job.succeeded + (job.failed or 0) >= (job.total or 0):
-                        job.status = "partial_failed" if job.failed else "completed"
-                        job.finished_at = datetime.now(timezone.utc)
+                _close_job_if_done(sdb, job_id)
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id="", action_type="deploy", source="launch",
                           result="success",
@@ -3808,21 +3830,13 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             it.status = "success"
             it.error = (_a_warn or None)   # 自动建链降级留痕（批次I，不静默）
             it.error_code = ("auto_subcode_degraded" if _a_warn else None)
-            if job:
-                job.succeeded = (job.succeeded or 0) + 1
-                if (job.failed or 0) > 0:
-                    job.failed -= 1
-                if job.succeeded + (job.failed or 0) >= (job.total or 0):
-                    job.status = "partial_failed" if job.failed else "completed"
-                    job.finished_at = datetime.now(timezone.utc)
         except FbApiError as e:
             it.status = "fail"; it.error = (e.friendly or str(e))[:300]; it.error_code = e.category
         except Exception as e:
             it.status = "fail"; it.error = str(e)[:300]; it.error_code = "error"
-        # 失败也要收口 job：不回收 → retry 置的 running 永停 → 模板部署被 409 锁死到重启
-        if it.status == "fail" and job:
-            job.status = "partial_failed"   # 此 item 仍 fail → failed≥1，必落 partial_failed
-            job.finished_at = datetime.now(timezone.utc)
+        # 批AP：收口统一走 _close_job_if_done——失败也收（防 running 永停 409 锁死部署），
+        # 但还有并发重试的 item 在跑时不提前关门
+        _close_job_if_done(sdb, job_id)
         sdb.commit()
         # 重试成功也做对账（新 ad_id 要进 ads_cache 才能在清单看到活状态）
         if it.status == "success" and it.ad_id:

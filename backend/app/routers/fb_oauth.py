@@ -167,12 +167,20 @@ def oauth_callback(request: Request):
             return _done_page(False, "令牌无效（/me 失败）")
         perm_snapshot = None
         try:
-            debug = fb.debug_token()
-            perm_snapshot = json.dumps({
-                "scopes": debug.get("data", {}).get("scopes", []),
-                "app_id": debug.get("data", {}).get("app_id"),
-                "is_valid": debug.get("data", {}).get("is_valid"),
-            })
+            # 批AP：改用 App 令牌 inspect——用户 token 自检恒 #100（非开发者限制），
+            # 此前所有 oauth 令牌 permission_snapshot 都是 None。快照从此存下
+            # scopes+签发 app_id，令牌页/审计可直接查「哪个 App 签的、实际有哪些权限」
+            r0 = httpx.get(f"{GRAPH_BASE}/debug_token", params={
+                "input_token": long_tok,
+                "access_token": f"{app.app_id}|{app_secret}",
+            }, timeout=30)
+            d0 = (r0.json() or {}).get("data", {}) if r0.status_code == 200 else {}
+            if d0:
+                perm_snapshot = json.dumps({
+                    "scopes": d0.get("scopes", []),
+                    "app_id": d0.get("app_id"),
+                    "is_valid": d0.get("is_valid"),
+                })
         except Exception:
             pass
 

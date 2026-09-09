@@ -2562,7 +2562,17 @@ def run_watchdog():
                 continue
             fb = FbClient(decrypt(c.access_token_enc))
             try:
-                dt = fb.debug_token().get("data", {})
+                # 批AP：自检 debug_token 对非开发者用户令牌恒 #100（cred25/26 每 5min 误报
+                # "token debug 失败"、过期预警全瞎）——改用 App 令牌 inspect。无 active App
+                # 配置时退回 /me 存活检查（拿不到过期时间但至少能发现死令牌）
+                from ..core.fb_tokens import active_app_access_token
+                from ..core.fb_client import debug_token_with_app_token
+                _app_tok = active_app_access_token(db)
+                if _app_tok:
+                    dt = debug_token_with_app_token(decrypt(c.access_token_enc), _app_tok).get("data", {})
+                else:
+                    fb.me()
+                    dt = {}
             except Exception as e:
                 logger.warning(f"[Watchdog] token debug 失败 alias={c.alias}: {e}")
                 continue

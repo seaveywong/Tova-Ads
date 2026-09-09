@@ -3370,7 +3370,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
             <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
             <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 60) }}</span>
-            <button v-if="it.status==='fail'" class="op primary sm" @click="retryItem(it)">{{ t('common.retry') }}</button>
+            <button v-if="it.status==='fail' || (['pending','creating'].includes(it.status) && !['pending','running'].includes(activeJob.status))" class="op primary sm" :title="it.status!=='fail' ? t('launch.retryStuckTip') : ''" @click="retryItem(it)">{{ t('common.retry') }}</button>
 </div>
 </div>
 </div>

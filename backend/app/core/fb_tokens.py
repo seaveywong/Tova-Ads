@@ -17,6 +17,18 @@ from .fb_client import FbClient
 from ..models.fb import FbCredential, Account
 
 
+def active_app_access_token(db: Session) -> str:
+    """当前唯一 active FB App 的 app access token（`app_id|secret`；空=未配置）。
+
+    用途：debug_token 的 inspector（非开发者用户 token 自检恒 #100，OAuth callback
+    与 Watchdog 都靠 App 令牌 inspect 才能拿到 scopes/app_id/is_valid/expires_at）。"""
+    from ..models.fb import FbApp
+    app = db.query(FbApp).filter(FbApp.status == "active").order_by(FbApp.id).first()
+    if not app or not (app.app_secret_enc or ""):
+        return ""
+    return f"{app.app_id}|{decrypt(app.app_secret_enc)}"
+
+
 def _tt_client_cls():
     """TtClient（P1 提供 core/tt_client.py）。未合入时返回 None——所有 TT 分支据此静默降级为空集。"""
     try:

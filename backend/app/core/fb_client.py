@@ -530,3 +530,24 @@ class FbClient:
             "limit": limit,
         })
         return data.get("data", [])
+
+
+def debug_token_with_app_token(input_token: str, app_access_token: str) -> dict:
+    """用 App 令牌 inspect 令牌（返回原始 JSON，含 data.scopes/app_id/is_valid/expires_at）。
+
+    非开发者用户的 user token 自检恒 #100（"must be owner or developer of the app"）——
+    OAuth callback 存权限快照、Watchdog 令牌健康检查都必须走 App 令牌 inspect。
+    失败抛 FbApiError（走与 FbClient 相同的错误分类翻译）。
+    """
+    r = httpx.get(f"{GRAPH_BASE}/debug_token",
+                  params={"input_token": input_token, "access_token": app_access_token},
+                  timeout=30)
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    if r.status_code != 200 or "error" in j:
+        err = j.get("error", {})
+        cat, friendly = classify_fb_error(err)
+        raise FbApiError(cat, friendly or f"debug_token HTTP {r.status_code}", err, r.status_code)
+    return j
