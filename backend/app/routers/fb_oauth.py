@@ -21,10 +21,14 @@ from ..models.fb_app import FbApp
 router = APIRouter(prefix="/fb/oauth", tags=["fb-oauth"])
 logger = logging.getLogger("toveads.fb_oauth")
 
-# OAuth 登录 scope。advanced 权限不能放 OAuth（FB 报 Invalid Scopes 拒授权，需 App Review 拿 Advanced Access 后才能用于 OAuth）。
-# 已去掉：read_insights（广告成效由 ads_read 覆盖）、pages_manage_posts、pages_manage_metadata。
-# 建帖(pages_manage_posts)+webhook订阅(pages_manage_metadata)等过审后加回；当前 token 不含这俩权限。
-OAUTH_SCOPES = "ads_management,ads_read,business_management,pages_show_list,pages_manage_ads,pages_read_engagement"
+# OAuth 登录 scope。advanced 权限需 App Review 拿到 Advanced Access 后才能放 OAuth（否则 FB 报
+# Invalid Scopes 拒授权）——**8 权限已全部过审（用户 2026-09-09 后台实况）**，故补回：
+# leads_retrieval（潜客拉取，此前从未进清单）+ pages_manage_metadata（页 webhook 订阅，未过审期
+# 曾摘除）。pages_manage_posts（建帖）过审清单里没有，继续不加。read_insights 不需要（ads_read 覆盖）。
+# 教训：App 批了≠令牌带着——授权 URL 没要的 scope 令牌永远没有（cred25 实况 7/9）。
+OAUTH_SCOPES = ("ads_management,ads_read,business_management,pages_show_list,"
+                "pages_manage_ads,pages_read_engagement,leads_retrieval,"
+                "pages_manage_metadata")
 STATE_TTL = 1800  # state 有效期 30 分钟（曾 10 分钟：管理员授权要在 FB 侧选 BM/资产，加
                   # 上复制链接到已登录浏览器再打开的常见流程，10 分钟频繁踩过期 → 报
                   # "state 无效或过期"。HMAC 签名+单次使用语义下 30 分钟窗口可控）
