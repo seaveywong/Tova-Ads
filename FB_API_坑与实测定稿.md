@@ -61,3 +61,9 @@
 - worker fire 的像素来自落地页自己的 pixel_ids（display 模式经 router/next 请求时动态下发）——投放链只给 adset 配像素、页不 fire = FB 永远零转化 → 止损按"花钱零转化"正确关广告
 - 修复：部署链解析像素后回写页 pixel_ids + 页像素进解析链；改页 pixel_ids 须重发布（LP_CONFIG 发布时注入）
 - 验证口径：POST /landing-pages/router/next（页的 ingest_secret+slug）看 pixel_ids，与 adset promoted_object 对账
+
+### 9. 令牌权限缩水与"对象不存在"伪装（批AB）
+- 已授权 App 重新授权：FB **默认跳过权限确认页**，按用户当前已授予的权限发令牌——用户在「业务集成」收走过权限 → 令牌缩水（实况 9→2 scope）
+- 修复：授权 URL 加 `auth_type=rerequest` 强制重弹权限勾选页
+- **FB 无权限错误伪装成"Object does not exist"**——看到 not exist 先 debug_token 查令牌 scope，别急着判对象被删
+- adset 有没有像素的判据：OFFSITE_CONVERSIONS 组无 promoted_object.pixel_id 根本建不出来；读回 `GET {adset_id}?fields=promoted_object` 对账
