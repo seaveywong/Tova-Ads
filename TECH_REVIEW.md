@@ -1716,3 +1716,27 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 
 ### LEADS E2E 测试（①-④ 之②，全 PAUSED 零消耗）
 模板 253 建成→部署→campaign/adset 走通→**广告创建被 FB 拦：主页 1295 未接受 Lead Generation Terms**（页面设置一次性操作，需页面管理员）。代码链路验证到此门为止，错误翻译清晰。**已清理**：FB 系列 DELETE、模板 253 硬删（job 解除关联）、无残留表单。LEADS 后续待用户在页设置接受条款后即可真跑。
+
+## 批AB：令牌缩水事故——OAuth 加 auth_type=rerequest（2026-09-09）
+
+### 事故
+用户报告「组 120252336030520220 没有像素 Fire 不了」→ 排查发现组本身像素一直在（promoted_object 读回正常），真因是 **cred25 令牌从 9 个 scope 缩到 2 个**（只剩 pages_manage_metadata+public_profile）。FB 把无权限的 adset GET 报成「对象不存在」——**#200/#100 权限错误会伪装成 not exist**。
+
+### 根因
+用户此前重新授权过：已授权的 App 再走 OAuth 时 **FB 跳过权限确认页，按「用户当前已授予」发令牌**——用户在 FB 业务集成里收走过权限，令牌就缩水，且无任何报错。
+
+### 修复
+`fb_oauth.py` 授权 URL 加 `auth_type=rerequest`：强制 FB 重弹权限勾选页，缺的 scope 当场补回。用户重授权后 debug_token 实测 9/9 恢复。排障铁律入坑文档：**FB 报 not exist 先 debug_token 排除令牌，再怀疑对象**。
+
+## 批AC：AdManager 广告组级「转化像素」列（2026-09-09）
+
+### 背景
+用户问「为什么前端我看不到像素」——后端 /ads/list 一直透传 adsets_json（含 promoted_object），但前端组级列没有像素列。
+
+### 变更
+- `adManagerView.js`：METRIC_COLUMNS 加 `{ id: 'pixel', label: 'colPixel', levels: ['adset'] }`；defaultColumns('adset') 含 pixel（默认显示）
+- `AdManager.vue` metricText：pixel 分支解析 promoted_object（缓存可能存字符串形态，JSON.parse 兜底）取 pixel_id
+- i18n zh/en：colPixel=转化像素/Pixel
+
+### 验证（真实浏览器）
+广告组 Tab 列头出现「转化像素」，Tova Ads 组1（120252336030520220）单元格显示 `1394346206205535`（= FB promoted_object.pixel_id）。注意：已保存过列偏好的浏览器（localStorage admanager-view-v1）默认不显示新列，需在「列」勾选或清偏好——normalizeViewPreferences 只滤非法 id 不补新默认。
