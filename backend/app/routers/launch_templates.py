@@ -179,6 +179,76 @@ def _resolve_landing_base(sdb, tenant_id: int, landing_page_id: int) -> tuple[st
     return _resolve_page_base(sdb, tenant_id, landing_page_id)
 
 
+class _LandingBlockedError(Exception):
+    """落地页所有绑定域名均被 FB 屏蔽——部署硬拦截（批S）。调用方不得降级直投。"""
+
+
+def _fb_domain_probe(db, tenant_id: int, url: str, _cache: dict | None = None) -> str:
+    """FB 域名封禁探测（批S；返 pass/warn/fail，口径同落地页自检）。
+    warn（无令牌/爬虫被挡/探测异常）不构成拦截依据——探测不可用不能误杀部署。"""
+    if _cache is not None and url in _cache:
+        return _cache[url]
+    from .landing import _fb_ban_probe
+    try:
+        st, _detail = _fb_ban_probe(db, tenant_id, url)
+    except Exception:
+        st = "warn"
+    if _cache is not None:
+        _cache[url] = st
+    return st
+
+
+def _healthy_landing_base(sdb, tenant_id: int, landing_page_id: int,
+                          _cache: dict | None = None) -> tuple[str, object, str]:
+    """落地 base + FB 封禁健康门（批S，FB 部署链专用；TT 不走此门）。
+
+    域名池 = 页绑定的全部域名（custom_domain 优先 + custom_domains 其余，现状顺序）。
+    - 首选域探测 pass/warn → 沿用（健康路径零行为变化）
+    - 首选域 fail（被 FB 屏蔽）→ 依序探测其余绑定域：取第一个 pass；无 pass 有 warn 用 warn
+    - 全部 fail → err 非空（含域名数），调用方 item 失败拒投，不得降级
+    """
+    import json as _json
+    from ..models.launch import LandingPage
+    p = sdb.query(LandingPage).filter(
+        LandingPage.id == landing_page_id, LandingPage.tenant_id == tenant_id).first()
+    if not p:
+        return "", None, "落地页不存在"
+    hosts: list[str] = []
+
+    def _add(h):
+        h = (h or "").strip().rstrip("/")
+        if h.startswith("https://"):
+            h = h[8:]
+        elif h.startswith("http://"):
+            h = h[7:]
+        if h and h not in hosts:
+            hosts.append(h)
+
+    _add(p.custom_domain)
+    try:
+        for d in _json.loads(p.custom_domains or "[]"):
+            _add(d)
+    except Exception:
+        pass
+    if not hosts:
+        return f"https://tovaads-landing-{p.id}.pages.dev", p, ""
+    warn_base = ""
+    for i, h in enumerate(hosts):
+        base = "https://" + h
+        st = _fb_domain_probe(sdb, tenant_id, base, _cache)
+        if st == "pass":
+            return base, p, ""
+        if st == "warn":
+            if i == 0:
+                return base, p, ""   # 首选域探测不可判定 → 沿用现状
+            warn_base = warn_base or base
+    if warn_base:
+        return warn_base, p, ""
+    return "https://" + hosts[0], p, (
+        f"落地页「{(p.title or '')[:24] or p.id}」所有绑定域名均被 FB 屏蔽（已探测 {len(hosts)} 个），"
+        "已阻止部署——请到落地页换绑健康域名后重试")
+
+
 def _flat_auto_subcode(sdb, tpl: LaunchTemplate, item: LaunchJobItem, asset):
     """平铺链自动建链（单模板/批量逐系列/重试共用；FB only）：绑了落地页且未手选子码 →
     建 reserved 子码，返 (slug, link, base_url, warn)。
@@ -188,7 +258,10 @@ def _flat_auto_subcode(sdb, tpl: LaunchTemplate, item: LaunchJobItem, asset):
     slug, link, base, warn = "", None, "", ""
     if (not tpl.subcode_slug) and (tpl.landing_page_id or 0):
         try:
-            _base, _lp = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))
+            # 批S 域名健康门：全封 → _LandingBlockedError 穿透（下方 except 不吞，调用方 item 失败）
+            _base, _lp, _blk = _healthy_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))
+            if _blk:
+                raise _LandingBlockedError(_blk)
             if not (_lp and (_lp.status or "") == "published"
                     and (_lp.redirect_mode or "display") == "display" and _base):
                 raise ValueError("落地页未发布或为直接跳转模式")
@@ -198,6 +271,8 @@ def _flat_auto_subcode(sdb, tpl: LaunchTemplate, item: LaunchJobItem, asset):
             sdb.commit()
             base = _base
             item.subcode_slug = slug   # 激活死列（B10）
+        except _LandingBlockedError:
+            raise   # 全封硬拦——降级直投等于把广告指向死链
         except Exception as e:
             sdb.rollback()
             warn = f"自动建链失败降级直投：{str(e)[:120]}"
@@ -1147,9 +1222,14 @@ def preflight_deploy(tid: int, body: PreflightIn,
     # 预检=所见即所发）；页不存在/解析失败回落插值快照
     if t.landing_page_id:
         try:
-            _pf_base = _resolve_landing_base(db, user.tenant_id, int(t.landing_page_id))[0] or ""
+            # 批S 域名健康门（预检=所见即所发）：全封 → 400 预拦，别等部署才炸
+            _pf_base, _pf_lp, _pf_err = _healthy_landing_base(db, user.tenant_id, int(t.landing_page_id))
+            if _pf_err:
+                raise HTTPException(400, _pf_err)
             if _pf_base:
                 _lp_url = _pf_base
+        except HTTPException:
+            raise
         except Exception:
             pass
     try:
@@ -1361,9 +1441,14 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         # 同口径）；页不存在/解析失败回落插值快照
         if first_ad.get("landing_page_id"):
             try:
-                _pf_lp_base = _resolve_landing_base(db, tenant_id, int(first_ad["landing_page_id"]))[0] or ""
+                # 批S 域名健康门（树预检）：全封 → 400 预拦
+                _pf_lp_base, _pf_pg, _pf_lperr = _healthy_landing_base(db, tenant_id, int(first_ad["landing_page_id"]))
+                if _pf_lperr:
+                    raise HTTPException(400, _pf_lperr)
                 if _pf_lp_base:
                     _lp_url = _pf_lp_base
+            except HTTPException:
+                raise
             except Exception:
                 pass
         # 出价额样例（G2② 单管道口径）：首组 bid_amount_usd（组级 > 模板级）→ 目标账户本币 minor units
@@ -2280,7 +2365,12 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, item, asset)
     if not _a_base and (tpl.landing_page_id or 0):
         try:
-            _a_base = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))[0] or ""
+            _hb, _hp, _herr = _healthy_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))
+            if _herr:
+                raise _LandingBlockedError(_herr)
+            _a_base = _hb or ""
+        except _LandingBlockedError:
+            raise
         except Exception:
             _a_base = ""
     if _a_base:
@@ -2418,6 +2508,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     _tpl_adv = _parse_advanced(tpl) or {}
     _subcode_cache: dict = {}
     _lp_base_cache: dict = {}      # landing_page_id → 公网 base（自动建链用，页行解析）
+    _lp_probe_cache: dict = {}     # url → FB 封禁探测结果（批S；同 item 内去重 FB Graph 调用）
     _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
     auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     _page_id = item.page_id or tpl.page_id or ""
@@ -2588,7 +2679,12 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             node_lp_base = ""
             if node_lpid:
                 if node_lpid not in _lp_base_cache:
-                    _lp_base_cache[node_lpid] = _resolve_landing_base(sdb, tenant_id, node_lpid)[0] or ""
+                    # 批S 域名健康门：全封 → 缓存哨兵 "__BLOCKED__"，下方整 item 失败拒投
+                    _hb, _hp, _herr = _healthy_landing_base(sdb, tenant_id, node_lpid, _lp_probe_cache)
+                    _lp_base_cache[node_lpid] = "__BLOCKED__" if _herr else (_hb or "")
+                if _lp_base_cache[node_lpid] == "__BLOCKED__":
+                    raise _LandingBlockedError(
+                        f"落地页(#{node_lpid})所有绑定域名均被 FB 屏蔽，已阻止部署——请换绑健康域名")
                 node_lp_base = _lp_base_cache[node_lpid]
             aname_base = (anode.get("name") or "").strip()
 
@@ -3396,7 +3492,12 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             _a_slug, _a_link, _a_base, _a_warn = _flat_auto_subcode(sdb, tpl, it, asset)
             if not _a_base and (tpl.landing_page_id or 0):
                 try:
-                    _a_base = _resolve_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))[0] or ""
+                    _hb, _hp, _herr = _healthy_landing_base(sdb, tpl.tenant_id, int(tpl.landing_page_id))
+                    if _herr:
+                        raise _LandingBlockedError(_herr)
+                    _a_base = _hb or ""
+                except _LandingBlockedError:
+                    raise
                 except Exception:
                     _a_base = ""
             if _a_base:
