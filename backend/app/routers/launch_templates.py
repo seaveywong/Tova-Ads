@@ -462,6 +462,10 @@ def _validate_structure(raw) -> tuple[dict, str]:
             "billing_event": str(adset.get("billing_event") or ""),
             "advanced_config": str(adset.get("advanced_config") or ""),
             "conv_location": conv_loc,
+            # 批P1 修2：白名单漏了这个键——保存时被"未知键丢弃"策略剥掉，
+            # 存库树永远无此键 → 部署回退默认开 → 兴趣受众撞 FB 1870227。三态保留（None=未设）
+            "advantage_audience": (bool(adset["advantage_audience"])
+                                   if adset.get("advantage_audience") is not None else None),
             "placement_mode": (placement_mode if placement_mode == "manual" else ""),
             "publisher_platforms": pp,
             "device_platforms": dp,
@@ -1463,14 +1467,19 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             daily_budget=camp_budget_fb if is_cbo else None,
             budget_mode=t.budget_mode, bid_strategy=t.bid_strategy,
             spend_cap=_p_spend_cap_fb)
+        _pf_t = _resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
+                                   (adsets[0].get("audience_json") or t.audience_json or ""))
+        # 批P1 修2 同口径：未设 advantage_audience 的存量节点按兴趣词启发式（预检=所见即所发）
+        _pf_adv = adsets[0].get("advantage_audience")
+        if _pf_adv is None:
+            _pf_adv = not bool((_pf_t or {}).get("flexible_spec"))
         adset_payload = build_adset(
             name=tree_out[0]["name"], campaign_id="<FB 创建 campaign 后返回>",
             daily_budget=tree_out[0]["budget_local_fb"], objective=t.objective,
             conversion_goal=t.conversion_goal, page_id=(body.page_id or t.page_id or ""),
             pixel_id=(body.pixel_id or t.pixel_id or ""), landing_url=_lp_url,
             bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
-            targeting=_resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
-                                         (adsets[0].get("audience_json") or t.audience_json or "")),
+            targeting=_pf_t,
             dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
             optimization_goal=(adsets[0].get("optimization_goal") or t.optimization_goal or ""),
             billing_event=(adsets[0].get("billing_event") or t.billing_event or ""),
@@ -1483,7 +1492,7 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             conv_location=(adsets[0].get("conv_location") or ""),
             placements=_node_placements(adsets[0] or {}),
             whatsapp_phone_number=(t.whatsapp_phone_number or ""),
-            advantage_audience=(adsets[0].get("advantage_audience") is not False),
+            advantage_audience=_pf_adv,
             bid_amount=_pf_bid_fb)
         creative_payload = build_creative(
             page_id=(body.page_id or t.page_id or ""), objective=t.objective,
@@ -2600,6 +2609,12 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             _fail_group(sname, snode, f"转化位置解析失败：{e}")
             continue
         grp_is_msg = is_messaging_destination(grp_dest, grp_opt)
+        # 批P1 修2：advantage_audience 三态——节点显式设置用节点的；未设（存量模板）按平铺链
+        # 同款启发式兜底：受众含兴趣词(flexible_spec)=原始受众(关)，纯宽定向=Advantage+(开)。
+        # 旧行为 is not False 把未设当开 → 兴趣受众+Advantage+ 开 → FB 1870227 拒收整个 adset
+        _adv_aud = snode.get("advantage_audience")
+        if _adv_aud is None:
+            _adv_aud = not bool((targeting or {}).get("flexible_spec"))
         # 组像素链：节点 > 部署抽屉按账户 > 模板默认；全空时兜底账户像素库任选一个
         # （批P复审补——"自动=部署时按账户选择"的最终兑现，否则三处全空首跑直接 400 需 pixel_id）
         _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id,
@@ -2625,7 +2640,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 extra=merged_adv or None,
                 budget_type=node_btype, lifetime_budget=adset_lifetime_fb,
                 start_time=s_sched_start, end_time=s_sched_end, pacing=s_pacing,
-                advantage_audience=(snode.get("advantage_audience") is not False),
+                advantage_audience=_adv_aud,
                 bid_amount=s_bid_fb,
                 minimum_roas=(float(s_min_roas) if s_min_roas else None),
                 conv_location=s_conv_loc,
