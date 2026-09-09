@@ -1895,3 +1895,21 @@ VV 落地看板 0 消耗 / redirects map 0 / owner 三页回归有数据 / VV �
 ### 教训（写入 memory 的根因模式）
 - 「deny 后继续执行」「缓存先于鉴权」是权鉴修复批的同根遗漏——deny 必须立即 return/raise，缓存键必须含用户域
 - 前端推导 computed 要有单测式冒烟（两个 bug 都是"看起来对但恒 false"）
+
+## 批AK：六问排查与四修（2026-09-10）
+
+### ① 「冤杀」文案——改大白话
+像素体检的"不冤杀"= 技术注释口吻漏进了 UI。改为「{n} 个账户的令牌暂时用不了，本次未检查（不会误标失效）」。含义：令牌失效时拿不到 FB 实况，此时标记像素"失效"可能是错的（拿不到证据 ≠ 像素死了），所以跳过。
+
+### ③ 批量部署 3 账户失败根因（探针二分定位）
+逐层复刻昨晚 payload（campaign→adset→全字段含 45-65/男/7兴趣/手动版位/DC extra）在失败账户**全部成功**——payload 无罪。真因：**写令牌候选池（cred26 Gia Reyno / cred25 Kritins Rae）是外部 App 授权的 OAuth 令牌**（watchdog 同期 debug_token #100 "must be owner/developer of the app"），FB 对这类令牌的写请求报**裸 "Invalid parameter" 无 error_data**（权限错伪装成参数错，与批AB not-exist 伪装同族）。多令牌 RR 轮换：命中好令牌的账户成功、命中外部令牌的失败。
+**修复**：部署 runner（主+重试两处）写令牌候选兜底——裸 invalid_param（无 error_data）自动 rollback 换下一候选整树重试。该类令牌建议后续在令牌页清理或重授权（本库 App=1583686816811436 签发的才有完整写权限）。
+
+### ④ 管理器综合转化显示口径
+conversions 列改 either=max(FB, 落地通过)——与规则引擎完全同口径（规则侧批AA 已验：landing_clicks 按 ad_id 精确归因+IP 去重，FB 回传延迟时用落地通过兜底不误停）。成效(FB) 列保持 FB 原值可辨。
+
+### ② 系列名重名
+树/平铺部署 campaign 名统一加日期后缀（MMDD）：`Tova Ads 0910`。前缀来自模板 name_prefix（建模板时填的），后缀之前没加。
+
+### ⑤⑥ 无需改动
+动态像素/S2S 已实证生效（昨日验证）；权鉴大白话解释见对话（VV=同团队 operator 只能看自己名下+自建，owner 全租户）。
