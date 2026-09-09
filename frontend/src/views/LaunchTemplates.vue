@@ -2322,7 +2322,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     </el-dialog>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
-    <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="680px" :destroy-on-close="true" :before-close="onEditBeforeClose">
+    <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="760px" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="edit-body">
       <!-- 平台（建模板时已定，编辑器内只读展示——FB/TT 三件套链路不同，不可中途切） -->
       <div class="plat-ro-row">
@@ -3142,7 +3142,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dialog>
 
     <!-- 部署抽屉 -->
-    <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="680px">
+    <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="760px">
       <div class="d">{{ deployTpl?.platform === 'tt' ? t('launch.ttDeploySubtitle') : t('launch.deploySubtitle') }}</div>
       <!-- 主页权限总览（令牌×主页权限面；FB 专属，懒加载折叠面板） -->
       <div v-if="deployTpl?.platform !== 'tt'" class="pp-ov">
@@ -3512,8 +3512,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px}
 
 .form{display:flex;flex-direction:column;gap:12px}
-.row{display:flex;flex-direction:column;gap:4px}
-.row label{font-size:12px;color:var(--t3);font-weight:500}
+.row{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.row label{font-size:11px;color:var(--t3);font-weight:600;letter-spacing:.02em}
 .api-hint{font-size:10px;color:var(--t3);opacity:.6;font-family:'SF Mono',ui-monospace,monospace;font-weight:400}
 .inp{padding:6px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit}
 .inp:focus{border-color:var(--ac);outline:none}
@@ -3529,7 +3529,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .age-row{display:flex;align-items:center;gap:6px}
 .age-row .inp.sm{width:80px}
 .sep{border:none;border-top:1px solid var(--bd);margin:6px 0}
-.sec-title{font-size:12px;color:var(--t2);font-weight:600;margin:-2px 0 2px}
+.sec-title{font-size:11px;color:var(--t2);font-weight:700;letter-spacing:.05em;margin:12px 0 6px}
 .sec-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .sec-title-row .sec-title{margin:0}
 
@@ -3804,13 +3804,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 /* 1:1 三层结构模式：模式切换（树面板已并入三段手风琴） */
 .tpl-mode-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .tpl-mode-row label{font-size:12px;color:var(--t3);font-weight:500}
-.tdot{width:8px;height:8px;border-radius:50%;flex:none}
+.tdot{width:7px;height:7px;border-radius:2px;flex:none}
 .tdot.g{background:var(--success)}
 .tdot.y{background:var(--warning)}
 .tdot.c{background:var(--t3);opacity:.35}
-.t-arrow{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);flex:none;transition:transform .15s;display:inline-block;cursor:pointer;padding:2px}
-.t-arrow.open{transform:rotate(90deg)}
-.t-op{background:none;border:none;color:var(--t3);cursor:pointer;padding:2px;border-radius:4px;display:inline-flex;align-items:center}
+.t-arrow{font-size:0;color:var(--t3);flex:none;transition:transform .18s;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;cursor:pointer}
+  .t-arrow::before{content:'';width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);display:block;margin-right:2px}
+.t-arrow.open{transform:rotate(45deg);color:var(--t1)}
+.t-op{background:none;border:1px solid transparent;color:var(--t3);cursor:pointer;padding:4px;border-radius:6px;display:inline-flex;align-items:center}
 .t-op:hover{color:var(--ac);background:var(--bg3)}
 .t-op.danger:hover{color:var(--error)}
 .t-add-adset{margin-top:4px;padding:6px;border:1px dashed var(--bd);background:none;color:var(--t3);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit}
@@ -3827,12 +3828,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 /* 批次I：组卡转化位置单选组（按钮 chip，可换行） */
 .convloc-opts{display:flex;flex-wrap:wrap;gap:6px}
-.convloc-opt{padding:6px 12px;border:1px solid var(--bd);border-radius:6px;background:var(--bg3);color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit}
+.convloc-opt{padding:6px 14px;border:1px solid var(--bd);border-radius:999px;background:transparent;color:var(--t3);font-size:12px;cursor:pointer;font-family:inherit}
 .convloc-opt:hover{border-color:var(--ac);color:var(--ac)}
-.convloc-opt.on{border-color:var(--ac);color:var(--ac);background:var(--acg)}
+.convloc-opt.on{border-color:var(--ac);color:#fff;background:var(--ac);font-weight:600}
 /* 组卡折叠子区（受众/版位；受众默认展开=折叠集，版位默认收起=展开集，仿出价控制） */
 .node-sec{border:1px solid var(--bd);border-radius:8px;padding:6px 10px;background:var(--bg3)}
-.node-sec-head{display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:2px 0;cursor:pointer;font-family:inherit}
+.node-sec-head{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;color:var(--t2);font-size:11px;font-weight:700;letter-spacing:.05em;padding:12px 0 6px;cursor:pointer;font-family:inherit;border-top:1px dashed var(--bd);margin-top:12px}
 .node-sec-head:hover{color:var(--ac)}
 .node-sec-val{margin-left:auto;font-weight:500;color:var(--ac);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
 .node-sec-val.warn{color:var(--warning)}
@@ -3871,10 +3872,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 /* FB 创建流：编辑器顶栏（完备状态）+ 三层 Tab（系列/组/广告——面包屑合进 Tab） */
 .fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
-.fb-tabs{display:flex;gap:6px;margin-bottom:12px}
-.fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg2);color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
+.fb-tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:var(--bg2);border-radius:10px}
+.fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:none;border-radius:7px;background:transparent;color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
 .fb-tab:hover{color:var(--t1);border-color:var(--bd2)}
-.fb-tab.on{border-color:var(--ac);color:var(--ac);background:var(--acg);font-weight:600}
+.fb-tab.on{background:var(--bg3);color:var(--t1);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .fb-tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fb-tab-badge{font-size:10px;font-weight:600;padding:0 7px;border-radius:8px;line-height:16px;flex:none}
 .fb-tab-badge.ok{color:var(--success);background:rgba(52,199,89,.13)}
@@ -3882,7 +3883,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .tab-panel{padding-bottom:4px}
 .tab-meta{font-size:11px;color:var(--t3);margin-bottom:8px}
 /* 组卡头摘要链（目标 · 转化位置 · 优化目标）+ 动态引擎提示框 */
-.as-card-chain{flex:none;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t3)}
+.as-card-chain{flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--t3);opacity:.85}
 .loc-hint{padding:8px 10px;border:1px dashed var(--bd2);border-radius:6px;font-size:12px;color:var(--t3);background:var(--bg3);line-height:1.5}
 .msg-aud-hint{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:var(--bg2);color:var(--t2);border:1px solid var(--bd)}
 /* 只读字段 + CBO 行 + 必填标记 + 禁用输入（特殊广告类别联动） */
@@ -3895,11 +3896,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .sched-row{display:flex;align-items:center;gap:6px}
 .sched-sep{color:var(--t3)}
 /* 广告组卡 / 广告小卡（结构模式） */
-.as-card{border:1px solid var(--bd);border-radius:8px;background:var(--bg2);margin-bottom:10px;overflow:hidden}
+.as-card{border:1px solid var(--bd);border-left:3px solid var(--bd);border-radius:10px;background:var(--bg2);margin-bottom:10px;overflow:hidden}
+  .as-card.err{border-left-color:var(--error)}
 .as-card.err,.ad-card.err{border-color:var(--error);box-shadow:0 0 0 1px var(--error)}
-.as-card-head{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;background:var(--bg3)}
+.as-card-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;background:transparent;border-bottom:1px solid var(--bd)}
 .as-card-head:hover{background:var(--bg2)}
-.as-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500;color:var(--t1)}
+.as-card-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--t1)}
 .as-card-ops{display:flex;gap:2px;flex:none}
 .as-card-body{padding:12px}
 .ad-group-head{display:flex;align-items:center;gap:8px;margin:2px 0 8px}
