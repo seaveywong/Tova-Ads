@@ -809,7 +809,25 @@ def _fetch_post_content(db: Session, tenant_id: int, post_id: str) -> dict:
     ② ads_cache creative.object_story_spec（暗帖——广告帖大多是暗帖，published_posts 读不到；
        但同步广告时拉了 object_story_spec，含 link_data/video_data 的文案+图）
     ③ FB published_posts 边(有机帖，page token——GET /{post_id} 节点对主页帖常权限不足，边才行)。
-    都取不到→空 dict（前端显"无法读取"）。统一返 {message, headline, picture, cta_type, link, permalink_url}。"""
+    都取不到→空 dict（前端显"无法读取"）。统一返 {message, headline, picture, cta_type, link, permalink_url}。
+    结果缓存 1h（帖子内容不可变；树编辑器每次打开对每个 reuse 节点自动解析——外部帖重复拉 FB）。"""
+    _ck = f"postcontent:{tenant_id}:{post_id}"
+    if _ck in _POST_CONTENT_CACHE:
+        _at, _val = _POST_CONTENT_CACHE[_ck]
+        if time.time() - _at < 3600:
+            return _val
+    _out = _fetch_post_content_uncached(db, tenant_id, post_id)
+    if _out:
+        if len(_POST_CONTENT_CACHE) > 2000:
+            _POST_CONTENT_CACHE.clear()
+        _POST_CONTENT_CACHE[_ck] = (time.time(), _out)
+    return _out
+
+
+_POST_CONTENT_CACHE: dict = {}
+
+
+def _fetch_post_content_uncached(db: Session, tenant_id: int, post_id: str) -> dict:
     from ..models.page_post import PagePost
     from ..models.launch import Asset
     from ..models.ads_cache import AdsCache

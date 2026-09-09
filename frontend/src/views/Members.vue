@@ -110,16 +110,16 @@ const changeRole = async (m, roleName) => {
   } catch { return }  // 取消则 select 自动回弹到 m.role（受控）
   try {
     await PUT(`/rbac/members/${m.membership_id}/role`, { role: roleName })
+    m.role = roleName   // 原地（同 AdminTeams 模式）——省掉 3-GET 全量重拉
     ElMessage.success(t('members.roleUpdated'))
-    await load()
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const removeMember = async (m) => {
   try {
     await ElMessageBox.confirm(t('members.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/rbac/members/${m.membership_id}`)
+    members.value = members.value.filter(x => x.membership_id !== m.membership_id)   // 本地移除
     ElMessage.success(t('members.removed'))
-    await load()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
 }
 

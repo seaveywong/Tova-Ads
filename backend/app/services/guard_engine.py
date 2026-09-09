@@ -54,16 +54,17 @@ COOLDOWN_MIN = 60
 
 logger = logging.getLogger("toveads.guard")
 
-# 规则类型 → 客户面类别（doc 03 §2.1，8 类止损规则 + 2 类扩量规则）
+# 规则类型 → 客户面类别（doc 03 §2.1 + 批AF 1.0 对齐：补 CPM/CPC/刷点击三个 KPI 维度 + 激进拉量档）
 RULE_CATEGORY = {
     "bleed_abs": "空耗止损", "click_no_conv": "空耗止损", "reach_no_conv": "空耗止损",
-    "low_ctr_no_conv": "空耗止损", "budget_burn_fast": "空耗止损",
-    "cpa_exceed": "成本超标", "trend_drop": "效果下滑", "consecutive_bad": "效果下滑",
-    "slow_scale": "智能扩量", "roas_scale": "智能扩量",
+    "low_ctr_no_conv": "空耗止损", "budget_burn_fast": "空耗止损", "click_fraud": "空耗止损",
+    "cpa_exceed": "成本超标", "cpm_high": "成本超标", "cpc_high": "成本超标",
+    "trend_drop": "效果下滑", "consecutive_bad": "效果下滑",
+    "slow_scale": "智能扩量", "roas_scale": "智能扩量", "fast_scale": "智能扩量",
 }
 
 # 扩量规则类型（1.0 _check_scale_rule 移植）：命中 → 走 set_budget 加预算（非暂停链）
-SCALE_RULE_TYPES = ("slow_scale", "roas_scale")
+SCALE_RULE_TYPES = ("slow_scale", "roas_scale", "fast_scale")
 
 # 默认参数（审计项目9：8 规则默认值表 + 扩量 2 类）
 # 扩量契约（params JSON，全部可省）：
@@ -89,6 +90,17 @@ RULE_DEFAULTS = {
                          "consecutive_days": 1, "cooldown_hours": 24},
     "roas_scale":       {"min_conversions": 3, "roas_threshold": 3.0, "cpa_ratio": 0.8,
                          "scale_pct": 15, "max_daily_budget_usd": 100,
+                         "consecutive_days": 1, "cooldown_hours": 24},
+    # 批AF 1.0 对齐新增（KPI 细化维度）：
+    #   cpm_high  展示成本过高（流量贵）且零转化——1.0 engagement 信号 CPM≤15 判优的反向止损
+    #   cpc_high  点价过高且零转化——1.0 请求了 cpc 字段但从未用，此处补上维度
+    #   click_fraud 刷量嫌疑——总点击高但去重点击占比低（同批人反复点）+ 零转化
+    #   fast_scale 1.0 激进拉量档（0.7×目标/当日 5 转化/+25%），补「表现极好快速放大」中间档
+    "cpm_high":         {"min_spend": 10, "max_cpm": 15},
+    "cpc_high":         {"min_spend": 10, "max_cpc": 1.0},
+    "click_fraud":      {"min_clicks": 100, "max_unique_ratio": 50},
+    "fast_scale":       {"min_conversions": 5, "cpa_target": 8, "cpa_ratio": 0.7,
+                         "scale_pct": 25, "max_daily_budget_usd": 100,
                          "consecutive_days": 1, "cooldown_hours": 24},
 }
 
@@ -329,7 +341,7 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     #   不计入则 CPA 永远算不出、空耗规则误杀有潜客的广告。
     # 空耗类规则（bleed_abs/click_no_conv 等）保持 either/landing 兜底（落地有通过量
     #   说明不是纯空耗，防误杀）。
-    if rule.rule_type in ("cpa_exceed", "consecutive_bad", "slow_scale", "roas_scale"):
+    if rule.rule_type in ("cpa_exceed", "consecutive_bad", "slow_scale", "roas_scale", "fast_scale"):
         if cs == "landing" and not (ad_insights.get("actions") or []):
             return False, ""  # CPA 规则不适用：无 FB actions，宁可漏告不拿落地数顶替 CPA
         conversions = max(conversions, leads_count)
@@ -350,7 +362,7 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     # 阈值会误杀，1:1 兜底换算对小面额币种放大数千倍同样误杀。仅跳过金额类规则；click_no_conv/
     # trend_drop/consecutive_bad 等非金额规则照常评估。账户级已另发 unsupported_currency 告警。
     if spend_usd is None and rt in ("bleed_abs", "cpa_exceed", "low_ctr_no_conv", "reach_no_conv",
-                                    "budget_burn_fast", *SCALE_RULE_TYPES):
+                                    "budget_burn_fast", "cpm_high", "cpc_high", *SCALE_RULE_TYPES):
         return False, ""
 
     if rt == "bleed_abs":
@@ -391,6 +403,39 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
         min_spend = float(p.get("min_spend", 10))
         if reach >= reach_threshold and spend_usd >= min_spend and conversions == 0:
             return True, f"触达 {reach}≥{reach_threshold} / 空 {fmt_spend(spend, currency)}"
+        return False, ""
+
+    # ── 批AF 1.0 对齐：CPM/CPC/刷点击三个 KPI 维度（1.0 只有 CPA 中心口径的补位）──
+    if rt == "cpm_high":
+        min_spend = float(p.get("min_spend", 10))
+        max_cpm = float(p.get("max_cpm", 15))
+        cpm = _sf(ad_insights.get("cpm", 0) or 0)
+        if not cpm and impressions:
+            cpm = spend_usd * 1000 / impressions   # FB 未返时现算（USD 口径）
+        # impressions≥1000：展示太少时 CPM 噪声大（1.0 low_ctr 同款隐形门槛思路）
+        if spend_usd >= min_spend and impressions >= 1000 and conversions == 0 and cpm > max_cpm:
+            return True, f"CPM ≈${cpm:.2f}>{max_cpm}（流量贵，{fmt_spend(spend, currency)} 零转化）"
+        return False, ""
+
+    if rt == "cpc_high":
+        min_spend = float(p.get("min_spend", 10))
+        max_cpc = float(p.get("max_cpc", 1.0))
+        cpc = _sf(ad_insights.get("cpc", 0) or 0)
+        if not cpc and clicks:
+            cpc = spend_usd / clicks
+        if spend_usd >= min_spend and clicks >= 20 and conversions == 0 and cpc > max_cpc:
+            return True, f"CPC ≈${cpc:.2f}>{max_cpc}（点价贵，{fmt_spend(spend, currency)} 零转化）"
+        return False, ""
+
+    if rt == "click_fraud":
+        min_clicks = int(p.get("min_clicks", 100))
+        max_ur = float(p.get("max_unique_ratio", 50))
+        uclicks = _si(ad_insights.get("unique_clicks", 0) or 0)
+        if clicks >= min_clicks and conversions == 0:
+            # 去重点击占总点击比：正常流量 80-95%；同批人反复点（刷量/诱导）显著偏低
+            ur = uclicks / clicks * 100 if clicks else 0
+            if ur <= max_ur:
+                return True, f"{clicks} 次点击但去重点击仅 {uclicks}（占比 {ur:.0f}%≤{max_ur}%，疑似刷量）"
         return False, ""
 
     if rt == "trend_drop":
@@ -1022,6 +1067,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 active_ids = {a.get("id") for a in active_ads if _ad_is_active(a, "fb")}
                 created_map = {a.get("id"): a.get("created_time") for a in active_ads}
                 _writeback_ads_cache(db, tenant_id, acc.act_id, active_ads)
+                # 批AF：巡检顺带刷结构层（campaigns/adsets）——三层从此都由 5min 巡检供数
+                # （15min cron 的 FB 结构同步已撤；成本 +16 次/h·账户 换结构层 5min 新鲜+并发自愈）。
+                # 结构失败绝不影响止损主路径：单独吞掉，下轮再试（函数级 import 防 routers↔services 循环）。
+                try:
+                    from ..routers.ads import _sync_one
+                    _sync_one(db, tenant_id, acc.act_id, fb, platform="fb",
+                              currency=(acc.currency or "USD"), include_ads=False)
+                except Exception:
+                    pass
         except FbApiError as e:
             # 限流统一冷却（复审R1）：曾只在 insights 分支冷却令牌——get_active_ads 撞限流
             # 不冷却，同轮其余 worker/下轮继续选同一令牌撞墙。DB 级冷却对后续 worker 立即可见

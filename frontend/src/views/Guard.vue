@@ -56,6 +56,19 @@ const RULE_TYPES = computed(() => ({
   budget_burn_fast: { label: t('guard.rt.budget_burn_fast'), category: t('guard.cat.bleed'), params: [
     { key: 'threshold_abs', label: t('guard.param.delta_gte'), def: 20, unit: 'USD' },
   ]},
+  // 批AF 1.0 对齐：CPM/CPC/刷点击三个 KPI 维度止损
+  cpm_high: { label: t('guard.rt.cpm_high'), category: t('guard.cat.cost'), params: [
+    { key: 'min_spend', label: t('guard.param.spend_gte'), def: 10, unit: 'USD' },
+    { key: 'max_cpm', label: t('guard.param.cpm_lte'), def: 15, unit: 'USD' },
+  ]},
+  cpc_high: { label: t('guard.rt.cpc_high'), category: t('guard.cat.cost'), params: [
+    { key: 'min_spend', label: t('guard.param.spend_gte'), def: 10, unit: 'USD' },
+    { key: 'max_cpc', label: t('guard.param.cpc_lte'), def: 1.0, unit: 'USD' },
+  ]},
+  click_fraud: { label: t('guard.rt.click_fraud'), category: t('guard.cat.bleed'), params: [
+    { key: 'min_clicks', label: t('guard.param.clicks_gte'), def: 100, unit: t('guard.unit.times') },
+    { key: 'max_unique_ratio', label: t('guard.param.unique_ratio_lte'), def: 50, unit: '%' },
+  ]},
   // 扩量规则（1.0 移植）：转化好/ROAS 达标 → 自动加日预算（带上限+24h 冷却防重复）
   slow_scale: { label: t('guard.rt.slow_scale'), category: t('guard.cat.scale'), params: [
     { key: 'min_conversions', label: t('guard.param.conv_gte'), def: 3, unit: t('guard.unit.times') },
@@ -72,8 +85,17 @@ const RULE_TYPES = computed(() => ({
     { key: 'max_daily_budget_usd', label: t('guard.param.cap_usd'), def: 100, unit: 'USD' },
     { key: 'consecutive_days', label: t('guard.param.days'), def: 1, unit: t('guard.unit.day') },
   ]},
+  // 批AF：1.0 激进拉量档——表现极好（CPA≤0.7×目标+5转化）当日即扩，步长更大
+  fast_scale: { label: t('guard.rt.fast_scale'), category: t('guard.cat.scale'), params: [
+    { key: 'min_conversions', label: t('guard.param.conv_gte'), def: 5, unit: t('guard.unit.times') },
+    { key: 'cpa_target', label: t('guard.param.cpa_target'), def: 8, unit: 'USD' },
+    { key: 'cpa_ratio', label: t('guard.param.cpa_good'), def: 0.7, unit: 'x' },
+    { key: 'scale_pct', label: t('guard.param.step_pct'), def: 25, unit: '%' },
+    { key: 'max_daily_budget_usd', label: t('guard.param.cap_usd'), def: 100, unit: 'USD' },
+    { key: 'consecutive_days', label: t('guard.param.days'), def: 1, unit: t('guard.unit.day') },
+  ]},
 }))
-const SCALE_TYPES = ['slow_scale', 'roas_scale']
+const SCALE_TYPES = ['slow_scale', 'roas_scale', 'fast_scale']
 const isScaleType = (rt) => SCALE_TYPES.includes(rt)
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign'), scale: t('guard.action.scale') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
@@ -142,6 +164,10 @@ const HUMAN = {
   budget_burn_fast: r => t('guard.human.budget_burn_fast', { n: p(r,'threshold_abs')||20 }),
   slow_scale: r => t('guard.human.slow_scale', { conv: p(r,'min_conversions')||3, ratio: p(r,'cpa_ratio')||0.8, pct: p(r,'scale_pct')||20, cap: p(r,'max_daily_budget_usd')||100 }),
   roas_scale: r => t('guard.human.roas_scale', { conv: p(r,'min_conversions')||3, roas: p(r,'roas_threshold')||3, pct: p(r,'scale_pct')||15, cap: p(r,'max_daily_budget_usd')||100 }),
+  fast_scale: r => t('guard.human.fast_scale', { conv: p(r,'min_conversions')||5, ratio: p(r,'cpa_ratio')||0.7, pct: p(r,'scale_pct')||25, cap: p(r,'max_daily_budget_usd')||100 }),
+  cpm_high: r => t('guard.human.cpm_high', { spend: p(r,'min_spend')||10, cpm: p(r,'max_cpm')||15 }),
+  cpc_high: r => t('guard.human.cpc_high', { spend: p(r,'min_spend')||10, cpc: p(r,'max_cpc')||1 }),
+  click_fraud: r => t('guard.human.click_fraud', { clicks: p(r,'min_clicks')||100, ratio: p(r,'max_unique_ratio')||50 }),
 }
 const fmtN = (n) => Number(n).toLocaleString()
 const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r))

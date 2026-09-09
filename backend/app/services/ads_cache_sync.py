@@ -1,10 +1,8 @@
 """广告实体缓存同步（定时拉 campaigns/adsets → ads_cache，广告管理器读缓存跨账户汇总，0 FB）。
 
-独立 job（15min），不进巡检 5min 主循环（广告实体变化慢，降频省 API）。
-FB/TT 都同步（P1-5）：TT 走同一 _sync_one 平台分发——归一 FB 形状后 upsert platform='tt' 行，
-两份实现不漂移。
-FB 的 ads 层由巡检独家供数（巡检每 5min 拉全状态 /ads 后回写 ads_json——省 API：本 cron
-不再重复拉同 edge；campaigns/adsets 巡检不拉，仍由本 job 供数）。TT 无巡检回写，本 job 恒拉三层。
+独立 job（15min）。批AF 起 FB 三层（campaigns/adsets/ads）全部由巡检 5min 顺带回写
+（同成本换 5min 新鲜 + 并发自愈），本 cron 只剩 TT（TT 无巡检回写，恒拉三层）与
+无令牌账户的停更告警探测。
 """
 import logging
 from sqlalchemy import or_
@@ -38,6 +36,10 @@ def run_ads_cache_sync():
             client = client_for_account(db, acc.tenant_id, acc.act_id, "read")
             if client is None:
                 _no_token[acc.tenant_id] = _no_token.get(acc.tenant_id, 0) + 1
+                continue
+            if platform != "tt":
+                # 批AF：FB 三层已由巡检 5min 顺带供数（结构层同 5min 刷新）——这里再拉是纯冗余，
+                # 跳过（本 cron 对 FB 只剩上面 client 探测贡献的停更告警输入）
                 continue
             try:
                 if _sync_one(db, acc.tenant_id, acc.act_id, client,

@@ -634,11 +634,8 @@ const delDomain = async (d) => {
 
 const init = async () => {
   await Promise.all([loadPages(), loadLib()]); loadLandingTemplates()
-  try {
-    const me = await GET('/auth/me')
-    isSuper.value = !!me.is_superadmin
-    localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0')
-  } catch {}
+  // 超管标志读 MainLayout 挂载时写入的 localStorage（省一次 /auth/me）
+  isSuper.value = localStorage.getItem('tova_super') === '1'
 }
 onMounted(async () => { await loadAsnBlocklist(); await init() })
 </script>

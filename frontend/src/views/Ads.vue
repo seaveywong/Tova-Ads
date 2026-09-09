@@ -94,12 +94,19 @@ const batchRemove = async () => {
   } catch { return }
   accLoading.value = true
   const errs = []; let ok = 0
-  for (const actId of selectedAccs.value) {
-    try { await DELETE(`/fb/accounts/${actId}`); ok++ }
-    catch (e) { errs.push(`${actId}: ${e.message || e}`) }
+  const okIds = new Set()
+  // 并发删除（限 5/批——后端 unmanage 查 FB 在投数，全并发会打爆限流）；成功项本地移除省全量重拉
+  const ids = [...selectedAccs.value]
+  for (let i = 0; i < ids.length; i += 5) {
+    const rs = await Promise.allSettled(ids.slice(i, i + 5).map(id => DELETE(`/fb/accounts/${id}`)))
+    rs.forEach((r, j) => {
+      const actId = ids[i + j]
+      if (r.status === 'fulfilled') { ok++; okIds.add(actId) }
+      else errs.push(`${actId}: ${r.reason?.message || r.reason}`)
+    })
   }
+  accounts.value = accounts.value.filter(a => !okIds.has(a.act_id))   // 失败行留存（如实显示）
   selectedAccs.value.clear()
-  await load()   // 无论部分失败与否都刷新（被删的和残留的都要如实显示）
   accLoading.value = false
   if (errs.length) showError(t('ads.batchRemoveResult', { ok, fail: errs.length, errs: errs.join('\n') }), t('ads.batchSyncFailDetail'))
   else ElMessage.success(t('ads.removed', { n: ok }))
@@ -271,7 +278,8 @@ const syncCampaigns = async () => {
 
 onMounted(async () => {
   await load()
-  try { const me = await GET('/auth/me'); isSuper.value = !!me.is_superadmin; localStorage.setItem('tova_super', me.is_superadmin ? '1' : '0') } catch(e) {}
+  // 超管标志读 MainLayout 挂载时写入的 localStorage（省一次 /auth/me——布局必先于子页挂载）
+  isSuper.value = localStorage.getItem('tova_super') === '1'
 })
 onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _syncRefreshTimer = null } })   // 全库审查P2
 </script>

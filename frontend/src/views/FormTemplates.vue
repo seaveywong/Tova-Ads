@@ -64,7 +64,7 @@ const MORE_CONTACTS = computed(() => CONTACT_FIELDS.value.filter(f => !['PHONE',
 
 const load = async () => {
   loading.value = true
-  try { forms.value = await GET('/form-templates/forms'); messages.value = await GET('/form-templates/messages') }
+  try { [forms.value, messages.value] = await Promise.all([GET('/form-templates/forms'), GET('/form-templates/messages')]) }   // 互不依赖——并行
   catch (e) { showError(e, t('formtpl.loadFail')) }
   loading.value = false
 }

@@ -1635,23 +1635,67 @@ const openEdit = async (tpl) => {
   if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
+// 批AF 换素材跟随：文案/标题「未自定义才跟随」——当前值为空或恰好=旧素材 AI 首条时跟随新素材，
+// 手改过的永不覆盖（部署链兜底优先级：手填 > 素材AI > 模板，编辑器显示与部署结果从此一致）
+const _copyFollowsOld = (cur, oldFirst) => !cur || !oldFirst || cur === oldFirst
 const pickAsset = async (a) => {
   // 结构模式：素材写入当前选中的广告节点（单选=替换；多选开=追加；跟帖强制单素材）
   if (editMode.value === 'tree' && treeSel.value.type === 'ad' && selAd.value) {
     const n = selAd.value
+    const _replacing = n.post_source === 'reuse' || !n.multi || !(n.asset_ids || []).length
+    const _old = adAsset0(n)
     n.asset_ids = (n.post_source === 'reuse' || !n.multi)
       ? [a.id] : [...new Set([...(n.asset_ids || []), a.id])]
-    if (!n.headline && a.ai_copy?.headlines?.[0]) n.headline = a.ai_copy.headlines[0]
-    if (!n.body && a.ai_copy?.bodies?.[0]) n.body = a.ai_copy.bodies[0]
+    if (_replacing) {
+      if (_copyFollowsOld(n.headline, _old?.ai_copy?.headlines?.[0]) && a.ai_copy?.headlines?.[0]) n.headline = a.ai_copy.headlines[0]
+      if (_copyFollowsOld(n.body, _old?.ai_copy?.bodies?.[0]) && a.ai_copy?.bodies?.[0]) n.body = a.ai_copy.bodies[0]
+      // 受众国家跟随（组级内联受众）：当前为空或恰=旧素材国家集才跟随（受众保真——手配不覆盖）
+      const _s = selAdset.value
+      const _newC = (a.ai_audience?.countries || []).filter(Boolean)
+      const _oldC = (_old?.ai_audience?.countries || []).filter(Boolean)
+      if (_s && _s.aud && !_s.audience_id && _newC.length) {
+        const _cur = _s.aud.countries || []
+        const _sameSet = (x, y) => JSON.stringify([...x].sort()) === JSON.stringify([...y].sort())
+        if (!_cur.length || _sameSet(_cur, _oldC)) _s.aud.countries = [..._newC]
+      }
+    }
     assetPickerOpen.value = false
     return
   }
+  const _oldF = editingAsset.value
   form.value.asset_id = a.id
   editingAsset.value = a
   const hs = (a.ai_copy?.headlines || []); const bs = (a.ai_copy?.bodies || [])
-  if (!form.value.headline && hs[0]) form.value.headline = hs[0]
-  if (!form.value.body && bs[0]) form.value.body = bs[0]
+  if (_copyFollowsOld(form.value.headline, _oldF?.ai_copy?.headlines?.[0]) && hs[0]) form.value.headline = hs[0]
+  if (_copyFollowsOld(form.value.body, _oldF?.ai_copy?.bodies?.[0]) && bs[0]) form.value.body = bs[0]
   assetPickerOpen.value = false
+}
+// 批AF AI 建议兴趣：来自组内广告节点所选素材的 ai_audience.interests（模型输出的自由文本词，
+// 不是 FB 受众 ID）——只展示为可点 chips，点击后经 /audiences/search 解析成 FB 实体才入列
+// （用户逐个确认，受众保真不自动注入）
+const aiInterestHints = (s) => {
+  if (!s || s.advantage_audience) return []
+  const ids = (s.ads || []).flatMap(a => a.asset_ids || [])
+  for (const x of treeAssets.value) {
+    if (ids.includes(x.id) && (x.ai_audience?.interests || []).length)
+      return x.ai_audience.interests.slice(0, 6)
+  }
+  return []
+}
+const aiInterestAdding = ref('')
+const addAiInterest = async (s, term) => {
+  aiInterestAdding.value = term
+  try {
+    const rs = await GET('/audiences/search?q=' + encodeURIComponent(term) + '&limit=1')
+    const it = (rs || [])[0]
+    if (it && s?.aud) {
+      if (!s.aud.interests.some(x => x.id === String(it.id))) {
+        s.aud.interests.push({ id: String(it.id), name: it.name })
+        ElMessage.success(t('launch.aiInterestAdded', { name: it.name }))
+      } else ElMessage.info(t('launch.aiInterestExists'))
+    } else ElMessage.warning(t('launch.aiInterestNoMatch', { term }))
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
+  aiInterestAdding.value = ''
 }
 const openAssetPicker = async () => {
   assetPickerOpen.value = true
@@ -2623,6 +2667,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                       <div class="interest-list">
                         <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>
                         <span v-if="!(s.aud.interests||[]).length" class="hint">{{ t('launch.addViaSearch') }}</span>
+</div>
+</div>
+                    <div v-if="!locIsMsg(s) && !s.advantage_audience && aiInterestHints(s).length" class="row ai-hints-row">
+                      <label>{{ t('launch.aiInterestHints') }}</label>
+                      <div class="interest-list">
+                        <span v-for="h in aiInterestHints(s)" :key="h" class="interest-chip ai-hint" :title="t('launch.aiInterestTip')" @click="addAiInterest(s, h)">{{ h }} <span class="add">{{ aiInterestAdding === h ? '…' : '+' }}</span></span>
 </div>
 </div>
                     </template>

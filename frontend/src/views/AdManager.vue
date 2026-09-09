@@ -235,9 +235,10 @@ const structAgeMin = computed(() => {
 })
 const _ageTxt = (m) => m == null ? '—' : (m < 1 ? t('adm.cacheAgeLt1Short') : t('adm.cacheAgeShort', { n: m }))
 const cacheAgeText = computed(() => {
+  // 批AF：巡检 5min 同时回写广告层与结构层（campaigns/adsets）——两层同龄，单层显示取更旧者
   const a = adsAgeMin.value, s = structAgeMin.value
   if (a == null && s == null) return t('adm.cacheAgeNone')
-  return t('adm.cacheAgeDual', { a: _ageTxt(a), s: _ageTxt(s) })
+  return t('adm.cacheAgeSingle', { v: _ageTxt(Math.max(a ?? 0, s ?? 0)) })
 })
 const cacheAgeStale = computed(() => adsAgeMin.value != null && adsAgeMin.value >= 60)
 
@@ -585,7 +586,7 @@ const openDiagnose = async (item) => {
   catch (e) { if (isLatest()) ElMessage.error(t('adm.diagFail', { msg: e.message || '' })) }
   if (isLatest()) diagLoading.value = false
 }
-const RULE_ZH = computed(() => ({ bleed_abs: t('adm.ruleBleedAbs'), cpa_exceed: t('adm.ruleCpaExceed'), consecutive_bad: t('adm.ruleConsecutiveBad'), click_no_conv: t('adm.ruleClickNoConv'), reach_no_conv: t('adm.ruleReachNoConv'), low_ctr_no_conv: t('adm.ruleLowCtrNoConv'), budget_burn_fast: t('adm.ruleBudgetBurnFast') }))
+const RULE_ZH = computed(() => ({ bleed_abs: t('adm.ruleBleedAbs'), cpa_exceed: t('adm.ruleCpaExceed'), consecutive_bad: t('adm.ruleConsecutiveBad'), click_no_conv: t('adm.ruleClickNoConv'), reach_no_conv: t('adm.ruleReachNoConv'), low_ctr_no_conv: t('adm.ruleLowCtrNoConv'), budget_burn_fast: t('adm.ruleBudgetBurnFast'), cpm_high: t('adm.ruleCpmHigh'), cpc_high: t('adm.ruleCpcHigh'), click_fraud: t('adm.ruleClickFraud'), fast_scale: t('adm.ruleFastScale') }))
 const CS_ZH = computed(() => ({ fb: t('adm.csFb'), landing: t('adm.csLanding'), either: t('adm.csEither') }))
 const goLandingLogs = (slug, adId) => { router.push({ name: 'landing', query: { tab: 'logs', slug, ad_id: adId } }) }
 const loadRedirectMap = async () => { try { redirectMap.value = await GET('/ads/redirects/map') } catch (e) {} }

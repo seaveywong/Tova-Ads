@@ -253,9 +253,7 @@ onMounted(async () => {
   if (route.query.slug) fSlug.value = route.query.slug
   if (route.query.page_id) fPage.value = String(route.query.page_id)
   if (route.query.ad_id) fAd.value = String(route.query.ad_id)   // AdManager「查看落地日志」深链
-  await loadPages()
-  await loadAccounts()
-  await loadRedirectMap()
+  await Promise.all([loadPages(), loadAccounts(), loadRedirectMap()])   // 三者互不依赖——并行省 2 RTT
   setPreset('today')  // 默认今日（与其他看板一致；之前无默认=加载全量）
 })
 watch(() => route.query, (q) => {

@@ -309,7 +309,7 @@ class FbClient:
         """
         params = {
             "fields": "ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,"
-                      "spend,impressions,clicks,ctr,cpc,reach,frequency,"
+                      "spend,impressions,clicks,ctr,cpc,cpm,unique_clicks,reach,frequency,"
                       "actions,purchase_roas",
             "level": "ad",
         }

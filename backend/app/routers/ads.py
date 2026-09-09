@@ -261,6 +261,14 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
         campaigns = fb.get_campaigns(act_id)
         adsets = fb.get_adsets(act_id, effective_status=None)
         ads = None
+        if platform != "tt" and include_ads:
+            # 广告层新鲜度跳过（批AE遗留）：巡检每 5min 回写全状态广告层——手动刷新时
+            # 广告层 <5min 新就不重拉 /ads（3→2 次调用/账户，新鲜度等价）
+            _r0 = db.query(AdsCache.ads_updated_at).filter(
+                AdsCache.tenant_id == tenant_id, AdsCache.act_id == act_id,
+                AdsCache.platform == platform).first()
+            if _r0 and _r0[0] and (datetime.now(timezone.utc) - _r0[0]).total_seconds() < 300:
+                include_ads = False
         if include_ads or platform == "tt":
             ads = fb.get_ads(act_id, effective_status=None)
     except (FbApiError, Exception):
@@ -612,6 +620,7 @@ def refresh_ads(
 
 # live-status 同账户 10s 内存缓存（防连点/列表抖动重复打 FB；多 worker 各自一份，可接受）
 _LIVE_STATUS_CACHE: dict = {}  # {f"{tenant_id}:{act_id}": (fetched_ts, resp)}
+_DIAG_CACHE: dict = {}   # {f"{tenant_id}:{ad_id}": (ts, result)}——诊断面板 60s 响应缓存
 _LIVE_STATUS_TTL = 10
 
 
@@ -1158,7 +1167,12 @@ def diagnose_ad(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """广告诊断：实时拉 FB 数据 + 落地数据 + 规则评估 + 冷却状态，返回完整诊断面板数据。"""
+    """广告诊断：实时拉 FB 数据 + 落地数据 + 规则评估 + 冷却状态，返回完整诊断面板数据。
+    整响应 60s 内存缓存（批AE遗留项）：面板重复打开/连点不重打 FB insights（1 次/分钟/广告）。"""
+    _dck = f"{user.tenant_id}:{ad_id}"
+    _hit0 = _DIAG_CACHE.get(_dck)
+    if _hit0 and time.time() - _hit0[0] < 60:
+        return _hit0[1]
     loc = req_locale(request)
     from ..core.fb_tokens import client_for_account
     from ..core.fb_client import FbClient
@@ -1416,4 +1430,7 @@ def diagnose_ad(
             "detail": (r.trigger_detail or "")[:80],
         })
 
+    if len(_DIAG_CACHE) > 500:
+        _DIAG_CACHE.clear()
+    _DIAG_CACHE[_dck] = (time.time(), result)
     return result

@@ -341,8 +341,8 @@ const delEmAddress = async (a) => {
   } catch { return }
   try {
     await DELETE(`/settings/email-routing/destinations/${a.id}`)
+    em.value.addresses = (em.value.addresses || []).filter(x => x.id !== a.id)   // 本地移除——省全量重拉
     ElMessage.success(t('settings.emDeleted'))
-    await loadEmailRouting()
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 const addEmRoute = async () => {
@@ -359,9 +359,10 @@ const addEmRoute = async () => {
   emRouteSaving.value = false
 }
 const toggleEmRoute = async (r) => {
-  try { await PATCH(`/settings/email-routing/routes/${r.id}`, { enabled: !r.enabled }) }
-  catch (e) { ElMessage.error(e.message || t('common.fail')) }
-  await loadEmailRouting()
+  try {
+    await PATCH(`/settings/email-routing/routes/${r.id}`, { enabled: !r.enabled })
+    r.enabled = !r.enabled   // 原地翻转——省全量重拉
+  } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 const delEmRoute = async (r) => {
   try {
@@ -370,8 +371,8 @@ const delEmRoute = async (r) => {
   } catch { return }
   try {
     await DELETE(`/settings/email-routing/routes/${r.id}`)
+    em.value.routes = (em.value.routes || []).filter(x => x.id !== r.id)   // 本地移除——省全量重拉
     ElMessage.success(t('settings.emDeleted'))
-    await loadEmailRouting()
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
