@@ -338,6 +338,59 @@ def sync_pixels(
     return {"added": added}
 
 
+@router.post("/pixels/health-check")
+def pixel_health_check(
+    user: CurrentUser = Depends(require_permission("landing.manage")),
+    db: Session = Depends(get_db),
+):
+    """像素体检：库里 active 的 FB 像素逐账户比对 FB 实况（每账户 1 次调用，5 并发），
+    FB 侧已删/解绑的标 status='dead'——random 轮换/自愈只选 active，死像素不再被选中。
+    保守原则：令牌拉不动该账户（失效/无权限）= 实况未知，跳过不标记（拿不到实况不冤杀）。"""
+    from ..core.fb_tokens import client_for_account
+    from concurrent.futures import ThreadPoolExecutor
+    rows = db.query(LandingPixel).filter(
+        LandingPixel.tenant_id == user.tenant_id,
+        LandingPixel.platform == "fb", LandingPixel.status == "active",
+        LandingPixel.act_id.isnot(None), LandingPixel.act_id != "").all()
+    if not rows:
+        return {"checked_acts": 0, "skipped_acts": 0, "dead": [], "alive": 0}
+    by_act: dict = {}
+    for r in rows:
+        by_act.setdefault(r.act_id, []).append(r)
+    # 令牌解析在主线程（session 非线程安全）；FbClient 线程安全（FB 调用并发跑）
+    acts = []
+    for act_id in by_act:
+        fb = client_for_account(db, user.tenant_id, act_id, op_kind="read")
+        if fb is not None:
+            acts.append((act_id, fb))
+
+    def _one(item):
+        act_id, fb = item
+        try:
+            return act_id, {str(p.get("id")) for p in fb.get_pixels(act_id)}
+        except Exception:
+            return act_id, None   # 拉不动 = 实况未知
+
+    live: dict = {}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for act_id, ids in ex.map(_one, acts):
+            if ids is not None:
+                live[act_id] = ids
+    skipped = len(by_act) - len(live)
+    dead = []
+    alive = 0
+    for act_id, ids in live.items():
+        for r in by_act[act_id]:
+            if str(r.pixel_id) in ids:
+                alive += 1
+            else:
+                r.status = "dead"
+                dead.append({"pixel_id": r.pixel_id, "name": r.pixel_name, "act_id": act_id})
+    db.commit()
+    return {"checked_acts": len(live), "skipped_acts": skipped,
+            "dead": dead, "alive": alive}
+
+
 # ── 域名库（V1：只读——仅超管分配，租户不可手填/改/删；像素库仍可手填）──
 @router.get("/domains")
 def list_domains(user: CurrentUser = Depends(require_permission("ads.read")),

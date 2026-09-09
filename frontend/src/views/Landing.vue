@@ -480,6 +480,22 @@ const pixelOpen = ref(false)
 const pixelForm = ref({ id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '', fb_capi_enabled: false })
 const pixelSaving = ref(false)
 const syncing = ref(false)
+const pixelChecking = ref(false)
+const checkPixels = async () => {
+  pixelChecking.value = true
+  try {
+    // 逐账户比对 FB 实况，多账户可达数十秒——放宽到 120s
+    const r = await POST('/landing-lib/pixels/health-check', {}, 120000)
+    if (r.dead?.length) {
+      ElMessage.warning(t('landing.pixelCheckDead', { n: r.dead.length, acts: r.checked_acts }))
+      await loadLib()
+    } else {
+      ElMessage.success(t('landing.pixelCheckClean', { alive: r.alive || 0, acts: r.checked_acts }))
+      if (r.skipped_acts) ElMessage.info(t('landing.pixelCheckSkipped', { n: r.skipped_acts }))
+    }
+  } catch (e) { ElMessage.error(t('landing.syncFail') + '：' + (e.message || '')) }
+  pixelChecking.value = false
+}
 const pixelTesting = ref(false)
 const openPixels = () => { pixelOpen.value = true; pixelForm.value = { id: null, pixel_id: '', pixel_name: '', note: '', platform: 'fb', tt_access_token: '', test_event_code: '', fb_capi_enabled: false } }
 const syncPixels = async () => {
@@ -1015,7 +1031,10 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     </el-dialog>
 
     <el-drawer v-model="pixelOpen" :title="t('landing.pixelLibTitle')" direction="rtl" size="480px" :destroy-on-close="true" append-to-body>
-      <button class="btn" :disabled="syncing" @click="syncPixels" style="margin-bottom:14px">{{ syncing ? t('landing.pixelSyncing') : t('landing.pixelSync') }}</button>
+      <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" :disabled="syncing" @click="syncPixels">{{ syncing ? t('landing.pixelSyncing') : t('landing.pixelSync') }}</button>
+        <button class="btn" :disabled="pixelChecking" :title="t('landing.pixelCheckTip')" @click="checkPixels">{{ pixelChecking ? t('landing.pixelChecking') : t('landing.pixelCheckBtn') }}</button>
+      </div>
       <div class="sec-title">{{ pixelForm.id ? t('landing.pixelEdit') : t('landing.pixelAdd') }}</div>
       <div class="form-l"><label>{{ t('landing.fPixelId') }}</label><input v-model="pixelForm.pixel_id" class="input" :placeholder="t('landing.fPixelIdPh')" :disabled="!!pixelForm.id" /></div>
       <div class="form-l"><label>{{ t('landing.fPixelPlatform') }}</label>

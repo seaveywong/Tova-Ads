@@ -75,9 +75,9 @@ export async function api(method, path, body, timeoutMs = 30000) {
 }
 
 export const GET = (p, timeoutMs) => api('GET', p, undefined, timeoutMs)
-export const POST = (p, b) => api('POST', p, b)
-export const PUT = (p, b) => api('PUT', p, b)
-export const PATCH = (p, b) => api('PATCH', p, b)
+export const POST = (p, b, timeoutMs) => api('POST', p, b, timeoutMs)
+export const PUT = (p, b, timeoutMs) => api('PUT', p, b, timeoutMs)
+export const PATCH = (p, b, timeoutMs) => api('PATCH', p, b, timeoutMs)
 export const DELETE = (p) => api('DELETE', p)
 
 // CSV/文件下载：fetch + Bearer + X-Locale（后端按 locale 出列头）→ blob 落盘

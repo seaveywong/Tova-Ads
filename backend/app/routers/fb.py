@@ -5,6 +5,7 @@
 import json
 import logging
 import math
+import time
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from fastapi import APIRouter
@@ -583,13 +584,38 @@ def list_credential_accounts(
             for a in accounts]
 
 
+# ── 令牌资产（主页/像素）短缓存 ──────────────────────────────────────────────
+# 主页授权关系/像素集合变化频率极低；实时拉 FB 单次 1-3s，pixels 全量模式更是遍历
+# 令牌下所有账户逐户拉（几百户令牌一次下拉 = 几百次 FB 调用）。5min 进程内缓存，
+# fresh=1 绕过。gunicorn 多 worker 各自持缓存（独立命中，无一致性问题——资产数据）。
+_ASSET_CACHE: dict = {}
+_ASSET_CACHE_TTL = 300.0
+
+
+def _asset_cache_get(key: str):
+    hit = _ASSET_CACHE.get(key)
+    return hit[1] if hit and hit[0] > time.time() else None
+
+
+def _asset_cache_set(key: str, value):
+    if len(_ASSET_CACHE) > 2000:   # 防无界增长（粗粒度清空即可）
+        _ASSET_CACHE.clear()
+    _ASSET_CACHE[key] = (time.time() + _ASSET_CACHE_TTL, value)
+
+
 @router.get("/credentials/{cred_id}/pages")
 def list_credential_pages(
     cred_id: int,
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """列出该令牌能管理的主页。"""
+    """列出该令牌能管理的主页（5min 缓存，fresh=1 绕过）。"""
+    ck = f"pages:{user.tenant_id}:{cred_id}"
+    if not fresh:
+        cached = _asset_cache_get(ck)
+        if cached is not None:
+            return cached
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
@@ -601,9 +627,11 @@ def list_credential_pages(
         pages = fb.get_pages()
     except FbApiError as e:
         raise HTTPException(400, e.friendly)
-    return [{"id": p.get("id", ""), "name": p.get("name", ""),
-             "category": p.get("category", ""), "fan_count": p.get("fan_count", 0)}
-            for p in pages]
+    out = [{"id": p.get("id", ""), "name": p.get("name", ""),
+            "category": p.get("category", ""), "fan_count": p.get("fan_count", 0)}
+           for p in pages]
+    _asset_cache_set(ck, out)
+    return out
 
 
 @router.get("/pages/{page_id}/posts")
@@ -920,34 +948,58 @@ def resolve_post(body: ResolvePostIn,
 @router.get("/credentials/{cred_id}/pixels")
 def list_credential_pixels(
     cred_id: int,
+    act_id: str = "",   # 单账户模式：只拉该账户（1 次 FB 调用）；空 = 全量遍历令牌所有账户
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """列出该令牌能管理的像素（遍历广告账户拉）。"""
+    """列出该令牌能用的像素（5min 缓存，fresh=1 绕过）。
+    act_id 单账户模式供部署抽屉逐账户下拉——全量模式遍历令牌全部广告账户逐户拉，
+    几百户令牌一次下拉 = 几百次 FB 调用，是抽屉加载慢的主因。"""
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
     ).first()
     if not cred:
         raise HTTPException(404, "令牌不存在")
+    if act_id:
+        ck = f"pixels:{user.tenant_id}:{cred_id}:{act_id}"
+        if not fresh:
+            cached = _asset_cache_get(ck)
+            if cached is not None:
+                return cached
+        fb = FbClient(decrypt(cred.access_token_enc))
+        try:
+            out = [{"id": str(p.get("id", "")), "name": p.get("name", ""), "account": act_id}
+                   for p in fb.get_pixels(act_id) if p.get("id")]
+        except FbApiError as e:
+            raise HTTPException(400, e.friendly)
+        _asset_cache_set(ck, out)
+        return out
+    ck = f"pixels:{user.tenant_id}:{cred_id}"
+    if not fresh:
+        cached = _asset_cache_get(ck)
+        if cached is not None:
+            return cached
     fb = FbClient(decrypt(cred.access_token_enc))
     pixels = []
     seen = set()
     try:
         for acc in fb.get_ad_accounts():
-            act_id = acc.get("account_id", "")
-            if not act_id:
+            aid = acc.get("account_id", "")
+            if not aid:
                 continue
             try:
-                for p in fb.get_pixels(act_id):
+                for p in fb.get_pixels(aid):
                     pid = p.get("id", "")
                     if pid and pid not in seen:
                         seen.add(pid)
-                        pixels.append({"id": pid, "name": p.get("name", ""), "account": act_id})
+                        pixels.append({"id": pid, "name": p.get("name", ""), "account": aid})
             except FbApiError:
                 continue
     except FbApiError as e:
         raise HTTPException(400, e.friendly)
+    _asset_cache_set(ck, pixels)
     return pixels
 
 

@@ -1946,6 +1946,13 @@ const openDeploy = async (tpl) => {
   }
   accLoading.value = false
 }
+// 同令牌主页请求共享（页面级）：主页列表是令牌级，同令牌多账户各拉一遍 = 同一 /me/accounts
+// 被打 N 次；共享一个 Promise 后只发一次（后端另有 5min 缓存兜底跨会话）
+const _credPagesReq = {}
+const fetchCredPages = (credId) => {
+  if (!_credPagesReq[credId]) _credPagesReq[credId] = GET(`/fb/credentials/${credId}/pages`).catch(() => [])
+  return _credPagesReq[credId]
+}
 // 选中账户后拉该账户可用的主页/像素（deployItems 填模板默认值）
 const ensureAccConfig = async (id) => {
   // 默认值先行（accPages 早退在后）——openDeploy 每次重置 deployItems 但不清 accPages，
@@ -1961,9 +1968,11 @@ const ensureAccConfig = async (id) => {
   if (credId) {
     accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
     try {
+      // 像素带 act_id 单账户模式（1 次 FB 调用）；不带会遍历令牌全部账户逐户拉，
+      // 几百户令牌一次下拉 = 几百次 FB 调用（抽屉加载慢的主因）
       const [pages, pixels] = await Promise.all([
-        GET('/fb/credentials/' + credId + '/pages').catch(() => []),
-        GET('/fb/credentials/' + credId + '/pixels').catch(() => []),
+        fetchCredPages(credId),
+        GET('/fb/credentials/' + credId + '/pixels?act_id=' + encodeURIComponent(id)).catch(() => []),
       ])
       accPages.value[id] = pages; accPixels.value[id] = pixels
       // 策略为「随机用账户像素」时，新加载池的账户立即随机填入（与已选账户保持同策略）
