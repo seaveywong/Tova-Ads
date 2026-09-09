@@ -132,7 +132,11 @@ class FbClient:
                 if "error" in result:
                     err = result["error"]
                     cat, friendly = classify_fb_error(err)
-                    logger.warning(f"[FB] {method} {path} → {cat}: {friendly}")
+                    # 原始 message/error_data 一并留日志——friendly 是翻译口径，
+                    # 定位字段级问题（invalid_param 到底哪个参数）必须看原文
+                    logger.warning(f"[FB] {method} {path} → {cat}: {friendly} | raw: "
+                                   f"{str(err.get('message'))[:260]} | data: "
+                                   f"{str(err.get('error_data'))[:200]}")
                     raise FbApiError(cat, friendly, err, resp.status_code)
                 return result
             except FbApiError:
