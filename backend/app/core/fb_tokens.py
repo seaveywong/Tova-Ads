@@ -22,7 +22,7 @@ def active_app_access_token(db: Session) -> str:
 
     用途：debug_token 的 inspector（非开发者用户 token 自检恒 #100，OAuth callback
     与 Watchdog 都靠 App 令牌 inspect 才能拿到 scopes/app_id/is_valid/expires_at）。"""
-    from ..models.fb import FbApp
+    from ..models.fb_app import FbApp
     app = db.query(FbApp).filter(FbApp.status == "active").order_by(FbApp.id).first()
     if not app or not (app.app_secret_enc or ""):
         return ""
