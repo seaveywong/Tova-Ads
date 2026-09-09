@@ -2509,6 +2509,12 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             _fail_group(sname, snode, f"转化位置解析失败：{e}")
             continue
         grp_is_msg = is_messaging_destination(grp_dest, grp_opt)
+        # 组像素链：节点 > 部署抽屉按账户 > 模板默认；全空时兜底账户像素库任选一个
+        # （批P复审补——"自动=部署时按账户选择"的最终兑现，否则三处全空首跑直接 400 需 pixel_id）
+        _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id,
+                                         str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "")
+        if not _grp_pixel:
+            _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id, "random")
         # 组 landing_url 取第一广告节点的（build_adset 的 WEBSITE 类 promoted_object 用；
         # 真正逐广告的链接在创意层覆盖）——占位符此时无组名上下文，用稳定插值
         _first_ad = (snode.get("ads") or [{}])[0]
@@ -2517,8 +2523,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
                 objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                 page_id=_page_id,
-                pixel_id=_resolve_tree_pixel(sdb, tenant_id, item.act_id,
-                                             str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""),
+                pixel_id=_grp_pixel,
                 landing_url=_stable_landing_url(_first_ad.get("landing_url") or tpl.landing_url or "",
                                                 tpl.name or "", "fb"),
                 bid_strategy=tpl.bid_strategy, budget_mode=tpl.budget_mode,
