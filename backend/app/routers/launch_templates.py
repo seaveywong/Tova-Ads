@@ -336,6 +336,67 @@ def _post_adset_with_fallback(fb, act_id: str, payload: dict) -> dict:
         return r
 
 
+def _bind_pixel_to_landing_page(sdb, tenant_id: int, landing_page_id: int, pixel_id: str,
+                                act_id: str = "") -> bool:
+    """像素回写落地页（批Z，转化闭环的关键一环）。
+
+    worker fire 的像素来自页自己的 pixel_ids（LP_CONFIG）——投放链只把像素给 adset
+    而页不 fire，FB 就永远收不到转化 → 止损规则按"花钱零转化"正确关广告（2026-09-09
+    实例：LP6 pixel_ids 空，广告组优化 Tova 像素，页一个事件都没发）。
+    解析出的广告组像素若不在页配置里 → 追加（幂等；独立 session 防 RLS SET LOCAL 坑）。
+    返回是否新增绑定（调用方留痕）。"""
+    if not (landing_page_id and pixel_id):
+        return False
+    from ..models.launch import LandingPage as _LP
+    reg = SuperSessionLocal()
+    try:
+        p = reg.query(_LP).filter(_LP.id == landing_page_id,
+                                  _LP.tenant_id == tenant_id).first()
+        if not p:
+            return False
+        try:
+            ids = json.loads(p.pixel_ids or "[]")
+        except Exception:
+            ids = []
+        if pixel_id in ids:
+            return False
+        ids.append(pixel_id)
+        p.pixel_ids = json.dumps(ids)
+        reg.commit()
+        write_log(reg, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                  target_type="landing_page", target_id=str(landing_page_id),
+                  action_type="bind_pixel", source="launch", result="success",
+                  friendly_error=f"部署回写像素 {pixel_id} 到落地页（转化闭环）",
+                  metadata={"act_id": act_id, "pixel_id": pixel_id})
+        return True
+    except Exception as e:
+        try:
+            reg.rollback()
+        except Exception:
+            pass
+        logging.getLogger("toveads.launch").warning(
+            f"[Launch] 像素回写落地页失败 lp={landing_page_id}: {e}")
+        return False
+    finally:
+        reg.close()
+
+
+def _landing_page_first_pixel(sdb, tenant_id: int, landing_page_id: int) -> str:
+    """落地页已配 FB 像素第一个（批Z：绑了页的组优先用页的像素——页是运营配置源，
+    adset 与 worker fire 同源才有转化闭环）。"""
+    if not landing_page_id:
+        return ""
+    try:
+        p = sdb.query(LandingPage).filter(LandingPage.id == landing_page_id,
+                                          LandingPage.tenant_id == tenant_id).first()
+        if not p:
+            return ""
+        ids = json.loads(p.pixel_ids or "[]")
+        return str(ids[0]) if ids else ""
+    except Exception:
+        return ""
+
+
 def _resolve_tree_pixel(sdb, tenant_id: int, act_id: str, val: str) -> str:
     """组像素解析（批O-3）：值=random → 从该账户已绑像素随机轮换一个（多像素分摊防单像素过热）；
     其余（自动=空/指定 ID）原样返回走既有链路（节点 > 部署抽屉按账户 > 模板默认）。"""
@@ -2409,9 +2470,15 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
     pixel_id = item.pixel_id or tpl.pixel_id
+    if not pixel_id and (tpl.landing_page_id or 0):
+        # 批Z：绑了落地页 → 页已配像素优先（与 worker fire 同源才有转化闭环）
+        pixel_id = _landing_page_first_pixel(sdb, tenant_id, int(tpl.landing_page_id))
     if not pixel_id:
         # 批U2 自愈：抽屉/模板都没选 → 绑账户既有像素，零像素则自动建
         pixel_id = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
+    if (tpl.landing_page_id or 0) and pixel_id:
+        # 批Z：回写页（页没配这个像素就补上）——否则 worker 不 fire，FB 零转化
+        _bind_pixel_to_landing_page(sdb, tenant_id, int(tpl.landing_page_id), pixel_id, item.act_id)
     # lifetime 模式不解析日预算（无 budget_usd 也能部署；总预算在下方换算）
     daily_budget_fb = (0 if (tpl.budget_type or "daily") == "lifetime"
                        else _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id))
@@ -2715,18 +2782,23 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         _adv_aud = snode.get("advantage_audience")
         if _adv_aud is None:
             _adv_aud = not bool((targeting or {}).get("flexible_spec"))
-        # 组像素链：节点 > 部署抽屉按账户 > 模板默认；全空时兜底账户像素库任选一个
-        # （批P复审补——"自动=部署时按账户选择"的最终兑现，否则三处全空首跑直接 400 需 pixel_id）
+        # 组像素链（批Z 终版）：节点 > 部署抽屉按账户 > 模板默认 > **落地页已配像素** >
+        # 库随机 > 自愈(绑既有/自动建)。页像素优先于库随机——worker fire 的就是页的
+        # pixel_ids，adset 与页同源才有转化闭环；解析后回写页（_bind_pixel_to_landing_page）。
+        _first_ad = (snode.get("ads") or [{}])[0]
+        _grp_lpid = int(_first_ad.get("landing_page_id") or 0)
         _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id,
                                          str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "")
+        if not _grp_pixel and _grp_lpid:
+            _grp_pixel = _landing_page_first_pixel(sdb, tenant_id, _grp_lpid)
         if not _grp_pixel:
             _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id, "random")
         if not _grp_pixel:
             # 批U2 自愈：库无该账户像素 → 绑账户既有 / 自动建（用户问「没像素会不会自动创建」的兑现）
             _grp_pixel = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
-        # 组 landing_url 取第一广告节点的（build_adset 的 WEBSITE 类 promoted_object 用；
-        # 真正逐广告的链接在创意层覆盖）——占位符此时无组名上下文，用稳定插值
-        _first_ad = (snode.get("ads") or [{}])[0]
+        if _grp_lpid and _grp_pixel:
+            # 批Z：回写页（页没配这个像素就补上）——否则 worker 不 fire，FB 零转化
+            _bind_pixel_to_landing_page(sdb, tenant_id, _grp_lpid, _grp_pixel, item.act_id)
         try:
             adset_payload = build_adset(
                 name=sname, campaign_id=campaign_id, daily_budget=adset_budget_fb,
