@@ -2757,7 +2757,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             adset = _post_adset_with_fallback(fb, item.act_id, adset_payload)
             if adset.get("_advantage_forced"):
                 # 受众被强制 Advantage+：窄定向（年龄/性别/兴趣）被剥为纯 geo+AI 扩展——留痕不静默
-                auto_warns.append(f"{sname}: 受众被强制 Advantage+（App 未过审无经典定向权限），"
+                auto_warns.append(f"[受众] {sname}: 受众被强制 Advantage+（App 未过审无经典定向权限），"
                                   f"已按国家+AI 扩展投放")
         except FbApiError as e:
             _fail_group(sname, snode, (e.friendly or str(e)))
@@ -3045,7 +3045,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         is_retry=is_retry, unit="广告")
     if auto_warns and item.status == "success":
         # 降级不静默（铁律 bare-except-silent-failure）：广告照建（裸 URL 直投），item 留痕
-        item.error = f"自动建链失败 {len(auto_warns)} 条已降级直投：{auto_warns[0][:150]}"[:300]
+        item.error = f"部署提示 {len(auto_warns)} 条：{'；'.join(w[:110] for w in auto_warns[:2])}"[:300]
         item.error_code = "auto_subcode_degraded"
 
 
