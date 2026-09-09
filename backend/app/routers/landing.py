@@ -1270,6 +1270,23 @@ def check_subdomain(prefix: str = "", root: str = "", pid: int = 0,
     return {"available": not clash, "subdomain": sub, "clash_with": (clash.title if clash else "")}
 
 
+def _probe_http(method: str, url: str, attempts: int = 2, **kw):
+    """自检 HTTP 探测：网络类异常（超时/抖动/CF 冷启动）隔 2s 重试 1 次，仍异常才抛。
+    只重试异常——HTTP 状态码（含 5xx）是真实响应，原样返回不重试。"""
+    import time as _t
+    import httpx as _httpx
+    kw.setdefault("headers", {"User-Agent": "TovaHealthCheck/1.0"})
+    last = None
+    for i in range(attempts):
+        try:
+            return _httpx.request(method, url, **kw)
+        except Exception as e:
+            last = e
+            if i < attempts - 1:
+                _t.sleep(2)
+    raise last
+
+
 def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     """落地页全功能自检矩阵。返回 {overall, summary, checks:[{key,label,status,detail}]}。
 
@@ -1279,7 +1296,6 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     live_probe=False：跳过域名/Worker 实时 curl（发布后 CF 传播未完成会误报；且 Worker 已被 smoke 门验过。
                      发布时用 False 只跑配置项，standalone /health 用 True）。
     """
-    import httpx as _httpx
     import json as _j
     from datetime import datetime as _dt, timezone as _tz
     checks = []
@@ -1305,8 +1321,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     # 3. 域名+SSL 可达（curl 根域，follow_redirects）—— live_probe=False 时跳过（发布后 CF 传播未完成会误报）
     if live_probe:
         try:
-            resp = _httpx.get(base, timeout=6, follow_redirects=True,
-                              headers={"User-Agent": "TovaHealthCheck/1.0"})
+            resp = _probe_http("GET", base, timeout=6, follow_redirects=True)
             ssl_ok = str(resp.url).startswith("https://")
             ok = resp.status_code < 500 and ssl_ok
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
@@ -1318,8 +1333,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     # 4. Worker 存活（/__health 无条件 200）—— live_probe=False 时跳过（已被发布 smoke 门验过）
     if live_probe:
         try:
-            resp = _httpx.get(base.rstrip("/") + "/__health", timeout=6, follow_redirects=False,
-                              headers={"User-Agent": "TovaHealthCheck/1.0"})
+            resp = _probe_http("GET", base.rstrip("/") + "/__health", timeout=6, follow_redirects=False)
             checks.append({"key": "worker", "label": L(loc, "landing.scWorker"),
                            "status": "pass" if resp.status_code == 200 else "fail",
                            "detail": f"HTTP {resp.status_code}"})
@@ -1365,7 +1379,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "fail", "detail": "未配置目标 URL"})
     else:
         try:
-            tr = _httpx.head(tgt, timeout=5, follow_redirects=True)
+            tr = _probe_http("HEAD", tgt, timeout=5, follow_redirects=True)
             # 401/403/405 = 服务器有响应只是拒绝 HEAD（很多目标站这样）→ 算可达 pass
             reachable = tr.status_code < 400 or tr.status_code in (401, 403, 405)
             checks.append({"key": "target", "label": L(loc, "landing.scTarget"),
