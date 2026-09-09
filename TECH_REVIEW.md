@@ -1705,3 +1705,14 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 ### 坑（已记坑文档）
 - display 模式像素在请求时经 worker→后端 router/next 动态下发（非烤进页面）——验证像素链路要调 router/next，别 grep 页面 HTML
 - 落地页改 pixel_ids 后必须重发布才进 LP_CONFIG（worker 侧）；router/next 则即时生效
+
+## 批AA：四项核查+LEADS E2E 测试（2026-09-09）
+
+### 四项核查结论
+1. **数据集空（用户报告，归因修正）**：router/next 像素解析第一优先级=ads_cache 反查广告组 promoted_object.pixel_id（非页配置）——beacon 显示 04:36 起 worker 一直下发正确像素（1394...）。真正断点=**旧发布页面模板缺 _d 像素解码段**（不执行 fbq）；批Z 重发布后实测带 _d 页面含 fbq×6。空数据集=修复前流量的历史遗留+广告 06:19 起暂停无新流量。批Z 的部署回写+页优先级仍有价值（页级兜底+配置一致性）
+2. **子码**：功能全对（FB 链接完整/归因 ad_id 正确/beacon 记录）。格式=设计内语义 slug（lt{模板}-{节点}-{素材}-{账户尾4}-{序}，≤44 字符），与手动 6 位随机共存
+3. **规则综合转化**：规则1 conversion_source=either 实测生效；空耗类 `conversions=max(FB转化,落地通过量,潜客数)`（guard_engine 330 行）。本次停广告判断正确：$27.13、5 点击、1 落地通过、0 转化
+4. **FB 拉数实况**：$27.13 spend / 105 imps / 7 clicks / 0 conversion actions——与用户所见一致
+
+### LEADS E2E 测试（①-④ 之②，全 PAUSED 零消耗）
+模板 253 建成→部署→campaign/adset 走通→**广告创建被 FB 拦：主页 1295 未接受 Lead Generation Terms**（页面设置一次性操作，需页面管理员）。代码链路验证到此门为止，错误翻译清晰。**已清理**：FB 系列 DELETE、模板 253 硬删（job 解除关联）、无残留表单。LEADS 后续待用户在页设置接受条款后即可真跑。
