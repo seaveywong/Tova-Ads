@@ -512,6 +512,9 @@ def build_adset(
 
     # 高级字段深合并（advanced_config：bid_amount/attribution_spec/placements/dayparting/...）
     if extra:
+        # is_dynamic_creative 一律剥掉（批U3 实证）：DC 组要求多素材创意，本链创意恒单素材
+        # ——模板 advanced_config 残留该键时 adset 建成但 ads 全灭 1885702/invalid_param
+        extra = {k: v for k, v in extra.items() if k != "is_dynamic_creative"}
         _deep_merge(payload, extra)
     return payload
 
