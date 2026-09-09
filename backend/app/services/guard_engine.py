@@ -369,7 +369,9 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     elif cs == "landing":
         conversions = landing_val
     elif cs == "either":
-        conversions = max(conversions, landing_val, leads_count)
+        # 批AM：either 综合口径=max(FB, 落地访问, 落地通过, leads)——真人从广告进入落地页
+        # 即成效（用户语义）；访问先于通过，只看通过会低估空耗判定
+        conversions = max(conversions, landing_val, landing_visits, leads_count)
     raw_params = {k: v for k, v in raw_params.items() if v not in (None, "", [])}
     defaults = RULE_DEFAULTS.get(rule.rule_type, {})
     p = {**defaults, **raw_params}

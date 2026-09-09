@@ -25,7 +25,7 @@ export const METRIC_COLUMNS = [
   { id: 'pass_rate', label: 'colPassRate', levels: ['ad'], width: 110 },
 ]
 export const columnsFor = level => METRIC_COLUMNS.filter(c => !c.levels || c.levels.includes(level))
-export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr'] : [])].filter(id => columnsFor(level).some(c => c.id === id))
+export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass'] : []).filter(id => columnsFor(level).some(c => c.id === id))
 
 export function entityContext(data) {
   const campaigns = new Map((data.campaigns || []).map(row => [entityKey(row), row]))

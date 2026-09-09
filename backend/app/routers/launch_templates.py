@@ -3521,13 +3521,17 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         it.pixel_id = body.pixel_id
     # job 置回 running + 清 finished_at——原状态停在 partial_failed/failed，
     # 前端进度轮询首拍即判终态停表，重试结果永不回显且再试被 job 终态守卫放行后 item 又 400
-    j.status = "running"
-    j.finished_at = None
+    # 批AM：job 行状态更新用原生 UPDATE——ORM 对象曾撞 StaleDataError
+    # （UPDATE expected 1 row 0 matched：后台 reaper/并发请求已动过该行，内存对象谓词失配
+    #  → retry 直接 500 无详情）。原生 UPDATE 无版本谓词，幂等。
+    db.execute(_text("UPDATE launch_jobs SET status='running', finished_at=NULL WHERE id=:jid"),
+               {"jid": j.id})
+    j = db.query(LaunchJob).filter(LaunchJob.id == j.id).first() or j
     # 心跳 touch：重试 job 的 created_at 是原创建时间（几乎必然 >10min 前），而批量重试可能
     # 跑几十分钟——不 touch 会被 5min 一次的 _reap_stale_jobs 判孤儿标 failed → 用户再重试 =
     # 已建系列再建一份（双份预算）。touch 后与 runner「无心跳 10min 才算死」口径一致
     # （副作用：job 列表的创建时间显示为最近一次重试时间，可接受——runner 本就把它当心跳用）
-    j.created_at = datetime.now(timezone.utc)
+    db.execute(_text("UPDATE launch_jobs SET created_at=now() WHERE id=:jid"), {"jid": j.id})
     db.commit()
     bg.add_task(_retry_one, job_id, user.tenant_id, j.template_id, item_id)
     return {"job_id": job_id, "item_id": item_id, "retrying": True}
