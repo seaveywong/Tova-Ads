@@ -1573,8 +1573,8 @@ _CRAWLER_MAP = [
     (("googlebot",), "Google爬虫"), (("bingbot",), "Bing爬虫"), (("baiduspider",), "百度爬虫"),
     (("bytespider",), "字节爬虫"), (("yandexbot",), "Yandex爬虫"), (("duckduckbot",), "DuckDuckGo爬虫"),
 ]
-_ALL_CRAWLER_TOKENS = ("facebookexternalhit", "facebot", "meta-externalagent", "googlebot", "bingbot",
-                       "baiduspider", "bytespider", "yandexbot", "duckduckbot", "crawler", "spider")
+# 单一来源挪 core/landing_source（ads.py 聚合 + guard_engine 转化口径共用；改清单去那改）
+from ..core.landing_source import CRAWLER_UA_TOKENS as _ALL_CRAWLER_TOKENS  # noqa: E402
 
 
 def _detect_crawler(asn, ua):

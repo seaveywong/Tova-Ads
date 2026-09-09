@@ -1385,21 +1385,26 @@ def _inspect_account_worker(ctx: dict) -> dict:
                         "landing_events.created_at", _tz))
                     # 通过量（click + redirect）—— 按 ip_hash 去重（同一人多次点击算1，减少误差）
                     # tenant 过滤：SuperSession 绕 RLS，同 ad_id 双租户导入时不能互串归因
+                    # 批AO：排除爬虫/审核机器人（core/landing_source 单一清单）——爬虫访问
+                    # 不算转化、不豁免空耗（用户口径：只认真人从广告进入的）
+                    from ..core.landing_source import crawler_filter_cond as _crawl_cond
                     landing_clicks = db.query(_f.count(_f.distinct(LandingEvent.ip_hash))).filter(
                         LandingEvent.tenant_id == tenant_id,
                         LandingEvent.ad_id == ad_id,
                         LandingEvent.event_type.in_(["click", "redirect"]),
                         LandingEvent.ip_hash.isnot(None),
+                        ~_crawl_cond(LandingEvent),
                         _local_date_expr == acc_today,
                     ).scalar() or 0
-                    # 访问量（visit + redirect）—— 同样按 ip_hash 去重（爬虫/同人刷新
-                    # 会刷高访问量 → 空耗规则被虚假"转化"豁免）；ip_hash 为空的行不丢：
-                    # COALESCE 成逐行唯一值各自计 1（worker 正常事件都带 ip_hash）
+                    # 访问量（visit + redirect）—— 同样按 ip_hash 去重（同人刷新会刷高
+                    # 访问量）；ip_hash 为空的行不丢：COALESCE 成逐行唯一值各自计 1
+                    # （worker 正常事件都带 ip_hash）；爬虫同样排除
                     landing_visits = db.query(_f.count(_f.distinct(_f.coalesce(
                         LandingEvent.ip_hash, _f.concat("row:", LandingEvent.id))))).filter(
                         LandingEvent.tenant_id == tenant_id,
                         LandingEvent.ad_id == ad_id,
                         LandingEvent.event_type.in_(["visit", "redirect"]),
+                        ~_crawl_cond(LandingEvent),
                         _local_date_expr == acc_today,
                     ).scalar() or 0
                 except Exception:

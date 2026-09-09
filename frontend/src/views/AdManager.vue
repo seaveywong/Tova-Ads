@@ -953,7 +953,7 @@ const unsubscribeLeads = async () => {
               <td v-for="col in visibleColumns" :key="col.id">
                 <button v-if="col.id === 'budget'" class="budget-cell sort-button" :disabled="!hasBudget(a) || !!accStateTag(a) || opLoading" @click="openBudget(a)">{{ fmtBudget(a, tab) }}</button>
                 <code v-else-if="col.id === 'slug' && a.slug" class="ad-slug" @click="goLandingLogs(a.slug, a.id)">/a/{{ a.slug }}</code>
-                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : ''">{{ metricText(a, col.id) }}</span>
+                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : (col.id === 'conversions' ? t('adm.convTip') : '')">{{ metricText(a, col.id) }}</span>
               </td>
               <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
                 <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item>

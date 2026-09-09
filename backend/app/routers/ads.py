@@ -20,6 +20,7 @@ from ..models.fb import Account
 from ..models.ads_cache import AdsCache
 from ..models.launch import LandingAdLink
 from ..services.guard_engine import from_minor_units
+from ..core.landing_source import crawler_not_sql, crawler_filter_cond
 
 router = APIRouter(prefix="/ads", tags=["ads"])
 
@@ -138,8 +139,9 @@ def _agg_cached(tenant_id: int, act_id: str, date_from: str, date_to: str, db) -
         FROM landing_events
         WHERE tenant_id = :tid AND ad_id IS NOT NULL AND ad_id != ''
           AND created_at >= :s AND created_at < :e
+          AND %s
         GROUP BY ad_id
-    """), {"tid": tenant_id, "s": _us, "e": _ue}).fetchall():
+    """ % crawler_not_sql()), {"tid": tenant_id, "s": _us, "e": _ue}).fetchall():
         landing[str(_r.ad_id)] = {"visits": int(_r.lv or 0), "pass": int(_r.lp or 0)}
     if len(_AGG_CACHE) > 200:
         _AGG_CACHE.clear()
@@ -462,7 +464,8 @@ def list_ads(
         ad["landing_visits"] = _ls["visits"] if _ls else 0
         ad["landing_pass"] = _ls["pass"] if _ls else 0
         # 批AM：综合转化=落地访问口径 max(FB, 落地访问)——「从广告真实进入落地页」即成效
-        # （用户定义）；点击量（点了按钮）在「落地通过」列直观展示
+        # （用户定义）；批AO：_agg_cached 已排除爬虫/审核机器人（真人访问口径）。
+        # 点击量（点了按钮）在「落地通过」列直观展示
         ad["conversions"] = max(int(ad.get("conversions") or 0), int(ad["landing_visits"] or 0))
         # 提取 creative 的 effective_object_story_id 供"复用此帖铺放"入口
         _cr = ad.get("creative")
@@ -1340,12 +1343,14 @@ def diagnose_ad(
             LandingEvent.ad_id == _ad_short,
             LandingEvent.event_type.in_(["click", "redirect"]),
             LandingEvent.ip_hash.isnot(None),
+            ~crawler_filter_cond(LandingEvent),
             _local_date_expr == acc_today,
         ).scalar() or 0
         result["landing_visits"] = db.query(_f.count(LandingEvent.id)).filter(
             LandingEvent.tenant_id == user.tenant_id,
             LandingEvent.ad_id == _ad_short,
             LandingEvent.event_type.in_(["visit", "redirect"]),
+            ~crawler_filter_cond(LandingEvent),
             _local_date_expr == acc_today,
         ).scalar() or 0
     except Exception:
@@ -1362,7 +1367,9 @@ def diagnose_ad(
     acc_rules = [r for r in rules if not r.scope_act_id or _act_id in [s.strip() for s in r.scope_act_id.split(",")]]
 
     fb_conv = result["fb_conversions"]
-    landing_val = result["landing_clicks"]  # metric=pass 默认
+    # 批AO：诊断面板顶层综合转化与列表口径对齐 = max(FB, 真人落地访问)（爬虫已在上游排除；
+    # 下方每条规则的 _conv 仍按该规则自己的 landing_metric 算，不受此处影响）
+    landing_val = result["landing_visits"]
     result["effective_conversions"] = max(fb_conv, landing_val) if landing_val > fb_conv else fb_conv
 
     if ad_insights:
