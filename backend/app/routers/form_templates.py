@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import first_client
 from ..core.fb_client import FbApiError
@@ -138,6 +138,7 @@ def update_form(fid: int, body: FormTemplateIn,
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能动自己的
     # platform 建后不可改（create-time 选择）：缓存 form_id 绑定平台，改平台=换一套 API 语义
     t.name = body.name; t.description = body.description; t.locale = body.locale
     new_cfg = json.dumps(body.config, ensure_ascii=False) if body.config else None
@@ -154,6 +155,7 @@ def delete_form(fid: int, user: CurrentUser = Depends(require_permission("ads.cr
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能动自己的
     # 归档后部署 runner 仍会按 id 继续用它建 FB 表单——被引用时明确告知而不是静默归档
     from ..models.launch_template import LaunchTemplate
     _ref = db.query(LaunchTemplate.id).filter(
@@ -175,6 +177,7 @@ def deploy_form(fid: int, body: dict,
     t = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.id == fid, LeadFormTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "表单模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能动自己的
     # ── TikTok Instant Form：建到 TT 广告主（lead/form/create/，sandbox 校准点）──
     # fb_form_id/fb_page_id 复用为通用缓存（TT 存 form_id/advertiser_id）
     if (t.platform or "fb") == "tt":
@@ -334,6 +337,7 @@ def update_message(mid: int, body: MsgTemplateIn,
     t = db.query(MessageTemplate).filter(
         MessageTemplate.id == mid, MessageTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "消息模板不存在")
+    _ro(user, t)   # 批AJ
     t.name = body.name; t.type = body.type; t.welcome_text = body.welcome_text
     t.ice_breakers_json = json.dumps(body.ice_breakers, ensure_ascii=False) if body.ice_breakers else None
     db.commit()
@@ -346,6 +350,7 @@ def delete_message(mid: int, user: CurrentUser = Depends(require_permission("ads
     t = db.query(MessageTemplate).filter(
         MessageTemplate.id == mid, MessageTemplate.tenant_id == user.tenant_id).first()
     if not t: raise HTTPException(404, "消息模板不存在")
+    _ro(user, t)   # 批AJ
     # 引用闸（对齐表单模板删：消息模板被投放模板引用时静默归档 → 部署时消息段悄悄丢失）
     from ..models.launch_template import LaunchTemplate
     _ref = db.query(LaunchTemplate.id).filter(

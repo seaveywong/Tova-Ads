@@ -605,11 +605,14 @@ def _asset_cache_set(key: str, value):
     _ASSET_CACHE[key] = (time.time() + _ASSET_CACHE_TTL, value)
 
 
-def _asset_cache_drop(tenant_id: int, cred_id: int, pixels: bool = False):
-    """写路径失效该令牌的资产缓存（改名/改类目/刷新账户等）。"""
+def _asset_cache_drop(tenant_id: int, cred_id: int, pixels: bool = False, act_id: str = ""):
+    """写路径失效该令牌的资产缓存（改名/改类目/刷新账户/建像素等）。
+    act_id 非空时连清该账户的单账户像素键。"""
     keys = [f"pages:{tenant_id}:{cred_id}", f"assets:{tenant_id}:{cred_id}"]
     if pixels:
         keys.append(f"pixels:{tenant_id}:{cred_id}")
+        if act_id:
+            keys.append(f"pixels:{tenant_id}:{cred_id}:{act_id}")
     for k in keys:
         _ASSET_CACHE.pop(k, None)
 
@@ -1892,6 +1895,9 @@ def create_account_pixel(
               metadata={"pixel_id": pid, "cred_id": cred.id,
                         "in_library": exists is None})
     db.commit()
+    # 批AJ：真新建像素后失效像素缓存（单账户键+全量键）——否则 5min 内下拉看不到新像素
+    _asset_cache_drop(user.tenant_id, cred.id, pixels=True, act_id=aid)
+    _ASSET_CACHE.pop(f"fbassets:{user.tenant_id}", None)
     return {"pixel_id": pid, "pixel_name": name, "act_id": aid, "trace_id": tid,
             "in_library": exists is None}
 

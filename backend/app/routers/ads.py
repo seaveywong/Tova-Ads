@@ -303,14 +303,17 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
     return True
 
 
-def _managed_account(db: Session, user, act_id: str):
+def _managed_account(db: Session, user, act_id: str, platform: str = ""):
     """账户访问闸（批AG 权鉴修正）：is_managed + operator 只看名下（与 /fb/accounts 口径一致）。
-    返回 Account 或 None（名下之外视同不存在——不泄漏存在性）。"""
+    platform 非空时参与过滤（同 act_id 双平台共存时取对行）。返回 Account 或 None。"""
     from ..core.deps import account_operable
-    acc = db.query(Account).filter(
+    q = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == act_id,
         Account.is_managed == True,  # noqa: E712
-    ).first()
+    )
+    if platform:
+        q = q.filter(Account.platform == platform)
+    acc = q.first()
     if acc and not account_operable(user, acc):
         return None
     return acc
@@ -1078,8 +1081,23 @@ def redirects_map(
 ):
     """{ad_id: target_url} 映射，广告列表内联显示"已设跳转"用。"""
     from ..models.launch import AdRedirectOverride
+    from ..core.deps import scope_account_query
+    _own = {a.act_id for a in scope_account_query(db.query(Account).filter(
+        Account.tenant_id == user.tenant_id), user).all()}
     rows = db.query(AdRedirectOverride).filter(
         AdRedirectOverride.tenant_id == user.tenant_id).all()
+    # 批AJ：operator 只见名下账户广告的跳转（ad→act 反查）
+    if user.role == "operator":
+        from ..models.ads_cache import AdsCache as _AC
+        _ad2act = {}
+        for c in db.query(_AC).filter(_AC.tenant_id == user.tenant_id).all():
+            try:
+                for _a in json.loads(c.ads_json or "[]"):
+                    _aid = _id_of(_a.get("id")) if isinstance(_a, dict) else _a.get("id")
+                    if _aid: _ad2act[str(_aid)] = c.act_id
+            except Exception:
+                continue
+        rows = [r for r in rows if _ad2act.get(str(r.ad_id)) in _own]
     return {r.ad_id: r.target_url for r in rows}
 
 
@@ -1090,11 +1108,14 @@ def list_redirects(
 ):
     """列出所有广告跳转覆盖（管理列表用）。"""
     from ..models.launch import AdRedirectOverride
+    m = redirects_map(user=user, db=db)   # 批AJ：复用归属过滤（operator 只见名下）
+    _vis = set(m.keys())
     rows = db.query(AdRedirectOverride).filter(
         AdRedirectOverride.tenant_id == user.tenant_id
     ).order_by(AdRedirectOverride.updated_at.desc()).all()
     return [{"ad_id": r.ad_id, "target_url": r.target_url,
-             "updated_at": r.updated_at.isoformat() if r.updated_at else ""} for r in rows]
+             "updated_at": r.updated_at.isoformat() if r.updated_at else ""}
+            for r in rows if str(r.ad_id) in _vis]
 
 
 @router.post("/redirects")
@@ -1108,6 +1129,7 @@ def set_redirect(
     from datetime import datetime, timezone
     if not body.ad_id:
         raise HTTPException(400, "缺 ad_id")
+    _req_ad_gate(db, user, body.ad_id)   # 批AJ：operator 只能改名下账户广告的跳转
     target = (body.target_url or "").strip()
     row = db.query(AdRedirectOverride).filter(
         AdRedirectOverride.tenant_id == user.tenant_id,
@@ -1137,6 +1159,7 @@ def delete_redirect(
 ):
     """删单条广告的跳转覆盖（恢复到子码/页默认）。"""
     from ..models.launch import AdRedirectOverride
+    _req_ad_gate(db, user, ad_id)   # 批AJ：归属闸
     db.query(AdRedirectOverride).filter(
         AdRedirectOverride.tenant_id == user.tenant_id,
         AdRedirectOverride.ad_id == ad_id,
@@ -1145,15 +1168,30 @@ def delete_redirect(
     return {"ad_id": ad_id, "cleared": True}
 
 
+def _req_ad_gate(db: Session, user, ad_id: str):
+    """跳转端点归属闸（批AJ）：ad→act 反查（_AD_ACT_MAP 5min 缓存），operator 名下外 404。"""
+    if getattr(user, "role", None) != "operator":
+        return
+    _act = _ad_act_lookup(db, user.tenant_id).get(str(ad_id))
+    if not _act or not _managed_account(db, user, _act[0]):
+        raise HTTPException(404, "广告不在你的名下账户")
+
+
 @router.post("/redirects/reset")
 def reset_redirects(
     user: CurrentUser = Depends(require_permission("ads.update")),
     db: Session = Depends(get_db),
 ):
-    """一键清空所有广告跳转覆盖（全部恢复落地页默认跳转）。"""
+    """一键清空所有广告跳转覆盖（全部恢复落地页默认跳转）。批AJ：operator 只清名下（曾可清全租户）。"""
     from ..models.launch import AdRedirectOverride
-    n = db.query(AdRedirectOverride).filter(
-        AdRedirectOverride.tenant_id == user.tenant_id).delete()
+    _vis = set(redirects_map(user=user, db=db).keys())
+    q = db.query(AdRedirectOverride).filter(AdRedirectOverride.tenant_id == user.tenant_id)
+    if user.role == "operator":
+        from sqlalchemy import or_
+        if not _vis:
+            return {"cleared": 0}
+        q = q.filter(AdRedirectOverride.ad_id.in_(_vis))
+    n = q.delete(synchronize_session=False)
     db.commit()
     return {"cleared": n}
 
@@ -1167,7 +1205,7 @@ def diagnose_ad(
 ):
     """广告诊断：实时拉 FB 数据 + 落地数据 + 规则评估 + 冷却状态，返回完整诊断面板数据。
     整响应 60s 内存缓存（批AE遗留项）：面板重复打开/连点不重打 FB insights（1 次/分钟/广告）。"""
-    _dck = f"{user.tenant_id}:{ad_id}"
+    _dck = f"{user.tenant_id}:u{user.id}:{ad_id}"   # 批AJ：键加用户域——owner 的缓存不得喂给 operator，且 fb_error 含 locale 互串
     _hit0 = _DIAG_CACHE.get(_dck)
     if _hit0 and time.time() - _hit0[0] < 60:
         return _hit0[1]
@@ -1197,10 +1235,7 @@ def diagnose_ad(
         raise HTTPException(404, "广告不在缓存中，请先刷新广告列表")
     _act_id, _cache_plat = _hit  # (act_id, platform)——同 act_id 双平台可共存
 
-    acc = _managed_account(db, user, _act_id) if _cache_plat == "fb" else db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == _act_id,
-        Account.platform == _cache_plat,
-        Account.is_managed.is_(True)).first()
+    acc = _managed_account(db, user, _act_id, platform=_cache_plat)   # 批AJ：TT 分支同过归属闸（曾漏）
     if not acc:
         raise HTTPException(404, "账户未纳管或已移除")
     _plat = "tt" if (acc.platform or "fb") == "tt" else "fb"   # 快照/报表查询按账户实际平台
@@ -1361,6 +1396,7 @@ def diagnose_ad(
 
             try:
                 hit, detail = _evaluate_rule(rule, ad_insights, conversions=_conv,
+                                             kpi_field=result.get("fb_kpi_field") or "",   # 批AJ：kpi_scope 限定规则面板与引擎同口径
                                              target_cpa=result["target_cpa"], currency=acc.currency or "USD",
                                              landing_clicks=result["landing_clicks"],
                                              landing_visits=result["landing_visits"],

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from ..core.database import get_db, SessionLocal, SuperSessionLocal, acquire_run_lock, release_run_lock
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account, client_for_account_page
 from ..core.fb_client import FbApiError
@@ -934,6 +934,7 @@ def update_template(tid: int, body: TemplateIn,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     try:
         _check_url_placeholders(body.landing_url)
     except ValueError as e:
@@ -958,6 +959,7 @@ def hard_delete_template(tid: int, force: int = 0,
         LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     _jobs = db.query(LaunchJob).filter(
         LaunchJob.template_id == tid, LaunchJob.tenant_id == user.tenant_id).all()
     if _jobs and not force:
@@ -982,6 +984,7 @@ def delete_template(tid: int, user: CurrentUser = Depends(require_permission("ad
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     t.status = "archived"  # 软删（保留部署历史）
     db.commit()
     return {"id": tid, "archived": True}
@@ -1011,6 +1014,7 @@ def copy_template(tid: int, user: CurrentUser = Depends(require_permission("ads.
         LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not src:
         raise HTTPException(404, "模板不存在")
+    _ro(user, src)   # 批AJ
     new = LaunchTemplate(tenant_id=user.tenant_id, created_by=user.id, status="draft", deploy_count=0)
     for col in _COPY_COLS:
         setattr(new, col, getattr(src, col))
@@ -1052,6 +1056,7 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     if not body.items:
         raise HTTPException(400, "至少选一个账户")
     if t.status == "archived":
@@ -1260,6 +1265,7 @@ def reuse_eligible_accounts(tid: int,
         LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not tpl:
         raise HTTPException(404, "模板不存在")
+    _ro(user, tpl)   # 批AJ
     ref = tpl.reuse_post_ref or ""
     page_id = ref.split("_", 1)[0] if "_" in ref else (tpl.page_id or "")
     if not page_id:
@@ -1296,6 +1302,7 @@ def preflight_deploy(tid: int, body: PreflightIn,
     t = db.query(LaunchTemplate).filter(LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     _budget_guard_400(t)
     # 结构模式预检（0088）：整树概览 + 逐组预算本币换算 + 将消耗节点横幅（FBInsider 同款）
     _tree = _parse_structure(t)
@@ -3375,6 +3382,7 @@ def template_deployments(tid: int, job_id: int = 0,
         LaunchTemplate.id == tid, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not t:
         raise HTTPException(404, "模板不存在")
+    _ro(user, t)   # 批AJ：operator 只能操作自己创建的
     if job_id:
         j = db.query(LaunchJob).filter(
             LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id,

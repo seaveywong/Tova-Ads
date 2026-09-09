@@ -27,6 +27,14 @@ def account_operable(user, acc) -> bool:
     return getattr(user, "role", None) != "operator" or (acc.owner_user_id == user.id)
 
 
+def require_owned(user, row, attr: str = "created_by"):
+    """资源对象归属闸（批AJ）：operator 只能改/删自己创建的资源；非 operator 直通。
+    查不到归属列值（NULL）视为他人（保守）。用法：查出行后调 require_owned(user, row)。"""
+    from fastapi import HTTPException
+    if getattr(user, "role", None) == "operator" and getattr(row, attr, None) != user.id:
+        raise HTTPException(404, "资源不存在或不在你的名下")
+
+
 @dataclass
 class CurrentUser:
     id: int

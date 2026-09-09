@@ -102,6 +102,8 @@ def update_rule(rule_id: int, body: UpdateRuleIn,
         GuardRule.id == rule_id, GuardRule.tenant_id == user.tenant_id).first()
     if not rule:
         raise HTTPException(404, "规则不存在")
+    from ..core.deps import require_owned
+    require_owned(user, rule)   # 批AJ：operator 只能改自己的
     if body.action is not None and body.action.lower() not in RULE_ACTIONS:
         raise HTTPException(400, f"action 必须是 {sorted(RULE_ACTIONS)} 之一")
     if body.name is not None:
@@ -135,6 +137,8 @@ def delete_rule(rule_id: int, user: CurrentUser = Depends(require_permission("ru
         GuardRule.id == rule_id, GuardRule.tenant_id == user.tenant_id).first()
     if not rule:
         raise HTTPException(404, "规则不存在")
+    from ..core.deps import require_owned
+    require_owned(user, rule)   # 批AJ
     db.delete(rule)
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="rule", target_id=str(rule_id),

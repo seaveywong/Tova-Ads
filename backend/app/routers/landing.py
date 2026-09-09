@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.config import settings
 from ..core.i18n import req_locale, tenant_locale, L
 from ..core.log_utils import write_log, new_trace_id
@@ -847,9 +847,10 @@ def list_landing_pages(
     from ..models.launch import LandingPage, LandingAdLink
     from ..models.landing_event import LandingEvent
     from sqlalchemy import func as _f
-    if user.role == "operator":   # 批AG：operator 只看自己创建的
-        rows = db.query(LandingPage).filter(LandingPage.owner_user_id == user.id,
-                                           LandingPage.status != "archived").all()
+    if user.role == "operator":   # 批AG：operator 只看自己创建的（批AJ：排序与 owner 分支一致）
+        rows = db.query(LandingPage).filter(
+            LandingPage.tenant_id == user.tenant_id, LandingPage.owner_user_id == user.id,
+            LandingPage.status != "archived").order_by(LandingPage.id.desc()).all()
     else:
         rows = db.query(LandingPage).filter(
         LandingPage.tenant_id == user.tenant_id, LandingPage.status != "archived"
@@ -888,6 +889,7 @@ def get_landing_page(
     ).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     d = _page_to_dict(p, db)
     d["description"] = _read_page_description(pid)
     subs = db.query(LandingAdLink).filter(
@@ -914,6 +916,7 @@ def update_landing_page(
     ).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     cur_targets = []
     try:
         cur_targets = _json.loads(p.target_urls) if p.target_urls else []
@@ -982,6 +985,7 @@ def archive_landing_page(
     ).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     p.status = "archived"
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
               actor_type="user", actor_user_id=user.id,
@@ -1144,6 +1148,7 @@ def add_subdomain(pid: int, body: dict,
     p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     # 取根域名
     roots = []
     try:
@@ -1210,6 +1215,7 @@ def delete_subdomain(pid: int, hostname: str,
     p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     subs = []
     try:
         if p.bound_subdomains: subs = _json.loads(p.bound_subdomains)
@@ -1499,6 +1505,7 @@ def health_check(
         LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # 批AJ：operator 只能动自己创建的
     res = _run_self_check(db, p, include_fb=True, loc=req_locale(request))
     p.last_health_status = res["overall"]
     p.last_health_summary = res["summary"]

@@ -430,7 +430,7 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     if rt == "cpm_high":
         min_spend = float(p.get("min_spend", 10))
         max_cpm = float(p.get("max_cpm", 15))
-        cpm = _sf(ad_insights.get("cpm", 0) or 0)
+        cpm = to_usd(_sf(ad_insights.get("cpm", 0) or 0), currency)   # 批AJ：FB 返的是本币——先折 USD 再比 USD 阈值
         if not cpm and impressions:
             cpm = spend_usd * 1000 / impressions   # FB 未返时现算（USD 口径）
         # impressions≥1000：展示太少时 CPM 噪声大（1.0 low_ctr 同款隐形门槛思路）
@@ -441,7 +441,7 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
     if rt == "cpc_high":
         min_spend = float(p.get("min_spend", 10))
         max_cpc = float(p.get("max_cpc", 1.0))
-        cpc = _sf(ad_insights.get("cpc", 0) or 0)
+        cpc = to_usd(_sf(ad_insights.get("cpc", 0) or 0), currency)   # 批AJ：同 cpm——本币折 USD
         if not cpc and clicks:
             cpc = spend_usd / clicks
         if spend_usd >= min_spend and clicks >= 20 and conversions == 0 and cpc > max_cpc:

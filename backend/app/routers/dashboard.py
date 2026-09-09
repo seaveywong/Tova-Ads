@@ -674,7 +674,7 @@ def ad_breakdown(
     _acc = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
     if _acc and not account_operable(user, _acc):
-        _acc = None   # 批AG：operator 只看名下（与 /fb/accounts 口径一致）
+        raise HTTPException(404, "账户未纳管")   # 批AJ：deny 必须 404——曾设 None 后继续跑，泄漏他人账户广告级明细
     _acc_plat = (_acc.platform or "fb") if _acc else "fb"
     today = _business_today()
     rows = db.query(PerfSnapshot).filter(
@@ -695,6 +695,14 @@ def ad_breakdown(
 
 
 @router.get("/landing")
+def _op_own_acts(db, user):
+    """operator 名下账户集合（批AJ 抽出共用）；owner/超管返 None=不过滤。"""
+    if getattr(user, "role", None) != "operator":
+        return None
+    return {a.act_id for a in scope_account_query(db.query(Account).filter(
+        Account.tenant_id == user.tenant_id), user).all()}
+
+
 def landing_overview(
     date_preset: str = "today",
     date_from: str = "",
@@ -714,6 +722,11 @@ def landing_overview(
     时间窗按业务日（北京）→ UTC（landing_events.created_at 是 UTC timestamptz；
     perf_snapshots.snapshot_date 是账户本地日，按业务日历日字符串匹配各账户本地该日）。
     """
+
+    # 批AJ：operator 只看名下（曾完全无过滤——落地/消耗全租户泄漏）
+    _own = _op_own_acts(db, user)
+    if _own is not None:
+        act_ids = ",".join(sorted(set(x for x in act_ids.split(",") if x.strip()) & _own)) if act_ids else ",".join(sorted(_own))
     # 日期范围（北京业务日）
     today = _business_today()
     if date_from and date_to:
@@ -763,6 +776,8 @@ def landing_overview(
     #    platform 过滤：ad_id 跨平台可能撞号（fb/tt 各一行）——按 platform 列收窄
     _pf = _norm_platform(platform)
     _sel = [x.strip() for x in act_ids.split(",") if x.strip()] if act_ids else []
+    if _own is not None and not _sel:
+        _sel = ["__none__"]   # 批AJ：operator 名下为空——落地页消耗聚合必须空（不能落入全租户）
     _spend_sql = """
         SELECT ad_id, SUM(spend) AS spend, SUM(conversions) AS conv
         FROM perf_snapshots
@@ -990,7 +1005,7 @@ def dashboard_export(
         _acc = db.query(Account).filter(
             Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
         if _acc and not account_operable(user, _acc):
-            _acc = None   # 批AG：operator 只看名下
+            raise HTTPException(404, "账户未纳管")   # 批AJ：deny 404（曾设 None 继续跑）
         _acc_plat = (_acc.platform or "fb") if _acc else "fb"   # 快照按账户平台取（ad_id 跨平台撞号）
         rows_q = db.query(PerfSnapshot).filter(
             PerfSnapshot.tenant_id == user.tenant_id,

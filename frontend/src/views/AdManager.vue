@@ -47,18 +47,22 @@ const accStateTag = (a) => {
 // 批AI：层级状态联动——FB Ads Manager 语义：广告全停 ⇒ 所属组显示「已暂停」；组全停 ⇒ 所属系列显示「已暂停」。
 // 只做「全停→父层暂停」单向推导（父 ACTIVE 但子全停=实质停投）；父已停/异常态原样显示（不覆盖 FB 真实态）。
 const childPausedMap = computed(() => {
-  const adByAdset = {}, adsetByCamp = {}
-  for (const s of (data.value.adsets || [])) adsetByCamp[String(_idOf(s.campaign_id))] = adsetByCamp[String(_idOf(s.campaign_id))] || new Set(), adsetByCamp[String(_idOf(s.campaign_id))].add(String(s.id))
-  for (const a of (data.value.ads || [])) adByAdset[String(_idOf(a.adset_id))] = adByAdset[String(_idOf(a.adset_id))] || new Set(), adByAdset[String(_idOf(a.adset_id))].add(a)
+  // 批AJ 修正：广告对象直存集合（曾存对象却按 id find → 恒不匹配）；campaign 推导写 campAllPaused（曾误写 adsetAllPaused）
+  const adsByAdset = {}
+  for (const a of (data.value.ads || [])) {
+    const k = String(_idOf(a.adset_id))
+    ;(adsByAdset[k] = adsByAdset[k] || []).push(a)
+  }
+  const adsetsByCamp = {}
+  for (const s of (data.value.adsets || [])) {
+    const k = String(_idOf(s.campaign_id))
+    ;(adsetsByCamp[k] = adsetsByCamp[k] || []).push(s)
+  }
   const adsetAllPaused = {}, campAllPaused = {}
-  for (const [cid, aset] of Object.entries(adsetByCamp)) {
-    const kids = [...aset].map(sid => (data.value.adsets || []).find(s => String(s.id) === sid)).filter(Boolean)
-    adsetAllPaused[cid] = kids.length > 0 && kids.every(s => (s.effective_status || '').includes('PAUSED'))
-  }
-  for (const [sid, adsSet] of Object.entries(adByAdset)) {
-    const kids = [...adsSet].map(aid => (data.value.ads || []).find(a => String(a.id) === String(aid))).filter(Boolean)
+  for (const [sid, kids] of Object.entries(adsByAdset))
     adsetAllPaused[sid] = kids.length > 0 && kids.every(a => (a.effective_status || '').includes('PAUSED'))
-  }
+  for (const [cid, kids] of Object.entries(adsetsByCamp))
+    campAllPaused[cid] = kids.length > 0 && kids.every(s => (s.effective_status || '').includes('PAUSED'))
   return { adsetAllPaused, campAllPaused }
 })
 const effectiveStatusOf = (row, level) => {

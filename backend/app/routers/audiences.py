@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..core.log_utils import write_log, new_trace_id
@@ -115,6 +115,7 @@ def update_audience(aid: int, body: AudienceUpdate,
         SavedAudience.id == aid, SavedAudience.tenant_id == user.tenant_id).first()
     if not row:
         raise HTTPException(404, "受众模板不存在")
+    _ro(user, row)   # 批AJ：operator 只能动自己的
     data = body.model_dump(exclude_unset=True)
     if "strategy" in data and data["strategy"] not in ("broad_interest", "broad_only", "interest_only"):
         raise HTTPException(400, "strategy 无效")
@@ -147,6 +148,7 @@ def delete_audience(aid: int, user: CurrentUser = Depends(require_permission("ad
         SavedAudience.id == aid, SavedAudience.tenant_id == user.tenant_id).first()
     if not row:
         raise HTTPException(404, "受众模板不存在")
+    _ro(user, row)   # 批AJ
     # 引用检查：投放模板还挂着该受众时删除 = 部署静默退回 FB 最宽默认定向（用户无感知）
     from ..models.launch_template import LaunchTemplate
     _ref = db.query(LaunchTemplate.id).filter(
