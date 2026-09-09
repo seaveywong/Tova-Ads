@@ -303,6 +303,19 @@ def _sync_one(db: Session, tenant_id: int, act_id: str, fb, platform: str = "fb"
     return True
 
 
+def _managed_account(db: Session, user, act_id: str):
+    """账户访问闸（批AG 权鉴修正）：is_managed + operator 只看名下（与 /fb/accounts 口径一致）。
+    返回 Account 或 None（名下之外视同不存在——不泄漏存在性）。"""
+    from ..core.deps import account_operable
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act_id,
+        Account.is_managed == True,  # noqa: E712
+    ).first()
+    if acc and not account_operable(user, acc):
+        return None
+    return acc
+
+
 def _acc_platform(acc) -> str:
     """账户平台归一（'tt' → tt，空/历史缺省 → fb）。"""
     return "tt" if (getattr(acc, "platform", None) or "fb") == "tt" else "fb"
@@ -369,18 +382,18 @@ def list_ads(
         # 改后台刷：立即返回缓存，前端轮询 /ads/refresh-status 直到完成
         background_tasks.add_task(_bg_refresh, user.tenant_id, act_id)
         refreshing = True
-    # 读缓存——只看 managed 账户（已移除的不显示广告）
-    managed_ids = {a.act_id for a in db.query(Account).filter(
+    # 读缓存——只看 managed 账户（已移除的不显示广告）+ operator 只看名下（批AG 权鉴一致）
+    from ..core.deps import scope_account_query
+    _mg_q = scope_account_query(db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
-    ).all()}
+    ), user)
+    _acc_rows = _mg_q.all()
+    managed_ids = {a.act_id for a in _acc_rows}
     q = db.query(AdsCache).filter(AdsCache.tenant_id == user.tenant_id)
     if act_id:
         q = q.filter(AdsCache.act_id == act_id)
     caches = [c for c in q.all() if c.act_id in managed_ids]
-    # 账户名 + currency 映射（只查 managed）
-    _acc_rows = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
-    ).all()
+    # 账户名 + currency 映射（managed + 同归属口径，与上面同一查询结果）
     acc_map = {a.act_id: a.name for a in _acc_rows}
     cur_map = {a.act_id: (a.currency or "USD") for a in _acc_rows}
     # 合并三层（跨账户）+ 标 act_id/account_name/currency
@@ -602,12 +615,14 @@ def refresh_ads(
 ):
     """手动刷新 ads_cache（单账户 act_id 或全部）。FB/TT 平台分发（同 _bg_refresh）。"""
     if act_id:
-        accs = db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.act_id == act_id).all()
+        from ..core.deps import scope_account_query
+        accs = scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == act_id), user).all()
     else:
-        accs = db.query(Account).filter(
+        from ..core.deps import scope_account_query as _sc
+        accs = _sc(db.query(Account).filter(
             Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
-            Account.account_status == 1).all()
+            Account.account_status == 1), user).all()
     ok = 0
     for a in accs:
         fb = client_for_account(db, user.tenant_id, a.act_id, "read")
@@ -639,10 +654,7 @@ def ads_live_status(
     aid = (act_id or "").replace("act_", "").replace("ACT_", "").strip()
     if not aid:
         raise HTTPException(400, "缺 act_id")
-    acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == aid,
-        Account.is_managed == True,  # noqa: E712
-    ).first()
+    acc = _managed_account(db, user, aid)
     if not acc:
         raise HTTPException(404, "账户未纳管")
     _plat = _acc_platform(acc)
@@ -718,10 +730,7 @@ def ads_insights_breakdown(
         raise HTTPException(400, "缺 act_id/ad_id")
     if dim not in _BREAKDOWN_DIMS:
         raise HTTPException(400, "不支持的细分维度")
-    acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == aid,
-        Account.is_managed == True,  # noqa: E712
-    ).first()
+    acc = _managed_account(db, user, aid)
     if not acc:
         raise HTTPException(404, "账户未纳管")
     if _acc_platform(acc) == "tt":
@@ -877,9 +886,7 @@ def set_ad_status(
     平台分发：TT 账户走 tt_set_status（opt_status 语义），FB 走原 set_status。"""
     from ..services.ad_ops import set_status_any
     # 只允许操作已纳管账户（P2-1：未纳管/已软删账户不应再被改状态）
-    if not db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
-            Account.is_managed == True).first():  # noqa: E712
+    if not _managed_account(db, user, body.act_id):
         raise HTTPException(404, "账户未纳管")
     r = set_status_any(db, user.tenant_id, body.act_id, body.node_id, body.level, body.status, operator=user.email)
     if not r.get("success"):
@@ -904,10 +911,7 @@ def batch_set_status(
                  "success": False, "verified": None}
         try:
             # is_managed 门（全库审查 P2）：单端点都有，批量曾绕过——软删账户广告仍可被批量操作
-            if not db.query(Account).filter(
-                Account.tenant_id == user.tenant_id, Account.act_id == item.act_id,
-                Account.is_managed == True,  # noqa: E712
-            ).first():
+            if not _managed_account(db, user, item.act_id):
                 entry["error"] = "account not managed"
             else:
                 r = set_status_any(db, user.tenant_id, item.act_id, item.node_id,
@@ -942,9 +946,7 @@ def set_ad_budget(
     平台分发：TT 账户走 tt_set_budget（整本币 int + 仅 adgroup 层），FB 走原 set_budget。"""
     from ..services.ad_ops import set_budget_any
     # 只允许操作已纳管账户（P2-1；原实现未纳管也能改预算）
-    acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
-        Account.is_managed == True).first()  # noqa: E712
+    acc = _managed_account(db, user, body.act_id)
     if not acc:
         raise HTTPException(404, "账户未纳管")
     cur = acc.currency or "USD"
@@ -965,9 +967,7 @@ def delete_ad(
     """硬删广告（FB：DELETE /{id}；TT：opt_status=DELETE 软删——TT 无硬删端点）。"""
     from ..services.ad_ops import delete_node_any
     # 只允许操作已纳管账户（P2-1：未纳管/已软删账户不应再被删广告）
-    if not db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
-            Account.is_managed == True).first():  # noqa: E712
+    if not _managed_account(db, user, body.act_id):
         raise HTTPException(404, "账户未纳管")
     r = delete_node_any(db, user.tenant_id, body.act_id, body.node_id, operator=user.email)
     if not r.get("success"):
@@ -1002,9 +1002,7 @@ def rename_ad_node(
     # 平台分发：TT 账户走 services.ad_ops.tt_rename_node（各层端点与 name 字段名不同，
     # 广告主维度必带；锁/回读/cache patch/审计与下方 FB 内联版同构）。FB 路径原样保留。
     # is_managed 门（P2-1）：未纳管/已软删账户不可再操作。
-    _acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id,
-        Account.is_managed == True).first()  # noqa: E712
+    _acc = _managed_account(db, user, body.act_id)
     if not _acc:
         raise HTTPException(404, "账户未纳管")
     if (_acc.platform or "fb") == "tt":
@@ -1199,7 +1197,7 @@ def diagnose_ad(
         raise HTTPException(404, "广告不在缓存中，请先刷新广告列表")
     _act_id, _cache_plat = _hit  # (act_id, platform)——同 act_id 双平台可共存
 
-    acc = db.query(Account).filter(
+    acc = _managed_account(db, user, _act_id) if _cache_plat == "fb" else db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == _act_id,
         Account.platform == _cache_plat,
         Account.is_managed.is_(True)).first()

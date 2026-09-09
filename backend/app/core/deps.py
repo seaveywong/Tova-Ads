@@ -12,6 +12,21 @@ from ..models.auth import User
 _bearer = HTTPBearer()
 
 
+def scope_account_query(q, user):
+    """数据面统一口径（批AG 权鉴修正）：operator 只看名下账户（owner_user_id==user.id），
+    owner/超管看全租户。/fb/accounts 一直如此；dashboard/广告管理器曾漏——三页必须一致。
+    用法：scope_account_query(db.query(Account).filter(...), user)。"""
+    if getattr(user, "role", None) == "operator":
+        from ..models.fb import Account
+        q = q.filter(Account.owner_user_id == user.id)
+    return q
+
+
+def account_operable(user, acc) -> bool:
+    """同上口径的单账户判定（写操作/诊断/breakdown 用）：operator 只能动自己名下账户。"""
+    return getattr(user, "role", None) != "operator" or (acc.owner_user_id == user.id)
+
+
 @dataclass
 class CurrentUser:
     id: int

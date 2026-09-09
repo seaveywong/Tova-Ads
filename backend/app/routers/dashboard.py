@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam, func
 from ..core.database import get_db, SuperSessionLocal
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, scope_account_query, account_operable
 from ..models.fb import Account
 from ..models.perf import PerfSnapshot
 from ..models.log import ActionLog
@@ -167,7 +167,7 @@ def dashboard(
 
     # 全部账户（含已移除）——历史消耗必须保留；余额/覆盖只算 managed 子集。
     # 平台筛选④：fb/tt 时账户明细/余额/覆盖同口径收窄（all=不过滤，跨平台汇总）
-    accounts = db.query(Account).filter(Account.tenant_id == user.tenant_id).all()
+    accounts = scope_account_query(db.query(Account).filter(Account.tenant_id == user.tenant_id), user).all()
     _pf_on = platform != "all"
     if _pf_on:
         accounts = [a for a in accounts if (a.platform or "fb") == platform]
@@ -504,8 +504,8 @@ def trend_data(
     if platform != "all":
         # perf_snapshot_ticks 无 platform 列——按该平台账户的 act_id 过滤（与用户勾选账户求交）。
         # 交集为空 = 该平台无账户/无勾选 → 直接空结果（不能落入"不过滤"分支）
-        _pf_acts = {a.act_id for a in db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.platform == platform).all()}
+        _pf_acts = {a.act_id for a in scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.platform == platform), user).all()}
         sel_ids = (list(set(sel_ids) & _pf_acts) if sel_ids else list(_pf_acts))
         if not sel_ids:
             result = {"labels": [], "spend": [], "conversions": [], "cpa": [],
@@ -654,6 +654,8 @@ def ad_breakdown(
     platform 取自账户行（fb/tt 各查各的快照——ad_id 跨平台可能撞号）。"""
     _acc = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+    if _acc and not account_operable(user, _acc):
+        _acc = None   # 批AG：operator 只看名下（与 /fb/accounts 口径一致）
     _acc_plat = (_acc.platform or "fb") if _acc else "fb"
     today = _business_today()
     rows = db.query(PerfSnapshot).filter(
@@ -968,6 +970,8 @@ def dashboard_export(
             raise HTTPException(400, "act_id 必填" if not en else "act_id required")
         _acc = db.query(Account).filter(
             Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+        if _acc and not account_operable(user, _acc):
+            _acc = None   # 批AG：operator 只看名下
         _acc_plat = (_acc.platform or "fb") if _acc else "fb"   # 快照按账户平台取（ad_id 跨平台撞号）
         rows_q = db.query(PerfSnapshot).filter(
             PerfSnapshot.tenant_id == user.tenant_id,
