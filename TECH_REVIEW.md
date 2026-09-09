@@ -1913,3 +1913,22 @@ conversions 列改 either=max(FB, 落地通过)——与规则引擎完全同口
 
 ### ⑤⑥ 无需改动
 动态像素/S2S 已实证生效（昨日验证）；权鉴大白话解释见对话（VV=同团队 operator 只能看自己名下+自建，owner 全租户）。
+
+## 批AM：五问处置（2026-09-10）
+
+### ① 历史遗留账户的像素行——已一次性清 12 行
+级联清理其实已上线（批299：unmanage 清像素绑定+TT file_ids；批300：删令牌清 token_health）。这 12 行是级联上线**之前**移除的账户遗留的。已删。顺带审计：子码无孤儿、ads_cache 2 行属软删设计内（历史保留）。
+
+### ③ 重试 500 无详情——StaleDataError 已修
+根因：retry_item 里 job ORM 对象 commit 时 UPDATE 0 行匹配（后台 reaper/并发请求已动过该行，内存对象谓词失配）→ 500。修：job 状态/心跳更新改原生 UPDATE（幂等无版本谓词）。「Facebook 返回错误」无详情 = 外部 App 令牌的裸 Invalid parameter（批AK 根因），换令牌兜底已在。
+
+### ③' 为什么会用外部令牌
+写候选池按「绑定优先+RR」排序，两条令牌（cred25/26）都是用户 OAuth 授权进来的——FB 上一个用户可给多个 App 授权，授权时选了别的 App（22 manager 时期授权的），token_source=oauth 但不是本 App 签发。候选池不区分 App 归属，轮到它就失败。批AK 兜底（失败换下一候选）已上线；彻底除根 = 这两条令牌用本 App 重新授权或删除。
+
+### ④ 综合转化口径——改为访问量（用户定义）
+管理器 conversions = max(FB, 落地访问)；「落地通过」列（点击量）默认展示于广告层。规则引擎 either = max(FB, 访问, 通过, leads) 同步。220 广告实测：今日 19 visit + 2 click（去重）——管理器现在显示 19。
+
+### ⑤⑥ 爱尔兰直跳 + O337 之谜——完整时间线取证
+爱尔兰那条 click（id 14188）前后事件：21:25:35 Boardman×2 block（FB审核爬虫被拦）→ 21:26:08 同一秒 5 连 US visit（Springfield/Gallatin/Social Circle，**全部 ASN 32934 = Meta**）→ 21:26:25 IE Clonee click（**也是 ASN 32934**，Clonee 是 Meta 爱尔兰数据中心）。
+**结论**：这是 **FB 广告审核机器人的同一个会话**——Meta 集群内部 IP 池出口轮换（US→IE），它加载了落地页（US 出口时过白名单），然后在页面上点了 CTA（审核必做，验证目标页），click beacon 记录的是当时的 IE 出口 IP。「只有点击没有访问」因为 visit beacon 在页面加载时已用 US IP 记了（就是那 5 条）。**防护没洞：worker 层白名单工作正常，IE 出口的直接访问会被拦。**
+**O337 纠偏**：我上一轮说错了——O337（=1052568664219129，就是部署成功那个账户）事件 8 条**全部带广告归因**（has_ad=6 visit + 2 click），不是爬虫无归因。它进的**落地页本体**（decision=display，非屏蔽页）。「全是爬虫」的印象来自日志来源标签把 Meta IP 集群标成"Facebook爬虫"——那是 FB 审核流量（真人流量未起来前先到）。
