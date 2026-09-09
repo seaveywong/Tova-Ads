@@ -1740,3 +1740,23 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 
 ### 验证（真实浏览器）
 广告组 Tab 列头出现「转化像素」，Tova Ads 组1（120252336030520220）单元格显示 `1394346206205535`（= FB promoted_object.pixel_id）。注意：已保存过列偏好的浏览器（localStorage admanager-view-v1）默认不显示新列，需在「列」勾选或清偏好——normalizeViewPreferences 只滤非法 id 不补新默认。
+
+## 批AD：部署抽屉加载提速 + 像素体检（2026-09-10）
+
+### 慢因定位（比预估更深）
+「部分账户的主页/像素仍在加载」的真凶不止无缓存——`/fb/credentials/{id}/pixels` 全量模式**先拉令牌下全部广告账户再逐户拉像素**：几百户令牌一次下拉 = 几百次 FB 调用。前端本就并行（forEach 不 await），瓶颈全在后端调用量。
+
+### 变更
+1. **pixels 端点加 `act_id` 单账户模式**（1 次 FB 调用；空=原全量兼容）：部署抽屉逐账户下拉改传 act_id
+2. **pages/pixels 5min 进程内缓存**（`_ASSET_CACHE`，fresh=1 绕过）——主页授权/像素集合变化频率极低
+3. **前端同令牌 pages 请求共享**（`_credPagesReq`，页面级）——主页列表是令牌级，N 个同令牌账户原先打 N 次同一 /me/accounts
+4. **像素体检**（`POST /landing-lib/pixels/health-check`）：库里 active FB 像素按账户分组，逐账户拉 FB 实况 diff，不在实况集的标 `status='dead'`（random 轮换/_ensure_account_pixel 只选 active，死像素不再被选中）。**保守原则：令牌拉不动的账户跳过不标记**（拿不到实况不冤杀）。像素库面板加「像素体检」按钮（Landing.vue，120s 超时）
+5. api() 超时参数透传到 POST/PUT/PATCH（此前只有 GET）
+
+### 实测（生产，真 FB）
+- pixels 单账户 0.44s；缓存命中 0.02s（20×）
+- 体检：10 账户 12 像素全活、0 死亡、15 无令牌账户正确跳过
+
+### 顺带回答（用户问）
+- 空像素部署链：抽屉>模板>落地页像素>自愈（绑账户既有；零像素自动建 Tova-*，FB 每账户限 1 自有像素天然只建一次）；转化类目标必须像素，流量类不用
+- 抽屉像素下拉是 FB 实时拉取（死像素不出现）；死像素风险在像素库（已由体检覆盖）
