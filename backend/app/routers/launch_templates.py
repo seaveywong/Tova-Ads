@@ -328,8 +328,8 @@ def _post_adset_with_fallback(fb, act_id: str, payload: dict) -> dict:
             raise
         p2 = dict(payload)
         geo = (p2.get("targeting") or {}).get("geo_locations")
-        p2["targeting"] = ({"geo_locations": geo} if geo else {})
-        p2["targeting_automation"] = {"advantage_audience": 1}
+        p2["targeting"] = {"geo_locations": geo} if geo else {}
+        p2["targeting"]["targeting_automation"] = {"advantage_audience": 1}   # 批V：嵌套（顶层=白发）
         r = fb.post(f"act_{act_id}/adsets", p2)
         if isinstance(r, dict):
             r["_advantage_forced"] = True

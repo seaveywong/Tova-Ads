@@ -376,9 +376,7 @@ def build_adset(
         "status": "ACTIVE",
     }
 
-    # Advantage+ 受众（组级开关）：FB 默认开=不发字段；显式关=原始受众（0），手动定向全量生效
-    if advantage_audience is False:
-        payload["targeting_automation"] = {"advantage_audience": 0}
+    # Advantage+ 受众开关在 extra 深合并后统一写入（见下方 return 前）——批V。
 
     # 受益人/付款人披露（EU/泰国/印度/巴西/台湾/澳洲/新加坡等强制；不填 FB 会拒）
     if dsa_beneficiary:
@@ -516,6 +514,17 @@ def build_adset(
         # ——模板 advanced_config 残留该键时 adset 建成但 ads 全灭 1885702/invalid_param
         extra = {k: v for k, v in extra.items() if k != "is_dynamic_creative"}
         _deep_merge(payload, extra)
+    # Advantage+ 受众（组级开关，批V）：v23.0 起 targeting_automation 必须嵌在 targeting 内——
+    # 顶层发会被静默丢弃，FB 默认 Advantage+=1 → 手动收窄（自定义年龄/性别/兴趣）全 1870227。
+    # 显式关=原始受众（0）手动定向全量生效（V23 实测：45-65+性别+兴趣+版位全量保真）；
+    # 开=不发该键（FB 默认 1）。放 extra 合并后写，防 advanced_config 残留键顶掉。
+    if advantage_audience is False:
+        payload.setdefault("targeting", {})
+        payload["targeting"].pop("targeting_automation", None)
+        payload["targeting"]["targeting_automation"] = {"advantage_audience": 0}
+    else:
+        if isinstance(payload.get("targeting"), dict):
+            payload["targeting"].pop("targeting_automation", None)
     return payload
 
 
