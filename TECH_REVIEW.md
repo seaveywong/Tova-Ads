@@ -1809,3 +1809,32 @@ insights 字段补 cpm/unique_clicks。Guard.vue 类型/参数/human 卡片/i18n
 后端：_sync_one 广告层 <5min 跳过 /ads（3→2 次/账户）；resolve-post 帖子内容 1h 缓存（树编辑器逐节点解析不再重复打 FB）；diagnose 整响应 60s 缓存。
 前端：Ads 批量移除并发化（5/批+成功本地移除）；Members 改角色/移除原地；Settings email-routing 删/翻转本地；Ads/Landing 超管标志读 localStorage（省 /auth/me）；LandingLogs/FormTemplates mount 并行。
 未做：Dashboard 通知去重（需 store 重构，MainLayout 60s 已减半）。
+
+## 批AG：权鉴修正——operator 数据/资源面全面隔离（2026-09-10，P0 安全）
+
+### 事故（用户报告）
+VV（operator，租户1）登录后：数据看板有全租户消耗、广告管理器有全租户广告；广告账户页却为空（该页有 owner 过滤）。三页口径不一致 = 权鉴漏洞。扩展排查发现投放模板/素材/表单/落地页/规则/受众库同样对 operator 全量可见。
+
+### 根因
+权限模型本意「operator 只看名下」（/fb/accounts 注释明示），但只有账户页实现了 owner_user_id 过滤；dashboard/ads/六类资源列表全部只按 tenant 过滤。另发现两处次生漏洞：
+- **dashboard 30s 内存缓存键只含租户**：owner 的同参缓存结果会直接喂给 operator（缓存层泄漏）
+- **perf 聚合 SQL 在无筛选时全租户聚合**：operator 空 act_ids 落入"不过滤"分支
+
+### 修复（三道统一闸 + 六资源过滤）
+1. `core/deps.py` 新增 `scope_account_query()`（账户查询归属过滤）+ `account_operable()`（单账户判定）
+2. **数据面**（14 处）：/ads/list、refresh、live-status、breakdown、diagnose、写操作×6（status/batch/budget/delete/rename）、dashboard 主聚合、trend、ad_breakdown、export——operator 只看名下账户；名下为空时聚合强制空集（哨兵 act_id）
+3. **看板缓存键加用户域**：operator 键含 u{id}，杜绝缓存串读；operator 名下为空提前返回空
+4. **资源面**（7 处列表）：投放模板/素材/表单 forms+messages/落地页/规则/受众库——operator 只看自己创建（created_by/owner_user_id 列均已存在，唯 guard_rules 缺列）
+5. **迁移 0094**：guard_rules 加 created_by + 回填租户 owner（迁移内联 UPDATE 未生效，已脚本补齐）；create 端点写 created_by
+6. 引擎行为不变：巡检仍评估全部规则（团队安全网归 owner 责任），仅 UI 可见性隔离
+
+### 实测矩阵（真 token）
+- **VV(operator)**：9 类资源 + 看板全部 0/空 —— 14/14 PASS
+- **owner 回归**：账户 7 / 广告 48 / 模板 / 落地页 / 规则 / 看板 $4228 —— 4/4 PASS
+- **跨租户（租户4 owner）**：5 类列表无租户1行 + 账户交集空 + 看板正常 —— 7/7 PASS
+- **email 唯一**：无重复（同名邮箱不可能两个账号）
+- **越权写**：VV 对非名下账户 rename/delete → 404
+
+### 模型说明（写给后续）
+- owner/超管：全租户；operator：名下账户的数据 + 自己创建的资源；finance：billing + ads.read（无账户归属=看板空）
+- 资源 create 时全部写归属列；巡检/cron 走 SuperSession 不受影响
