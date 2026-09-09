@@ -1760,3 +1760,28 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 ### 顺带回答（用户问）
 - 空像素部署链：抽屉>模板>落地页像素>自愈（绑账户既有；零像素自动建 Tova-*，FB 每账户限 1 自有像素天然只建一次）；转化类目标必须像素，流量类不用
 - 抽屉像素下拉是 FB 实时拉取（死像素不出现）；死像素风险在像素库（已由体检覆盖）
+
+## 批AE：交互减 API 批（2026-09-10，双 agent 审计驱动）
+
+### 审计
+两 agent 并行：前端 16 视图冗余 HTTP 调用（Top 15）+ 后端交互端点 FB 直调（Top 10）。共同最大发现：**写响应已带完整对象却全量重拉**模式遍布两个最高频页面（同文件都有原地 patch 先例可照抄）。
+
+### 前端（原地 patch / 并行 / 守卫 / 降频）
+1. **AdManager**：batchStatus 按响应逐项 patch effective_status（省全量 /ads/list——全站最重 GET）；deleteItem 本地移除+级联（删系列连带组/广告）；mount 链 load()/loadRedirectMap() 并行
+2. **LaunchTemplates**：saveTpl/copyTpl 用写响应原地 upsert/insert；archive/hardDelete 本地移除；openDeploy 三路 Promise.all（原串行 3 RTT）；素材选择器会话守卫（已加载不重拉全量 /assets）
+3. **Tokens**：主页改名/改类目原地 patch（省抽屉 3-GET 重拉）；max-accounts 原地（照 changeTokenType 模式）
+4. **Landing**：子码 target_urls 原地更新（省分页重拉）
+5. **MainLayout**：通知轮询 30s→60s（visibilitychange 回前台即时补偿保留）
+6. **FormTemplates**：AI 选素材抽屉会话守卫
+
+### 后端（_ASSET_CACHE 扩展，均 fresh=1 绕过 + 写路径失效）
+1. `/fb/credentials/{id}/assets`（令牌抽屉，原每次 4+ 次 FB）整响应 5min 缓存；rename/category/refresh-accounts 写入失效
+2. `/fb/assets`（模板编辑器主页下拉，原每 cred 2 次×N）整响应按租户 5min
+3. `/leads/pages`（受控视图，原 N_creds+N_pages≈15 次/打开）整响应按租户 5min；subscribe/unsubscribe 写入失效
+
+### 实测
+- assets 抽屉：2.3s → **0.025s**（93×）
+- leads/pages：8-12s → **0.01s**（冷 worker 一次性填充；多 worker 各持缓存，≤1 冷/worker/5min）
+
+### 未做（审计结论留档）
+后端 #4 ads/refresh 按新鲜度跳过 include_ads（3→2 次/账户）、#7 resolve-post 帖子内容缓存、#8 diagnose 读快照；前端 #7 /auth/me 共享 store、#8 Dashboard 通知去重、#12 批量移除并发化、#13/#15 低频管理页——价值中低或改动面大，待后续。
