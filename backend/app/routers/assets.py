@@ -117,6 +117,8 @@ def list_assets(
 ):
     """列本租户素材 + 筛选（类型/标签/名称搜索）。"""
     q = db.query(Asset).filter(Asset.tenant_id == user.tenant_id, Asset.status == "active")
+    if user.role == "operator":   # 批AG：operator 只看自己上传的
+        q = q.filter(Asset.owner_user_id == user.id)
     if type:
         q = q.filter(Asset.type == type)
     if tag:

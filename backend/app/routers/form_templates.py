@@ -91,6 +91,8 @@ def list_forms(platform: str = "", user: CurrentUser = Depends(require_permissio
     q = db.query(LeadFormTemplate).filter(
         LeadFormTemplate.tenant_id == user.tenant_id, LeadFormTemplate.status != "archived"
     )
+    if user.role == "operator":   # 批AG：operator 只看自己创建的
+        q = q.filter(LeadFormTemplate.created_by == user.id)
     p = (platform or "").strip().lower()
     if p in ("fb", "tt"):
         q = q.filter(LeadFormTemplate.platform == p)
@@ -298,9 +300,12 @@ class MsgTemplateIn(BaseModel):
 @router.get("/messages")
 def list_messages(user: CurrentUser = Depends(require_permission("ads.create")),
                   db: Session = Depends(get_db)):
-    rows = db.query(MessageTemplate).filter(
+    _q = db.query(MessageTemplate).filter(
         MessageTemplate.tenant_id == user.tenant_id, MessageTemplate.status != "archived"
-    ).order_by(MessageTemplate.id.desc()).all()
+    )
+    if user.role == "operator":   # 批AG：operator 只看自己创建的
+        _q = _q.filter(MessageTemplate.created_by == user.id)
+    rows = _q.order_by(MessageTemplate.id.desc()).all()
     return [_msg_dict(t) for t in rows]
 
 

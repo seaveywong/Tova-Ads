@@ -51,7 +51,10 @@ class SentinelArmIn(BaseModel):
 # ── 规则 CRUD ──
 @router.get("/rules")
 def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db: Session = Depends(get_db)):
-    rules = db.query(GuardRule).filter(GuardRule.tenant_id == user.tenant_id).all()
+    _q = db.query(GuardRule).filter(GuardRule.tenant_id == user.tenant_id)
+    if user.role == "operator":   # 批AG：operator 只看自己创建的（引擎仍评估全部规则——团队安全网）
+        _q = _q.filter(GuardRule.created_by == user.id)
+    rules = _q.all()
     # 每条规则的命中统计（action_logs: pause/increase_budget by rule_engine, 按 trigger_type 聚合；
     # increase_budget=扩量规则的"命中"，否则扩量规则永远显示未命中）
     from ..models.log import ActionLog
@@ -75,7 +78,7 @@ def create_rule(body: CreateRuleIn, user: CurrentUser = Depends(require_permissi
                 db: Session = Depends(get_db)):
     if (body.action or "default").lower() not in RULE_ACTIONS:
         raise HTTPException(400, f"action 必须是 {sorted(RULE_ACTIONS)} 之一")
-    rule = GuardRule(tenant_id=user.tenant_id, name=body.name, category=body.category,
+    rule = GuardRule(tenant_id=user.tenant_id, created_by=user.id, name=body.name, category=body.category,
                      rule_type=body.rule_type, params=json.dumps(body.params),
                      conversion_source=body.conversion_source, action=body.action,
                      scope_act_id=body.scope_act_id or None, enabled=body.enabled)

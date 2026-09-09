@@ -115,7 +115,14 @@ def dashboard(
     except Exception:
         pass
 
-    cache_key = f"{user.tenant_id}:{since}:{until}:{conversion_category}:{act_ids}:{platform}"
+    # 批AG：operator 只看名下——归属交集进筛选；缓存键必须带用户域（否则 owner 的同参
+    # 缓存结果直接喂给 operator——缓存层泄漏）
+    _op_scope = getattr(user, "role", None) == "operator"
+    if _op_scope:
+        _own_acts = {a.act_id for a in scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id), user).all()}
+        act_ids = ",".join(sorted(set(x for x in act_ids.split(",") if x.strip()) & _own_acts)) if act_ids else ",".join(sorted(_own_acts))
+    cache_key = f"{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{since}:{until}:{conversion_category}:{act_ids}:{platform}"
     now = _time.time()
     if not fresh and cache_key in _CACHE:
         entry = _CACHE[cache_key]
@@ -155,6 +162,8 @@ def dashboard(
         params["cat_fields"] = cat_fields
         binds.append(bindparam("cat_fields", expanding=True))
     sel_ids = [s.strip() for s in act_ids.split(",") if s.strip()] if act_ids else []
+    if _op_scope and not sel_ids:
+        sel_ids = ["__none__"]   # 批AG：operator 名下无账户——perf 聚合必须为空（不能落入无过滤的全租户聚合）
     if sel_ids:
         sql_text += "  AND act_id IN :act_ids\n"
         params["act_ids"] = sel_ids
@@ -485,7 +494,12 @@ def trend_data(
     """
     platform = _norm_platform(platform)
     # 缓存命中（key 含全部筛选维度）
-    _tkey = f"trend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}:{platform}"
+    _op_scope = getattr(user, "role", None) == "operator"
+    if _op_scope:
+        _own_acts = {a.act_id for a in scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id), user).all()}
+        act_ids = ",".join(sorted(set(x for x in act_ids.split(",") if x.strip()) & _own_acts)) if act_ids else ",".join(sorted(_own_acts))
+    _tkey = f"trend:{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}:{platform}"
     _tnow = _time.time()
     if not fresh and _tkey in _CACHE:
         _te = _CACHE[_tkey]
@@ -501,6 +515,11 @@ def trend_data(
         since = (datetime.now(BUSINESS_TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
         until = today
     sel_ids = [s.strip() for s in act_ids.split(",") if s.strip()] if act_ids else []
+    if _op_scope and not sel_ids:
+        # operator 名下无账户——绝不能落入"不过滤"分支聚全租户
+        result = {"labels": [], "spend": [], "conversions": [], "cpa": [], "granularity": granularity or "day"}
+        _CACHE[_tkey] = (_tnow, result)
+        return result
     if platform != "all":
         # perf_snapshot_ticks 无 platform 列——按该平台账户的 act_id 过滤（与用户勾选账户求交）。
         # 交集为空 = 该平台无账户/无勾选 → 直接空结果（不能落入"不过滤"分支）

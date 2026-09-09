@@ -847,7 +847,11 @@ def list_landing_pages(
     from ..models.launch import LandingPage, LandingAdLink
     from ..models.landing_event import LandingEvent
     from sqlalchemy import func as _f
-    rows = db.query(LandingPage).filter(
+    if user.role == "operator":   # 批AG：operator 只看自己创建的
+        rows = db.query(LandingPage).filter(LandingPage.owner_user_id == user.id,
+                                           LandingPage.status != "archived").all()
+    else:
+        rows = db.query(LandingPage).filter(
         LandingPage.tenant_id == user.tenant_id, LandingPage.status != "archived"
     ).order_by(LandingPage.id.desc()).all()
     # 计数批量预取（原每页 4 条 COUNT = N+1）

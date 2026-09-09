@@ -898,10 +898,13 @@ class TemplateIn(BaseModel):
 @router.get("")
 def list_templates(user: CurrentUser = Depends(require_permission("ads.create")),
                    db: Session = Depends(get_db)):
-    rows = db.query(LaunchTemplate).filter(
+    _q = db.query(LaunchTemplate).filter(
         LaunchTemplate.tenant_id == user.tenant_id,
         LaunchTemplate.status != "archived",
-    ).order_by(LaunchTemplate.id.desc()).all()
+    )
+    if user.role == "operator":   # 批AG：operator 只看自己创建的（与账户/数据口径一致）
+        _q = _q.filter(LaunchTemplate.created_by == user.id)
+    rows = _q.order_by(LaunchTemplate.id.desc()).all()
     return [_tpl_dict(t) for t in rows]
 
 

@@ -14,6 +14,7 @@ class GuardRule(Base):
     conversion_source = Column(Text, default="either")
     action = Column(Text, default="default")  # observe/default/pause/pause_adset/pause_campaign
     scope_act_id = Column(Text)  # NULL=全局（名下所有账户）；act_id(裸数字)=仅该账户
+    created_by = Column(BigInteger, ForeignKey("users.id"))  # 批AG：operator 只看自己创建的规则
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

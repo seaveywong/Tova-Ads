@@ -72,8 +72,10 @@ def _row_dict(a: SavedAudience) -> dict:
 @router.get("")
 def list_audiences(user: CurrentUser = Depends(require_permission("ads.read")),
                    db: Session = Depends(get_db)):
-    rows = db.query(SavedAudience).filter(
-        SavedAudience.tenant_id == user.tenant_id).order_by(SavedAudience.id.desc()).all()
+    _q = db.query(SavedAudience).filter(SavedAudience.tenant_id == user.tenant_id)
+    if user.role == "operator":   # 批AG：operator 只看自己创建的
+        _q = _q.filter(SavedAudience.created_by == user.id)
+    rows = _q.order_by(SavedAudience.id.desc()).all()
     return [_row_dict(a) for a in rows]
 
 
