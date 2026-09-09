@@ -325,6 +325,50 @@ def _resolve_tree_pixel(sdb, tenant_id: int, act_id: str, val: str) -> str:
     return str(_random.choice(rows).pixel_id) if rows else ""
 
 
+def _ensure_account_pixel(sdb, tenant_id: int, act_id: str, fb, allow_create: bool = True) -> str:
+    """像素自愈（批U2）：像素库无该账户像素时的兜底——
+    ① 拉 FB 账户既有像素（只读），取第一个入库存档后返回（库存档后以后走库，零 FB 调用）
+    ② 账户零像素 → POST act/adspixels 自动建 Tova-时间戳（权限实测系统用户令牌可建；
+       FB 每账户限 1 个自有像素 6200 → 恰好天然只建一次）
+    ③ FB 调用失败返空串（调用方走原 ValueError/fail 路径，不静默瞎猜）。
+    预检传 allow_create=False（预检不写 FB：能绑既有就用，不能就给占位符）。"""
+    from datetime import datetime as _dt, timezone as _tz
+    try:
+        rows = sdb.query(LandingPixel).filter(
+            LandingPixel.tenant_id == tenant_id, LandingPixel.act_id == act_id,
+            LandingPixel.platform == "fb", LandingPixel.status == "active").all()
+        if rows:
+            return str(rows[0].pixel_id)
+        if fb is None:
+            return ""
+        px = fb.get_pixels(act_id)
+        pid, name = "", ""
+        if px:
+            pid = str(px[0].get("id") or "")
+            name = (px[0].get("name") or "")[:100]
+        elif allow_create:
+            name = "Tova-" + _dt.now(_tz.utc).strftime("%Y%m%d%H%M%S")
+            r = fb.post(f"act_{act_id}/adspixels", {"name": name})
+            pid = str(r.get("id") or "")
+        if not pid:
+            return ""
+        if not sdb.query(LandingPixel).filter(
+                LandingPixel.tenant_id == tenant_id, LandingPixel.pixel_id == pid,
+                LandingPixel.platform == "fb").first():
+            sdb.add(LandingPixel(tenant_id=tenant_id, act_id=act_id, platform="fb",
+                                 pixel_id=pid, pixel_name=name, status="active", source="deploy"))
+            sdb.commit()
+        return pid
+    except Exception as e:
+        try:
+            sdb.rollback()
+        except Exception:
+            pass
+        logging.getLogger("toveads.launch").warning(
+            f"[Launch] pixel self-heal failed act_{act_id}: {e}")
+        return ""
+
+
 def _validate_structure(raw) -> tuple[dict, str]:
     """结构 JSON 形状校验 + 规范化。返 (规范化 dict, 错误信息)。错误信息空 = 通过。
 
@@ -1202,7 +1246,17 @@ def preflight_deploy(tid: int, body: PreflightIn,
     targeting = _resolve_targeting(db, t.audience_id, t.audience_json or "")
     advanced = _parse_advanced(t)
     page_id = body.page_id or t.page_id
+    # 批U2 像素自愈（预检侧）：手选 > 模板 > 只读绑定账户既有像素；仍无 → 占位符（部署时自建，
+    # 预检不写 FB）——原行为是 400 硬拦，但部署链已能自建，预检不该拦住一条能成的部署
     pixel_id = body.pixel_id or t.pixel_id
+    if not pixel_id:
+        try:
+            pixel_id = _ensure_account_pixel(
+                db, user.tenant_id, body.act_id,
+                client_for_account(db, user.tenant_id, body.act_id, "read"),
+                allow_create=False) or "<部署时自动绑定/创建>"
+        except Exception:
+            pixel_id = "<部署时自动绑定/创建>"
     # 批量模式：示例系列用第一个素材（系列名=素材名，与部署 runner 的 _series_name 同口径）
     asset = (batch_assets[0] if batch_assets else
              (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == user.tenant_id).first()
@@ -1469,6 +1523,16 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             spend_cap=_p_spend_cap_fb)
         _pf_t = _resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
                                    (adsets[0].get("audience_json") or t.audience_json or ""))
+        # 批U2 像素自愈（树预检侧，同平铺口径）：手选 > 模板 > 只读绑定既有；仍无 → 占位符
+        _pf_px = (body.pixel_id or t.pixel_id or "")
+        if not _pf_px:
+            try:
+                _pf_px = _ensure_account_pixel(
+                    db, tenant_id, body.act_id,
+                    client_for_account(db, tenant_id, body.act_id, "read"),
+                    allow_create=False) or "<部署时自动绑定/创建>"
+            except Exception:
+                _pf_px = "<部署时自动绑定/创建>"
         # 批P1 修2 同口径：未设 advantage_audience 的存量节点按兴趣词启发式（预检=所见即所发）
         _pf_adv = adsets[0].get("advantage_audience")
         if _pf_adv is None:
@@ -1477,7 +1541,7 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             name=tree_out[0]["name"], campaign_id="<FB 创建 campaign 后返回>",
             daily_budget=tree_out[0]["budget_local_fb"], objective=t.objective,
             conversion_goal=t.conversion_goal, page_id=(body.page_id or t.page_id or ""),
-            pixel_id=(body.pixel_id or t.pixel_id or ""), landing_url=_lp_url,
+            pixel_id=_pf_px, landing_url=_lp_url,
             bid_strategy=t.bid_strategy, budget_mode=t.budget_mode,
             targeting=_pf_t,
             dsa_beneficiary=t.beneficiary or "", dsa_payor=t.payer or "",
@@ -2312,6 +2376,9 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
     pixel_id = item.pixel_id or tpl.pixel_id
+    if not pixel_id:
+        # 批U2 自愈：抽屉/模板都没选 → 绑账户既有像素，零像素则自动建
+        pixel_id = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
     # lifetime 模式不解析日预算（无 budget_usd 也能部署；总预算在下方换算）
     daily_budget_fb = (0 if (tpl.budget_type or "daily") == "lifetime"
                        else _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id))
@@ -2621,6 +2688,9 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                                          str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "")
         if not _grp_pixel:
             _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id, "random")
+        if not _grp_pixel:
+            # 批U2 自愈：库无该账户像素 → 绑账户既有 / 自动建（用户问「没像素会不会自动创建」的兑现）
+            _grp_pixel = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
         # 组 landing_url 取第一广告节点的（build_adset 的 WEBSITE 类 promoted_object 用；
         # 真正逐广告的链接在创意层覆盖）——占位符此时无组名上下文，用稳定插值
         _first_ad = (snode.get("ads") or [{}])[0]
@@ -3467,6 +3537,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     video_id = ensure_video_id_for_account(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
+            _px_id = it.pixel_id or tpl.pixel_id
+            if not _px_id:
+                _px_id = _ensure_account_pixel(sdb, tenant_id, it.act_id, fb)
             # 与 _run_deploy_job 保持一致：表单模板 page-aware 解析 + AI 消息兜底（重试要等价于全新部署，否则 LEADS/ENGAGEMENT 重试拿到错误/缺失的 form/message）
             lead_form_id = ""
             if tpl.objective == "OUTCOME_LEADS" and _page_id:
@@ -3519,7 +3592,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 _lp_url = _a_base
             r = deploy_one_account(
                 fb, act_id=it.act_id, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
-                page_id=_page_id, pixel_id=it.pixel_id or tpl.pixel_id,
+                page_id=_page_id, pixel_id=_px_id,
                 landing_url=_lp_url,
                 daily_budget=(0 if (tpl.budget_type or "daily") == "lifetime"
                               else _resolve_budget_fb(sdb, it.act_id, tpl, tenant_id)),
