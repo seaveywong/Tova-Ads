@@ -1947,3 +1947,22 @@ adManagerView.js `defaultColumns` 少收尾 `]`（PARSE_ERROR）——批AM 起�
 
 ### 部署
 后端 4 文件（双门+restart+health OK）+ 行为验证（新模块加载+新旧口径对比 SQL）+ 前端 build✓ + CF deploy。commit：b49dffe、a5de053。
+
+## 批AP：部署重试彻底修复（本人 E2E 实测）+ Watchdog/OAuth 令牌检查修正（2026-09-10）
+
+### ① 重试"失败无原因"根因链（全部修复+实测）
+- **卡死态**：09-09 job32 重试时 item33/34 的后台任务没执行（无任何日志），item 永远 pending、error 空、按钮消失=用户看到的"失败没具体原因"。修复：retry 端点放行回收终态 job 里的 pending/creating 卡死行（claim WHERE 扩三态+清 error_code）；前端对卡死行显示重试按钮（带说明 tooltip）。
+- **提前关门**：并发重试时先结束的 item 无条件把 job 标完（succeeded/failed 计数器还会互相丢更新）。修复：`_close_job_if_done`——按 items 表 FILTER 聚合收口，无 in-flight 才关；替换 _retry_one 全部 5 处收口点。
+- **autoflush 坑（实测抓到）**：session autoflush=False，item 终态在 ORM 内存、聚合 SQL 读 DB 旧值→误判 in-flight 永不收口（item34 终态但 job 停 running）。修复：helper 先 flush。
+- **静默 return（不静默铁律）**：_retry_one 模板/item 查不到直接走人→item 永远 pending+job 永远 running（部署 409 锁死）。修复：落 fail 带原因+收口。
+- **僵尸自愈**：既有 _reap_stale_jobs（10min 心跳+5min 巡检）实测 23:32:15 正确回收 job32。
+
+### ② 本人 E2E 实测（零 FB 写入/零花费——三账户本就无写令牌）
+铸 owner JWT→POST retry item33（200，僵尸回收✓）→立刻得明确原因「act_1381683294159318 未绑定写令牌」；等 reaper 回收 item34（✓ 日志为证）→再重试 item34（200✓）→同因明确报错；flush 修复前抓到 job 停 running→修复后直接调 helper 收口成功（partial_failed 1/3）。
+
+### ③ Watchdog debug_token + OAuth 权限快照（App 令牌 inspect）
+自检 debug_token 对非开发者用户令牌恒 #100：Watchdog 每 5min 误报"token debug 失败"（cred25/26）且过期预警全瞎；OAuth callback permission_snapshot 恒 None。修复：新增 `core/fb_tokens.active_app_access_token` + `core/fb_client.debug_token_with_app_token`，两处改用 App 令牌 inspect（无 App 配置时 Watchdog 退回 /me 存活检查）。实测 cred26：**app_id=1583686816811436（Tova Ads Manager，22manager 疑团又一实锤）**、valid=True、9 scopes。今后重新授权即存快照。
+探针还抓到 FbApp import 路径错（models/fb_app 非 models/fb）——import 门测不到函数内 lazy import，运行时探针的又一次价值。
+
+### 部署
+后端 3 轮（双门+restart+health 全绿）+ 前端 CF。commit：3ae7c15、4c6f8a5、(flush 修复)。
