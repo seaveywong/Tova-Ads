@@ -1578,3 +1578,32 @@ commit 43466f8。
 
 ### Commit
 456d676（重构主体）· 30cf6cf（分段控件井底补丁）
+
+## 批U/U2/U3：真部署链路四层根因修复（2026-09-09）
+
+### 概述
+用户真部署「US 45+ 购物通用」到 O322 连续失败。真浏览器+真 FB 重放二分定位出**四层叠加根因**，逐层修复后**全链路真跑通**（campaign/adset/ad/子码/回绑全成，广告 PENDING_REVIEW）。
+
+### 四层根因与修复
+| # | 根因 | 现象 | 修复 |
+|---|---|---|---|
+| 1 | `_validate_structure` 白名单漏 `advantage_audience` 键（保存时被未知键丢弃策略剥掉） | 编辑器开关永远失效 | 白名单三态保留（1b4ad31） |
+| 2 | 树 runner/预检回退把「未设」当「开」 | 兴趣受众+Advantage+ 开 → FB 1870227 | 未设时按 flexible_spec 启发式（对齐平铺链） |
+| 3 | **dev App 无 Standard Access → FB 强制 Advantage+**：年龄/性别/兴趣全拒，显式 =0 也无视（v19/v22/v25 同、O322/O324 同；纯 geo+ta=1 可建） | 任何经典受众字段 1870227 | `_post_adset_with_fallback`：1870227 自动降级纯 geo+Advantage+ 重试，item 留痕「受众被强制 Advantage+」 |
+| 4 | 模板 advanced_config 残留 `{"is_dynamic_creative":true}` 经 extra 深合并进 adset | adset 建成但 ads 全灭 1885702（DC 组要求多素材创意） | build_adset 一律剥 is_dynamic_creative |
+
+### 附带
+- 批U2 像素自愈：库无该账户像素 → 绑账户既有入库存档 → 零像素自动建 Tova-*（实测 cred25 可建；FB 每账户限 1 自有像素 6200）。预检只读绑定不写 FB，占位符不再 400 硬拦
+- 批U2修 RLS 坑：请求 session 上 commit 带走 SET LOCAL 租户上下文 → ObjectDeletedError；像素入库改独立 SuperSession
+- 批U3b fb_client 错误日志带 raw message/error_data（翻译口径定位不了字段级问题）
+- 排障方法论：FakeFb 捕获 payload → 真 FB 重放 → 字段二分（V0-V15/A0-A2/B1-B4），每变体建 PAUSED 即删零消耗
+
+### 验证
+- 真浏览器（Playwright+生产前端）：⋯菜单预检 200 → 部署抽屉选 O322 → 确认弹窗 → job success
+- FB 实况：campaign 120252335778050220 / adset 120252335778560220 / ad 120252335779720220（名含 [子码:lt197-ad_2-6-2605-3]，configured ACTIVE，PENDING_REVIEW）
+- 预检 payload：targeting_automation={advantage_audience:0} + 真像素 1394346206205535
+
+### 遗留（已知未修）
+- 用户主页 1302132919641404 对 cred25 无广告权限（3858749）——1302 需在 BM 给系统用户授权；自动识别选中的 1295587800300315 可用
+- O322 孤儿系列 5 个（2×Tova Ads 空 + 3×RealDeploy3 各1 adset）待清理
+- 精确受众（45+/男/兴趣）需 App Review 拿 Standard Access 后恢复——当前一律降级 Advantage+（有留痕）
