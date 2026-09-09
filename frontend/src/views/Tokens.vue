@@ -503,8 +503,8 @@ const renamePage = async (tk, p) => {
     const nv = value.trim()
     if (nv === (p.name || '')) return
     await POST(`/fb/credentials/${tk.id}/pages/rename`, { page_id: p.id, name: nv })
+    p.name = nv   // 原地改名——省掉抽屉资产三组全量重拉
     ElMessage.success(t('tokens.pageRenamed'))
-    delete assetCache.value[tk.id]; await loadDrawerAssets(tk)   // 主页名即刻刷新
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const ttTypeLabel = (ty) => {
@@ -518,8 +518,8 @@ const setPageCategory = async (tk, p) => {
       { inputValue: p.category || '', inputPattern: /^.{1,120}$/, inputErrorMessage: t('tokens.pageCategoryLimit'),
         confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
     await POST(`/fb/credentials/${tk.id}/pages/category`, { page_id: p.id, category: value.trim() })
+    p.category = value.trim()   // 原地更新——省掉抽屉资产三组全量重拉
     ElMessage.success(t('tokens.pageCategorySaved'))
-    if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const changeMaxAccounts = async (tk) => {
@@ -532,8 +532,8 @@ const changeMaxAccounts = async (tk) => {
         confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
     const v = value.trim() === '' ? null : parseInt(value.trim(), 10)
     await PUT(`/fb/credentials/${tk.id}/max-accounts`, { max_accounts: v })
+    tk.max_accounts = v   // 原地 patch（同 changeTokenType 模式）——省掉全量令牌列表重拉
     ElMessage.success(t('common.savedOk'))
-    await load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const changeTokenType = async (tk) => {

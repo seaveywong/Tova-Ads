@@ -216,7 +216,7 @@ onMounted(async () => {
       unreadCount.value = items.filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).length
     } catch {}
   }
-  poll(); pollTimer = setInterval(poll, 30000)
+  poll(); pollTimer = setInterval(poll, 60000)   // 60s（visibilitychange 回前台即时补偿；纯角标数不必 30s 高频）
   document.addEventListener('visibilitychange', poll)
   document.addEventListener('click', closeNotifsOnOutside)
 })

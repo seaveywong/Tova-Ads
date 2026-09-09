@@ -230,7 +230,11 @@ const openAssetPicker = async (mode) => {
   assetPickerOpen.value = true
   loadAssets()
 }
-const loadAssets = async () => { try { pickerAssets.value = await GET('/assets') } catch {} }
+const loadAssets = async () => {
+  // 会话级守卫：已加载就不重拉全量素材（选素材只为取 AI 文案，不要求实时新上传）
+  if (pickerAssets.value.length) return
+  try { pickerAssets.value = await GET('/assets') } catch {}
+}
 const pickAsset = (a) => { pickerMode.value === 'msg' ? aiGenerateMsg(a) : aiGenerate(a) }
 const aiGenerate = async (a) => {
   assetPickerOpen.value = false; aiLoading.value = true

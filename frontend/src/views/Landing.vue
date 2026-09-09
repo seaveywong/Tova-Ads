@@ -350,7 +350,10 @@ const startEditTarget = (s) => { subTargetEdit.value = { [s.id]: s.target_urls |
 const saveSubTarget = async (s) => {
   try {
     await PUT(`/subcodes/${s.id}`, { target_urls: subTargetEdit.value[s.id] || '' })
-    ElMessage.success(t('landing.subTargetSet')); delete subTargetEdit.value[s.id]; await loadSubcodes(subPage.value.id)
+    // 原地更新（单字段改动）——省掉子码分页全量重拉
+    s.target_urls = subTargetEdit.value[s.id] || ''
+    delete subTargetEdit.value[s.id]
+    ElMessage.success(t('landing.subTargetSet'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const copyUrl = (slug) => {

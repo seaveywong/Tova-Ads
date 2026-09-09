@@ -203,6 +203,7 @@ def set_page_category(
         FbClient(page_token).post(body.page_id, {"category": cat})
     except FbApiError as e:
         raise HTTPException(400, getattr(e, "friendly", str(e)))
+    _asset_cache_drop(user.tenant_id, cred_id)
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="page", target_id=body.page_id,
               action_type="page_category", source="user", result="success",
@@ -244,6 +245,7 @@ def rename_page(
     except FbApiError as e:
         # 常见失败：pages_manage_posts 类页权限/改名频率限制（FB 7 天窗口）
         raise HTTPException(400, getattr(e, "friendly", str(e)))
+    _asset_cache_drop(user.tenant_id, cred_id)
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="page", target_id=body.page_id,
               action_type="page_rename", source="user", result="success",
@@ -601,6 +603,15 @@ def _asset_cache_set(key: str, value):
     if len(_ASSET_CACHE) > 2000:   # 防无界增长（粗粒度清空即可）
         _ASSET_CACHE.clear()
     _ASSET_CACHE[key] = (time.time() + _ASSET_CACHE_TTL, value)
+
+
+def _asset_cache_drop(tenant_id: int, cred_id: int, pixels: bool = False):
+    """写路径失效该令牌的资产缓存（改名/改类目/刷新账户等）。"""
+    keys = [f"pages:{tenant_id}:{cred_id}", f"assets:{tenant_id}:{cred_id}"]
+    if pixels:
+        keys.append(f"pixels:{tenant_id}:{cred_id}")
+    for k in keys:
+        _ASSET_CACHE.pop(k, None)
 
 
 @router.get("/credentials/{cred_id}/pages")
@@ -1049,10 +1060,18 @@ def credentials_assets_summary(
 @router.get("/credentials/{cred_id}/assets")
 def get_credential_assets(
     cred_id: int,
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """该令牌的资产：已导入广告账户（DB）+ 主页 / BM（FB）。抽屉用。"""
+    """该令牌的资产：已导入广告账户（DB）+ 主页 / BM（FB）。抽屉用。
+    整响应 5min 缓存（fresh=1 绕过）：pages+BM 角色 ≈ 4+ 次 FB 调用且准静态；
+    accounts 余额来自 DB（account_sync 周期更新），5min 陈旧可接受。"""
+    ck = f"assets:{user.tenant_id}:{cred_id}"
+    if not fresh:
+        cached = _asset_cache_get(ck)
+        if cached is not None:
+            return cached
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
@@ -1111,8 +1130,11 @@ def get_credential_assets(
                     b["role"] = b["role"] or "基本"
     except FbApiError as e:
         error = e.friendly
-    return {"accounts": accounts, "pages": pages,
-            "businesses": businesses, "error": error}
+    out = {"accounts": accounts, "pages": pages,
+           "businesses": businesses, "error": error}
+    if error is None:
+        _asset_cache_set(ck, out)   # 出错的结果不缓存（重开抽屉给 FB 再一次机会）
+    return out
 
 
 @router.post("/credentials/{cred_id}/refresh-accounts")
@@ -1155,15 +1177,24 @@ def refresh_credential_accounts(
         acc.amount_spent = str(live.get("amount_spent") or acc.amount_spent or "")
         updated += 1
     db.commit()
+    _asset_cache_drop(user.tenant_id, cred_id)   # 余额/状态已变——抽屉资产缓存失效
     return {"updated": updated, "imported_total": len(imported_rows)}
 
 
 @router.get("/assets")
 def get_assets(
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """用已存凭证拉 FB 资产（广告账户 + 主页）。聚合所有 active token（多 token 不漏）。"""
+    """用已存凭证拉 FB 资产（广告账户 + 主页）。聚合所有 active token（多 token 不漏）。
+    整响应按租户 5min 缓存（fresh=1 绕过）：每 cred 2 次 FB 调用 × N 令牌，调用方（模板编辑器
+    主页下拉）每次打开都拉——资产集合准静态。"""
+    ck = f"fbassets:{user.tenant_id}"
+    if not fresh:
+        cached = _asset_cache_get(ck)
+        if cached is not None:
+            return cached
     from ..core.fb_tokens import iter_tenant_clients
     pairs = iter_tenant_clients(db, user.tenant_id)
     if not pairs:
@@ -1181,7 +1212,9 @@ def get_assets(
         except (FbApiError, TtApiError):
             # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合
             continue
-    return {"ad_accounts": accounts, "pages": pages}
+    out = {"ad_accounts": accounts, "pages": pages}
+    _asset_cache_set(ck, out)
+    return out
 
 
 @router.get("/credentials/loadable-accounts")

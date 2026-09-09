@@ -115,7 +115,10 @@ const fmtBudget = (a, ctx) => {
 const hasBudget = (a) => a.daily_budget_amount != null || a.lifetime_budget_amount != null
 
 const loadAccounts = async () => {
-  try { accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]; await load(); await loadRedirectMap() }
+  try {
+    accounts.value = await GET('/fb/accounts'); const q = route.query.act; if (q) selectedActs.value = [q]
+    await Promise.all([load(), loadRedirectMap()])   // 两者互不依赖且内部自吞错——并行省 1 RTT
+  }
   catch (e) { ElMessage.error(e.message || t('adm.loadAccountsFail')) }
 }
 const load = async (refresh = false, silent = false) => {
@@ -444,7 +447,16 @@ const deleteItem = async (item) => {
     opLoading.value = true
     try {
       await POST('/ads/delete', { act_id: item.act_id, node_id: item.id })
-      ElMessage.success(t('adm.deleted')); await load()
+      // 本地移除（FB 删除即定局；删系列连带组/广告，删组连带广告）——省掉全量重拉 /ads/list
+      const _idStr = String(item.id)
+      const _keepParent = (pk) => (x) => String(_idOf(x[pk])) !== _idStr
+      data.value.campaigns = (data.value.campaigns || []).filter(x => String(x.id) !== _idStr)
+      if (tab.value === 'campaign') data.value.adsets = (data.value.adsets || []).filter(_keepParent('campaign_id'))
+      if (tab.value !== 'ad') {
+        const _fk = tab.value === 'campaign' ? 'campaign_id' : 'adset_id'
+        data.value.ads = (data.value.ads || []).filter(_keepParent(_fk))
+      }
+      ElMessage.success(t('adm.deleted'))
     } catch (e) { ElMessage.error(e.message || t('common.opFail')) }   // 失败（无写令牌/FB 拒/并发锁）要告诉用户为什么
   } catch(e) { /* 用户取消 */ }
   opLoading.value = false
@@ -473,7 +485,16 @@ const batchStatus = async (status) => {
       const row = curList.value.find(a => a.id === it.node_id && a.act_id === it.act_id)
       return row && entityKey(row)
     }).filter(Boolean))
-    await load(); selected.value = failedKeys
+    // 原地 patch 成功行（写响应逐项带 effective_status）——省掉全量重拉 /ads/list；失败行保留勾选便于重试
+    for (const rr of (r.results || [])) {
+      if (!rr.success || rr.verified === false) continue
+      const row = curList.value.find(a => String(a.id) === String(rr.node_id) && (!rr.act_id || a.act_id === rr.act_id))
+      if (row) {
+        const st = rr.effective_status || status
+        row.effective_status = st; row.status = st
+      }
+    }
+    selected.value = failedKeys
   } catch (e) { ElMessage.error(e.message || t('adm.batchOpFail')) }
   opLoading.value = false
 }

@@ -163,6 +163,7 @@ def update_lead(
 
 @router.get("/pages")
 def pages_status(
+    fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -171,7 +172,15 @@ def pages_status(
 
     回答「哪些主页真的受控」：页权限是 FB 侧该号被分配的角色（OAuth 只能复制不能放大），
     订阅需要「管理主页」任务。手动触发（前端打开面板时拉），每页 1 次订阅查询。
-    """
+    整响应按租户 5min 缓存（fresh=1 绕过）：N_creds 次权限面 + N_pages 次订阅查询，
+    两个面板（潜客 tab/部署抽屉权限总览）每次打开都全量打——权限与订阅均准静态。
+    订阅写入（subscribe/unsubscribe 端点）已同步失效缓存。"""
+    from .fb import _asset_cache_get, _asset_cache_set
+    ck = f"leadpages:{user.tenant_id}"
+    if not fresh:
+        cached = _asset_cache_get(ck)
+        if cached is not None:
+            return cached
     clients = _tenant_fb_clients(db, user.tenant_id)
     if not clients:
         return {"pages": [], "error": "no active FB credential"}
@@ -232,7 +241,9 @@ def pages_status(
                 pass   # 查询失败保持 None（未知，前端显示 —）
             by_page[pid] = row
     pages = sorted(by_page.values(), key=lambda r: (not r["can_manage"], r["page_name"]))
-    return {"pages": pages, "subscribed_count": sum(1 for r in pages if r["subscribed"])}
+    out = {"pages": pages, "subscribed_count": sum(1 for r in pages if r["subscribed"])}
+    _asset_cache_set(ck, out)
+    return out
 
 
 def _tenant_fb_clients(db: Session, tenant_id: int) -> list:
@@ -435,6 +446,8 @@ def subscribe_webhook(
         total_pages = len(by_page) or len(only)
     results = list(by_page.values())
     ok = sum(1 for r in results if r["ok"])
+    from .fb import _ASSET_CACHE
+    _ASSET_CACHE.pop(f"leadpages:{user.tenant_id}", None)   # 订阅态已变——受控视图缓存失效
     return {"subscribed": ok, "total_pages": total_pages or len(results), "pages": results}
 
 
@@ -584,4 +597,6 @@ def unsubscribe_webhook(
                 row["error"] = e.friendly
     results = list(by_page.values())
     ok = sum(1 for r in results if r["ok"])
+    from .fb import _ASSET_CACHE
+    _ASSET_CACHE.pop(f"leadpages:{user.tenant_id}", None)   # 订阅态已变——受控视图缓存失效
     return {"unsubscribed": ok, "total_pages": len(results), "pages": results}

@@ -1654,7 +1654,10 @@ const pickAsset = async (a) => {
   assetPickerOpen.value = false
 }
 const openAssetPicker = async () => {
-  assetPickerOpen.value = true; pickerLoading.value = true
+  assetPickerOpen.value = true
+  // 会话级守卫：已加载过且无新上传就不重拉全量素材（上传路径 1692 行自带刷新）
+  if (pickerAssets.value.length) return
+  pickerLoading.value = true
   try { pickerAssets.value = await GET('/assets') } catch {}
   pickerLoading.value = false
 }
@@ -1813,9 +1816,18 @@ const saveTpl = async () => {
       delete adv.pacing_type
       body.advanced_config = Object.keys(adv).length ? JSON.stringify(adv) : ''
     } catch {}
-    if (editing.value) { await PUT('/launch-templates/' + editing.value.id, body); ElMessage.success(t('common.saved')) }
-    else { await POST('/launch-templates', body); ElMessage.success(t('launch.created')) }
-    editOpen.value = false; await load(); snapshotForm()
+    // 写响应即完整模板对象（后端 _tpl_dict）——原地 upsert，省掉全量重拉 /launch-templates
+    if (editing.value) {
+      const r = await PUT('/launch-templates/' + editing.value.id, body)
+      const i = list.value.findIndex(x => x.id === editing.value.id)
+      if (i >= 0 && r?.id) list.value[i] = r; else await load()
+      ElMessage.success(t('common.saved'))
+    } else {
+      const r = await POST('/launch-templates', body)
+      if (r?.id) list.value.unshift(r); else await load()
+      ElMessage.success(t('launch.created'))
+    }
+    editOpen.value = false; snapshotForm()
   } catch (e) {
     showError(e, t('launch.saveTplFail'))
     // 后端 422（detail 带组名/可用清单）→ 按节点名定位标红+滚动（api 层已展开 detail 文本）
@@ -1832,7 +1844,8 @@ const hardDeleteTpl = async (tpl) => {
   try {
     // force=1：有部署历史也删（job 行保留 template_name 快照，仅解除关联——投放记录不丢）
     await DELETE('/launch-templates/' + tpl.id + '/hard?force=1')
-    ElMessage.success(t('launch.hardDeleted')); await load()
+    list.value = list.value.filter(x => x.id !== tpl.id)   // 本地移除——省掉全量重拉
+    ElMessage.success(t('launch.hardDeleted'))
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 
@@ -1840,14 +1853,16 @@ const removeTpl = async (tpl) => {
   try {
     await ElMessageBox.confirm(t('launch.archiveConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE('/launch-templates/' + tpl.id)
-    ElMessage.success(t('launch.archived')); await load()
+    list.value = list.value.filter(x => x.id !== tpl.id)   // 本地移除——省掉全量重拉
+    ElMessage.success(t('launch.archived'))
   } catch (e) { if (e !== 'cancel') showError(e, t('common.opFail')) }   // 真报错要提示（如 400 有运行中 job）
 }
 const copyTpl = async (tpl) => {
   try {
     const r = await POST('/launch-templates/' + tpl.id + '/copy', {})
     ElMessage.success(t('launch.copiedAs', { name: r.name }))
-    await load()
+    if (r?.id) list.value.unshift(r)   // 响应即完整模板对象——原地插入，省掉全量重拉
+    else await load()
   } catch (e) { showError(e, t('launch.copyFail')) }
 }
 // 卡片 ⋯ 下拉分发（部署保留主按钮，其余操作收进来）
@@ -1930,15 +1945,15 @@ const openDeploy = async (tpl) => {
   deployMode.value = 'single'; batchAssetIds.value = new Set()
   deployTree.value = null
   if (tpl.structure) { try { deployTree.value = JSON.parse(tpl.structure).adsets || null } catch { deployTree.value = null } }
-  if (tpl.asset_id) { try { deployAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
   accLoading.value = true
-  try {
-    const all = await GET('/fb/accounts')
-    accounts.value = (tpl.platform === 'tt') ? all.filter(a => a.platform === 'tt') : all.filter(a => (a.platform || 'fb') === 'fb')
-  } catch (e) { showError(e, t('launch.loadAccFail')) }
-  if (tpl.platform === 'tt') {
-    try { const ps = await GET('/landing-lib/pixels'); ttPixels.value = (ps || []).filter(p => p.platform === 'tt') } catch { ttPixels.value = [] }
-  }
+  // 三路互不依赖——并行（原先串行 3 RTT）
+  const [, allAccounts, ttPx] = await Promise.all([
+    tpl.asset_id ? GET('/assets/' + tpl.asset_id).then(r => { deployAsset.value = r }).catch(() => {}) : Promise.resolve(),
+    GET('/fb/accounts').catch(e => { showError(e, t('launch.loadAccFail')); return [] }),
+    tpl.platform === 'tt' ? GET('/landing-lib/pixels').catch(() => []) : Promise.resolve(null),
+  ])
+  accounts.value = (tpl.platform === 'tt') ? (allAccounts || []).filter(a => a.platform === 'tt') : (allAccounts || []).filter(a => (a.platform || 'fb') === 'fb')
+  if (tpl.platform === 'tt') ttPixels.value = (ttPx || []).filter(p => p.platform === 'tt')
   if (tpl.post_source === 'reuse' && tpl.id) {
     // 后端权威判定：候选池里有能管该帖主页的写令牌的账户才可选（多令牌同账户也覆盖）
     try { const r = await GET('/launch-templates/' + tpl.id + '/reuse-eligible'); reuseEligibleActs.value = new Set(r.eligible || []) }
