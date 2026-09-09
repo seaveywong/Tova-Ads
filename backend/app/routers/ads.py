@@ -461,6 +461,9 @@ def list_ads(
         _ls = _landing.get(str(ad.get("id")))
         ad["landing_visits"] = _ls["visits"] if _ls else 0
         ad["landing_pass"] = _ls["pass"] if _ls else 0
+        # 批AK：综合转化显示与规则引擎同口径（either=max(FB, 落地通过)）——FB 回传延迟时
+        # 落地页已真实通过的广告不再显示 0 转化误导；成效(FB)列保持 FB 原值可辨
+        ad["conversions"] = max(int(ad.get("conversions") or 0), int(ad["landing_pass"]))
         # 提取 creative 的 effective_object_story_id 供"复用此帖铺放"入口
         _cr = ad.get("creative")
         _sid = ""

@@ -1190,6 +1190,41 @@ def _validate_batch_assets(db, asset_ids: list[int], tenant_id: int) -> list:
     return out
 
 
+def _write_fb_with_fallback(sdb, tenant_id: int, act_id: str):
+    """写令牌候选兜底（批AK）：逐候选返回 FbClient 列表——裸 Invalid parameter（无
+    error_data，跨 App/无写权限令牌的伪装形态，2026-09-09 批量部署 3 账户失败实例）
+    时调用方换下一个候选重试。首轮即 client_for_account 选中的那个（保持现有 RR）。"""
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    cands = _account_write_candidates(sdb, tenant_id, act_id, "write")
+    first = client_for_account(sdb, tenant_id, act_id, "write")
+    if first is None:
+        return None, cands
+    out, seen = [first], set()
+    for c in cands:
+        if c.id in seen:
+            continue
+        seen.add(c.id)
+        try:
+            out.append(FbClient(decrypt(c.access_token_enc)))
+        except Exception:
+            continue
+    # 去重保持序（first 可能等于某候选）
+    uniq, ids = [], set()
+    for f in out:
+        tok = getattr(f, "_access_token", None) or ""
+        if tok and tok not in ids:
+            ids.add(tok)
+            uniq.append(f)
+    return uniq, cands
+
+
+def _is_bare_invalid_param(e) -> bool:
+    """裸 Invalid parameter（无 error_data）——FB 对无权限令牌的伪装报错形态。"""
+    return (getattr(e, "category", "") == "invalid_param"
+            and not getattr(e, "error_data", None))
+
+
 def _series_name(tpl: LaunchTemplate, asset, idx: int) -> str:
     """批量模式系列名（campaign/adset/ad 共用的 name_prefix）= 素材名；素材名空回退
     母版前缀+序号（FB/TT campaign 名不能为空）。截 100 字符——FB 上限 400，留余量保证各处列表可读。"""
@@ -1501,7 +1536,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
     except ValueError as e:
         raise HTTPException(400, f"预算换算失败：{e}")
     is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
-    campaign_name = (t.name_prefix or t.name or "Tova Ads")[:100]
+    from datetime import datetime as _dtn
+    campaign_name = f"{t.name_prefix or t.name or 'Tova Ads'} {_dtn.now().strftime('%m%d')}"[:100]
     # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；
     # 批次III 统一缺汇率口径：_usd_to_account_minor 缺汇率 raise→调用处 400，不再静默 1.0 兜底）
     try:
@@ -2651,7 +2687,10 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         d.update(ov)
         return SimpleNamespace(**d)
 
-    campaign_name = (tpl.name_prefix or tpl.name or "Tova Ads")[:100]
+    # 批AK：系列名加日期后缀（账户本地日 MMDD）——多账户批量部署系列名不再全同名
+    from datetime import datetime as _dtn
+    _suffix = _dtn.now().strftime("%m%d")
+    campaign_name = f"{tpl.name_prefix or tpl.name or 'Tova Ads'} {_suffix}"[:100]
     is_cbo = (tpl.budget_mode or "ABO").upper() == "CBO"
     _cats = []
     try:
@@ -3224,9 +3263,10 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     if not fb:
                         raise FbApiError("no_id", f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
                 else:
-                    fb = client_for_account(sdb, tenant_id, item.act_id, "write")
-                    if not fb:
+                    _fb_list, _ = _write_fb_with_fallback(sdb, tenant_id, item.act_id)
+                    if not _fb_list:
                         raise FbApiError("no_id", f"act_{item.act_id} 未绑定写令牌")
+                    fb = _fb_list[0]
                 # 批量模式（按素材批量生成系列）：item 内逐素材克隆系列，单素材失败不中断后续
                 # （partial 汇总）。item = 账户 的粒度不变——job.total / 前端进度轮询 / 重试入口零改动
                 if batch_assets:
@@ -3238,7 +3278,21 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 # 素材组节点逐素材展开。上方 batch_assets/单模板分支都不适用）
                 tree_adsets = _parse_structure(tpl)
                 if tree_adsets:
-                    _deploy_item_fb_tree(sdb, job, item, tpl, tree_adsets, tenant_id, fb)
+                    # 批AK：裸 Invalid parameter 换下一写令牌候选整树重试（跨App令牌伪装错）
+                    _tree_err = None
+                    for _fb_cand in (_fb_list or [fb]):
+                        try:
+                            _deploy_item_fb_tree(sdb, job, item, tpl, tree_adsets, tenant_id, _fb_cand)
+                            _tree_err = None
+                            break
+                        except FbApiError as _fe:
+                            if _is_bare_invalid_param(_fe) and _fb_cand is not (_fb_list or [fb])[-1]:
+                                _tree_err = _fe
+                                sdb.rollback()
+                                continue
+                            raise
+                    if _tree_err is not None:
+                        raise _tree_err
                     sdb.commit()
                     continue
                 # 单模板模式：一个系列（原内联块抽为 _deploy_series_fb，行为不变）
@@ -3581,9 +3635,10 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 if not fb:
                     raise FbApiError("no_id", f"act_{it.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
             else:
-                fb = client_for_account(sdb, tenant_id, it.act_id, "write")
-                if not fb:
+                _fb_list, _ = _write_fb_with_fallback(sdb, tenant_id, it.act_id)
+                if not _fb_list:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
+                fb = _fb_list[0]
             # 结构模式重试（0088）：整树重跑（仅全败 item——部分成功在端点层已拒）；
             # 不走 _find_existing_campaign 幂等捷径（树有多组多名，同名命中无法确认归属）
             tree_adsets = _parse_structure(tpl)
