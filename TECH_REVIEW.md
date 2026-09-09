@@ -1607,3 +1607,20 @@ commit 43466f8。
 - 用户主页 1302132919641404 对 cred25 无广告权限（3858749）——1302 需在 BM 给系统用户授权；自动识别选中的 1295587800300315 可用
 - O322 孤儿系列 5 个（2×Tova Ads 空 + 3×RealDeploy3 各1 adset）待清理
 - 精确受众（45+/男/兴趣）需 App Review 拿 Standard Access 后恢复——当前一律降级 Advantage+（有留痕）
+
+## 批V：1870227 终版根因——targeting_automation 嵌套位置（2026-09-09）
+
+### 概述
+批U3 的"账户级强制 Advantage+"归因被用户实锤推翻（UI 一直能设 45+ 定投、App 是 Live+8 权限全批）。补全实验矩阵发现：ta=1+默认 18-65 可建、任何自定义收窄被拒 → 怀疑字段本身没送达。**FB 读回 targeting 时 `targeting_automation` 嵌在 targeting 内** → 验证嵌套发送 → V23 全量受众建成保真。
+
+### 根因与修复
+v23.0 起 `targeting_automation` 必须作为 `targeting` 的子键发送；顶层发送被静默丢弃，FB 默认 Advantage+=1 拒收一切手动收窄（1870227/1487079）。修复：`build_adset` 在 extra 深合并后写 `payload["targeting"]["targeting_automation"]={"advantage_audience":0}`（显式关时），开时清除残留键；`_post_adset_with_fallback` 降级路径同改嵌套。
+
+### 验证
+- V23 重放：嵌套 ta=0 + 45-65+男+4兴趣+FB/mobile/feed 版位 → CREATED，FB 读回一字不差
+- 真浏览器全链路：模板 197 → O322 → job success → FB 读回 `age=45-65 gender=[1] interests=4 ta={"advantage_audience":0}`
+- 附带清理：删错受众旧广告+5 调试孤儿系列；重部署广告 PENDING_REVIEW（configured ACTIVE，$288.88/天 CBO）
+
+### 附加发现
+- Playwright 选部署抽屉账户行：`.first()` 匹配 `.acc-list` 容器点中心=中间行（列表顺序会变→时好时坏）；正确做法 `getByText(act_id).locator('xpath=ancestor::label[1]')` + 选区状态断言（`.acc-row.on`）
+- 读回 adset 时顶层字段 `targeting_automation` 不可读（nested in targeting）
