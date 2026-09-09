@@ -52,3 +52,7 @@
 - targeting_automation 嵌套修复：TECH_REVIEW.md 批V
 - API 全面重审（含 leadgen 修复）：TECH_REVIEW.md 批W
 - 潜客/webhook 断链与 OAuth scope 补齐：TECH_REVIEW.md 批X
+
+### 7. webhook 订阅字段权限（批Y 补）
+- `subscribed_apps` 的 `subscribed_fields` 带 `messages` 需 **pages_messaging**（未申请）；`leadgen`/`feed` 只需 pages_manage_metadata
+- 重授权弹窗 8 个权限 + 自动附加的 public_profile = 后台 9 个，非缺失

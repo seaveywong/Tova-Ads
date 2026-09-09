@@ -1671,3 +1671,22 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 
 ### 恢复步骤（用户侧一步）
 令牌页对 Kritins Rae 走「重新授权」（OAuth 现带全 scope）→ 新令牌替换后：leads 轮询/同步自动恢复；POST /leads/subscribe 订阅页 leadgen webhook
+
+## 批Y：重授权后潜客/webhook 全链打通（2026-09-09 夜）
+
+### 8 vs 9 权限之谜（用户问）
+授权弹窗 8 个 = OAuth 主动申请的 8 个；第 9 个 `public_profile` 是 **FB 自动附加的默认权限**（不需申请、不在弹窗显示，但每个令牌都带）。debug_token 实测重授权后 cred25 = **9 scope 全齐**（leads_retrieval + pages_manage_metadata 均到位）。
+
+### 全链验证（夜班实测）
+| 环节 | 结果 |
+|---|---|
+| 新令牌 scope（debug_token） | ✅ 9/9 |
+| GET /{ad_id}/leads（此前 #200） | ✅ 200（潜客数为 0 正常，无消耗广告） |
+| 页级 webhook 订阅 | ✅ leadgen+feed 已订阅（subscribed_apps 读回确认） |
+| webhook 回调验签+处理 | ✅ 合法 HMAC 模拟回调 200 EVENT_RECEIVED |
+| App 级 callback | ✅ 早已配置 active |
+
+潜客双通道（webhook 实时 + 10min 轮询兜底）全部在线。
+
+### 新坑（追加到坑文档）
+- 订阅字段带 `messages` 需 `pages_messaging`（未申请）——leadgen/feed 不需要；正式端点 leads.py 只订 leadgen，本来就对（测试脚本踩的）
