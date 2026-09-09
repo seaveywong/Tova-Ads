@@ -1534,3 +1534,30 @@ vue-i18n 默认 JIT 编译，`createI18n` 后 `t(key)` 才编译消息；写了�
 可见实底蓝（bg=#0a84ff）= 创建按钮×1 + 行启用开关控件态×3；行名蓝=0/6；选中 chip 背景=rgba(10,132,255,.12) tint；绿色装饰文本=0。语义色只剩表格状态区。视觉复查评分 7.5→收敛"一屏一重点"。
 
 生产：纯前端，CF 部署 ×2。commit 8c675c6 + 补充（entity-name）。
+
+---
+
+## 批S — 部署链落地页域名健康门（FB 侧）｜2026-09-09
+
+### 背景
+用户需求：落地页绑定的域名被 FB 封禁时部署应报错拦截而非投死链；多域名绑定自动切换健康域；部署触发时实时检测（TT 暂不做）。此前 FB 屏蔽扫描仅每小时看板告警，部署链完全不查。
+
+### 实现（launch_templates.py，纯后端）
+| 组件 | 说明 |
+|---|---|
+| `_fb_domain_probe` | 复用落地页自检的 `_fb_ban_probe`（Graph scrape，pass/warn/fail）+ url→结果缓存（item 内去重 FB 调用） |
+| `_healthy_landing_base` | 域名池=custom_domain+custom_domains（归一 https:// 前缀，现状顺序）；首选 pass/warn→沿用（健康路径零行为变化）；首选 fail→依序探测备用取 pass（无 pass 用 warn）；全 fail→返回错误 |
+| `_LandingBlockedError` | 全封硬拦异常——专门穿透自动建链的降级 except（降级直投=广告指向死链，比失败更糟） |
+| 接线 6 处 | 平铺预检(400 预拦)、树预检(400)、平铺自动建链、平铺 base 兜底×2、树 runner base 缓存（`__BLOCKED__` 哨兵，整 item 失败）、重试路径 |
+| 不误杀设计 | warn（无令牌/爬虫被挡/探测异常）一律放行——探测不可用不能挡部署；TT 部署链完全不走此门 |
+
+item 失败消息示例：`落地页「RH-Signals US」所有绑定域名均被 FB 屏蔽（已探测 2 个），已阻止部署——请到落地页换绑健康域名后重试`
+
+### 验证
+- 批S smoke 6/6：①首选 pass 沿用 ②首选 fail 备 pass **自动切换**（goosvk6→marketbriefnow 实证）③全 fail 报错拒投（消息含页名/探测数/指引）④全 warn 不拦截 ⑤live 探测真实返回 pass（当前域名健康）
+- 回归 154 断言全绿（tree35+I54+II35+III30）；双门过、restart、health ok
+
+### 已知边界
+已投出去的广告 URL 写死在 FB，切换只对**新部署**生效（老广告需人工重投）——这是 FB 侧约束非系统限制。
+
+commit 43466f8。
