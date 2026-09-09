@@ -44,6 +44,30 @@ const accStateTag = (a) => {
   return null
 }
 // 组行悬停显示所属系列名（非下钻视图下组的归属上下文；下钻时 drill-tag 已标）
+// 批AI：层级状态联动——FB Ads Manager 语义：广告全停 ⇒ 所属组显示「已暂停」；组全停 ⇒ 所属系列显示「已暂停」。
+// 只做「全停→父层暂停」单向推导（父 ACTIVE 但子全停=实质停投）；父已停/异常态原样显示（不覆盖 FB 真实态）。
+const childPausedMap = computed(() => {
+  const adByAdset = {}, adsetByCamp = {}
+  for (const s of (data.value.adsets || [])) adsetByCamp[String(_idOf(s.campaign_id))] = adsetByCamp[String(_idOf(s.campaign_id))] || new Set(), adsetByCamp[String(_idOf(s.campaign_id))].add(String(s.id))
+  for (const a of (data.value.ads || [])) adByAdset[String(_idOf(a.adset_id))] = adByAdset[String(_idOf(a.adset_id))] || new Set(), adByAdset[String(_idOf(a.adset_id))].add(a)
+  const adsetAllPaused = {}, campAllPaused = {}
+  for (const [cid, aset] of Object.entries(adsetByCamp)) {
+    const kids = [...aset].map(sid => (data.value.adsets || []).find(s => String(s.id) === sid)).filter(Boolean)
+    adsetAllPaused[cid] = kids.length > 0 && kids.every(s => (s.effective_status || '').includes('PAUSED'))
+  }
+  for (const [sid, adsSet] of Object.entries(adByAdset)) {
+    const kids = [...adsSet].map(aid => (data.value.ads || []).find(a => String(a.id) === String(aid))).filter(Boolean)
+    adsetAllPaused[sid] = kids.length > 0 && kids.every(a => (a.effective_status || '').includes('PAUSED'))
+  }
+  return { adsetAllPaused, campAllPaused }
+})
+const effectiveStatusOf = (row, level) => {
+  const st = row.effective_status || ''
+  if (st !== 'ACTIVE') return st   // 已停/异常态原样
+  if (level === 'adset' && childPausedMap.value.adsetAllPaused[String(row.id)]) return 'PAUSED'
+  if (level === 'campaign' && childPausedMap.value.campAllPaused[String(row.id)]) return 'PAUSED'
+  return st
+}
 const campNameOf = (s) => {
   const c = (data.value.campaigns || []).find(x => String(x.id) === String(s.campaign_id))
   return c ? t('adm.belongsToCampaign', { name: c.name }) : ''
@@ -163,6 +187,11 @@ const statusMatch = (s) => {
   if (statusFilter.value === 'active') return s === 'ACTIVE'
   if (statusFilter.value === 'abnormal') return ABNORMAL_SET.has(s)
   return s === 'PAUSED' || (s && s.includes('PAUSED'))
+}
+// 批AI：筛选按推导态（子全停的系列在「已暂停」筛选可见）——传行进来进行层级感知匹配
+const statusMatchRow = (row, rawStatus) => {
+  if (tab.value === 'ad') return statusMatch(rawStatus)
+  return statusMatch(effectiveStatusOf(row, tab.value))
 }
 const actMatch = (item) => !selectedActs.value.length ? true : selectedActs.value.includes(item.act_id)
 // 平台切换器过滤（纯前端：accounts 带 platform 字段，实体行按所属账户过滤）
@@ -326,7 +355,7 @@ const curList = computed(() => {
   if (tab.value === 'campaign') arr = data.value.campaigns || []
   else if (tab.value === 'adset') { arr = data.value.adsets || []; if (drillCampaign.value) arr = arr.filter(a => _idOf(a.campaign_id) === drillCampaign.value) }
   else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => String(_idOf(a.adset_id)) === String(drillAdset.value)); else if (drillCampaign.value) arr = arr.filter(a => String(_idOf(a.campaign_id)) === String(drillCampaign.value)) }
-  arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatch(a.effective_status))
+  arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatchRow(a, a.effective_status))
   // 脱管/被禁账户排后面（用户反馈：不好区分，正常在前异常在后）
   const _deadRank = (a) => accStateTag(a) ? 1 : 0
   arr = arr.slice()
@@ -604,6 +633,7 @@ const saveRedirect = async () => {
   redirectSaving.value = false
 }
 const mgmtLoading = ref(false)
+const hostOf = (u) => { try { return new URL(u).hostname } catch { return '' } }
 const openRedirectMgmt = async () => {
   redirectMgmtOpen.value = true; mgmtLoading.value = true
   try { redirectList.value = await GET('/ads/redirects') } catch (e) {}
@@ -906,7 +936,7 @@ const unsubscribeLeads = async () => {
           <template v-for="a in curList" :key="entityKey(a)">
             <tr :class="{ sel: isSelected(entityKey(a)) }">
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
-              <td><div class="status-cell"><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(a.effective_status)"></span>{{ statusLabel(a.effective_status) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
+              <td><div class="status-cell"><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
@@ -1024,7 +1054,10 @@ const unsubscribeLeads = async () => {
       </div>
       <div class="rd-mgmt-list" v-loading="mgmtLoading">
         <div v-for="r in redirectList" :key="r.ad_id" class="rd-mgmt-row">
-          <code class="rd-mid">{{ r.ad_id }}</code>
+          <div class="rd-mid-wrap">
+            <code class="rd-mid" title="ad_id">{{ r.ad_id }}</code>
+            <span class="rd-mhost">{{ hostOf(r.target_url) }}</span>
+          </div>
           <span class="rd-murl" :title="r.target_url">{{ r.target_url }}</span>
           <button class="ctrl-btn sm" :disabled="opLoading" @click="removeRedirect(r.ad_id)">{{ t('common.remove') }}</button>
         </div>
@@ -1251,7 +1284,7 @@ const unsubscribeLeads = async () => {
 .pp-tag.mid { color: var(--warning) }
 .pp-tag.low { color: var(--t3) }
 .cache-at.live-ok { color: var(--success) }
-.rd-badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; font-size: 10px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd2); border-radius: 8px }
+.rd-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 3px; margin-left: 5px; font-size: 10px; line-height: 1; background: var(--acg); color: var(--ac); border: 1px solid var(--ac); border-radius: 8px; vertical-align: middle; box-sizing: border-box }
 .rd-form { display: flex; flex-direction: column; gap: 8px }
 .rd-form label { font-size: 12px; color: var(--t3) }
 .rd-hint { font-size: 11px; color: var(--t3); line-height: 1.5 }
@@ -1259,7 +1292,9 @@ const unsubscribeLeads = async () => {
 .rd-cnt { font-size: 12px; color: var(--t2) }
 .rd-mgmt-list { max-height: 380px; overflow-y: auto }
 .rd-mgmt-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 12px }
-.rd-mid { color: var(--t3); font-size: 11px; flex-shrink: 0 }
+.rd-mid-wrap { display: flex; flex-direction: column; gap: 2px; width: 150px; flex-shrink: 0 }
+.rd-mid { color: var(--t3); font-size: 10px; letter-spacing: .2px; overflow: hidden; text-overflow: ellipsis }
+.rd-mhost { color: var(--ac); font-size: 10px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .rd-murl { flex: 1; color: var(--ac); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px }
 .diag-body { padding: 0 4px }
 .diag-warn { padding: 10px 14px; background: rgba(255,159,10,.08); color: var(--warning); border-radius: 8px; font-size: 12px; line-height: 1.5; margin-bottom: 16px }
