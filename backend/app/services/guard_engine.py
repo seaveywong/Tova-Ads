@@ -66,6 +66,17 @@ RULE_CATEGORY = {
 # 扩量规则类型（1.0 _check_scale_rule 移植）：命中 → 走 set_budget 加预算（非暂停链）
 SCALE_RULE_TYPES = ("slow_scale", "roas_scale", "fast_scale")
 
+# 转化类型 → KPI 字段集（与 dashboard.KPI_CATEGORY 同源拷贝；routers 导入 services 会循环，反向拷贝）
+# 规则 kpi_scope 按此映射过滤：规则只作用于该转化类型的广告（不同类型阈值天然不同——对话 $8 vs 购物 $40）
+KPI_CATEGORY = {
+    "shopping": ["offsite_conversion.fb_pixel_purchase", "purchase", "omni_purchase",
+                 "onsite_web_purchase", "web_in_store_purchase", "onsite_web_app_purchase"],
+    "messaging": ["onsite_conversion.messaging_conversation_started_7d"],
+    "leads": ["onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"],
+    "engagement": ["like", "post_engagement", "page_likes"],
+    "traffic": ["link_click", "landing_page_view"],
+}
+
 # 默认参数（审计项目9：8 规则默认值表 + 扩量 2 类）
 # 扩量契约（params JSON，全部可省）：
 #   min_conversions   转化数下限（当日 FB 转化 ≥ 此值才考虑扩量）
@@ -314,7 +325,8 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
                    target_cpa: float | None = None, yesterday_insight: dict | None = None,
                    prev_spend: float | None = None, history: list | None = None,
                    currency: str = "USD", landing_clicks: int = 0,
-                   landing_visits: int = 0, leads_count: int = 0) -> tuple[bool, str]:
+                   landing_visits: int = 0, leads_count: int = 0,
+                   kpi_field: str = "") -> tuple[bool, str]:
     """评估单条规则对单条广告。返回 (命中, 命中详情)。
 
     conversions：FB 转化数（KPI resolver，目标感知）。
@@ -327,6 +339,15 @@ def _evaluate_rule(rule: GuardRule, ad_insights: dict, conversions: int = 0,
         leads 例外——真转化计入 CPA（无 leads 时潜客系列会被空耗误杀，2026-09-04 用户案例）。
     landing_metric（rule params）：pass（通过量，默认）/ visit（访问量）。
     """
+    # kpi_scope（批AH）：规则只作用于指定转化类型的广告——不同类型合理 CPA 天差地别
+    # （对话 $8 vs 购物 $40），一条规则一个阈值管全部类型必然误杀/漏判。空=全部类型（兼容存量规则）。
+    _kscope = (json.loads(rule.params) if rule.params else {}).get("kpi_scope", "")
+    if _kscope:
+        _cat_fields = KPI_CATEGORY.get(str(_kscope), [])
+        if kpi_field and kpi_field not in _cat_fields:
+            return False, ""
+        if not kpi_field:   # 广告 KPI 未解析出（未知类型）——限定型规则不适用，宁漏判不误杀
+            return False, ""
     # 转化归因：按规则 conversion_source + landing_metric 取 effective conversions
     cs = (getattr(rule, "conversion_source", None) or "either").lower()
     raw_params = json.loads(rule.params) if rule.params else {}
@@ -1445,6 +1466,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 for rule in acc_rules:
                     try:
                         _h, _d = _evaluate_rule(rule, ad, conversions=conv, target_cpa=target_cpa,
+                                                kpi_field=(kpi or {}).get("kpi_field", ""),
                                                 landing_clicks=landing_clicks,
                                                 landing_visits=landing_visits,
                                                 leads_count=leads_map.get(ad_id, 0),

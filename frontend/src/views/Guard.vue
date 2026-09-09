@@ -170,7 +170,12 @@ const HUMAN = {
   click_fraud: r => t('guard.human.click_fraud', { clicks: p(r,'min_clicks')||100, ratio: p(r,'max_unique_ratio')||50 }),
 }
 const fmtN = (n) => Number(n).toLocaleString()
-const humanText = (r) => (HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r))
+const KPI_SCOPE_LABEL = computed(() => ({ shopping: t('guard.kpiCat.shopping'), messaging: t('guard.kpiCat.messaging'), leads: t('guard.kpiCat.leads'), engagement: t('guard.kpiCat.engagement'), traffic: t('guard.kpiCat.traffic') }))
+const humanText = (r) => {
+  const base = HUMAN[r.rule_type] ? HUMAN[r.rule_type](r) : paramsSummary(r)
+  const ks = (r.params || {}).kpi_scope
+  return ks ? `[${KPI_SCOPE_LABEL.value[ks] || ks}] ${base}` : base   // 批AH：限定型规则显示适用转化类型前缀
+}
 // action-tag 分色：observe=中性灰 / pause 系=warning / scale=success
 const actionTagCls = (a) => a === 'observe' ? 'act-observe' : a === 'scale' ? 'act-scale' : 'act-pause'
 // 命中时间格式化
@@ -207,7 +212,7 @@ const confirmDiscard = async () => {
 }
 const openCreate = () => {
   editing.value = null
-  form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
+  form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, kpi_scope: '', conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
   onTypeChange()
   snapForm()
   editOpen.value = true
@@ -218,10 +223,12 @@ const openEdit = (r) => {
   // landing_metric 藏在 params 里（后端从 params 读），UI 上单独取出来
   const landingMetric = rawParams.landing_metric || 'pass'
   delete rawParams.landing_metric
+  const kpiScope = rawParams.kpi_scope || ''
+  delete rawParams.kpi_scope
   form.value = {
     name: r.name, rule_type: r.rule_type, category: r.category,
     params: rawParams, conversion_source: r.conversion_source || 'either',
-    landing_metric: landingMetric,
+    landing_metric: landingMetric, kpi_scope: kpiScope,
     action: r.action,
     scope_act_ids: r.scope_act_id ? r.scope_act_id.split(',').map(s => s.trim()).filter(Boolean) : [],
   }
@@ -236,6 +243,8 @@ const save = async () => {
   })
   // landing_metric 作为 params 子键随规则存（后端 _evaluate_rule 从 params 取）
   if (form.value.conversion_source !== 'fb') cleanParams.landing_metric = form.value.landing_metric || 'pass'
+  // 批AH：适用转化类型也作 params 子键（后端按 KPI 字段分类过滤；空=全部类型）
+  if (form.value.kpi_scope) cleanParams.kpi_scope = form.value.kpi_scope
   const body = {
     name: form.value.name.trim(), rule_type: form.value.rule_type, category: form.value.category,
     params: cleanParams, conversion_source: form.value.conversion_source,
@@ -366,6 +375,16 @@ const doInspect = async (force = false) => {
         <div class="form-l"><label>{{ t('guard.type') }}</label>
           <select v-model="form.rule_type" class="input" @change="onTypeChange">
             <option v-for="(meta, key) in RULE_TYPES" :key="key" :value="key">{{ meta.label }}</option>
+          </select>
+        </div>
+        <div class="form-l"><label>{{ t('guard.kpiScope') }}</label>
+          <select v-model="form.kpi_scope" class="input" :title="t('guard.kpiScopeTip')">
+            <option value="">{{ t('guard.kpiScopeAll') }}</option>
+            <option value="shopping">{{ t('guard.kpiCat.shopping') }}</option>
+            <option value="messaging">{{ t('guard.kpiCat.messaging') }}</option>
+            <option value="leads">{{ t('guard.kpiCat.leads') }}</option>
+            <option value="engagement">{{ t('guard.kpiCat.engagement') }}</option>
+            <option value="traffic">{{ t('guard.kpiCat.traffic') }}</option>
           </select>
         </div>
         <div class="form-l" v-if="currentSchema.params.length"><label>{{ t('guard.threshold') }}</label>
