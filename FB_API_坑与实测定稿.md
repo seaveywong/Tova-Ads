@@ -56,3 +56,8 @@
 ### 7. webhook 订阅字段权限（批Y 补）
 - `subscribed_apps` 的 `subscribed_fields` 带 `messages` 需 **pages_messaging**（未申请）；`leadgen`/`feed` 只需 pages_manage_metadata
 - 重授权弹窗 8 个权限 + 自动附加的 public_profile = 后台 9 个，非缺失
+
+### 8. 转化闭环：adset 像素 ≠ 落地页 fire 像素（批Z）
+- worker fire 的像素来自落地页自己的 pixel_ids（display 模式经 router/next 请求时动态下发）——投放链只给 adset 配像素、页不 fire = FB 永远零转化 → 止损按"花钱零转化"正确关广告
+- 修复：部署链解析像素后回写页 pixel_ids + 页像素进解析链；改页 pixel_ids 须重发布（LP_CONFIG 发布时注入）
+- 验证口径：POST /landing-pages/router/next（页的 ingest_secret+slug）看 pixel_ids，与 adset promoted_object 对账

@@ -1690,3 +1690,18 @@ fb_oauth.py OAUTH_SCOPES 补 leads_retrieval + pages_manage_metadata（8 权限�
 
 ### 新坑（追加到坑文档）
 - 订阅字段带 `messages` 需 `pages_messaging`（未申请）——leadgen/feed 不需要；正式端点 leads.py 只订 leadgen，本来就对（测试脚本踩的）
+
+## 批Z：转化闭环断裂修复——投放像素与落地页 fire 不同源（2026-09-09）
+
+### 事故
+真投广告花钱后被止损规则正确关闭（花钱零转化）。根因不是"没建像素"：广告组优化的是 Tova 像素（库随机解析），但**落地页 6 的 pixel_ids 是空的**——worker fire 的像素来自页自己的 LP_CONFIG/router_next，页没配就一个事件都不发 → FB 零转化 → 止损触发。投放链（给 adset）与落地页（给 worker）是两套独立配置，中间从没接线。
+
+### 修复
+1. **部署链回写**（launch_templates 树/平铺 runner）：解析出像素后 `_bind_pixel_to_landing_page` 写回绑定的落地页 pixel_ids（幂等，独立 SuperSession 防 RLS 坑，write_log 留痕）
+2. **像素链插入页优先级**：节点 > 抽屉 > 模板 > **落地页已配像素** > 库随机 > 自愈建
+3. **数据修复 LP6**：补绑 1394346206205535 + PUT 重发布（LP_CONFIG 是发布时注入，改库必须重发布；自检 pass，域名/子码不变）
+4. **验证**：POST /landing-pages/router/next（worker 的真实取数端点）→ pixel_ids=['1394346206205535'] = 广告组优化像素，闭环闭合
+
+### 坑（已记坑文档）
+- display 模式像素在请求时经 worker→后端 router/next 动态下发（非烤进页面）——验证像素链路要调 router/next，别 grep 页面 HTML
+- 落地页改 pixel_ids 后必须重发布才进 LP_CONFIG（worker 侧）；router/next 则即时生效
