@@ -32,13 +32,14 @@ function _errMsg(detail) {
   return String(detail)
 }
 
-export async function api(method, path, body) {
+export async function api(method, path, body, timeoutMs = 30000) {
   const opts = { method, headers: headers() }
   if (body) opts.body = JSON.stringify(body)
   // 超时 + 中止：防止空闲时 fetch 堆积（网络瞬断→pending 连接耗尽→页面卡死）
+  // 默认 30s；慢端点（如落地页自检带 FB 封禁探测）可单独放宽
   const _ctrl = new AbortController()
   opts.signal = _ctrl.signal
-  const _timer = setTimeout(() => _ctrl.abort(), 30000)
+  const _timer = setTimeout(() => _ctrl.abort(), timeoutMs)
   try {
     const res = await fetch(`${BASE}${path}`, opts)
     // 滑动续期：后端返新 token 就存（活跃用永不掉线）
@@ -73,7 +74,7 @@ export async function api(method, path, body) {
   }
 }
 
-export const GET = (p) => api('GET', p)
+export const GET = (p, timeoutMs) => api('GET', p, undefined, timeoutMs)
 export const POST = (p, b) => api('POST', p, b)
 export const PUT = (p, b) => api('PUT', p, b)
 export const PATCH = (p, b) => api('PATCH', p, b)

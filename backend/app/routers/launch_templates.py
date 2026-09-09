@@ -188,9 +188,9 @@ def _fb_domain_probe(db, tenant_id: int, url: str, _cache: dict | None = None) -
     warn（无令牌/爬虫被挡/探测异常）不构成拦截依据——探测不可用不能误杀部署。"""
     if _cache is not None and url in _cache:
         return _cache[url]
-    from .landing import _fb_ban_probe
+    from .landing import _fb_ban_probe_batch
     try:
-        st, _detail = _fb_ban_probe(db, tenant_id, url)
+        st, _detail = _fb_ban_probe_batch(db, tenant_id, [url])[0]
     except Exception:
         st = "warn"
     if _cache is not None:

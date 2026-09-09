@@ -270,7 +270,8 @@ const showSelfCheck = (r, title) => {
 const checkHealth = async (p) => {
   healthCheckingId.value = p.id
   try {
-    const r = await GET(`/landing/pages/${p.id}/health`)
+    // 自检含 FB 封禁探测（域级+全部子码）可达数十秒——放宽到 120s，避免 30s 全局超时误报「请求超时」
+    const r = await GET(`/landing/pages/${p.id}/health`, 120000)
     healthResult.value = r
     await loadPages()
     showSelfCheck(r, t('landing.scTitle'))

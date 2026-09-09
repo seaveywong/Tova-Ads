@@ -1093,23 +1093,9 @@ def _fb_scrape_once(fb, url: str):
         return "warn", f"检测异常：{str(e)[:50]}"
 
 
-def _fb_ban_probe(db, tenant_id, url):
-    """FB 平台封禁探测：调 Graph API URL scrape，判断 URL 是否被 FB 拉黑。
-
-    返回 (status, detail)：
-    - pass: FB 正常抓取（未封禁）
-    - fail: 命中封禁关键词（blocked/spam/policy/violat 等）→ 疑似被封禁
-    - warn: FB 爬不到（SSL/DNS/你的防护挡了 FB 爬虫）/ 令牌问题 / 无可用令牌（无法判定）
-    """
-    from ..core.fb_tokens import first_client
-    fb = first_client(db, tenant_id)
-    if fb is None:
-        return "warn", "无可用 FB 令牌，跳过封禁检测"
-    return _fb_scrape_once(fb, url)
-
-
 def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0):
-    """批量 FB 封禁探测：5 并发 + 单调用 10s 超时兜底（串行 N 个 × 30s 必撞网关超时）。
+    """FB 封禁探测（单/批通用）：5 并发 + 单调用 10s 超时兜底（裸调 fb_client 会拖满其内置 30s）。
+    单 URL 场景传 [url] 取 [0]。
 
     first_client 只在主线程调（SQLAlchemy Session 非线程安全）；FbClient 线程安全（见 _fb_scrape_once）。
     返回与 urls 同序的 [(status, detail), ...]；单调用超时按 warn 处理不阻断整体。
@@ -1318,15 +1304,17 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
                    "detail": p.status or "draft"})
     # 2. 公开链接
     checks.append({"key": "url", "label": L(loc, "landing.scUrl"), "status": "pass", "detail": base})
-    # 3. 域名+SSL 可达（curl 根域，follow_redirects）—— live_probe=False 时跳过（发布后 CF 传播未完成会误报）
+    # 3. 域名+SSL 可达 —— live_probe=False 时跳过（发布后 CF 传播未完成会误报）
+    # 不跟随重定向：redirect 模式 / 会 302 到外部目标站——跟随会把外部站的故障/协议
+    # 错算到本页头上（且 SSL 校验会被外部最终 URL 干扰）。自己域名返回任意 <500 响应
+    # （200=display / 302=redirect）即证明域名解析+SSL+Worker 全活；目标站健康度归检查 6。
     if live_probe:
         try:
-            resp = _probe_http("GET", base, timeout=6, follow_redirects=True)
-            ssl_ok = str(resp.url).startswith("https://")
-            ok = resp.status_code < 500 and ssl_ok
+            resp = _probe_http("GET", base, timeout=6, follow_redirects=False)
+            ok = resp.status_code < 500
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
-                           "detail": f"HTTP {resp.status_code}" + ("" if ssl_ok else " · SSL无效")})
+                           "detail": f"HTTP {resp.status_code}"})
         except Exception as e:
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"), "status": "fail",
                            "detail": f"不可达: {str(e)[:60]}"})
@@ -1409,7 +1397,9 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         checks.append({"key": "protection", "label": L(loc, "landing.scProtection"), "status": "warn", "detail": "未开启"})
     # 8. FB 平台封禁（慢，发布时跳过）——域名级 + 子码级
     if include_fb:
-        fb_status, fb_detail = _fb_ban_probe(db, p.tenant_id, base)
+        # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
+        # 内置 30s 拖满，手动自检整体撞前端超时）
+        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base])[0]
         checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
         # 子码级 FB 封禁检测（扫描所有 active 子码）
         from ..models.launch import LandingAdLink

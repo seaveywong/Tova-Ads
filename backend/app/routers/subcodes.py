@@ -307,12 +307,12 @@ def fb_check_subcode(
 
     返回 {status: pass/warn/fail, detail, url}。
     """
-    from .landing import _fb_ban_probe
+    from .landing import _fb_ban_probe_batch
     base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
     if not p:
         raise HTTPException(404, "落地页不存在")
     url = f"{base.rstrip('/')}/a/{body.slug}"
-    status, detail = _fb_ban_probe(db, user.tenant_id, url)
+    status, detail = _fb_ban_probe_batch(db, user.tenant_id, [url])[0]
     return {"status": status, "detail": detail, "url": url}
 
 
