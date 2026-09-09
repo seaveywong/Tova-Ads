@@ -742,8 +742,7 @@ def build_lead_form_payload(
         key = q.get("key") or q.get("label", "").lower().replace(" ", "_")
         item["key"] = key
         item["label"] = q.get("label", "")
-        if q.get("placeholder"):
-            item["placeholder"] = q["placeholder"]
+        # placeholder 是编辑器本地概念，LeadGenQuestion 无此键（批W 实测 #100 Invalid keys）
         opts = q.get("options")
         if opts:
             has_custom_options = True
