@@ -3584,6 +3584,12 @@ def _close_job_if_done(sdb, job_id: int):
     failed 计数器在并发会话上互相丢更新。改为：无 pending/creating item 才收口，
     计数以 items 表 FILTER 聚合为准（幂等，可重复调）。"""
     from sqlalchemy import text as _text
+    # session autoflush=False（database.py 全局）——item 的终态先在 ORM 内存里，不 flush
+    # 聚合 SQL 读到的是 DB 旧值（creating）→ 误判 in-flight 永不收口（实测 job32 抓到）
+    try:
+        sdb.flush()
+    except Exception:
+        pass
     row = sdb.execute(_text("""
         SELECT count(*) FILTER (WHERE status IN ('pending','creating')) AS inflight,
                count(*) FILTER (WHERE status = 'success') AS nok,
