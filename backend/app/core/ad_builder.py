@@ -514,17 +514,23 @@ def build_adset(
         # ——模板 advanced_config 残留该键时 adset 建成但 ads 全灭 1885702/invalid_param
         extra = {k: v for k, v in extra.items() if k != "is_dynamic_creative"}
         _deep_merge(payload, extra)
-    # Advantage+ 受众（组级开关，批V）：v23.0 起 targeting_automation 必须嵌在 targeting 内——
-    # 顶层发会被静默丢弃，FB 默认 Advantage+=1 → 手动收窄（自定义年龄/性别/兴趣）全 1870227。
-    # 显式关=原始受众（0）手动定向全量生效（V23 实测：45-65+性别+兴趣+版位全量保真）；
-    # 开=不发该键（FB 默认 1）。放 extra 合并后写，防 advanced_config 残留键顶掉。
-    if advantage_audience is False:
-        payload.setdefault("targeting", {})
-        payload["targeting"].pop("targeting_automation", None)
-        payload["targeting"]["targeting_automation"] = {"advantage_audience": 0}
-    else:
-        if isinstance(payload.get("targeting"), dict):
-            payload["targeting"].pop("targeting_automation", None)
+    # Advantage+ 受众（组级开关，批V+批W 实测定稿）：v23.0 起 targeting_automation 必须嵌在
+    # targeting 内且显式发 1/0。**非默认定向（自定义年龄/性别/受众/兴趣）必须=0**——显式 1 或
+    # 不发键在非默认取向下都会被拒（1870227/1870188 实测）。规则：开关关 或 targeting 含任何
+    # 非默认收窄 → 0（原始受众，手动定向全量生效）；仅默认宽定向（geo+18-65+全性别）才 1。
+    # 放 extra 合并后写，防 advanced_config 残留键顶掉。
+    payload.setdefault("targeting", {})
+    if isinstance(payload["targeting"], dict):
+        _t = payload["targeting"]
+        _non_default = bool(
+            _t.get("flexible_spec") or _t.get("excluded_connections")
+            or _t.get("custom_audiences") or _t.get("excluded_custom_audiences")
+            or _t.get("behaviors") or _t.get("life_events")
+            or _t.get("genders") not in (None, [], [0, 1, 2])   # []=build_targeting 全性别
+            or _t.get("age_min") not in (None, 18)
+            or _t.get("age_max") not in (None, 65))
+        payload["targeting"]["targeting_automation"] = {
+            "advantage_audience": 0 if (advantage_audience is False or _non_default) else 1}
     return payload
 
 
@@ -719,15 +725,17 @@ def build_lead_form_payload(
         raise ValueError("privacy_url 必填（02_附录 §四 不变量3）")
 
     # ── questions：联系字段（按国家路由）+ 客户自选 + 自定义问题 ──
+    # 批W 实测修正：questions 项不支持 "name" 键（v25 #100 Invalid keys "name"）——
+    # 预置联系字段用 type+key，自定义问题用 key+label（下方原样）
     primary = default_contact_field(target_countries or [])
     questions: list[dict] = [
-        {"type": "FIRST_NAME", "name": "first_name"},
-        {"type": primary, "name": primary.lower()},
+        {"type": "FIRST_NAME", "key": "first_name"},
+        {"type": primary, "key": primary.lower()},
     ]
     for f in (extra_contact_fields or []):
         f_up = f.upper().strip()
         if f_up in _CONTACT_FIELD_TYPES and f_up not in (primary, "FIRST_NAME"):
-            questions.append({"type": f_up, "name": f_up.lower()})
+            questions.append({"type": f_up, "key": f_up.lower()})
     has_custom_options = False
     for q in (custom_questions or []):
         item = {"type": "CUSTOM"}

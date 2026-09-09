@@ -98,6 +98,12 @@ def run_leads_poll():
                 try:
                     leads_data = fb.get_leads(ad_id, limit=100, since_ts=since)
                 except FbApiError as e:
+                    # 权限类失败=该账户令牌 FB 侧已失效（如账户被 owner 移除授权）——
+                    # 跳过本账户剩余广告（每轮空打 N 次只换 N 条 warning，无价值）
+                    if e.category in ("permissions", "permission_denied"):
+                        logger.warning("[LeadsPoll] act=%s 令牌无权限，本轮跳过 %d 个广告: %s",
+                                       act_id, len(ad_ids) - ads_polled + 1, e.friendly)
+                        break
                     logger.warning("[LeadsPoll] ad=%s 拉取失败: %s", ad_id, e.friendly)
                     continue
                 for ld in leads_data:
