@@ -629,6 +629,11 @@ const fbTip = (a) => a.results_fb_available === false ? t('adm.fbNotCollected') 
 const metricText = (a, id) => {
   if (id === 'objective') return objLabel(a.objective)
   if (id === 'optimization_goal') return optLabel(a.optimization_goal)
+  if (id === 'pixel') {   // 组级转化像素（promoted_object.pixel_id；缓存可能存字符串形态）
+    let po = a.promoted_object
+    if (typeof po === 'string') { try { po = JSON.parse(po) } catch { po = null } }
+    return po?.pixel_id || '—'
+  }
   if (id === 'spend') return fmtSpendCol(a)
   if (id === 'cpa') return fmtCpaCol(a)
   if (id === 'results_fb') return fbResult(a) == null ? '—' : fbResult(a).toLocaleString()

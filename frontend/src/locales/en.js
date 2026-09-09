@@ -916,7 +916,7 @@ export default {
     redirectLink: 'Redirect link', selectedCount: '{n} selected', selectAll: 'Select all / clear',
     batchActivate: 'Batch Activate', batchPause: 'Batch Pause', clearSelection: 'Clear selection',
     tabCampaign: 'Campaigns', tabAdset: 'Ad Sets', tabAd: 'Ads',
-    colSeries: 'Campaign', colAdset: 'Ad Set', colObjective: 'Objective', colOptGoal: 'Optimization Goal',
+    colSeries: 'Campaign', colAdset: 'Ad Set', colObjective: 'Objective', colOptGoal: 'Optimization Goal', colPixel: 'Pixel',
     colBudget: 'Budget', colSpend: 'Spend', colConversion: 'Conv.', colReach: 'Reach', colFrequency: 'Frequency',
     colSubcode: 'Subcode', colVisits: 'Visits', colPass: 'Pass', colPassRate: 'Pass Rate',
     activate: 'Activate', editBudget: 'Edit Budget', redirectShort: 'Redirect',

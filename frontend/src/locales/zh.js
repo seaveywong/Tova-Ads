@@ -927,7 +927,7 @@ export default {
     redirectLink: '跳转链接', selectedCount: '已选 {n} 条', selectAll: '全选/取消',
     batchActivate: '批量开启', batchPause: '批量暂停', clearSelection: '取消选择',
     tabCampaign: '广告系列', tabAdset: '广告组', tabAd: '广告',
-    colSeries: '系列', colAdset: '广告组', colObjective: '目标', colOptGoal: '优化目标',
+    colSeries: '系列', colAdset: '广告组', colObjective: '目标', colOptGoal: '优化目标', colPixel: '转化像素',
     colBudget: '预算', colSpend: '消耗', colConversion: '转化', colReach: '覆盖', colFrequency: '频次',
     colSubcode: '子码', colVisits: '访问', colPass: '通过', colPassRate: '通过率',
     activate: '开启', editBudget: '改预算', redirectShort: '跳转',

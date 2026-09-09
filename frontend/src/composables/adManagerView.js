@@ -6,6 +6,7 @@ const parentKey = (row, id) => `${row.platform || 'fb'}:${row.act_id}:${entityId
 export const METRIC_COLUMNS = [
   { id: 'objective', label: 'colObjective', levels: ['campaign'], width: 140 },
   { id: 'optimization_goal', label: 'colOptGoal', levels: ['adset'], width: 160 },
+  { id: 'pixel', label: 'colPixel', levels: ['adset'], width: 150 },
   // 顺序照 FB Ads Manager 默认列：成效 → 消耗 → 单次成效费用 → 预算 → …（批H）
   { id: 'results_fb', label: 'resultsFb', width: 120, sort: 'results_fb' },
   { id: 'spend', label: 'colSpend', width: 120, sort: 'spend' },
@@ -24,7 +25,7 @@ export const METRIC_COLUMNS = [
   { id: 'pass_rate', label: 'colPassRate', levels: ['ad'], width: 110 },
 ]
 export const columnsFor = level => METRIC_COLUMNS.filter(c => !c.levels || c.levels.includes(level))
-export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'ad' ? ['ctr'] : [])].filter(id => columnsFor(level).some(c => c.id === id))
+export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr'] : [])].filter(id => columnsFor(level).some(c => c.id === id))
 
 export function entityContext(data) {
   const campaigns = new Map((data.campaigns || []).map(row => [entityKey(row), row]))
