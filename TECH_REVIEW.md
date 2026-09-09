@@ -1624,3 +1624,28 @@ v23.0 起 `targeting_automation` 必须作为 `targeting` 的子键发送；顶�
 ### 附加发现
 - Playwright 选部署抽屉账户行：`.first()` 匹配 `.acc-list` 容器点中心=中间行（列表顺序会变→时好时坏）；正确做法 `getByText(act_id).locator('xpath=ancestor::label[1]')` + 选区状态断言（`.acc-row.on`）
 - 读回 adset 时顶层字段 `targeting_automation` 不可读（nested in targeting）
+
+## 批W：FB API 全面重审（官方 changelog 对照 + 真打实测，2026-09-09）
+
+### 概述
+按用户要求把全部 FB 写路径 × 现行 API 规则重审一遍（官方 2025-06 Advantage+ 行为变更博客 + 逐字段真打验证），修三类问题。
+
+### 审计范围
+ad_ops/guard_engine 保活/launch_templates 三处建广告链、build_campaign/build_adset/build_creative/build_lead_form_payload、adspixels、page_post(/feed /photos)、leadgen_forms(3 调用点)、leads 拉取、subscribed_apps、FB scrape
+
+### 修复
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | 非默认定向（自定义年龄/性别/兴趣/受众）下 Advantage+ 开（显式 1 或不发键）→ FB 拒（1870227/1870188 实测）；官方博客：非默认必须显式 0 | build_adset 终局规则：开关关**或** targeting 含任何非默认收窄 → 嵌套 advantage_audience=0；仅默认宽定向 → 1。双分支真建验证（45-65+男 → 0 保真；18-65 宽 → 1） |
+| 2 | leadgen 表单创建从未真通过：questions 含非法键 name/placeholder（v25 #100 Invalid keys） | name→key；placeholder 剥除（编辑器本地概念）。**真建成功**（补 follow_up_url 后，v25 必填 FollowUpActionURL，部署链已传）；探测表单已归档 |
+| 3 | leads 轮询对失效令牌账户每轮空打 N 次 API（journal 刷屏） | 权限类错误跳过本账户剩余广告（单条日志） |
+
+### 实测结论（全部真建 PAUSED 即删，零消耗）
+- T1b 开关开+自定义年龄：builder 强制 ta=0 → FB 建成，age=45-65 gender=[1] 一字不差
+- T1c 默认宽定向：ta=1 → 正常
+- T3 leadgen：修复后建成（1997233864326843，已归档）；API 不支持删表单（33），归档可用
+- 确认项：guard 保活 payload 用默认 18-65 定向（自动 opt-in 合规，无需改）；copies/delivery_estimate 未使用
+
+### 待用户侧动作
+- **cred25 令牌缺 leads_retrieval scope**（App 已批但令牌未带；O322 自家广告读 leads 报 #100 Requires pages_manage_ads or leads_retrieval）→ BM→系统用户→重新生成令牌勾选 leads_retrieval，换进 2.0 后潜客轮询恢复
+- page_post /feed 发帖需 pages_manage_posts（未在已批权限单里）→ 下一轮 App Review 补申请；现有 object_story_spec 内嵌链路不受影响
