@@ -391,6 +391,57 @@ def _resolve_tree_pixel(sdb, tenant_id: int, act_id: str, val: str) -> str:
     return str(_random.choice(rows).pixel_id) if rows else ""
 
 
+def _account_pixel_ids(sdb, tenant_id: int, act_id: str) -> list[str]:
+    """该账户已绑（=已核权）的 FB 像素列表——像素库 act 维度（sync/deploy 来源均经
+    act/adspixels 实测入档，是账户权限的地面真相缓存）。"""
+    from ..models.landing_lib import LandingPixel
+    return [str(r.pixel_id) for r in sdb.query(LandingPixel).filter(
+        LandingPixel.tenant_id == tenant_id, LandingPixel.act_id == act_id,
+        LandingPixel.platform == "fb", LandingPixel.status == "active").all()]
+
+
+def _landing_page_pixel_ids(sdb, tenant_id: int, landing_page_id: int) -> list[str]:
+    """落地页已配 FB 像素全列表（first_pixel 的全量版——权限比对需要逐个）。"""
+    if not landing_page_id:
+        return []
+    try:
+        p = sdb.query(LandingPage).filter(LandingPage.id == landing_page_id,
+                                          LandingPage.tenant_id == tenant_id).first()
+        if not p:
+            return []
+        return [str(x) for x in json.loads(p.pixel_ids or "[]")]
+    except Exception:
+        return []
+
+
+def _pick_group_pixel(sdb, tenant_id: int, act_id: str, explicit_px: str,
+                      landing_page_id: int, fb, allow_create: bool = True) -> tuple[str, str]:
+    """组像素统一解析（批BR 终版，用户拍板「优先账户自己能关联到的」——2026-09-11 …142 实证：
+    页/模板像素令牌可见 → 创建不报错，但账户未被 assign → 投放侧拦截，「部署成功广告失败」
+    静默雷）。优先级：
+      ① 显式指定（节点>抽屉>模板）且该账户有权（∈像素库 act 绑定）→ 原样尊重
+      ② 账户已绑像素随机（主位策略——自己能关联到的永不错；多像素分摊沿用批O-3）
+      ③ 库空 → 自愈：拉 FB act/adspixels 入档（零像素且 allow_create 则自动建）后按 ②
+    返回 (pixel_id, note)：note 非空=发生了自动换（调用方留痕）；pixel_id 空=真无解（fail-fast）。
+    选中像素账户必有权限；调用方须回写落地页 fire（_bind_pixel_to_landing_page，追加不顶——
+    页上主像素继续收全量事件，账户像素管优化归因）。"""
+    explicit_px = (explicit_px or "").strip()
+    lib = _account_pixel_ids(sdb, tenant_id, act_id)
+    if not lib:
+        _ensure_account_pixel(sdb, tenant_id, act_id, fb, allow_create=allow_create)
+        lib = _account_pixel_ids(sdb, tenant_id, act_id)
+    if not lib:
+        return "", ""
+    if explicit_px and explicit_px in lib:
+        return explicit_px, ""
+    page_ids = _landing_page_pixel_ids(sdb, tenant_id, landing_page_id)
+    want = explicit_px or (page_ids[0] if page_ids else "")
+    picked = _resolve_tree_pixel(sdb, tenant_id, act_id, "random") or lib[0]
+    note = "" if (not want or picked == want) else \
+        f"像素 {want} 该账户无权限，已自动换为账户像素 {picked}"
+    return picked, note
+
+
 def _ensure_account_pixel(sdb, tenant_id: int, act_id: str, fb, allow_create: bool = True) -> str:
     """像素自愈（批U2）：像素库无该账户像素时的兜底——
     ① 拉 FB 账户既有像素（只读），取第一个入库存档后返回（库存档后以后走库，零 FB 调用）
@@ -1662,18 +1713,17 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
             spend_cap=_p_spend_cap_fb)
         _pf_t = _resolve_targeting(db, adsets[0].get("audience_id") or t.audience_id,
                                    (adsets[0].get("audience_json") or t.audience_json or ""))
-        # 批U2 像素自愈（树预检侧，同平铺口径）：手选 > 模板 > 库随机 > 只读绑定既有；仍无 → 占位符
-        _pf_px = (body.pixel_id or t.pixel_id or "")
+        # 批BR 像素统一链（同部署口径——所见即所发）：显式且有权 > 账户自有随机 > 只读自愈；
+        # 预检不建像素（allow_create=False）；仍无 → 占位符
+        try:
+            _pf_lpid = int(((adsets[0].get("ads") or [{}])[0].get("landing_page_id")) or 0)
+        except Exception:
+            _pf_lpid = 0
+        _pf_px, _ = _pick_group_pixel(
+            db, tenant_id, body.act_id, (body.pixel_id or t.pixel_id or ""),
+            _pf_lpid, None, allow_create=False)
         if not _pf_px:
-            _pf_px = _resolve_tree_pixel(db, tenant_id, body.act_id, "random")
-        if not _pf_px:
-            try:
-                _pf_px = _ensure_account_pixel(
-                    db, tenant_id, body.act_id,
-                    client_for_account(db, tenant_id, body.act_id, "read"),
-                    allow_create=False) or "<部署时自动绑定/创建>"
-            except Exception:
-                _pf_px = "<部署时自动绑定/创建>"
+            _pf_px = "<部署时自动绑定/创建>"
         # 批P1 修2 同口径：未设 advantage_audience 的存量节点按兴趣词启发式（预检=所见即所发）
         _pf_adv = adsets[0].get("advantage_audience")
         if _pf_adv is None:
@@ -2543,13 +2593,14 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, item.act_id, filepath)
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
-    pixel_id = item.pixel_id or tpl.pixel_id
-    if not pixel_id and (tpl.landing_page_id or 0):
-        # 批Z：绑了落地页 → 页已配像素优先（与 worker fire 同源才有转化闭环）
-        pixel_id = _landing_page_first_pixel(sdb, tenant_id, int(tpl.landing_page_id))
+    # 批BR：统一走「优先账户自有像素」链（同树模式——模板/页像素无权时自动换+进度留痕）
+    pixel_id, _px_note = _pick_group_pixel(
+        sdb, tenant_id, item.act_id, (item.pixel_id or tpl.pixel_id or ""),
+        int(tpl.landing_page_id or 0), fb)
     if not pixel_id:
-        # 批U2 自愈：抽屉/模板都没选 → 绑账户既有像素，零像素则自动建
-        pixel_id = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
+        raise FbApiError("no_id", "该账户无可用像素（BM 未分配且自动创建失败）——请先在 BM 给账户分配像素")
+    if _px_note:
+        _item_note(sdb, item, f"像素核对：{_px_note[:70]}")
     if (tpl.landing_page_id or 0) and pixel_id:
         # 批Z：回写页（页没配这个像素就补上）——否则 worker 不 fire，FB 零转化
         _bind_pixel_to_landing_page(sdb, tenant_id, int(tpl.landing_page_id), pixel_id, item.act_id)
@@ -2881,20 +2932,21 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         _adv_aud = snode.get("advantage_audience")
         if _adv_aud is None:
             _adv_aud = not bool((targeting or {}).get("flexible_spec"))
-        # 组像素链（批Z 终版）：节点 > 部署抽屉按账户 > 模板默认 > **落地页已配像素** >
-        # 库随机 > 自愈(绑既有/自动建)。页像素优先于库随机——worker fire 的就是页的
-        # pixel_ids，adset 与页同源才有转化闭环；解析后回写页（_bind_pixel_to_landing_page）。
+        # 组像素链（批BR 终版，用户拍板「优先账户自己能关联到的」）：显式指定且有权 → 尊重；
+        # 否则账户已绑像素随机（号商账户永不错——…142 实证页像素创建成功但投放被拦的静默雷
+        # 从源头消除）；无权自动换+留痕；选定即回写页 fire（追加不顶，主像素继续收全量事件）。
         _first_ad = (snode.get("ads") or [{}])[0]
         _grp_lpid = int(_first_ad.get("landing_page_id") or 0)
-        _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id,
-                                         str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "")
-        if not _grp_pixel and _grp_lpid:
-            _grp_pixel = _landing_page_first_pixel(sdb, tenant_id, _grp_lpid)
+        _grp_pixel, _px_note = _pick_group_pixel(
+            sdb, tenant_id, item.act_id,
+            str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "",
+            _grp_lpid, fb)
         if not _grp_pixel:
-            _grp_pixel = _resolve_tree_pixel(sdb, tenant_id, item.act_id, "random")
-        if not _grp_pixel:
-            # 批U2 自愈：库无该账户像素 → 绑账户既有 / 自动建（用户问「没像素会不会自动创建」的兑现）
-            _grp_pixel = _ensure_account_pixel(sdb, tenant_id, item.act_id, fb)
+            _fail_group(sname, snode, "该账户无可用像素（BM 未分配且自动创建失败）——请先在 BM 给账户分配像素")
+            continue
+        if _px_note:
+            auto_warns.append(f"[像素] {sname}: {_px_note}")
+            _item_note(sdb, item, f"像素核对：{_px_note[:70]}")
         if _grp_lpid and _grp_pixel:
             # 批Z：回写页（页没配这个像素就补上）——否则 worker 不 fire，FB 零转化
             _bind_pixel_to_landing_page(sdb, tenant_id, _grp_lpid, _grp_pixel, item.act_id)
