@@ -571,7 +571,7 @@ const onTplInline = async (e) => {
     fd.append('file', file)
     const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'   // 全库审查P2：与下方 uploadLandingTpl/downloadTplRef 的 BASE 取法统一（原 '/api' 兜底打错端点）
     const r = await fetch(BASE + '/landing-lib/templates/upload', {
-      method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') }, body: fd
+      method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'X-Locale': localStorage.getItem('tova_locale') || 'zh' }, body: fd
     }).then(r => r.json())
     if (r.id) {
       await loadLandingTemplates()
@@ -596,7 +596,7 @@ const uploadLandingTpl = async () => {
     const fd = new FormData()
     fd.append('name', tplForm.value.name.trim()); fd.append('description', tplForm.value.description); fd.append('file', tplForm.value.file)
     const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
-    const r = await fetch(BASE + '/landing-lib/templates/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') }, body: fd })
+    const r = await fetch(BASE + '/landing-lib/templates/upload', { method: 'POST', headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'X-Locale': localStorage.getItem('tova_locale') || 'zh' }, body: fd })
     if (r.status === 401) { localStorage.removeItem('tova_token'); location.hash = '#/login'; throw new Error(t('landing.notLoggedIn')) }
     const text = await r.text(); let data = {}; try { data = JSON.parse(text) } catch {}
     if (!r.ok) throw new Error(data.detail || t('landing.uploadFail'))
@@ -612,7 +612,7 @@ const delLandingTpl = async (tpl) => {
 }
 const downloadTplRef = () => {
   const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
-  fetch(BASE + '/landing-lib/templates/reference', { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') } })
+  fetch(BASE + '/landing-lib/templates/reference', { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'X-Locale': localStorage.getItem('tova_locale') || 'zh' } })
     .then(r => r.blob()).then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'template-reference.zip'; a.click(); URL.revokeObjectURL(url) })
 }
 const zoneFilter = ref('')

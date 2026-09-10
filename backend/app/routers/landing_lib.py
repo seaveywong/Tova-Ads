@@ -573,8 +573,10 @@ async def upload_template(
     loc = req_locale(request)
     if resource_files:
         warnings.append(L(loc, "landing.tplWarnResourceFiles", n=resource_files))
+    # 硬编码像素：FB 纯数字 ID；TT 是 C 前缀+字母数字混合 ID（真实形态如 CJK4R9BC77U0…，
+    # 纯数字正则永远匹配不到——交叉审核实测抓的漏检）
     if re.search(r'''fbq\(\s*['"]init['"]\s*,\s*['"]\d{6,}''', html) \
-            or re.search(r'''ttq\.load\(\s*['"][Cc]?\d{6,}''', html):
+            or re.search(r'''ttq\.load\(\s*['"][Cc][A-Za-z0-9]{14,}''', html):
         warnings.append(L(loc, "landing.tplWarnHardcodedPixel"))
     # 写死外链（排除带占位符的——那些发布时会被替换，是正确写法）
     _hard_links = [u for u in re.findall(r'''href\s*=\s*['"]([^'"]+)['"]''', html)
@@ -585,6 +587,12 @@ async def upload_template(
     supports_tt = "__LP_TT_PIXELS_JSON__" in html
     if not supports_tt:
         warnings.append(L(loc, "landing.tplWarnNoTtPixel"))
+    # 缺守卫检测（交叉审核 P2-5）：像素/转化占位符所在行没有 (_d) 守卫 → 广告流量与
+    # 系统注入脚本双发、数据翻倍（现网曾有存量模板中招）。守卫写法见参考模板。
+    _unguarded = [ln.strip()[:60] for ln in html.splitlines()
+                  if "__LP_" in ln and "_JSON__" in ln and "(_d)" not in ln]
+    if _unguarded:
+        warnings.append(L(loc, "landing.tplWarnNoGuard", n=len(_unguarded)))
     # 同名覆盖：有则 UPDATE，无则 INSERT
     existing_tpl = db.query(LandingTemplate).filter(
         LandingTemplate.tenant_id == user.tenant_id,

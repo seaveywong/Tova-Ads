@@ -343,6 +343,10 @@ DATA = {
         "zh": "未检测到 TikTok 像素占位符：TT 流量不会 fire 像素（只投 FB 可忽略）",
         "en": "No TikTok pixel placeholder detected: TT traffic will not fire pixels (ignorable if you only run FB)",
     },
+    "landing.tplWarnNoGuard": {
+        "zh": "{n} 处像素/转化占位符缺少 (_d) 守卫——广告流量会与系统注入脚本双发、数据翻倍，请按最新参考模板的守卫写法修改",
+        "en": "{n} pixel/conversion placeholder line(s) lack the (_d) guard — ad traffic will double-fire alongside the injected script and inflate data; follow the guard pattern in the latest reference template",
+    },
 }
 
 
