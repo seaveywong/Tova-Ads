@@ -1380,8 +1380,10 @@ def _inspect_account_worker(ctx: dict) -> dict:
                     from ..models.landing_event import LandingEvent
                     from sqlalchemy import func as _f, text as _ft
                     # 按账户本地日过滤（created_at 存 UTC，转成本地时区再取日期，和 FB insights 对齐）
+                    # 批AS 修：created_at 是 timestamptz——双重 AT TIME ZONE 实际算出 UTC-8h 的日期
+                    # （北京时间 0~16 点的落地访问全部错进前一日桶，当天巡检永远数不到，Agent取证实证）
                     _tz = acc.timezone_name or "UTC"
-                    _local_date_expr = _ft("({} AT TIME ZONE 'UTC' AT TIME ZONE '{}')::date".format(
+                    _local_date_expr = _ft("({} AT TIME ZONE '{}')::date".format(
                         "landing_events.created_at", _tz))
                     # 通过量（click + redirect）—— 按 ip_hash 去重（同一人多次点击算1，减少误差）
                     # tenant 过滤：SuperSession 绕 RLS，同 ad_id 双租户导入时不能互串归因

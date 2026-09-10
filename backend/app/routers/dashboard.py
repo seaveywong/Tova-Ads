@@ -928,7 +928,7 @@ def landing_trend(
     utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ).astimezone(timezone.utc) + timedelta(days=1)
 
     rows = db.execute(text("""
-        SELECT (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::date::text AS day,
+        SELECT (e.created_at AT TIME ZONE 'Asia/Shanghai')::date::text AS day,  -- 批AS 修:timestamptz 双重转换=UTC-8h 日期(0~16点错前一日);单次转换才对
                SUM(CASE WHEN e.event_type IN ('visit','redirect') THEN 1 ELSE 0 END) AS visits,
                COUNT(DISTINCT CASE WHEN e.event_type IN ('redirect','click') THEN e.ip_hash END) AS clicks,
                SUM(CASE WHEN e.event_type = 'block' THEN 1 ELSE 0 END) AS blocked

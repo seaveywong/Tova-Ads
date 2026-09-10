@@ -1360,7 +1360,9 @@ def diagnose_ad(
 
     # 3. 落地页数据（账户本地日）
     _tz_name = acc.timezone_name or "UTC"
-    _local_date_expr = _ft("(landing_events.created_at AT TIME ZONE 'UTC' AT TIME ZONE '{}')::date".format(_tz_name))
+    # 批AS 修：created_at 是 timestamptz——双重 AT TIME ZONE 会算出 UTC-8h 的日期
+    # （北京时间 0~16 点的访问错进前一天桶）；单次转换才是正确的账户本地日
+    _local_date_expr = _ft("(landing_events.created_at AT TIME ZONE '{}')::date".format(_tz_name))
     try:
         result["landing_clicks"] = db.query(_f.count(_f.distinct(LandingEvent.ip_hash))).filter(
             LandingEvent.tenant_id == user.tenant_id,
