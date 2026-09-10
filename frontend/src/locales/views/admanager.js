@@ -1,6 +1,6 @@
 export default {
   zh: {
-    columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化',
+    columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化（访问）',
     costPerResult: '单次成效费用', combinedCpa: '综合 CPA', ctrLabel: 'CTR',
     snapshot: '快照 {time}', snapshotUnknown: '快照时间未知',
     snapMin: '快照 {n} 分钟前', snapHour: '快照 {n} 小时前',
@@ -20,7 +20,7 @@ export default {
     createAd: '创建',
   },
   en: {
-    columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined conversions',
+    columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined (visits)',
     costPerResult: 'Cost per result', combinedCpa: 'Combined CPA', ctrLabel: 'CTR',
     snapshot: 'Snapshot {time}', snapshotUnknown: 'Snapshot time unavailable',
     snapMin: 'Snapshot {n} min ago', snapHour: 'Snapshot {n} h ago',

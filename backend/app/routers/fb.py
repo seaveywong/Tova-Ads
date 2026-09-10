@@ -73,19 +73,24 @@ def store_credential(
     except FbApiError as e:
         raise HTTPException(400, e.friendly)
 
-    # debug_token 拉权限快照
+    # debug_token 拉权限快照——批AT：改用 App 令牌 inspect（用户 token 自检对非开发者
+    # 恒 #100，此前手动添加的令牌快照全是 None）
     perm_snapshot = None
     debug = None
     try:
-        debug = fb.debug_token()
-        perm_snapshot = json.dumps({
-            "scopes": debug.get("data", {}).get("scopes", []),
-            "app_id": debug.get("data", {}).get("app_id"),
-            "is_valid": debug.get("data", {}).get("is_valid"),
-            "expires_at": debug.get("data", {}).get("data_access_expires_at"),
-        })
+        from ..core.fb_tokens import active_app_access_token
+        from ..core.fb_client import debug_token_with_app_token
+        _app_tok = active_app_access_token(db)
+        if _app_tok:
+            debug = debug_token_with_app_token(body.access_token, _app_tok)
+            perm_snapshot = json.dumps({
+                "scopes": debug.get("data", {}).get("scopes", []),
+                "app_id": debug.get("data", {}).get("app_id"),
+                "is_valid": debug.get("data", {}).get("is_valid"),
+                "expires_at": debug.get("data", {}).get("data_access_expires_at"),
+            })
     except Exception:
-        pass  # debug_token 失败不阻断存储
+        pass  # inspect 失败不阻断存储
 
     # 长效令牌交换（手动粘贴常是 ~1-2h 短效，导入即死）。对齐 OAuth 流程：
     # 用 debug_token 的 app_id 找我们库里的 App secret 才能换；换失败存原值不阻断。
@@ -463,12 +468,19 @@ def update_credential_token(
         me = fb.me()
     except FbApiError as e:
         raise HTTPException(400, f"新令牌无效：{e.friendly}")
-    # 拉权限快照
+    # 拉权限快照（批AT：App 令牌 inspect——自检对非开发者用户恒 #100，快照存不进）
     perm_snapshot = cred.permission_snapshot
     try:
-        debug = fb.debug_token()
-        scopes = debug.get("data", {}).get("scopes", [])
-        perm_snapshot = json.dumps({"scopes": scopes})
+        from ..core.fb_tokens import active_app_access_token
+        from ..core.fb_client import debug_token_with_app_token
+        _at = active_app_access_token(db)
+        if _at:
+            debug = debug_token_with_app_token(new_token, _at)
+            perm_snapshot = json.dumps({
+                "scopes": debug.get("data", {}).get("scopes", []),
+                "app_id": debug.get("data", {}).get("app_id"),
+                "is_valid": debug.get("data", {}).get("is_valid"),
+            })
     except Exception:
         pass
     # 更新
@@ -508,7 +520,16 @@ def check_credential(
     try:
         # /me 快速验活
         me = fb.me()
-        debug = fb.debug_token()
+        # 批AT：inspect 改用 App 令牌——用户 token 自检对非开发者恒 #100（invalid_param
+        # 明确错误直接判 expired）＝「检测」按钮把所有有效 OAuth 令牌误杀成失效的根因
+        from ..core.fb_tokens import active_app_access_token
+        from ..core.fb_client import debug_token_with_app_token
+        _app_tok = active_app_access_token(db)
+        if _app_tok:
+            debug = debug_token_with_app_token(token, _app_tok)
+        else:
+            # 无 App 配置：/me 通了就视为活令牌（拿不到过期时间，快照留 is_valid）
+            debug = {"data": {"is_valid": True, "scopes": []}}
         is_valid = debug.get("data", {}).get("is_valid", False)
         scopes = debug.get("data", {}).get("scopes", [])
         app_id = debug.get("data", {}).get("app_id")

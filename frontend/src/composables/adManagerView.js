@@ -68,17 +68,34 @@ export function compareRows(a, b, { key, direction, mixedCurrency, blocked, stat
   return statusRank(a.effective_status) - statusRank(b.effective_status) || entityKey(a).localeCompare(entityKey(b))
 }
 
+// 默认列后续新增时，给已保存列配置的用户一次性补上（列迁移版本号）：
+// 老用户 localStorage 里存过自定义列 → defaultColumns 的新增列对他们永不生效
+// （批AT 实证：landing_pass/landing_visits 加了默认但老配置用户看不到）。改默认列时
+// 把新列 id 加进 _COLS_MIGRATION 并 bump 版本号即可
+const _COLS_MIGRATION = 2
+const _MIGRATION_ADDS = { 2: { ad: ['landing_pass', 'landing_visits'] } }
+
 export function normalizeViewPreferences(raw) {
   const out = {}
+  const fromV = Number(raw?.colsV) || 1
   for (const level of ['campaign', 'adset', 'ad']) {
     const saved = raw?.[level] || {}
     const allowed = new Set(columnsFor(level).map(c => c.id))
     const sortKeys = new Set(['name', '_status_rank', ...columnsFor(level).map(c => c.sort).filter(Boolean)])
+    let cols = Array.isArray(saved.columns) ? [...new Set(saved.columns.filter(id => allowed.has(id)))] : defaultColumns(level)
+    if (Array.isArray(saved.columns)) {
+      for (let v = fromV + 1; v <= _COLS_MIGRATION; v++) {
+        for (const id of (_MIGRATION_ADDS[v]?.[level] || [])) {
+          if (allowed.has(id) && !cols.includes(id)) cols.push(id)
+        }
+      }
+    }
     out[level] = {
-      columns: Array.isArray(saved.columns) ? [...new Set(saved.columns.filter(id => allowed.has(id)))] : defaultColumns(level),
+      columns: cols,
       sortKey: sortKeys.has(saved.sortKey) ? saved.sortKey : 'spend',
       sortDir: saved.sortDir === 'asc' ? 'asc' : 'desc',
     }
   }
+  out.colsV = _COLS_MIGRATION
   return out
 }
