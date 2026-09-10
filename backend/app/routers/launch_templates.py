@@ -1399,6 +1399,12 @@ def preflight_deploy(tid: int, body: PreflightIn,
              (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == user.tenant_id).first()
               if t.asset_id else None))
     _prefix = _series_name(t, asset, 0) if batch_assets else t.name_prefix
+    # 文案样例与部署 runner 同口径（预检=所见即所发）：批量=素材 AI 优先，单模板=模板手填优先
+    from ..core.ad_ops import pick_ad_copy as _pf_pick_copy
+    if batch_assets:
+        _pf_head, _pf_body = _pf_pick_copy(asset, "", "", t.headline or "", t.body or "")
+    else:
+        _pf_head, _pf_body = _pf_pick_copy(asset, t.headline or "", t.body or "")
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
@@ -1467,14 +1473,14 @@ def preflight_deploy(tid: int, body: PreflightIn,
         if asset and asset.type == "video":
             creative_payload = build_creative(
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-                landing_url=_lp_url, headline=t.headline, body=t.body,
+                landing_url=_lp_url, headline=_pf_head, body=_pf_body,
                 cta_type=t.cta_type, video_id="<部署时按账户上传缓存>",
                 instagram_actor_id=(t.instagram_actor_id or ""),
             )
         else:
             creative_payload = build_creative(
                 page_id=page_id, objective=t.objective, conversion_goal=t.conversion_goal,
-                landing_url=_lp_url, headline=t.headline, body=t.body,
+                landing_url=_lp_url, headline=_pf_head, body=_pf_body,
                 cta_type=t.cta_type, image_hash="<部署时按账户上传缓存>",
                 instagram_actor_id=(t.instagram_actor_id or ""),
             )
@@ -1626,6 +1632,17 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
     if first_ad.get("asset_ids"):
         first_asset = db.query(Asset).filter(
             Asset.id == int(first_ad["asset_ids"][0]), Asset.tenant_id == tenant_id).first()
+    # 文案样例与部署 runner 同口径（预检=所见即所发）：素材组节点=素材 AI 优先，单素材=节点手填优先
+    from ..core.ad_ops import pick_ad_copy as _pf_pick_copy
+    if len(first_ad.get("asset_ids") or []) > 1:
+        _pf_head, _pf_body = _pf_pick_copy(
+            first_asset, "", "",
+            (first_ad.get("headline") or t.headline or ""),
+            (first_ad.get("body") or t.body or ""))
+    else:
+        _pf_head, _pf_body = _pf_pick_copy(
+            first_asset, first_ad.get("headline") or "", first_ad.get("body") or "",
+            t.headline or "", t.body or "")
     try:
         _lp_url = _interp_landing_url(
             (first_ad.get("landing_url") or t.landing_url or ""), campaign_name=campaign_name,
@@ -1701,8 +1718,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
         creative_payload = build_creative(
             page_id=(body.page_id or t.page_id or ""), objective=t.objective,
             conversion_goal=t.conversion_goal, landing_url=_lp_url,
-            headline=(first_ad.get("headline") or t.headline or ""),
-            body=(first_ad.get("body") or t.body or ""),
+            headline=_pf_head,
+            body=_pf_body,
             cta_type=(first_ad.get("cta_type") or t.cta_type or ""),
             video_id="<部署时按账户上传缓存>" if (first_asset and first_asset.type == "video")
                     else None,
@@ -2008,10 +2025,14 @@ def _deploy_item_tt(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, asset, t
         if not pixel_code and normalize_tt_objective(tpl.objective) == "WEB_CONVERSIONS":
             raise TtApiError("invalid_param",
                              "未解析到 TikTok 像素 code（转化类目标必填）：部署抽屉选 TT 像素 / 模板填像素 code / 像素库添加 platform=tt 像素")
-        # 文案优先级（批次II 修审计 A3，与 FB 链同口径）：模板手填 > 素材 AI 随机（TT 创意
-        # 只有 ad_text 无独立标题，headline 仅作 _resolve_page_post 的兜底文案源）
+        # 文案优先级（批次II 修审计 A3，与 FB 链同口径）：单模板=模板手填 > 素材 AI 随机；
+        # 批量模式（name_prefix_override=素材名，逐素材克隆系列）=素材 AI > 模板文案兜底——
+        # 多素材各用各的文案（TT 创意只有 ad_text 无独立标题，headline 仅作兜底文案源）
         from ..core.ad_ops import pick_ad_copy
-        _tt_head, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
+        if name_prefix_override:
+            _tt_head, _body = pick_ad_copy(asset, "", "", tpl.headline or "", tpl.body or "")
+        else:
+            _tt_head, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
         # 追踪参数插值（与 FB 链同口径）：{{campaign.name}}=系列名（批量=素材名）
         _tt_sn = name_prefix_override or tpl.name_prefix
         _lp_url = _interp_landing_url(
@@ -2075,6 +2096,12 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int, batc
              (db.query(Asset).filter(Asset.id == t.asset_id, Asset.tenant_id == tenant_id).first()
               if t.asset_id else None))
     _prefix = _series_name(t, asset, 0) if batch_assets else t.name_prefix
+    # 文案样例与部署 runner 同口径（预检=所见即所发）：批量=素材 AI 优先，单模板=模板手填优先
+    from ..core.ad_ops import pick_ad_copy as _pf_pick_copy
+    if batch_assets:
+        _pf_head, _pf_body = _pf_pick_copy(asset, "", "", t.headline or "", t.body or "")
+    else:
+        _pf_head, _pf_body = _pf_pick_copy(asset, t.headline or "", t.body or "")
     acc = db.query(Account).filter(Account.act_id == body.act_id).first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = db.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
@@ -2100,7 +2127,7 @@ def _preflight_tt(db, t: LaunchTemplate, body: PreflightIn, tenant_id: int, batc
             pixel_code=pixel_code or "<部署时从 TT 像素库解析>",
             budget_mode=t.budget_mode, targeting=targeting)
         creative_payload = build_tt_creative(
-            ad_text=t.body or "", cta_type=t.cta_type, landing_url=_lp_url,
+            ad_text=_pf_body, cta_type=t.cta_type, landing_url=_lp_url,
             video_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "video") else "",
             image_file_id="<部署时按广告主上传缓存>" if (asset and asset.type == "image") else "")
     except ValueError as e:
@@ -2551,9 +2578,14 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             _msg_body = post_content["message"]  # 跟帖：用帖子文案当欢迎语
         if _msg_body:
             message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-    # 文案优先级（批次II 修审计 A3）：模板手填（平铺模式的手填层=模板表单）> 素材 AI 随机
+    # 文案优先级：单模板模式（series_name 空）维持「模板手填 > 素材 AI」（批次II 修审计 A3）
+    # ——编辑器表单显示什么就发什么；批量模式（series_name=素材名，逐素材克隆系列）反过来
+    # 「素材 AI > 模板文案兜底」——多素材必须各用各的文案，模板文案只兜住没生成过 AI 文案的素材
     from ..core.ad_ops import pick_ad_copy
-    _headline, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
+    if series_name:
+        _headline, _body = pick_ad_copy(asset, "", "", tpl.headline or "", tpl.body or "")
+    else:
+        _headline, _body = pick_ad_copy(asset, tpl.headline or "", tpl.body or "")
     page_post_id = _resolve_page_post(sdb, fb, tenant_id, tpl, asset, page_id, body=_body)
     if page_post_id:
         sdb.commit()  # 持久化 page_posts 缓存
@@ -3012,11 +3044,20 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             _msg_body = post_content["message"]
                         if _msg_body:
                             message_template = json.dumps({"text": _msg_body[:500], "ice_breakers": []})
-                    # 文案优先级（批次II 修审计 A3）：节点手填 > 素材 AI 随机 > 模板兜底
+                    # 文案优先级（批次II 修审计 A3 基础上按素材数分流）：单素材节点=节点手填 >
+                    # 素材 AI > 模板兜底（节点表单显示什么就发什么）；素材组节点（多素材展开
+                    # 多广告）=素材 AI > 节点/模板文案兜底——多素材必须各用各的文案，一份节点
+                    # 文案盖住 N 个素材正是多素材文案混用的树侧根源
                     from ..core.ad_ops import pick_ad_copy
-                    _headline, _body = pick_ad_copy(
-                        asset, anode.get("headline") or "", anode.get("body") or "",
-                        tpl.headline or "", tpl.body or "")
+                    if len(assets) > 1:
+                        _headline, _body = pick_ad_copy(
+                            asset, "", "",
+                            (anode.get("headline") or tpl.headline or ""),
+                            (anode.get("body") or tpl.body or ""))
+                    else:
+                        _headline, _body = pick_ad_copy(
+                            asset, anode.get("headline") or "", anode.get("body") or "",
+                            tpl.headline or "", tpl.body or "")
                     # 主页帖（new=每素材建 / reuse=节点引用帖）——_ad_page 已在表单解析前定义
                     page_post_id = _resolve_page_post(sdb, fb, tenant_id, vtpl, asset, _ad_page, body=_body)
                     if page_post_id:

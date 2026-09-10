@@ -1635,9 +1635,20 @@ const openEdit = async (tpl) => {
   if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
   validationErrors.value = []; editOpen.value = true; snapshotForm()
 }
-// 批AF 换素材跟随：文案/标题「未自定义才跟随」——当前值为空或恰好=旧素材 AI 首条时跟随新素材，
-// 手改过的永不覆盖（部署链兜底优先级：手填 > 素材AI > 模板，编辑器显示与部署结果从此一致）
-const _copyFollowsOld = (cur, oldFirst) => !cur || !oldFirst || cur === oldFirst
+// 换素材文案跟随：新素材有 AI 文案就立刻填入（标题/正文各自独立判断），没生成过文案的素材
+// 不动手填值；手改过的值会被覆盖——覆盖时返回 true，调用方 toast 告知（可感知，别静默顶掉）。
+// 部署链单素材口径仍是手填优先（编辑器显示什么就发什么），多素材由部署端各用各的 AI 文案
+const _followAssetCopy = (dst, oldAsset, a) => {
+  const nh = (a.ai_copy?.headlines || [])[0] || ''
+  const nb = (a.ai_copy?.bodies || [])[0] || ''
+  const handEdited = (cur, oldFirst) => !!String(cur || '').trim() && cur !== oldFirst
+  let clobbered = false
+  if (nh) { if (handEdited(dst.headline, (oldAsset?.ai_copy?.headlines || [])[0])) clobbered = true; dst.headline = nh }
+  if (nb) { if (handEdited(dst.body, (oldAsset?.ai_copy?.bodies || [])[0])) clobbered = true; dst.body = nb }
+  return clobbered
+}
+const _toastCopyFollow = (a) =>
+  ElMessage.info(t('launch.copyFollowOverridden', { name: a.name || a.filename || '' }))
 const pickAsset = async (a) => {
   // 结构模式：素材写入当前选中的广告节点（单选=替换；多选开=追加；跟帖强制单素材）
   if (editMode.value === 'tree' && treeSel.value.type === 'ad' && selAd.value) {
@@ -1647,8 +1658,7 @@ const pickAsset = async (a) => {
     n.asset_ids = (n.post_source === 'reuse' || !n.multi)
       ? [a.id] : [...new Set([...(n.asset_ids || []), a.id])]
     if (_replacing) {
-      if (_copyFollowsOld(n.headline, _old?.ai_copy?.headlines?.[0]) && a.ai_copy?.headlines?.[0]) n.headline = a.ai_copy.headlines[0]
-      if (_copyFollowsOld(n.body, _old?.ai_copy?.bodies?.[0]) && a.ai_copy?.bodies?.[0]) n.body = a.ai_copy.bodies[0]
+      if (_followAssetCopy(n, _old, a)) _toastCopyFollow(a)
       // 受众国家跟随（组级内联受众）：当前为空或恰=旧素材国家集才跟随（受众保真——手配不覆盖）
       const _s = selAdset.value
       const _newC = (a.ai_audience?.countries || []).filter(Boolean)
@@ -1665,9 +1675,7 @@ const pickAsset = async (a) => {
   const _oldF = editingAsset.value
   form.value.asset_id = a.id
   editingAsset.value = a
-  const hs = (a.ai_copy?.headlines || []); const bs = (a.ai_copy?.bodies || [])
-  if (_copyFollowsOld(form.value.headline, _oldF?.ai_copy?.headlines?.[0]) && hs[0]) form.value.headline = hs[0]
-  if (_copyFollowsOld(form.value.body, _oldF?.ai_copy?.bodies?.[0]) && bs[0]) form.value.body = bs[0]
+  if (_followAssetCopy(form.value, _oldF, a)) _toastCopyFollow(a)
   assetPickerOpen.value = false
 }
 // 批AF AI 建议兴趣：来自组内广告节点所选素材的 ai_audience.interests（模型输出的自由文本词，
@@ -3086,7 +3094,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <button class="btn sm" @click="openAssetPickerForAd(si, ai)">{{ (a.asset_ids||[]).length ? t('launch.change') : t('launch.selectAsset') }}</button>
 </div>
 </div>
-                <div v-if="(a.asset_ids||[]).length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: a.asset_ids.length }) }}</div>
+                <div v-if="(a.asset_ids||[]).length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: a.asset_ids.length }) }} · {{ t('launch.treeAssetCopyHint') }}</div>
                 <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="a.headline" class="inp" /></div>
                 <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="a.body" class="inp ta" rows="3"></textarea></div>
                 <!-- 动态引擎（按组卡 conv_location）：描述仅网站位；CTA 网站/消息/电话位出（表单/主页位 FB 固定按钮） -->
