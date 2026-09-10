@@ -2049,3 +2049,10 @@ commit 2067608。部署：后端 3 文件双门+restart+health 绿；前端 buil
 
 smoke：DB 写入/还原 ✓、fresh 查询（=get_job 真实路径）回传 progress/updated_at ✓、迁移列存在 ✓、health 绿、前端 build✓+CF。commit aeff0d0。
 坑：探针先载 ORM 再原生 UPDATE 会读到旧快照——端点是写入后新查询，无此问题。
+
+## 批BR：像素统一链——优先账户自有像素（2026-09-11）
+
+事故：…142(BSCH-TD-O324) 部署成功但广告投放被拦——adset 用了落地页#6 第一个像素 1394346206205535，令牌可见创建不报错，账户未被 assign 投放侧拦截（「部署成功广告失败」静默雷；1487429 创建自愈因此不触发）。
+用户拍板策略反转：**优先账户自己能关联到的像素**。落地 `_pick_group_pixel`（canonical，树/平铺/预检三链统一）：① 显式指定（节点>抽屉>模板）且 ∈ 账户像素库 → 尊重；② 账户库内随机（批O-3 分摊沿用）；③ 库空 → _ensure_account_pixel 拉 act/adspixels 入档（零像素自动建，预检 allow_create=False）。无权自动换+留痕（auto_warns+progress 注记），真无解 fail-fast 人话报错。选中即回写页 fire（追加不顶——主像素继续收全量事件）。
+副产物：①预检与部署像素口径拉齐（此前预检库优先/部署页优先，所见非所发）；②像素库探针垃圾像素 1048060468035628(toveads-probe-delete-me) 标 inactive（曾在 …142 库内被随机选中）。
+smoke（服务器真库）：…142→1065622819185646+换痕 ✓；…2605 有权集内 ✓；显式无权→换+痕 ✓；显式有权→尊重 ✓。commit e32e6ca。
