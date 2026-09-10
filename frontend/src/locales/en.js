@@ -183,6 +183,7 @@ export default {
     adReview: 'In Review',
     adPreview: 'Preview',
     adInProcess: 'Processing',
+    adIdle: 'No active ads',
     adWithIssues: 'With Issues',
     // TikTok ad status (tt_client _STATUS_MAP/_OPT_STATUS + review show_status)
     ttEnable: 'Active',

@@ -66,15 +66,35 @@ const childPausedMap = computed(() => {
   for (const [cid, kids] of Object.entries(adsetsByCamp))
     campAllPaused[cid] = kids.length > 0 && kids.every(s =>
       (s.effective_status || '').includes('PAUSED') || adsetAllPaused[String(_idOf(s.id))])
-  return { adsetAllPaused, campAllPaused }
+  // 批BU（用户点名）：系列/组「有没有真正在投的广告」——容器开着但零生效广告 ≠ 投放中
+  const adsByCamp = {}
+  for (const a of (data.value.ads || [])) {
+    const k = String(_idOf(a.campaign_id))
+    ;(adsByCamp[k] = adsByCamp[k] || []).push(a)
+  }
+  const countActive = (kids) => kids.filter(a => (a.effective_status || '') === 'ACTIVE').length
+  const adsetActiveAds = {}, campActiveAds = {}
+  for (const [sid, kids] of Object.entries(adsByAdset)) adsetActiveAds[sid] = countActive(kids)
+  for (const [cid, kids] of Object.entries(adsByCamp)) campActiveAds[cid] = countActive(kids)
+  return { adsetAllPaused, campAllPaused, adsetActiveAds, campActiveAds }
 })
 const effectiveStatusOf = (row, level) => {
   const st = row.effective_status || ''
   if (st !== 'ACTIVE') return st   // 已停/异常态原样
-  if (level === 'adset' && childPausedMap.value.adsetAllPaused[String(row.id)]) return 'PAUSED'
-  if (level === 'campaign' && childPausedMap.value.campAllPaused[String(row.id)]) return 'PAUSED'
+  const m = childPausedMap.value
+  if (level === 'adset') {
+    if (m.adsetAllPaused[String(row.id)]) return 'PAUSED'
+    // 批BU：容器开着但下面零条生效投放中的广告 → 显示「无在投广告」（投放中=误导）
+    if (!((m.adsetActiveAds || {})[String(row.id)] > 0)) return 'NO_ACTIVE_ADS'
+  } else if (level === 'campaign') {
+    if (m.campAllPaused[String(row.id)]) return 'PAUSED'
+    if (!((m.campActiveAds || {})[String(row.id)] > 0)) return 'NO_ACTIVE_ADS'
+  }
   return st
 }
+// 批BU：无在投广告态的悬浮说明（其余态不占 title）
+const stIdleTitle = (row, level) =>
+  effectiveStatusOf(row, level) === 'NO_ACTIVE_ADS' ? t('adm.stIdleTitle') : ''
 const campNameOf = (s) => {
   const c = (data.value.campaigns || []).find(x => String(x.id) === String(s.campaign_id))
   return c ? t('adm.belongsToCampaign', { name: c.name }) : ''
@@ -943,7 +963,7 @@ const unsubscribeLeads = async () => {
           <template v-for="a in curList" :key="entityKey(a)">
             <tr :class="{ sel: isSelected(entityKey(a)) }">
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
-              <td><div class="status-cell"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
+              <td><div class="status-cell" :title="stIdleTitle(a, tab)"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>

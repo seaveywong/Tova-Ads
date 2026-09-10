@@ -2593,10 +2593,17 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, item.act_id, filepath)
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
-    # 批BR：统一走「优先账户自有像素」链（同树模式——模板/页像素无权时自动换+进度留痕）
-    pixel_id, _px_note = _pick_group_pixel(
-        sdb, tenant_id, item.act_id, (item.pixel_id or tpl.pixel_id or ""),
-        int(tpl.landing_page_id or 0), fb)
+    # 批BR：统一走「优先账户自有像素」链（同树模式）；批BU：按 item 记忆——多素材多系列
+    # 只在第一条核对（第一系列定了正确像素，后续直接复用，不逐条重复提示）
+    _px_key = (item.pixel_id or tpl.pixel_id or "").strip()
+    _px_cache = getattr(item, "_px_cache", None) or {}
+    if _px_key in _px_cache:
+        pixel_id, _px_note = _px_cache[_px_key], ""
+    else:
+        pixel_id, _px_note = _pick_group_pixel(
+            sdb, tenant_id, item.act_id, _px_key, int(tpl.landing_page_id or 0), fb)
+        _px_cache[_px_key] = pixel_id
+        item._px_cache = _px_cache   # ORM 非列属性，仅本 item 生命周期内缓存
     if not pixel_id:
         raise FbApiError("no_id", "该账户无可用像素（BM 未分配且自动创建失败）——请先在 BM 给账户分配像素")
     if _px_note:
@@ -2855,6 +2862,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
 
     _ads_total = _tree_expanded_count(adsets)
     _ad_no = 0
+    _px_memo: dict = {}   # 批BU：像素核对按 item 记忆——同账户第一组定了正确像素，后续组直接复用
+    _px_noted = False      # 「已自动换」提示只弹一次（组组重复弹=用户实测噪音）
     for si, snode in enumerate(adsets, 1):
         sname = ((snode.get("name") or f"{campaign_name} 组{si}"))[:100]
         _item_note(sdb, item, f"组 {si}/{len(adsets)}：{sname[:36]}")   # 批BQ
@@ -2937,16 +2946,20 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         # 从源头消除）；无权自动换+留痕；选定即回写页 fire（追加不顶，主像素继续收全量事件）。
         _first_ad = (snode.get("ads") or [{}])[0]
         _grp_lpid = int(_first_ad.get("landing_page_id") or 0)
-        _grp_pixel, _px_note = _pick_group_pixel(
-            sdb, tenant_id, item.act_id,
-            str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or "",
-            _grp_lpid, fb)
+        _px_key = str(snode.get("pixel_id") or "") or item.pixel_id or tpl.pixel_id or ""
+        if _px_key in _px_memo:
+            _grp_pixel = _px_memo[_px_key]   # 批BU：已核对过直接复用（不重复查库/不重复提示）
+            _px_note = ""
+        else:
+            _grp_pixel, _px_note = _pick_group_pixel(sdb, tenant_id, item.act_id, _px_key, _grp_lpid, fb)
+            _px_memo[_px_key] = _grp_pixel
         if not _grp_pixel:
             _fail_group(sname, snode, "该账户无可用像素（BM 未分配且自动创建失败）——请先在 BM 给账户分配像素")
             continue
-        if _px_note:
-            auto_warns.append(f"[像素] {sname}: {_px_note}")
+        if _px_note and not _px_noted:
+            auto_warns.append(f"[像素] {_px_note}（本账户全部组已复用）")
             _item_note(sdb, item, f"像素核对：{_px_note[:70]}")
+            _px_noted = True
         if _grp_lpid and _grp_pixel:
             # 批Z：回写页（页没配这个像素就补上）——否则 worker 不 fire，FB 零转化
             _bind_pixel_to_landing_page(sdb, tenant_id, _grp_lpid, _grp_pixel, item.act_id)

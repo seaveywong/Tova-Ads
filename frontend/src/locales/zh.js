@@ -186,6 +186,7 @@ export default {
     adReview: '审核中',
     adPreview: '预览',
     adInProcess: '处理中',
+    adIdle: '无在投广告',
     adWithIssues: '有问题',
     // TikTok 广告状态（tt_client _STATUS_MAP/_OPT_STATUS + 审核 show_status）
     ttEnable: '投放中',

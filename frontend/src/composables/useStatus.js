@@ -20,6 +20,8 @@ export const FB_AD_STATUS = {
   PREVIEW:           { key: 'status.adPreview',          cls: 'warn' },
   IN_PROCESS:        { key: 'status.adInProcess',        cls: 'warn' },
   WITH_ISSUES:       { key: 'status.adWithIssues',       cls: 'warn' },
+  // 批BU：我们的派生态（非 FB 枚举）——系列/组容器开启但其下零条生效投放中的广告≠投放中
+  NO_ACTIVE_ADS:     { key: 'status.adIdle',            cls: 'off' },
 }
 export const fbAdStatus = (s) => {
   const e = FB_AD_STATUS[s]
