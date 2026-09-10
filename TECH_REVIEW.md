@@ -2056,3 +2056,14 @@ smoke：DB 写入/还原 ✓、fresh 查询（=get_job 真实路径）回传 pro
 用户拍板策略反转：**优先账户自己能关联到的像素**。落地 `_pick_group_pixel`（canonical，树/平铺/预检三链统一）：① 显式指定（节点>抽屉>模板）且 ∈ 账户像素库 → 尊重；② 账户库内随机（批O-3 分摊沿用）；③ 库空 → _ensure_account_pixel 拉 act/adspixels 入档（零像素自动建，预检 allow_create=False）。无权自动换+留痕（auto_warns+progress 注记），真无解 fail-fast 人话报错。选中即回写页 fire（追加不顶——主像素继续收全量事件）。
 副产物：①预检与部署像素口径拉齐（此前预检库优先/部署页优先，所见非所发）；②像素库探针垃圾像素 1048060468035628(toveads-probe-delete-me) 标 inactive（曾在 …142 库内被随机选中）。
 smoke（服务器真库）：…142→1065622819185646+换痕 ✓；…2605 有权集内 ✓；显式无权→换+痕 ✓；显式有权→尊重 ✓。commit e32e6ca。
+
+## 批BS：运营三页 UI 升级——投放模板/表单模板/素材库（2026-09-11）
+
+用户反馈「总体简陋」+ 点名隐藏按钮取舍。落地（延续批P2 干净降噪基调，靠层次感不加装饰）：
+- **卡片升级（三页）**：hover 边框亮+阴影+上浮 1px（.15s transition）；卡片分区间距节奏统一（gap 6→8、ops 区 margin-top:auto 沉底）；meta 行 chip 化（新全局 .meta-chip/.meta-chip.accent 进 main.css，两主题自适应——目标/预算/问题数/语言从纯文本变细边框 chip）；模板/表单卡 240→260px
+- **按钮曝光（用户点名）**：模板卡「编辑」放出（部署+编辑可见，⋯ 剩复制/预检/归档/硬删）；素材卡「文案/受众」放出、「详情」收进 ⋯（缩略图点击即预览，按钮冗余——onCardCmd 加 detail 分支）；表单卡不动（编辑+预览已合理）
+- **布局补强**：投放模板加搜索框（此前完全没有，按名称 computed 过滤+清空钮）；空态加「+ 新建模板」CTA；素材 AI 参数条吸顶（top=平台上下文条下方+投影，滚动不粘连；batch-bar 不吸顶——与 ai-bar 会叠位且选中态就近操作）
+- **放弃项**：FormTemplates .tab 改名 .seg——实查两套 CSS 视觉完全同款（bg3 容器+bg2 选中），改名零收益 churn
+- i18n：launch.searchPh zh/en 成对，en 零 CJK 校验过；复用现有 assets.copyAudience 零新 key
+
+build ✓ + CF master 部署完成。commit 本批（见 git log）。回归点：模板卡 ⋯ 各命令、素材选中批量条、表单双 tab、深浅主题。
