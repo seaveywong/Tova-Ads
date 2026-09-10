@@ -61,8 +61,11 @@ const childPausedMap = computed(() => {
   const adsetAllPaused = {}, campAllPaused = {}
   for (const [sid, kids] of Object.entries(adsByAdset))
     adsetAllPaused[sid] = kids.length > 0 && kids.every(a => (a.effective_status || '').includes('PAUSED'))
+  // 批BG：系列层判「全停」要用电组的生效态（组原生 status 不随广告停——广告全停的组
+  // 原生仍 ACTIVE，读原生会导致广告全停后系列仍显示投放中）
   for (const [cid, kids] of Object.entries(adsetsByCamp))
-    campAllPaused[cid] = kids.length > 0 && kids.every(s => (s.effective_status || '').includes('PAUSED'))
+    campAllPaused[cid] = kids.length > 0 && kids.every(s =>
+      (s.effective_status || '').includes('PAUSED') || adsetAllPaused[String(_idOf(s.id))])
   return { adsetAllPaused, campAllPaused }
 })
 const effectiveStatusOf = (row, level) => {
@@ -700,7 +703,7 @@ const metricText = (a, id) => {
 }
 const sumMetric = id => {
   if (id === 'spend') return sumSpend.value
-  if (!['results_fb','conversions','impressions','clicks','landing_visits','landing_pass'].includes(id)) return ''
+  if (!['results_fb','impressions','clicks','landing_visits','landing_pass'].includes(id)) return ''
   if (id === 'results_fb' && curList.value.some(a => fbResult(a) == null)) return '—'
   return curList.value.reduce((sum, a) => sum + Number(a[id] || 0), 0).toLocaleString()
 }
@@ -940,7 +943,7 @@ const unsubscribeLeads = async () => {
           <template v-for="a in curList" :key="entityKey(a)">
             <tr :class="{ sel: isSelected(entityKey(a)) }">
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
-              <td><div class="status-cell"><el-switch :model-value="a.effective_status === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
+              <td><div class="status-cell"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
@@ -953,7 +956,7 @@ const unsubscribeLeads = async () => {
               <td v-for="col in visibleColumns" :key="col.id">
                 <button v-if="col.id === 'budget'" class="budget-cell sort-button" :disabled="!hasBudget(a) || !!accStateTag(a) || opLoading" @click="openBudget(a)">{{ fmtBudget(a, tab) }}</button>
                 <code v-else-if="col.id === 'slug' && a.slug" class="ad-slug" @click="goLandingLogs(a.slug, a.id)">/a/{{ a.slug }}</code>
-                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : (col.id === 'conversions' ? t('adm.convTip') : '')">{{ metricText(a, col.id) }}</span>
+                <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : ''">{{ metricText(a, col.id) }}</span>
               </td>
               <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
                 <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item>

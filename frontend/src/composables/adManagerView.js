@@ -12,7 +12,6 @@ export const METRIC_COLUMNS = [
   { id: 'spend', label: 'colSpend', width: 120, sort: 'spend' },
   { id: 'cost_per_result', label: 'costPerResult', width: 140, sort: 'cost_per_result' },
   { id: 'budget', label: 'colBudget', levels: ['campaign', 'adset'], width: 190, sort: 'daily_budget_amount' },
-  { id: 'conversions', label: 'totalConversions', width: 125, sort: 'conversions' },
   { id: 'cpa', label: 'combinedCpa', width: 140, sort: 'cpa' },
   { id: 'impressions', label: 'diagImpressions', width: 115, sort: 'impressions' },
   { id: 'reach', label: 'colReach', width: 110, sort: 'reach' },
@@ -25,8 +24,8 @@ export const METRIC_COLUMNS = [
   { id: 'pass_rate', label: 'colPassRate', levels: ['ad'], width: 110 },
 ]
 export const columnsFor = level => METRIC_COLUMNS.filter(c => !c.levels || c.levels.includes(level))
-// 批AQ：广告层默认列补「访问量」——综合转化(=访问口径)+点击+访问 三个数并排（用户要求直观分开）
-export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', 'conversions', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass', 'landing_visits'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
+// 批BG：删「综合转化（访问）」列（用户拍板——已有「访问」「通过」两列，转化口径后端保留不动）
+export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass', 'landing_visits'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
 
 export function entityContext(data) {
   const campaigns = new Map((data.campaigns || []).map(row => [entityKey(row), row]))
