@@ -1980,3 +1980,22 @@ landing_events.created_at（timestamptz）双重 AT TIME ZONE 实际算出 UTC-8
 
 ### 部署与验证
 后端 6 文件（双门+restart+health）+前端 CF。验证：/ads/list 广告 220 综合转化 8=访问 8（出口覆盖修复未回归）；落地页 page6 真人访问 8/通过 1/屏蔽 102（口径生效）；子码今日统计正常。commit：e812d42、5cf9896、6b1584f。
+
+## 批AT-AZ+BA：部署链五连修 + 真FB下发验收 + 残骸清理（2026-09-10 深夜）
+
+### 根因链（每层服务器实测钉死）
+① 假兜底(批AU)：_write_fb_with_fallback 去重读 f._access_token(属性名是 token)→候选恒空→所有「未绑定写令牌」
+② 检测误杀(批AT)：令牌页检测用自检 debug_token(非开发者恒#100)→把有效令牌判 expired——用户两条令牌"突然失效"真相；重授权后新令牌快照已存(App令牌 inspect)
+③ 错误裸奔(批AZ)：error_user_title/msg 被吞成「请求参数错误」→现在直接显示 FB 人话(如「Pixel 无法使用」)
+④ 像素无权 1487429(终根因)：重授权新令牌用不了模板引用的共享BM像素→adset 全拒；**像素自愈**：撞 1487429 自动换账户可用像素重试+留痕+落地页回写
+⑤ 路径分歧(批AZ补,用户实测发现)：平铺/手动/批量的 adset 裸 POST 无任何降级(手动能成批量死的根源)→1870227+1487429 自愈下沉 core/ad_ops.post_adset_resilient 全路径统一
++ 限流 subcode 2446079 分类(部署清单「Facebook 返回错误」→人话)
+
+### 验收（用户标准：任务成功下发 FB+亲眼读回）
+item36 重试 → job33 completed 1✓0✗：campaign 120251523565770604 + 6 adset + **6 广告**(FB 实读,PENDING_REVIEW/ACTIVE,子码自动建链 lt197-*)；像素自愈×6 留痕。
+
+### 残骸清理（用户指示）
+归档 8 个测试系列：O337×2(含验收系列=同时消除花费风险)、O339×5(Tova Ads×3+probe-tree×2)、O338×1；保留厂商 M-SALE 系列+用户 O340 手动部署。探测像素 1376744804140068 删除失败(需像素属主权限,无害遗留)。
+
+### 其他
+「只有系列没广告」=今晚调试打满 O337 API 配额→ads_cache 同步失败,限流恢复后 15min cron 自动补;commit: d1d595c/8682fb4/9f4d6a0/940cf2b/d30112c
