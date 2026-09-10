@@ -2075,3 +2075,10 @@ build ✓ + CF master 部署完成。commit 本批（见 git log）。回归点�
 **FB 残件删除失败→真相**：两 BSCH 账户（…322/…324）**均已被 FB 停用**（account_status=2, disable_reason=1）——8 条 DISAPPROVED、像素访问异常、归档写入被拒（4841021）同源。号已废，需号商换号；系统侧 account_sync 会同步 status=2，看板账户明细状态列（批BN）自动标。
 
 **待办清算（用户拍板）**：主像素共享号商 BM——不做（维持账户自有像素逻辑）；FB policy 申诉——不管；C 组（像素零提示/保活实测/AuditLog mono）——全部移除待办。
+
+## 批BU：像素核对记忆 + 「无在投广告」诚实状态 + 安全守护 UI 实测（2026-09-11）
+
+① **像素核对按 item 记忆（用户点名「第一组定了后面还逐个过太麻烦」）**：树 runner 加 _px_memo（同 explicit 只解析一次，提示只弹一次+注明全组复用）；平铺/重试链 _deploy_series_fb 挂 item._px_cache。同账户一次部署 N 组/系列 → 1 次核对。
+② **系列/组「无在投广告」态（用户点名「没 Active 广告别显示投放中」）**：AdManager childPausedMap 扩 adsetActiveAds/campActiveAds（子广告 effective===ACTIVE 计数）；effectiveStatusOf 在容器 ACTIVE 但零生效广告时返 NO_ACTIVE_ADS（useStatus 新条目，灰态）；状态筛选「投放中」自动排除；悬浮说明「容器开启但无在投广告——不消耗」。覆盖全停 PAUSED（批BG）之外的新场景：审核中/被拒混合。
+③ **安全守护 UI 实测（Agent 截图 6 张 + API 快筛）**：三层全正常未复现「看不到」——暂停记录 tab 150 条、侧栏面板/移动端抽屉正常、日志中心 emergency 筛选 2 条（默认 7 天窗）。用户看不到的最可能原因：守护页默认在「规则配置」tab；日志中心被巡检心跳刷屏需筛选；时区显示+8h。另抓到 dashboard/landing 422（缺 platform 参数，另行处理）。
+smoke：build✓、i18n 成对+en零CJK、单测过、后端双门+health 绿。部署：后端 launch_templates.py + 前端 CF master。
