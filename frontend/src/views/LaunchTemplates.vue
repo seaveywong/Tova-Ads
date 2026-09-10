@@ -2363,6 +2363,13 @@ const itemCodeText = (it) => it.error_code === 'partial' ? t('launch.errPartial'
   : it.error_code === 'auto_subcode_degraded' ? t('launch.errDegrade')
   : it.error_code === 'no_id' ? t('launch.errNoId') : (it.error_code || '')
 const subcodeCount = (it) => (it.subcode_slug || '').split(',').filter(Boolean).length
+// 批BQ：实时进度龄（item.updated_at = runner 心跳时间戳）——超 2 分钟无更新橙显「进程可能已中断」
+const progressAge = (it) => {
+  if (!it.updated_at) return 0
+  const ts = new Date(it.updated_at).getTime()
+  return Number.isFinite(ts) ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
+}
+const fmtAge = (s) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`
 // 状态徽标：ok=绿实心✓ / err=红 / run=中性转圈 / stuck=橙（job 已终态还停 pending/creating）
 const itemBadgeCls = (it, job) => {
   if (it.status === 'success') return 'ok'
@@ -3484,7 +3491,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <span v-else class="pj-obj-none">—</span>
               </div>
               <div class="pj-reason-cell">
-                <span v-if="it.error" :class="['pj-reason', { note: isItemNote(it), wrap: it.error_code === 'partial' }]" :title="itemErrTitle(it)">
+                <span v-if="it.status === 'creating' && it.progress" :class="['pj-progress', { stale: progressAge(it) > 120 }]">
+                  <i class="pj-spin"></i>{{ it.progress }}<em> · {{ fmtAge(progressAge(it)) }}</em>
+                  <b v-if="progressAge(it) > 120">{{ t('launch.progressStale') }}</b>
+                </span>
+                <span v-else-if="it.status === 'success' && it.progress" class="pj-progress done">{{ it.progress }}</span>
+                <span v-else-if="it.error" :class="['pj-reason', { note: isItemNote(it), wrap: it.error_code === 'partial' }]" :title="itemErrTitle(it)">
                   <span v-if="isItemNote(it) || itemCodeText(it)" :class="['pj-code', { note: isItemNote(it) }]">{{ isItemNote(it) ? t('launch.deployNote') : itemCodeText(it) }}</span>
                   <span class="pj-reason-txt">{{ itemErrDisplay(it) }}</span>
                 </span>
@@ -3949,6 +3961,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pj-badge.run{color:var(--t2);background:var(--bg3);border:1px solid var(--bd)}
 .pj-badge.stuck{color:var(--warning);background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.5)}
 .pj-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--bd2);border-top-color:var(--ac);animation:pjspin .8s linear infinite;flex:none}
+.pj-progress{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx2);line-height:1.35}
+.pj-progress em{font-style:normal;color:var(--tx3);white-space:nowrap}
+.pj-progress.done{color:var(--tx3)}
+.pj-progress.stale{color:#c07818;font-weight:500}
+.pj-progress.stale .pj-spin{border-top-color:#c07818}
+.pj-progress.stale b{font-weight:600}
 @keyframes pjspin{to{transform:rotate(360deg)}}
 /* 创建物列：系列/组/广告 ID 各一行（label 定宽，ID 用 mono 对齐） */
 .pj-obj{display:flex;flex-direction:column;gap:1px;min-width:0}

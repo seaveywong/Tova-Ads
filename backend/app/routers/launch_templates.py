@@ -2415,7 +2415,8 @@ def _reap_stale_jobs():
             sdb.query(LaunchJobItem).filter(
                 LaunchJobItem.job_id == j.id,
                 LaunchJobItem.status.in_(("pending", "creating")),
-            ).update({"status": "fail", "error": "job 中断（服务重启），请检查 FB 后台并重试"},
+            ).update({"status": "fail", "error": "job 中断（服务重启），请检查 FB 后台并重试",
+                      "progress": None},
                      synchronize_session=False)
         if stale:
             sdb.commit()
@@ -2478,6 +2479,18 @@ def _job_batch_assets(sdb, job_id: int, tenant_id: int) -> list:
     return [by[i] for i in ids if i in by]
 
 
+def _item_note(sdb, item: LaunchJobItem, note: str) -> None:
+    """item 实时进度注记（批BQ）：写 progress + touch job/item 心跳（一条原生 UPDATE + commit）。
+    部署中任意时刻进度弹窗可见「正在哪一步、多久没动」——creating 只有转圈的时代结束
+    （用户 09-11 实测：12 广告树跑 1 分钟全黑盒被当「卡住」）。原生 UPDATE 避开 ORM
+    残留态（批AM StaleDataError 教训）；item.created_at 即「最后更新」时间戳（前端显龄）。"""
+    from sqlalchemy import text as _t
+    sdb.execute(_t("UPDATE launch_job_items SET progress = :p, created_at = now() WHERE id = :i"),
+                {"p": (note or "")[:200], "i": item.id})
+    sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :j"), {"j": item.job_id})
+    sdb.commit()
+
+
 def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: list,
                         last: Optional[dict], is_retry: bool = False, unit: str = "系列") -> None:
     """批量 item（=账户）汇总落账：全部成功 = success/error=None；任一失败 = fail +
@@ -2492,6 +2505,7 @@ def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: li
         item.ad_id = str(last.get("ad_id") or "")
         if last.get("page_post_id"):
             item.page_post_id = str(last["page_post_id"])
+    item.progress = f"完成：成功 {ok}/{total} {unit}"   # 批BQ：终态进度行（失败明细在 error）
     if not fails:
         item.status = "success"; item.error = None; item.error_code = None
         if job:
@@ -2521,6 +2535,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         filepath = os.path.join(ASSET_DIR, asset.storage_key)
         if not os.path.exists(filepath):
             raise FbApiError("no_id", f"素材文件丢失: {asset.storage_key}")
+        _item_note(sdb, item, f"素材上传/缓存：{(asset.name or asset.filename or '')[:40]}")   # 批BQ：视频上传是长步骤
         if asset.type == "image":
             image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
         else:
@@ -2665,9 +2680,8 @@ def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
     ok, fails, last = 0, [], None
     for i, a in enumerate(assets):
         name = _series_name(tpl, a, i)
-        sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
-                    {"jid": item.job_id})
-        sdb.commit()  # 心跳即提交——视频上传可能>10min，不提交的话 reap 在别的事务里看不到未提交心跳
+        # 心跳+进度注记（批BQ）：视频上传可能>10min，不提交的话 reap 在别的事务里看不到未提交心跳
+        _item_note(sdb, item, f"系列 {i+1}/{len(assets)}：{(name or '')[:40]}")
         try:
             r = _deploy_series_fb(sdb, fb, item, tpl, a, tenant_id, link,
                                   targeting, advanced, post_content, series_name=name)
@@ -2747,6 +2761,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             _spend_cap_fb = _usd_to_account_minor(sdb, item.act_id, float(tpl.spend_cap_usd), tenant_id)
         except ValueError as e:
             raise FbApiError("no_id", f"支出上限换算失败：{e}")
+    _item_note(sdb, item, "创建系列…")   # 批BQ：分步进度可见
     camp_payload = build_campaign(
         name=campaign_name, objective=tpl.objective,
         daily_budget=(camp_budget_fb if (is_cbo and not _camp_lifetime_fb) else None),
@@ -2787,8 +2802,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             for k in range(max(len(anode.get("asset_ids") or []), 1)):
                 fails.append(f"{sname}/{aname}: {msg[:110]}")
 
+    _ads_total = _tree_expanded_count(adsets)
+    _ad_no = 0
     for si, snode in enumerate(adsets, 1):
         sname = ((snode.get("name") or f"{campaign_name} 组{si}"))[:100]
+        _item_note(sdb, item, f"组 {si}/{len(adsets)}：{sname[:36]}")   # 批BQ
         s_enabled = bool(snode.get("enabled"))
         # 组预算（ABO）：节点 USD 覆盖 > 模板默认；节点/模板可选 lifetime（总预算须排期，
         # 保存端已校验节点级；模板级 lifetime 在 _budget_guard_400 已拦无排期）。
@@ -2973,16 +2991,15 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             aname_base = (anode.get("name") or "").strip()
 
             for asset in assets:
-                from sqlalchemy import text as _t2
-                sdb.execute(_t2("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
-                            {"jid": item.job_id})
-                sdb.commit()  # 心跳即提交（素材上传耗时 > reap 窗口，理由同批量模式）
+                _ad_no += 1
                 # 广告名：节点名 > 素材名（素材组展开的每个广告用素材名，对齐批量生成命名）
                 if aname_base:
                     ad_name = aname_base
                 else:
                     ad_name = ((asset.name or asset.filename or "") if asset else "") or f"{sname} 广告{ai}"
                 ad_name = ad_name[:100]
+                # 心跳+进度注记（批BQ，原裸 job touch）：素材上传耗时 > reap 窗口，commit 后轮询立即可见
+                _item_note(sdb, item, f"广告 {_ad_no}/{_ads_total}：{ad_name[:36]}")
                 try:
                     if asset is None and not (node_post == "reuse" and anode.get("reuse_post_ref")):
                         raise FbApiError("no_id", "广告节点未选素材或素材已被删除（跟帖模式可无素材）")
@@ -3230,9 +3247,7 @@ def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
     ok, fails, last = 0, [], None
     for i, a in enumerate(assets):
         name = _series_name(tpl, a, i)
-        sdb.execute(_t("UPDATE launch_jobs SET created_at = now() WHERE id = :jid"),
-                    {"jid": item.job_id})
-        sdb.commit()  # 心跳即提交（理由同 _deploy_item_fb_batch：reap 看不到未提交心跳）
+        _item_note(sdb, item, f"系列 {i+1}/{len(assets)}：{(name or '')[:40]}")   # 心跳+进度（批BQ）
         try:
             _deploy_item_tt(sdb, None, item, tpl, a, tenant_id, link,
                             name_prefix_override=name)
@@ -3411,6 +3426,8 @@ def _item_dict(it: LaunchJobItem) -> dict:
         "status": it.status, "campaign_id": it.campaign_id or "", "adset_id": it.adset_id or "",
         "ad_id": it.ad_id or "", "subcode_slug": it.subcode_slug or "", "error": it.error or "",
         "error_code": it.error_code or "", "page_post_id": it.page_post_id or "",
+        "progress": it.progress or "",                    # 批BQ：实时进度注记
+        "updated_at": str(it.created_at) if it.created_at else "",   # 心跳时间戳（=最后更新）
     }
 
 
@@ -3565,7 +3582,7 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     # WHERE 扩到 pending/creating（job 终态守卫已挡 running，此处命中=回收上次中断的卡死行）
     claimed = db.execute(
         _text("UPDATE launch_job_items SET status='pending', error=NULL, error_code=NULL, "
-              "campaign_id=NULL, adset_id=NULL, ad_id=NULL "
+              "campaign_id=NULL, adset_id=NULL, ad_id=NULL, progress=NULL "
               "WHERE id=:id AND status IN ('fail','pending','creating')"),
         {"id": item_id},
     ).rowcount

@@ -117,4 +117,5 @@ class LaunchJobItem(Base):
     error_code = Column(Text)       # 失败原因 category（cert_required/invalid_param/... 供前端 i18n）
     subcode_slug = Column(Text)
     error = Column(Text)
+    progress = Column(Text)                        # 批BQ：部署中实时进度注记（"广告 3/12：US4"）——creating 不再黑盒
     created_at = Column(DateTime(timezone=True), server_default=func.now())
