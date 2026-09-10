@@ -1966,3 +1966,17 @@ adManagerView.js `defaultColumns` 少收尾 `]`（PARSE_ERROR）——批AM 起�
 
 ### 部署
 后端 3 轮（双门+restart+health 全绿）+ 前端 CF。commit：3ae7c15、4c6f8a5、(flush 修复)。
+
+## 批AR+批AS：素材文案联动 + 全站真人口径 + 时区修复（2026-09-10，3 Agent 并行）
+
+### 批AR 素材↔文案联动（Agent④改/主会话复审）
+现状核实：批AF 只做了前端「未自定义才跟随」，下发端多素材从未按素材分流。修复：①换素材立即跟随新素材 AI 文案（手改被覆盖时 toast 告知；无 AI 文案素材不动）②多素材各用各的：批量（series_name 非空）/树素材组节点（len>1）/TT 批量=素材 AI 优先，模板/节点文案只兜无 AI 文案的素材 ③三处预检样例与 runner 同口径。单素材维持手填优先 WYSIWYG（表单显示什么发什么）。
+
+### 批AS 全站落地指标真人口径（Agent③改/主会话复审）
+落地页卡片/子码统计/看板（overview+趋势+屏蔽分布）统一：访问=visit+redirect，通过=click+redirect 按 ip 去重，爬虫/审核机器人剔除（core/landing_source 单一清单）。顺手修短链（redirect 模式）访问计数恒 0 缺口；前端标签统一「通过」术语+hover 口径提示；i18n 补 en 缺失 key。
+
+### 批AS 时区表达式修复（Agent①取证实证）
+landing_events.created_at（timestamptz）双重 AT TIME ZONE 实际算出 UTC-8h 日期：北京时间 0~16 点的落地访问全错进前一日桶、当天巡检数不到（广告 220 的 4 访问实测落错桶）。guard 规则/诊断面板/看板趋势三处改单次转换。验证：新分桶 09-10=7 visit 行（旧代码会把其中北京时间 0-16 点的扔 09-09）。
+
+### 部署与验证
+后端 6 文件（双门+restart+health）+前端 CF。验证：/ads/list 广告 220 综合转化 8=访问 8（出口覆盖修复未回归）；落地页 page6 真人访问 8/通过 1/屏蔽 102（口径生效）；子码今日统计正常。commit：e812d42、5cf9896、6b1584f。
