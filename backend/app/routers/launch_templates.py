@@ -2638,7 +2638,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     if r.get("pixel_swapped"):
         # 平铺/批量像素自愈留痕（批AZ 统一）：模板像素令牌无权 → 已换账户可用像素；
         # 落地页同步回写新像素（worker fire 页自身像素，只换 adset=FB 零转化）
-        _px_w = f"[像素] 模板像素当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
+        _px_w = f"[像素] 所配像素（模板/落地页）当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
         r["auto_subcode_warn"] = (f"{r['auto_subcode_warn']}；{_px_w}"
                                   if r.get("auto_subcode_warn") else _px_w)
         if (tpl.landing_page_id or 0):
@@ -2910,7 +2910,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             if _sw_px:
                 # 像素自愈留痕（批AZ）：模板像素令牌无权 → 已换账户可用像素；落地页必须同步
                 # 回写新像素（worker fire 页自身的 pixel_ids——只换 adset 页还发旧像素=FB 零转化）
-                auto_warns.append(f"[像素] {sname}: 模板像素当前令牌无权使用(1487429)，"
+                auto_warns.append(f"[像素] {sname}: 所配像素（模板/落地页）当前令牌无权使用(1487429)，"
                                   f"已自动换为账户可用像素 {_sw_px}")
                 _grp_pixel = _sw_px
                 if _grp_lpid:
@@ -3879,7 +3879,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             it.page_post_id = r.get("page_post_id") or page_post_id
             it.status = "success"
             # 自动建链降级留痕（批次I）+ 像素自愈留痕（批AZ 统一：平铺重试同树路径口径）
-            _px_w = (f"[像素] 模板像素当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
+            _px_w = (f"[像素] 所配像素（模板/落地页）当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
                      if r.get("pixel_swapped") else "")
             it.error = ("；".join(w for w in (_a_warn, _px_w) if w) or None)
             it.error_code = ("auto_subcode_degraded" if (_a_warn or _px_w) else None)
