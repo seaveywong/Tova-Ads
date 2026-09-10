@@ -96,9 +96,11 @@ def ensure_video_thumb_hash(fb: FbClient, db, asset, act_id: str, video_filepath
     """视频缩略图的 image_hash（FB API 建视频创意必填 video_data.image_hash——缺失=
     「你的广告缺少视频缩略图」整广告被拒，2026-09-10 用户 12 条视频广告全失败实证）。
 
-    首帧 JPG 落盘 {video}.thumb.jpg（一次抽取多账户/多次部署复用）；hash 复用
-    ensure_image_hash_for_account 的按账户缓存列——视频素材的 fb_image_hashes 只有
-    缩略图会写，与图片素材的正式 hash 不冲突。抽帧失败抛 FbApiError（明确归因）。"""
+    首帧 JPG 落盘 {video}.thumb.jpg（一次抽取多账户/多次部署复用）；hash 按账户缓存进
+    asset.fb_image_hashes（视频素材该列只有缩略图会写，与图片素材的正式 hash 不冲突）。
+    上传文件名必须是 .jpg（复用 ensure_image_hash_for_account 会带视频的 .mp4 文件名 →
+    FB 按 MIME 拒「请求参数错误」——首版 smoke 实证），故这里内联上传。
+    抽帧失败抛 FbApiError（明确归因）。"""
     import os
     from .media_util import extract_keyframes
     thumb_path = video_filepath + ".thumb.jpg"
@@ -108,7 +110,24 @@ def ensure_video_thumb_hash(fb: FbClient, db, asset, act_id: str, video_filepath
             raise FbApiError("no_id", f"视频抽帧失败（ffmpeg 缺失或视频损坏），无法生成缩略图: {asset.storage_key}")
         with open(thumb_path, "wb") as f:
             f.write(frames[0])
-    return ensure_image_hash_for_account(fb, db, asset, act_id, thumb_path)
+    cache = {}
+    if asset.fb_image_hashes:
+        try:
+            cache = json.loads(asset.fb_image_hashes)
+        except Exception:
+            cache = {}
+    h = cache.get(act_id)
+    if h:
+        return h
+    with open(thumb_path, "rb") as f:
+        image_bytes = f.read()
+    result = fb.upload_ad_image(act_id, image_bytes, "video-thumb.jpg")
+    h = result.get("hash")
+    if not h:
+        raise FbApiError("no_id", f"上传视频缩略图到 act_{act_id} 未返回 hash")
+    _merge_asset_cache(db, asset, "fb_image_hashes", act_id, h)
+    db.flush()
+    return h
 
 
 def ensure_video_id_for_account(fb: FbClient, db, asset, act_id: str, filepath: str) -> str:
