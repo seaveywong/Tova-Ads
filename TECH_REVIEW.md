@@ -2037,3 +2037,15 @@ item36 重试 → job33 completed 1✓0✗：campaign 120251523565770604 + 6 ads
 ② **系列层「访问/通过」列**：ads.py 批AQ 块扩 rollup——子广告 landing_visits/landing_pass 按系列聚合（与综合转化同 key 口径）；前端列 levels 扩 campaign、默认列加入、_COLS_MIGRATION v3 给已保存配置补列；排序/合计行自动生效（sumMetric 白名单已有）。无子广告行的系列显示 —（缓存广告层未含，诚实缺省）。
 smoke（服务器真码直调 list_ads）：19 系列 78 广告，5 个有数据系列 rollup 全对（如 访问=13 通过=4），广告层总和 61=系列层总和 61，真实失败 0；单测 5/5。
 commit 2067608。部署：后端 3 文件双门+restart+health 绿；前端 build✓+CF master。
+
+## 批BQ：部署进度透明化——卡住不再是黑盒（2026-09-11）
+
+背景：用户 12 广告树部署跑 1 分钟全程只有「creating」转圈被判「卡住」（真实原因=主页绑定 1815645 全拒，但过程中不可见）。落地：
+- **迁移 0095**：launch_job_items 加 progress 列
+- **runner 分步注记**（_item_note：原生 UPDATE 写 progress + touch job/item 心跳，防 StaleDataError）：树链「创建系列→组 i/N→广告 k/M：素材名」；平铺/单模板链「系列 i/N」「素材上传/缓存」（视频上传长步骤）；TT 批量同款。终态 _apply_batch_result 写「完成：成功 X/Y」
+- **_item_dict** 回传 progress + updated_at（心跳时间戳）；retry 抢占与回收器清 progress 防残留
+- **前端**：creating 行实时显进度 + 「· Xs 前」龄；超 2 分钟无更新橙显「进程可能已中断（如服务重启），稍后自动标记失败可重试」；成功行显终态汇总
+- **部署 SOP 强化**：restart 前必查 launch_jobs 在跑任务（本次批BP restart 杀掉用户在跑部署的事故防再犯，已入 auto-memory）
+
+smoke：DB 写入/还原 ✓、fresh 查询（=get_job 真实路径）回传 progress/updated_at ✓、迁移列存在 ✓、health 绿、前端 build✓+CF。commit aeff0d0。
+坑：探针先载 ORM 再原生 UPDATE 会读到旧快照——端点是写入后新查询，无此问题。
