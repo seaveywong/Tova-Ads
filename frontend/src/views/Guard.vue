@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -8,16 +9,21 @@ import { fmtTime } from '../composables/useTz'
 const isSuper = isSuperadminSync()
 
 const { t } = useI18n()
+const route = useRoute()
 
-// 视图切换：规则配置 / 暂停记录（哨兵+紧急暂停+止损动作流水）
-const viewTab = ref('rules')
+// 视图切换：规则配置 / 暂停记录（哨兵+紧急暂停+止损动作流水）；?tab=log 直达（侧栏入口）
+const viewTab = ref(route.query.tab === 'log' ? 'log' : 'rules')
 const pauseLog = ref([])
 const pauseLoading = ref(false)
+// 批BV（/goal①）：最近一次全局暂停的完整执行报告可回看——扫描账户/停用系列/核验失败/报错明细
+const lastEmergency = ref(null)
 const loadPauseLog = async () => {
   pauseLoading.value = true
   try { pauseLog.value = await GET('/guard/pause-log?limit=150') } catch { pauseLog.value = [] }
+  try { lastEmergency.value = await GET('/guard/emergency-status') } catch { lastEmergency.value = null }
   pauseLoading.value = false
 }
+if (viewTab.value === 'log') loadPauseLog()
 const tgtLabel = (v) => ({ campaign: t('guard.plCampaign'), ad: t('guard.plAd'), adset: t('guard.plAdset'), tenant: t('guard.plTenant') }[v] || v)
 const srcLabel = (src) => ({
   sentinel_patrol: t('guard.plSentinel'), emergency_pause: t('guard.plEmergency'), rule_engine: t('guard.plRule'),
@@ -325,6 +331,29 @@ const doInspect = async (force = false) => {
     </div>
 
     <div v-if="viewTab === 'log'" class="list" v-loading="pauseLoading">
+      <!-- 批BV（/goal①）：最近一次全局暂停的执行报告——侧栏面板只有按钮没有信息，这里是唯一回看处 -->
+      <div v-if="lastEmergency && lastEmergency.started_at" class="emg-report">
+        <div class="emg-head">
+          <span class="emg-title">{{ t('guard.emgReport') }}</span>
+          <span class="emg-time">{{ fmtTime(lastEmergency.started_at) }}</span>
+          <span v-if="lastEmergency.running" class="emg-running">{{ t('guard.emgRunning') }}</span>
+        </div>
+        <div class="emg-stats">
+          <div class="emg-stat"><b>{{ lastEmergency.total_accounts ?? '—' }}</b><span>{{ t('guard.emgScan') }}</span></div>
+          <div class="emg-stat"><b>{{ lastEmergency.campaigns ?? lastEmergency.paused ?? '—' }}</b><span>{{ t('guard.emgCamps') }}</span></div>
+          <div class="emg-stat"><b>{{ lastEmergency.paused_ads ?? '—' }}</b><span>{{ t('guard.emgAds') }}</span></div>
+          <div class="emg-stat" :class="{ bad: (lastEmergency.verify_failed || 0) > 0 }"><b>{{ lastEmergency.verify_failed ?? '—' }}</b><span>{{ t('guard.emgVerifyFail') }}</span></div>
+          <div class="emg-stat" :class="{ bad: (lastEmergency.final_active_count || 0) > 0 }"><b>{{ lastEmergency.final_active_count ?? '—' }}</b><span>{{ t('guard.emgStillActive') }}</span></div>
+        </div>
+        <div v-if="(lastEmergency.errors || []).length" class="emg-sec bad">
+          <div class="emg-sec-t">{{ t('guard.emgErrors') }}</div>
+          <div v-for="(e, i) in lastEmergency.errors" :key="i" class="emg-li">{{ e }}</div>
+        </div>
+        <div v-if="(lastEmergency.final_active_sample || []).length" class="emg-sec warn">
+          <div class="emg-sec-t">{{ t('guard.emgStillActive') }}</div>
+          <div v-for="(s, i) in lastEmergency.final_active_sample" :key="i" class="emg-li">{{ s }}</div>
+        </div>
+      </div>
       <div v-if="!pauseLog.length && !pauseLoading" class="empty-title" style="padding:30px;text-align:center">{{ t('guard.plEmpty') }}</div>
       <div v-for="e in pauseLog" :key="e.id" class="pl-row">
         <span class="pl-time">{{ fmtTime(e.created_at) }}</span>
@@ -507,12 +536,28 @@ const doInspect = async (force = false) => {
 
 .view-tabs { display: flex; gap: 6px; }
 .pl-row { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--bd); border-radius: 10px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
-.pl-time { color: var(--tx-3, #999); font-size: 12px; white-space: nowrap; }
+/* 批BV：最近全局暂停执行报告卡（/goal① 侧栏只有按钮没有信息——这里是回看处） */
+.emg-report { border: 1px solid var(--bd); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: var(--bg2); display: flex; flex-direction: column; gap: 10px; }
+.emg-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.emg-title { font-size: 13px; font-weight: 600; color: var(--error); }
+.emg-time { font-size: 12px; color: var(--t3); }
+.emg-running { font-size: 11px; color: var(--warning); border: 1px solid var(--warning); border-radius: 6px; padding: 1px 8px; }
+.emg-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.emg-stat { border: 1px solid var(--bd); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; text-align: center; }
+.emg-stat b { font-size: 18px; font-variant-numeric: tabular-nums; color: var(--t1); }
+.emg-stat span { font-size: 11px; color: var(--t3); }
+.emg-stat.bad b { color: var(--error); }
+.emg-sec { border-top: 1px dashed var(--bd); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.emg-sec-t { font-size: 12px; font-weight: 600; }
+.emg-sec.bad .emg-sec-t { color: var(--error); }
+.emg-sec.warn .emg-sec-t { color: var(--warning); }
+.emg-li { font-size: 12px; color: var(--t2); word-break: break-all; }
+.pl-time { color: var(--t3); font-size: 12px; white-space: nowrap; }
 .pl-tag { flex: none; padding: 2px 8px; border-radius: 6px; font-size: 12px; color: #fff; }
 .pl-tag.sent { background: var(--warning); }   /* UI审计#10：EP 旧色→token */
 .pl-tag.emg { background: var(--error); }
 .pl-tag.rule { background: var(--t3); }
-.pl-target { flex: none; color: var(--tx-3, #999); font-size: 12px; }
+.pl-target { flex: none; color: var(--t3); font-size: 12px; }
 .pl-detail { flex: 1; min-width: 200px; word-break: break-all; }
 .pl-result { flex: none; font-size: 12px; color: var(--success); }
 .pl-result.fail { color: var(--error); }

@@ -212,6 +212,7 @@ const ABNORMAL_SET = new Set(['DISAPPROVED', 'PENDING', 'PENDING_REVIEW', 'WITH_
 const statusMatch = (s) => {
   if (statusFilter.value === 'all') return true
   if (statusFilter.value === 'active') return s === 'ACTIVE'
+  if (statusFilter.value === 'idle') return s === 'NO_ACTIVE_ADS'   // 批BW：容器开但零在投（此前被「已暂停」误吞）
   if (statusFilter.value === 'abnormal') return ABNORMAL_SET.has(s)
   return s === 'PAUSED' || (s && s.includes('PAUSED'))
 }
@@ -246,7 +247,7 @@ const platChipByAct = (actId) => {
   return platChip(a)
 }
 const sortBy = (key) => { if (sortKey.value === key) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'; else { sortKey.value = key; sortDir.value = 'desc' } }
-const _rankMap = { ACTIVE: 0, PAUSED: 1, CAMPAIGN_PAUSED: 2, ADSET_PAUSED: 3, PENDING_REVIEW: 4, WITH_ISSUES: 5, DISAPPROVED: 6, ARCHIVED: 7, DELETED: 8 }
+const _rankMap = { ACTIVE: 0, PAUSED: 1, NO_ACTIVE_ADS: 2, CAMPAIGN_PAUSED: 3, ADSET_PAUSED: 4, PENDING_REVIEW: 5, WITH_ISSUES: 6, DISAPPROVED: 7, ARCHIVED: 8, DELETED: 9 }
 const statusRank = (s) => _rankMap[s] ?? 9
 const sortIcon = (key) => sortKey.value === key ? (sortDir.value === 'desc' ? '▼' : '▲') : ''
 
@@ -500,7 +501,10 @@ const saveBudget = async () => {
 }
 const deleteItem = async (item) => {
   try {
-    await ElMessageBox.confirm(t('adm.delConfirm', { name: item.name }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
+    // 批BW：确认文案写明级联范围（FB 删除不可逆：系列连带全部组/广告，组连带广告）
+    await ElMessageBox.confirm(
+      t('adm.delConfirm', { name: item.name }) + (tab.value === 'campaign' ? `\n\n${t('adm.delCascadeCampaign')}` : tab.value === 'adset' ? `\n\n${t('adm.delCascadeAdset')}` : ''),
+      t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
     opLoading.value = true
     try {
       await POST('/ads/delete', { act_id: item.act_id, node_id: item.id })
@@ -905,7 +909,7 @@ const unsubscribeLeads = async () => {
         </el-option>
       </el-select>
       <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
-      <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
+      <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
       <el-popover v-if="tab !== 'lead'" trigger="click" width="250" placement="bottom-end">
         <template #reference><button class="ctrl-btn">{{ t('adm.columns') }}</button></template>
@@ -963,7 +967,10 @@ const unsubscribeLeads = async () => {
           <template v-for="a in curList" :key="entityKey(a)">
             <tr :class="{ sel: isSelected(entityKey(a)) }">
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
-              <td><div class="status-cell" :title="stIdleTitle(a, tab)"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span class="dot" :class="statusDot(effectiveStatusOf(a, tab))"></span>{{ statusLabel(effectiveStatusOf(a, tab)) }}<span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span></div></td>
+              <td><div class="status-cell" :title="stIdleTitle(a, tab)">
+                <div class="st-line1"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span :class="['st-badge', statusDot(effectiveStatusOf(a, tab))]">{{ statusLabel(effectiveStatusOf(a, tab)) }}</span></div>
+                <span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span>
+              </div></td>
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
@@ -1261,6 +1268,14 @@ const unsubscribeLeads = async () => {
 .so:hover { color: var(--ac) }
 .status-cell { display: flex; align-items: center; gap: 4px; font-size: 11px; white-space: nowrap }
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle }
+/* 批BW：状态徽章（替代 dot+裸文字——一格四元素挤成乱，改开关+徽章一行/账户tag换行） */
+.status-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.st-line1 { display: flex; align-items: center; gap: 6px; }
+.st-badge { display: inline-block; font-size: 11px; font-weight: 500; line-height: 1.5; padding: 1px 8px; border-radius: 5px; white-space: nowrap; }
+.st-badge.ok { color: var(--success); background: rgba(52,199,89,.13) }
+.st-badge.warn { color: var(--warning); background: rgba(255,159,10,.13) }
+.st-badge.err { color: var(--error); background: rgba(255,69,58,.13) }
+.st-badge.off { color: var(--t3); background: var(--bg3) }
 .dot.ok { background: var(--success) } .dot.warn { background: var(--warning) } .dot.err { background: var(--error) } .dot.off { background: var(--t3); opacity: .4 }
 .budget-cell { cursor: default }
 .budget-cell.editable { cursor: pointer; color: var(--ac) }

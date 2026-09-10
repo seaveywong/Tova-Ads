@@ -16,6 +16,7 @@ export default {
     emptyTitle: '还没有止损规则', emptyStep: '创建第一条规则 —— 巡检会按规则自动暂停空耗/成本超标的广告。', noRulesInCat: '该分类下暂无规则',
     tabRules: '规则配置', tabLog: '暂停记录',
     plCampaign: '系列', plAd: '广告', plAdset: '广告组', plTenant: '全局', plSentinel: '哨兵', plEmergency: '紧急暂停', plRule: '规则止损', plEmpty: '暂无暂停记录（哨兵/紧急暂停/规则止损的动作会在这里留痕）',
+    emgReport: '最近一次全局暂停 · 执行报告', emgRunning: '执行中…', emgScan: '扫描账户', emgCamps: '停用系列', emgAds: '覆盖广告', emgVerifyFail: '核验失败', emgStillActive: '停后仍投放', emgErrors: '报错明细',
     editTitle: '编辑规则', createTitle: '新建规则', ruleName: '规则名', ruleNamePh: '如：VND 账户止血', type: '类型', threshold: '阈值', actionLabel: '动作',
     convLabelOpt: '转化口径', landingMetricOpt: '落地页指标', scopeAccountsLabel: '作用账户', scopeAccountsPh: '留空=名下全部账户；可多选指定账户',
     cat: { bleed: '空耗止损', cost: '成本超标', decline: '效果下滑', scale: '智能扩量' },

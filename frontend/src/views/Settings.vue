@@ -430,6 +430,10 @@ const saveRetention = async () => {
   retentionSaving.value = false
 }
 const runRetentionNow = async () => {
+  // 批BW：点「立即清理」=按当前策略真删旧数据——与同卡片缩窗口的 danger 确认对齐（原危险度倒挂）
+  try {
+    await ElMessageBox.confirm(t('settings.retentionRunConfirm'), t('settings.retentionRunTitle'), { type: 'warning', confirmButtonText: t('settings.retentionRunBtn'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
+  } catch { return }
   retentionRunning.value = true
   try {
     const r = await POST('/settings/retention/run')

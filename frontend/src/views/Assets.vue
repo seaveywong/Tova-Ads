@@ -302,8 +302,12 @@ const batchAnalyze = async () => {
 const batchDelete = async () => {
   if (!selCount.value) return
   const ids = [...selected.value]
+  // 批BW：批量删与单删同警示——选中里有「使用中」素材的列出提醒（单删有 usage 警、批量原来没有）
+  const inUse = assets.value.filter(a => selected.value.has(a.id) && (a.usage_count || 0) > 0)
   try {
-    await ElMessageBox.confirm(t('assets.batchDeleteConfirm', { n: ids.length }), t('assets.batchDelete'),
+    await ElMessageBox.confirm(t('assets.batchDeleteConfirm', { n: ids.length }) +
+      (inUse.length ? `\n\n⚠ ${t('assets.batchDeleteInUse', { n: inUse.length })}：${inUse.slice(0, 5).map(a => a.name).join('、')}${inUse.length > 5 ? '…' : ''}` : ''),
+      t('assets.batchDelete'),
       { type: 'warning', confirmButtonText: t('assets.confirmDelete'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
     let ok = 0, fail = 0
     for (const id of ids) {

@@ -6,6 +6,7 @@ import { GET, POST, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
 import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
+const fmtShort = (iso) => { try { return fmtTime(iso).split(' ')[0]?.slice(5) || '' } catch { return '' } }   // MM-DD（侧栏窄位摘要）
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 import PlatformSeg from '../components/PlatformSeg.vue'
@@ -114,11 +115,23 @@ const toggleNotifs = async () => {
 // 安全面板
 const guardStatus = ref({ rules_enabled: 0, sentinel_armed_accounts: 0, allowances_today: 0 })
 const sentinelOn = ref(false)
+// 批BV（/goal①）：最近一次全局暂停摘要（面板不只是按钮——能看到上次执行结果，点击进守护页看全报告）
+const lastEmergency = ref(null)
+const emgSummary = computed(() => {
+  const e = lastEmergency.value
+  if (!e || !e.started_at) return ''
+  const n = e.campaigns ?? e.paused ?? 0
+  const bad = (e.verify_failed || 0) + ((e.errors || []).length)
+  return `${fmtShort(e.started_at)} · ${t('layout.emgDone', { n })}${bad ? ` ⚠${bad}` : ' ✓'}`
+})
 const loadGuard = async () => {
   try {
     guardStatus.value = await GET('/guard/status')
     sentinelOn.value = guardStatus.value.sentinel_armed_accounts > 0
   } catch {}
+  if (myPerms.value.includes('ads.pause') || isSuperadmin) {
+    try { lastEmergency.value = await GET('/guard/emergency-status') } catch {}
+  }
 }
 const toggleSentinel = async (val) => {
   // disarm=关闭自动急停保护（资金安全行为）——必须确认；arm=开启保护，不拦
@@ -278,6 +291,11 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           <span>{{ t('layout.rulesCount', { n: guardStatus.rules_enabled }) }}</span>
           <span class="guard-dot" :class="{ on: guardStatus.rules_enabled > 0 }"></span>
         </div>
+        <div v-if="emgSummary" class="guard-row emg-last" @click="router.push({ name: 'guard', query: { tab: 'log' } })"
+             :title="t('layout.emgViewLog')">
+          <span>{{ t('layout.lastEmergency') }}</span>
+          <span class="emg-last-v">{{ emgSummary }} →</span>
+        </div>
         <button class="emergency-btn" :disabled="emergencyLoading" @click="emergencyPause">{{ emergencyLoading ? t('layout.pausing') : t('layout.emergencyPause') }}</button>
       </div>
     </aside>
@@ -331,6 +349,10 @@ watch(() => route.path, () => { sidebarOpen.value = false })
                 </div>
               </div>
               <div v-if="!recentNotifs.length" class="notif-empty">{{ t('layout.notifEmpty') }}</div>
+              <!-- 批BW：广告类告警不进铃铛（走告警中心）——底部固定引导行，指路+可点 -->
+              <div class="notif-footer" @click="router.push({ name: 'dashboard' }); notifOpen = false">
+                <span>{{ t('layout.notifViewAll') }}</span><span class="notif-footer-hint">{{ t('layout.notifAdAlertHint') }}</span>
+              </div>
             </div>
           </div>
           <el-dropdown trigger="click" @command="cmd => cmd === 'logout' && logout()">
@@ -413,6 +435,10 @@ watch(() => route.path, () => { sidebarOpen.value = false })
   display: flex; justify-content: space-between; align-items: center;
   padding: 4px 0; font-size: 13px; color: var(--t2);
 }
+/* 批BV：最近全局暂停摘要行（点击进守护页暂停记录看全报告） */
+.guard-row.emg-last { cursor: pointer; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; }
+.guard-row.emg-last:hover { background: var(--bg3); }
+.emg-last-v { font-size: 11px; color: var(--t3); white-space: nowrap; }
 .guard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--t3); }
 .guard-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .emergency-btn {
@@ -502,6 +528,9 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .notif-text { font-size: 13px; color: var(--t1); line-height: 1.4; }
 .notif-time { font-size: 11px; color: var(--t3); margin-top: 2px; }
 .notif-empty { padding: 28px; text-align: center; color: var(--t3); font-size: 13px; }
+.notif-footer { display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; border-top: 1px solid var(--bd); cursor: pointer; font-size: 12px; color: var(--ac); }
+.notif-footer:hover { background: var(--bg3); }
+.notif-footer-hint { color: var(--t3); font-size: 11px; }
 
 /* 用户 */
 .user-info {

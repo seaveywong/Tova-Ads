@@ -1217,8 +1217,17 @@ const removeTreeAdset = async (si) => {
   if (treeSel.value.si === si) selectTreeNode('campaign')
   else if (treeSel.value.si > si) treeSel.value = { ...treeSel.value, si: treeSel.value.si - 1 }
 }
-const removeTreeAd = (si, ai) => {
+const removeTreeAd = async (si, ai) => {
   const s = tree.value.adsets[si]; if (!s) return
+  // 批BW：删节点零确认误点即丢草稿（同 removeTreeAdset 有确认）——节点有配置才问，空节点直接删
+  const node = s.ads[ai] || {}
+  const hasCfg = (node.asset_ids || []).length || node.subcode_slug || node.landing_page_id || node.name
+  if (hasCfg) {
+    try {
+      await ElMessageBox.confirm(t('launch.treeAdDelConfirm'), t('common.delConfirm'),
+        { type: 'warning', confirmButtonClass: 'el-button--danger' })
+    } catch { return }
+  }
   s.ads.splice(ai, 1)
   if (treeSel.value.type === 'ad' && treeSel.value.si === si) {
     if (!s.ads.length) selectTreeNode('adset', si)

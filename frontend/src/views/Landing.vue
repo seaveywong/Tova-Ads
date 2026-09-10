@@ -632,6 +632,10 @@ const importZones = async () => {
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
 const delDomain = async (d) => {
+  // 批BW：全页唯一裸删 → 补确认（删的是线上域名：解析与 /a/ 链接即时受影响）
+  try {
+    await ElMessageBox.confirm(t('lp.domainDelConfirm', { d: d.domain }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
+  } catch { return }
   try { await DELETE(`/landing-lib/domains/${d.id}`); ElMessage.success(t('common.done')); await loadLib(); await openDomains() }
   catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
