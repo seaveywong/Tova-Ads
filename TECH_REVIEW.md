@@ -2082,3 +2082,13 @@ build ✓ + CF master 部署完成。commit 本批（见 git log）。回归点�
 ② **系列/组「无在投广告」态（用户点名「没 Active 广告别显示投放中」）**：AdManager childPausedMap 扩 adsetActiveAds/campActiveAds（子广告 effective===ACTIVE 计数）；effectiveStatusOf 在容器 ACTIVE 但零生效广告时返 NO_ACTIVE_ADS（useStatus 新条目，灰态）；状态筛选「投放中」自动排除；悬浮说明「容器开启但无在投广告——不消耗」。覆盖全停 PAUSED（批BG）之外的新场景：审核中/被拒混合。
 ③ **安全守护 UI 实测（Agent 截图 6 张 + API 快筛）**：三层全正常未复现「看不到」——暂停记录 tab 150 条、侧栏面板/移动端抽屉正常、日志中心 emergency 筛选 2 条（默认 7 天窗）。用户看不到的最可能原因：守护页默认在「规则配置」tab；日志中心被巡检心跳刷屏需筛选；时区显示+8h。另抓到 dashboard/landing 422（缺 platform 参数，另行处理）。
 smoke：build✓、i18n 成对+en零CJK、单测过、后端双门+health 绿。部署：后端 launch_templates.py + 前端 CF master。
+
+## 批BV+BW：安全守护报告可回看 + 全站交互审计快修 + AdManager 状态重排（2026-09-11 /goal）
+
+**/goal①（执行信息可看）**：侧栏安全守护面板加「上次暂停」摘要行（日期+停N系列+失败警示，点击跳守护页暂停记录）；守护页「暂停记录」tab 顶部新增「最近一次全局暂停·执行报告」卡——扫描账户/停用系列/覆盖广告/核验失败/停后仍投放五格大数字 + 报错明细 + 残留样本列表（数据源 /guard/emergency-status kv 持久化，后端零改动）；Guard 页支持 ?tab=log 深链。
+
+**/goal②（全站交互审计，Agent 扫 16 文件）**产出 22 条 + Top5；本批快修 6 处：①Landing delDomain 裸删→确认（线上域名影响 /a/ 链接）②Settings 立即清理裸跑→danger 确认（原与缩窗口危险度倒挂）③AdManager 删除确认补级联范围文案（系列连带全部组/广告）④Assets 批量删补「N 个使用中」警示（对齐单删）⑤树编辑器删广告节点补确认（原误点即丢草稿）⑥铃铛下拉底部加「查看全部告警→告警中心」引导（广告类告警不在铃铛的发现性）。**挂账**：巡检结果回看（Guard/Dashboard doInspect）、Ads syncCampaigns 报告、FormTemplates dirty-guard、Members 邀请密码重查、Landing 子码事件死入口（openSubEvents 无调用）。
+
+**用户点名 AdManager 状态乱**：状态列重排——原「开关+圆点+文字+账户tag」四元素挤一格 → 「开关+色底状态徽章」一行 + 账户 tag 换行（.st-badge 复用状态色 token）；状态筛选加「无在投」档（此前被已暂停档吞）；排序表补 NO_ACTIVE_ADS=2（投放中>暂停>无在投>各级暂停>异常）。
+
+smoke：build✓ + 单测 5/5 + i18n 全 key 成对 + en 零 CJK。CF master ×2 部署（批BV 先行，批BW 随后）。
