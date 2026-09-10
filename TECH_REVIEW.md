@@ -2067,3 +2067,11 @@ smoke（服务器真库）：…142→1065622819185646+换痕 ✓；…2605 有�
 - i18n：launch.searchPh zh/en 成对，en 零 CJK 校验过；复用现有 assets.copyAudience 零新 key
 
 build ✓ + CF master 部署完成。commit 本批（见 git log）。回归点：模板卡 ⋯ 各命令、素材选中批量条、表单双 tab、深浅主题。
+
+## 批BT：AI 分析读超时三修 + 待办清算（2026-09-11）
+
+用户实测「AI 分析异常：The read operation timed out + Vue runtime-5」。根因：视频/深度多帧分析超 vision 90s 读超时→500 原文透传；前端 analyze rethrow（批量计数用）冒进 Vue errorHandler 出渲染警告。三修：①ai_client vision timeout 90→180s（chat_with_images + json 版两处）；②analyze 端点超时识别人话化（504「AI 服务响应超时——稍后重试或换标准深度」）；③前端 analyze 改返 boolean，批量按返回值计数——rethrow 消失，Vue 警告根除。
+
+**FB 残件删除失败→真相**：两 BSCH 账户（…322/…324）**均已被 FB 停用**（account_status=2, disable_reason=1）——8 条 DISAPPROVED、像素访问异常、归档写入被拒（4841021）同源。号已废，需号商换号；系统侧 account_sync 会同步 status=2，看板账户明细状态列（批BN）自动标。
+
+**待办清算（用户拍板）**：主像素共享号商 BM——不做（维持账户自有像素逻辑）；FB policy 申诉——不管；C 组（像素零提示/保活实测/AuditLog mono）——全部移除待办。
