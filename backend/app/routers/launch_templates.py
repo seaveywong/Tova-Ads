@@ -22,7 +22,7 @@ from ..core.ad_builder import (build_targeting, build_campaign, build_adset, bui
                                OPT_GOALS_BY_OBJECTIVE, OPT_GOALS_BY_LOCATION)
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
                            ensure_video_id_for_account, usd_to_fb_amount, pick_cta,
-                           bind_link_ad_id)
+                           bind_link_ad_id, post_adset_resilient as _post_adset_with_fallback)
 from ..core.tt_client import TtApiError
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
 from ..models.launch import Asset, LandingAdLink, LandingPage
@@ -312,47 +312,8 @@ def _auto_landing_gate(db, adsets: list, tenant_id: int) -> None:
                             + "（发布落地页/改为展示模式，或手动选择子码）")
 
 
-def _post_adset_with_fallback(fb, act_id: str, payload: dict) -> dict:
-    """建 adset + 两类自动降级（重试一次，成功响应带留痕标记，调用方必须留痕——不静默铁律）。
-
-    ① 1870227（批U3 实测定论）：dev App 下 FB 强制 Advantage+ 受众，经典受众字段一律拒收，
-      显式 advantage_audience=0 也被无视。降级 = 剥 targeting 至纯 geo + Advantage+ 开。
-    ② 1487429（批AZ 实测）：模板/节点引用的像素当前令牌无权使用（共享 BM 像素+令牌更换后
-      高发：像素 1726 属外部 BM，重新授权的新令牌用不了 → 全组 adset 被拒）。降级 = 换成
-      该账户实际可用的第一个像素（act_/adspixels 实查）重试；响应带 "_pixel_swapped"=新像素。
-    其余错误原样外抛。"""
-    try:
-        return fb.post(f"act_{act_id}/adsets", payload)
-    except FbApiError as e:
-        raw = getattr(e, "raw", None) or {}
-        sub = raw.get("error_subcode")
-        if sub == 1870227:
-            p2 = dict(payload)
-            geo = (p2.get("targeting") or {}).get("geo_locations")
-            p2["targeting"] = {"geo_locations": geo} if geo else {}
-            p2["targeting"]["targeting_automation"] = {"advantage_audience": 1}   # 批V：嵌套（顶层=白发）
-            r = fb.post(f"act_{act_id}/adsets", p2)
-            if isinstance(r, dict):
-                r["_advantage_forced"] = True
-            return r
-        if sub == 1487429:
-            pxs = []
-            try:
-                pxs = fb.get(f"act_{act_id}/adspixels", {"fields": "id", "limit": 10}).get("data") or []
-            except Exception:
-                pxs = []
-            if pxs:
-                new_px = str(pxs[0].get("id") or "")
-                if new_px:
-                    p2 = dict(payload)
-                    po = dict(p2.get("promoted_object") or {})
-                    po["pixel_id"] = new_px
-                    p2["promoted_object"] = po
-                    r = fb.post(f"act_{act_id}/adsets", p2)
-                    if isinstance(r, dict):
-                        r["_pixel_swapped"] = new_px
-                    return r
-        raise
+# _post_adset_with_fallback 已下沉 core/ad_ops.post_adset_resilient（批AZ 统一：
+# 平铺/手动/批量/树全部署路径共用同一 1870227+1487429 降级，不再各写一份）
 
 
 def _bind_pixel_to_landing_page(sdb, tenant_id: int, landing_page_id: int, pixel_id: str,
@@ -2674,6 +2635,18 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     )
     if _a_warn:
         r["auto_subcode_warn"] = _a_warn   # 调用方在 item 上留痕（success 也会带 error）
+    if r.get("pixel_swapped"):
+        # 平铺/批量像素自愈留痕（批AZ 统一）：模板像素令牌无权 → 已换账户可用像素；
+        # 落地页同步回写新像素（worker fire 页自身像素，只换 adset=FB 零转化）
+        _px_w = f"[像素] 模板像素当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
+        r["auto_subcode_warn"] = (f"{r['auto_subcode_warn']}；{_px_w}"
+                                  if r.get("auto_subcode_warn") else _px_w)
+        if (tpl.landing_page_id or 0):
+            try:
+                _bind_pixel_to_landing_page(sdb, tenant_id, int(tpl.landing_page_id),
+                                            r["pixel_swapped"], item.act_id)
+            except Exception:
+                pass
     return r
 
 
@@ -3905,8 +3878,17 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             it.campaign_id = r["campaign_id"]; it.adset_id = r["adset_id"]; it.ad_id = r["ad_id"]
             it.page_post_id = r.get("page_post_id") or page_post_id
             it.status = "success"
-            it.error = (_a_warn or None)   # 自动建链降级留痕（批次I，不静默）
-            it.error_code = ("auto_subcode_degraded" if _a_warn else None)
+            # 自动建链降级留痕（批次I）+ 像素自愈留痕（批AZ 统一：平铺重试同树路径口径）
+            _px_w = (f"[像素] 模板像素当前令牌无权使用，已自动换为账户可用像素 {r['pixel_swapped']}"
+                     if r.get("pixel_swapped") else "")
+            it.error = ("；".join(w for w in (_a_warn, _px_w) if w) or None)
+            it.error_code = ("auto_subcode_degraded" if (_a_warn or _px_w) else None)
+            if r.get("pixel_swapped") and (tpl.landing_page_id or 0):
+                try:
+                    _bind_pixel_to_landing_page(sdb, tenant_id, int(tpl.landing_page_id),
+                                                r["pixel_swapped"], it.act_id)
+                except Exception:
+                    pass
         except FbApiError as e:
             it.status = "fail"; it.error = (e.friendly or str(e))[:300]; it.error_code = e.category
         except Exception as e:

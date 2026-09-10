@@ -53,6 +53,9 @@ FB_ERROR_MAP = {
     4:        ("rate_limited",   "请求过于频繁，请稍后重试"),
     17:       ("rate_limited",   "请求过于频繁，请稍后重试"),
     32:       ("rate_limited",   "达到 API 调用上限，请稍后重试"),
+    # 批AZ：User request limit reached（广告账户级限流，subcode 2446079）此前落 generic
+    # 「Facebook 返回错误」——部署清单实况查询撞限时显示不可读
+    2446079:  ("rate_limited",   "该账户 API 调用过多被限流，请稍后重试"),
 }
 
 

@@ -182,6 +182,48 @@ def bind_link_ad_id(link, ad_id) -> bool:
     return True
 
 
+def post_adset_resilient(fb, act_id: str, payload: dict) -> dict:
+    """建 adset + 两类自动降级（canonical，全部署路径共用；重试一次，响应带留痕标记）。
+
+    ① 1870227：dev App 下 FB 强制 Advantage+ 受众，经典受众字段一律拒收。降级 = 剥
+      targeting 至纯 geo + Advantage+ 开（批U3 实测定论）。
+    ② 1487429（批AZ 实测）：模板引用的像素当前令牌无权使用（共享 BM 像素+令牌更换后
+      高发）→ 换该账户实际可用的第一个像素重试。调用方按 "_pixel_swapped"/"_advantage_forced"
+      留痕并回写落地页像素（worker fire 页自身像素——只换 adset 页还发旧像素=FB 零转化）。"""
+    try:
+        return fb.post(f"act_{act_id}/adsets", payload)
+    except FbApiError as e:
+        raw = getattr(e, "raw", None) or {}
+        sub = raw.get("error_subcode")
+        if sub == 1870227:
+            p2 = dict(payload)
+            geo = (p2.get("targeting") or {}).get("geo_locations")
+            p2["targeting"] = {"geo_locations": geo} if geo else {}
+            p2["targeting"]["targeting_automation"] = {"advantage_audience": 1}   # 嵌套（顶层=白发）
+            r = fb.post(f"act_{act_id}/adsets", p2)
+            if isinstance(r, dict):
+                r["_advantage_forced"] = True
+            return r
+        if sub == 1487429:
+            pxs = []
+            try:
+                pxs = fb.get(f"act_{act_id}/adspixels", {"fields": "id", "limit": 10}).get("data") or []
+            except Exception:
+                pxs = []
+            if pxs:
+                new_px = str(pxs[0].get("id") or "")
+                if new_px:
+                    p2 = dict(payload)
+                    po = dict(p2.get("promoted_object") or {})
+                    po["pixel_id"] = new_px
+                    p2["promoted_object"] = po
+                    r = fb.post(f"act_{act_id}/adsets", p2)
+                    if isinstance(r, dict):
+                        r["_pixel_swapped"] = new_px
+                    return r
+        raise
+
+
 def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_goal: str,
                        page_id: str, pixel_id: str, landing_url: str,
                        daily_budget: int, budget_mode: str, bid_strategy: str,
@@ -265,7 +307,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         conv_location=conv_location, placements=placements,
         whatsapp_phone_number=whatsapp_phone_number,
     )
-    adset = fb.post(f"{act}/adsets", adset_payload)
+    adset = post_adset_resilient(fb, act_id, adset_payload)
     adset_id = adset.get("id")
     if not adset_id:
         raise FbApiError("no_id", f"FB 创建 adset 未返回 id（响应：{str(adset)[:200]}）")
@@ -340,7 +382,13 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
             _lg.warning("子码 %s 已绑广告 %s，跳过回绑新广告 %s（last-wins 守卫）",
                         subcode_slug, getattr(subcode_link, "ad_id", ""), ad_id)
 
-    return {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id, "page_post_id": page_post_id}
+    out = {"campaign_id": campaign_id, "adset_id": adset_id, "ad_id": ad_id, "page_post_id": page_post_id}
+    # 像素自愈/受众强制标记透传（调用方留痕+回写落地页，批AZ 统一口径）
+    if adset.get("_pixel_swapped"):
+        out["pixel_swapped"] = adset["_pixel_swapped"]
+    if adset.get("_advantage_forced"):
+        out["advantage_forced"] = True
+    return out
 
 
 # ── TikTok 部署链路（TK P3；与上面 FB 链平行，FB 函数零改动）──
