@@ -1209,10 +1209,12 @@ def _write_fb_with_fallback(sdb, tenant_id: int, act_id: str):
             out.append(FbClient(decrypt(c.access_token_enc)))
         except Exception:
             continue
-    # 去重保持序（first 可能等于某候选）
+    # 去重保持序（first 可能等于某候选）。批AU 修：FbClient 的令牌属性名是 token——
+    # 原来读 _access_token（不存在）→ getattr 落空 → 全部候选被清空 → 恒返回空表，
+    # 「未绑定写令牌」从批AK 起就是这条假兜底造成的（从未真正生效）
     uniq, ids = [], set()
     for f in out:
-        tok = getattr(f, "_access_token", None) or ""
+        tok = getattr(f, "token", None) or getattr(f, "_access_token", None) or ""
         if tok and tok not in ids:
             ids.add(tok)
             uniq.append(f)
