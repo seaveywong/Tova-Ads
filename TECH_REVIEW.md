@@ -2021,3 +2021,7 @@ item36 重试 → job33 completed 1✓0✗：campaign 120251523565770604 + 6 ads
 - **P2-5 缺守卫无检测**——已修（第 5 条 warning，新人删守卫行当场提示）
 - P2-4 index.htm 收紧（已接受）/P2-6 点击选择器过宽（既有，记录）/P2-7 spec 旧段小误（新段已覆盖）
 审核终答：处理 P0+P1 后，参考模板→改→上传链路对新人闭环安全。commit 4855e54。
+
+### 批BI：注入脚本点击判定修复（P2-6 升级处置，2026-09-10）
+
+交叉审核 P2-6 实测比报告更糟：once:true 在**任意点击**（含非链接空白处）即消耗监听→真 CTA 点击全丢转化+丢 click beacon。修复：FB/TT 两注入脚本改「仅 CTA 命中才 fire + 手动 _fired 开关（非 CTA 点击不消耗）」；CTA 判定 = goNext/#cta 或链接 href 指向目标 URL（去 query 比对，__lp_target 兜底 LP_TARGET_URL，无目标时保持宽匹配防漏报）。注入 JS 提取 node --check 双过；页 6 重发布线上验证 _isCta 在/once:true 无。commit 35560a5。
