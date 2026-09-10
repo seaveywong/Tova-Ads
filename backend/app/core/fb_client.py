@@ -132,9 +132,17 @@ class FbClient:
                 if "error" in result:
                     err = result["error"]
                     cat, friendly = classify_fb_error(err)
+                    # 批AZ：FB 自带的人话标题/详情（error_user_title/error_user_msg）直接拼进
+                    # friendly——"请求参数错误"看不出字段级问题（1885621「不能同时设置广告组
+                    # 和广告系列预算」曾被裸文案掩盖两轮排查）；subcode 进日志
+                    _ut = str(err.get("error_user_title") or "").strip()
+                    _um = str(err.get("error_user_msg") or "").strip()
+                    if _ut or _um:
+                        friendly = f"{friendly}（{_ut}{('：' + _um) if _um else ''}）"
                     # 原始 message/error_data 一并留日志——friendly 是翻译口径，
                     # 定位字段级问题（invalid_param 到底哪个参数）必须看原文
-                    logger.warning(f"[FB] {method} {path} → {cat}: {friendly} | raw: "
+                    logger.warning(f"[FB] {method} {path} → {cat}: {friendly} | subcode: "
+                                   f"{err.get('error_subcode')} | raw: "
                                    f"{str(err.get('message'))[:260]} | data: "
                                    f"{str(err.get('error_data'))[:200]}")
                     raise FbApiError(cat, friendly, err, resp.status_code)
