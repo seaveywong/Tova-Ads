@@ -2025,3 +2025,8 @@ item36 重试 → job33 completed 1✓0✗：campaign 120251523565770604 + 6 ads
 ### 批BI：注入脚本点击判定修复（P2-6 升级处置，2026-09-10）
 
 交叉审核 P2-6 实测比报告更糟：once:true 在**任意点击**（含非链接空白处）即消耗监听→真 CTA 点击全丢转化+丢 click beacon。修复：FB/TT 两注入脚本改「仅 CTA 命中才 fire + 手动 _fired 开关（非 CTA 点击不消耗）」；CTA 判定 = goNext/#cta 或链接 href 指向目标 URL（去 query 比对，__lp_target 兜底 LP_TARGET_URL，无目标时保持宽匹配防漏报）。注入 JS 提取 node --check 双过；页 6 重发布线上验证 _isCta 在/once:true 无。commit 35560a5。
+
+## 批BO：视频缩略图必填补齐 + 系列名唯一化（2026-09-10）
+
+① **视频缩略图**：FB API 建视频创意必填 video_data.image_hash——缺失=「缺少视频缩略图」整广告被拒（用户 12 条视频广告全失败实证）。新 ad_ops.ensure_video_thumb_hash：ffmpeg 抽首帧 JPG 落盘 .thumb.jpg（一次抽取多账户/多部署复用）→ 按账户上传 adimages 拿 hash（缓存 fb_image_hashes）→ build_creative video_data.image_hash。三部署链路（树/平铺批量/重试）全接线。两个 smoke 抓的坑：上传文件名必须 .jpg（带视频的 .mp4 名 → FB 拒参数错）；探针进程需完整模型注册（FK 解析）。终版 smoke：真实视频素材抽帧 39KB → hash 387a6eff… → creative 结构验证 PASS。
+② **系列名唯一化**：MMDD → MMDD-HHMM+4位随机（同模板多次部署/重试/多账户都不重名）；树+预检两处同步。commit eec6a9a + 文件名修复。
