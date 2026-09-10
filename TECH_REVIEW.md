@@ -2030,3 +2030,10 @@ item36 重试 → job33 completed 1✓0✗：campaign 120251523565770604 + 6 ads
 
 ① **视频缩略图**：FB API 建视频创意必填 video_data.image_hash——缺失=「缺少视频缩略图」整广告被拒（用户 12 条视频广告全失败实证）。新 ad_ops.ensure_video_thumb_hash：ffmpeg 抽首帧 JPG 落盘 .thumb.jpg（一次抽取多账户/多部署复用）→ 按账户上传 adimages 拿 hash（缓存 fb_image_hashes）→ build_creative video_data.image_hash。三部署链路（树/平铺批量/重试）全接线。两个 smoke 抓的坑：上传文件名必须 .jpg（带视频的 .mp4 名 → FB 拒参数错）；探针进程需完整模型注册（FK 解析）。终版 smoke：真实视频素材抽帧 39KB → hash 387a6eff… → creative 结构验证 PASS。
 ② **系列名唯一化**：MMDD → MMDD-HHMM+4位随机（同模板多次部署/重试/多账户都不重名）；树+预检两处同步。commit eec6a9a + 文件名修复。
+
+## 批BP：613 并发限流人话化 + 系列层「访问/通过」列（2026-09-11）
+
+① **613 错误分类**：用户批量启动广告撞 FB #613（subcode 4841018，写操作 30 秒窗口并发限流），此前落 generic 显示英文原文。FB_ERROR_MAP 加 613→rate_concurrent；_classify_write_error 加 613 分支（注意 subcode-first 取到 4841018，code 须另查 e.raw）；useFbError/zh/en 同步译文。被拒那次调用未生效（UI 失败行保留勾选便于重试），等 ~30s 重试即可，非数据/逻辑问题。IN_PROCESS 警告=FB 暂态（状态已写入、生效态传播中），非错误。
+② **系列层「访问/通过」列**：ads.py 批AQ 块扩 rollup——子广告 landing_visits/landing_pass 按系列聚合（与综合转化同 key 口径）；前端列 levels 扩 campaign、默认列加入、_COLS_MIGRATION v3 给已保存配置补列；排序/合计行自动生效（sumMetric 白名单已有）。无子广告行的系列显示 —（缓存广告层未含，诚实缺省）。
+smoke（服务器真码直调 list_ads）：19 系列 78 广告，5 个有数据系列 rollup 全对（如 访问=13 通过=4），广告层总和 61=系列层总和 61，真实失败 0；单测 5/5。
+commit 2067608。部署：后端 3 文件双门+restart+health 绿；前端 build✓+CF master。
