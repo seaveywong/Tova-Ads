@@ -548,6 +548,9 @@ def analyze_asset(aid: int, body: AnalyzeIn,
         raise
     except Exception as e:
         _mark_asset_failed(db, a, str(e)[:300])
+        # 批BT：读超时人话化（视频/深度多帧分析超 90s 实测高发；timeout 已调 180s 进一步压频）
+        if "timed out" in str(e).lower() or "timeout" in str(e).lower():
+            raise HTTPException(504, "AI 服务响应超时（视频/深度分析较慢）——请稍后重试，或先换「标准」深度")
         raise HTTPException(500, f"AI 分析异常：{e}")
 
 

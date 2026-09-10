@@ -136,7 +136,7 @@ def vision_client() -> AiClient:
 def chat_with_images(text_prompt: str, image_b64_list: list[str],
                      mime: str = "image/jpeg", system_prompt: str = "",
                      temperature: float = 0.4, max_tokens: int = 2048,
-                     timeout: int = 90) -> str:
+                     timeout: int = 180) -> str:
     """视觉模型看图：把多张图（base64）+ 文本 prompt 送给视觉模型，返回文本。
 
     image_b64_list: 不含 data:前缀的纯 base64 字符串列表（图片字节的 base64）。
@@ -161,7 +161,7 @@ def chat_with_images(text_prompt: str, image_b64_list: list[str],
 def chat_with_images_json(text_prompt: str, image_b64_list: list[str],
                           mime: str = "image/jpeg", system_prompt: str = "",
                           temperature: float = 0.3, max_tokens: int = 2048,
-                          timeout: int = 90) -> dict | list:
+                          timeout: int = 180) -> dict | list:
     """视觉看图 + 解析 JSON 输出（同 chat_json 的去 markdown 包裹逻辑）。"""
     raw = chat_with_images(text_prompt, image_b64_list, mime=mime, system_prompt=system_prompt,
                            temperature=temperature, max_tokens=max_tokens, timeout=timeout)

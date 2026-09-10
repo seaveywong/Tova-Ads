@@ -242,6 +242,7 @@ const analyze = async (a, presetPurpose) => {
   analyzingIds.value.add(a.id)
   analyzeElapsed.value[a.id] = 0
   if (!_analyzeTimer) _analyzeTimer = setInterval(_tickAnalyze, 1000)
+  let _ok = true
   try {
     // AI 分析可跑几分钟（绕 api 层 30s 超时用裸 fetch），但要有兜底中止——
     // 否则请求挂起时按钮永久 disabled + 计时器永久走
@@ -259,14 +260,16 @@ const analyze = async (a, presetPurpose) => {
     Object.assign(a, data)
     ElMessage.success(t('assets.analyzeDone'))
   } catch (e) {
+    _ok = false
     showError(e, t('assets.analyzeFailed'))
     try { Object.assign(a, await GET('/assets/' + a.id)) } catch {}
-    throw e   // rethrow：批量分析的失败计数靠它（原吞错 → 全挂也弹'已分析 N 个'成功）
+    // 批BT：改返 false 供批量计数（原 rethrow 冒进 Vue errorHandler → 控制台 runtime-5 渲染警告）
   } finally {
     analyzingIds.value.delete(a.id)
     delete analyzeElapsed.value[a.id]
     if (analyzingIds.value.size === 0 && _analyzeTimer) { clearInterval(_analyzeTimer); _analyzeTimer = null }
   }
+  return _ok
 }
 
 // 批量操作
@@ -290,7 +293,7 @@ const batchAnalyze = async () => {
   let ok = 0, fail = 0
   for (const id of ids) {
     const a = assets.value.find(x => x.id === id)
-    if (a) await analyze(a, purpose).then(() => { ok++ }).catch(() => { fail++ })
+    if (a) { if (await analyze(a, purpose)) ok++; else fail++ }   // 批BT：按返回值计数（analyze 不再 rethrow）
   }
   batchAnalyzing.value = false
   if (fail) ElMessage.warning(t('assets.batchDonePartial', { ok, fail }))
