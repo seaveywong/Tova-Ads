@@ -513,6 +513,8 @@ const submitAllowance = async () => {
 }
 
 // ── 账户明细表（原 KPI accounts 明细分支常驻化，六视角：+潜客）──
+// 账户状态列（所有视角统一追加在尾列；label 复用 useStatus registry，禁用原因 hover 全文）
+const _stCol = () => ({ key: 'st', label: t('common.status'), fmt: (v, a) => accountStatus(a.account_status).label })
 const VIEW_TABS = computed(() => [
   { mode: 'spend', label: t('dashboard.viewSpend') },
   { mode: 'conv', label: t('dashboard.viewConv') },
@@ -541,7 +543,7 @@ const accountsTable = computed(() => {
     return av - bv
   })
   const cols = mode === 'balance'
-    ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }]
+    ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }, _stCol()]
     : mode === 'leads'
     ? [
         { key: 'name', label: t('dashboard.colAccount'), left: true, bold: true },
@@ -549,6 +551,7 @@ const accountsTable = computed(() => {
         { key: 'cpl', label: t('dashboard.colCpl'), fmt: (v) => v ? fmtUsd(v) : '—' },
         { key: 'spend_usd', label: t('dashboard.colUsd'), fmt: fmtUsd },
         { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt },
+        _stCol(),
       ]
     : [
         { key: 'name', label: t('dashboard.colAccount'), left: true, bold: mode === 'spend' },
@@ -557,15 +560,22 @@ const accountsTable = computed(() => {
         { key: 'conversions', label: t('dashboard.colConversions'), fmt: fmt, bold: mode === 'conv' },
         { key: 'cpa', label: t('dashboard.colCpa'), fmt: fmtUsd, bold: mode === 'cpa' },
         { key: 'roas', label: t('dashboard.colRoas'), fmt: (v) => v ? v + '×' : '—', bold: mode === 'roas' },
+        _stCol(),
       ]
   return { mode, accs, cols }
 })
 const hasManagedAccs = computed(() => accountsTable.value.accs.some(a => !a.removed))
 const showRemoved = ref(false)  // 明细表默认只显示纳管账户——当前在管表现是主场景，历史在 KPI 汇总已有
+// 不可用账户（FB 侧 account_status≠1：被禁/关闭/待付款等）默认折叠——主场景是能投的账户，
+// 坏账户平时只占视野；搜索命中时穿透显示（找坏账户是明确意图），点折叠条可整体展开
+const showInactive = ref(false)
+const inactiveAccs = computed(() => accountsTable.value.accs.filter(a => !a.removed && Number(a.account_status) !== 1))
 const filteredAccounts = computed(() => {
   let accs = accountsTable.value.accs
   // 已移除默认不显示（可开「含已移除」）；余额视图强制排除（不可操作）
   if (!showRemoved.value || accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
+  // 不可用默认折叠（搜索时穿透——用户在明确找某个账户）
+  if (!showInactive.value && !detailSearch.value.trim()) accs = accs.filter(a => Number(a.account_status) === 1)
   if (detailSearch.value.trim()) {
     // 搜索只做过滤、保持表的既有排序（消耗降序等）——
     // 曾直接用 fuse.search().map，结果按匹配相关度重排，把消耗排序打乱
@@ -575,6 +585,12 @@ const filteredAccounts = computed(() => {
   }
   return accs
 })
+
+// 状态列 hover 全文：状态 + FB 禁用原因（坏账户第一问"为什么坏"）
+const stTitle = (a) => {
+  const dr = disableReason(a.disable_reason)
+  return dr ? accountStatus(a.account_status).label + ' · ' + dr.label : accountStatus(a.account_status).label
+}
 
 // 强制刷新（采集最新 FB 数据 + 巡检，跳过冷却）
 const lastForceTs = ref(0)
@@ -1215,11 +1231,18 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
               <tr v-for="acc in filteredAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (accountView === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
                 <td v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
                   <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span><span v-if="acc.group_label" class="grp-chip" :title="acc.group_label">{{ acc.group_label }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
+                  <template v-else-if="col.key === 'st'"><span :class="['acc-st', { bad: Number(acc.account_status) !== 1 }]" :title="stTitle(acc)">{{ accountStatus(acc.account_status).label }}</span></template>
                   <template v-else>{{ col.fmt(acc[col.key], acc) }}</template>
                 </td>
               </tr>
             </tbody>
           </table>
+          <div v-if="inactiveAccs.length && !showInactive && !detailSearch.trim()" class="inactive-bar" @click="showInactive = true">
+            <span class="inactive-caret">▸</span> {{ t('dashboard.inactiveBar', { n: inactiveAccs.length }) }}
+          </div>
+          <div v-else-if="showInactive && inactiveAccs.length" class="inactive-bar open" @click="showInactive = false">
+            <span class="inactive-caret">▾</span> {{ t('dashboard.inactiveHide', { n: inactiveAccs.length }) }}
+          </div>
           <div v-if="!filteredAccounts.length && !accountsTable.accs.some(a=>!a.removed)" class="empty" style="padding:40px 20px;text-align:center">
             <div style="font-size:15px;font-weight:600;margin-bottom:8px">{{ t('dashboard.noManagedTitle') }}</div>
             <div style="font-size:12px;color:var(--t3);margin-bottom:16px">{{ t('dashboard.noManagedHint') }}</div>
@@ -1752,6 +1775,12 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .accounts-table tbody tr:hover { background: var(--bg3); }
 .accounts-table tbody tr.removed-row { opacity: .55; cursor: default; }
 .accounts-table tbody tr.removed-row:hover { background: transparent; }
+/* 账户状态列：不可用红字（可用常规灰）+ 折叠条 */
+.acc-st { color: var(--t2); font-size: 12px; white-space: nowrap; }
+.acc-st.bad { color: var(--error); font-weight: 600; }
+.inactive-bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; margin: 6px 0; font-size: 12px; color: var(--t3); background: var(--bg2); border: 1px dashed var(--bd); border-radius: 6px; cursor: pointer; user-select: none; }
+.inactive-bar:hover { color: var(--t1); border-color: var(--bd2); }
+.inactive-bar.open { color: var(--t2); border-style: solid; }
 /* 左列表格不裁剪：内容不足保持基线高度（与右列平衡），超出随内容自然长高 */
 .acc-scroll { min-height: 400px; }   /* 信息密集块给足高度；上方 KPI 单行+图降高后表格上移首屏 */
 
