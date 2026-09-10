@@ -36,9 +36,11 @@ test('pre-collection zeros are not presented as measured FB results', () => {
 
 test('persisted settings reject removed columns and invalid sort keys per level', () => {
   const prefs = normalizeViewPreferences({ ad: { columns: ['budget','spend','spend','bad'], sortKey:'budget', sortDir:'bad' } })
-  assert.deepEqual(prefs.ad.columns, ['spend'])
+  // 批AT 列迁移：已保存配置会补上默认新增列（landing_pass/landing_visits）
+  assert.deepEqual(prefs.ad.columns, ['spend', 'landing_pass', 'landing_visits'])
   assert.equal(prefs.ad.sortKey, 'spend')
   assert.equal(prefs.ad.sortDir, 'desc')
   assert.ok(prefs.campaign.columns.includes('results_fb'))
-  assert.ok(prefs.campaign.columns.includes('conversions'))
+  // 批BG：综合转化列已删——保存过的旧配置里它应被拒收（allowed 过滤）
+  assert.ok(!prefs.campaign.columns.includes('conversions'))
 })
