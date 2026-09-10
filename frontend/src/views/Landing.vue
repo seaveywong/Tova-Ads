@@ -577,6 +577,8 @@ const onTplInline = async (e) => {
       await loadLandingTemplates()
       form.value.template_id = r.id  // 自动选中新模板
       ElMessage.success(t('landing.tplUploaded', { name: tplName, action: r.action === 'update' ? t('landing.tplUpdated') : t('landing.tplCreated') }))
+      // 上传 warning 逐条提示（资源文件不会上线/硬编码像素等，不拦截）
+      ;(r.warnings || []).forEach((w) => ElMessage.warning(w))
     } else {
       ElMessage.error(r.detail || t('common.opFail'))
     }
@@ -598,7 +600,9 @@ const uploadLandingTpl = async () => {
     if (r.status === 401) { localStorage.removeItem('tova_token'); location.hash = '#/login'; throw new Error(t('landing.notLoggedIn')) }
     const text = await r.text(); let data = {}; try { data = JSON.parse(text) } catch {}
     if (!r.ok) throw new Error(data.detail || t('landing.uploadFail'))
-    ElMessage.success(t('landing.uploadOk', { n: data.validation?.resources || 0 }))
+    ElMessage.success(t('landing.uploadOk'))
+    // 上传 warning 逐条提示（资源文件不会上线/硬编码像素等，不拦截）
+    ;(data.warnings || []).forEach((w) => ElMessage.warning(w))
     tplForm.value = { name: '', description: '', file: null }; if (tplFileInput.value) tplFileInput.value.value = ''; await loadLandingTemplates()
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   tplUploading.value = false
@@ -1103,7 +1107,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sub-list">
         <div v-for="tpl in landingTemplates" :key="tpl.id" class="sub-row">
           <code>{{ tpl.name }}</code>
-          <span v-if="tpl.has_resources" class="tag">{{ t('landing.multiFile') }}</span>
+          <span v-if="tpl.has_resources" class="tag" :title="t('landing.multiFileTip')">{{ t('landing.multiFile') }}</span>
           <button class="mb danger" style="margin-left:auto" @click="delLandingTpl(tpl)">{{ t('common.delete') }}</button>
         </div>
         <div v-if="!landingTemplates.length" class="empty">{{ t('landing.tplEmpty') }}</div>

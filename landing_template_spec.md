@@ -131,3 +131,53 @@ https://lp6.xxx.com/a/{子码}?ad={ad_id}&act={act_id}
 - TK 广告：填 `?ad=<你的TK广告ID>` （TK 无宏，手填或脚本填）
 - 系统提取 `ad` 参数用于子码绑定 + 追踪
 - **无 ad 参数也能访问**（ad_id 为空，仍正常展示落地页 + fire 像素）
+
+---
+
+# 2026-09-10 更新
+
+> 本段为追加约定，上方旧内容中与守卫相关的示例（"最简模板示例"里不带守卫的裸 fallback）以本段为准。
+
+## 像素 fallback 必须带 _d 守卫（防双发数据翻倍）
+
+背景：广告流量（URL 带 `?_d=`）的像素加载、PageView、CTA 点击转化**全部由系统注入的
+`_d_decode`（FB）/`_d_decode_tt`（TT）脚本 fire**。如果模板 fallback 不带守卫，模板和注入
+脚本会对同一事件各 fire 一次——像素数据直接翻倍。
+
+现行要求（FB 和 TT 一致，四个数组全部带守卫，直接照抄参考模板）：
+
+```html
+<script>
+var _d=new URLSearchParams(location.search).get('_d');
+var LP_PIXELS=(_d)?[]:(__LP_PIXELS_JSON__||[]);
+var LP_CONV=(_d)?[]:(__LP_CONV_EVENT_JSON__||[]);
+var LP_TT_PIXELS=(_d)?[]:(__LP_TT_PIXELS_JSON__||[]);
+var LP_TT_CONV=(_d)?[]:(__LP_TT_CONV_JSON__||[]);
+</script>
+```
+
+- URL 带 `_d`（广告访客）：模板全部空数组、一个都不 fire，交给注入脚本
+- URL 无 `_d`（直访/预览）：模板 fallback 生效（发布时占位符已替换为页配置值）
+- 默认模板（LANDING_TEMPLATE）与参考模板均已按此改造（2026-09-10）；此前上传的
+  自定义模板若有裸 fallback，建议按参考模板改守卫后重新上传同名覆盖
+
+## 上传校验新增 warning（不拦截，响应 `warnings` 数组带回）
+
+| 检测 | 触发条件 | warning 含义 |
+|---|---|---|
+| 资源文件 | zip 含非 index.html 文件 | 当前仅部署 index.html，资源不会上线，请内联样式/脚本 |
+| 硬编码像素 | `fbq('init','数字')` / `ttq.load('数字')` | 动态注入机制下会把数据发到错误像素 |
+| 写死外链 | `href="http(s)://…"`（不含 `__LP_` / `{{` 占位符） | CTA 应用 `__LP_TARGET_URL__` 才跟随目标轮换/子码跳转 |
+| 缺 TT 占位符 | 无 `__LP_TT_PIXELS_JSON__` | TT 流量不会 fire 像素（只投 FB 可忽略）；有则响应 `supports_tt: true` |
+
+## index.html 精确匹配
+
+- 只有 zip **根目录**的 `index.html` 算入口，子目录的不算
+- 多个根目录 index.html → 上传直接报错（入口歧义）
+
+## 参考模板已重写
+
+「落地页 → 模板 → 下载参考模板 zip」已重写为守卫范式：单文件 index.html（必填+可选占位符、
+全守卫 fallback、CTA 转化 fire、移动端居中卡片布局）+ README.txt（占位符表 / 守卫说明 /
+禁止事项 / 校验规则 / 上传前本地预检建议）。新模板开发直接从参考模板改起。
+

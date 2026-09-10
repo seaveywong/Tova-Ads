@@ -5,12 +5,13 @@
 - 域名用量 = landing_pages WHERE custom_domain = 此域名
 删除在用的不硬阻断，但返 usage_count 让前端警告。
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission
+from ..core.i18n import req_locale, L
 from ..core.log_utils import write_log, new_trace_id
 from ..models.landing_lib import LandingPixel, LandingDomain
 from ..models.launch import LandingPage, LandingTemplate
@@ -500,14 +501,16 @@ def list_templates(
 
 @router.post("/templates/upload")
 async def upload_template(
+    request: Request,
     name: str = Form(...),
     description: str = Form(""),
     file: UploadFile = File(...),
     user: CurrentUser = Depends(require_permission("landing.manage")),
     db: Session = Depends(get_db),
 ):
-    """zip 上传 → 解压 + 防病毒(白名单/黑名单/大小/数量/路径穿越) + 占位符校验 → 入库。"""
-    import zipfile, io, json
+    """zip 上传 → 解压 + 防病毒(白名单/黑名单/大小/数量/路径穿越) + 占位符校验 → 入库。
+    校验分两级：error 拦截上传；warning 不拦截，随响应带回（前端 toast 提示）。"""
+    import zipfile, io, json, re
     if not (file.filename or "").lower().endswith(".zip"):
         raise HTTPException(400, "只支持 .zip 文件")
     content = await file.read()
@@ -515,6 +518,8 @@ async def upload_template(
         raise HTTPException(400, "zip 超过 10MB 限制")
     html = None
     resources = {}
+    index_hits = 0     # 根目录 index.html 命中数（>1 = 入口歧义，拒）
+    resource_files = 0  # 非 index.html 的文件数（warning 用：这些当前不会上线）
     try:
         zf = zipfile.ZipFile(io.BytesIO(content))
         names = zf.namelist()
@@ -542,21 +547,44 @@ async def upload_template(
             _zip_total[0] += len(_read)
             if _zip_total[0] > 80 * 1024 * 1024:
                 raise HTTPException(400, "解压总量超限（80MB）")
-            if base_name.lower() in ("index.html", "index.htm"):
+            if fname.lower() == "index.html":
+                # 入口只认 zip 根目录的 index.html（精确匹配，子目录的不算）
+                index_hits += 1
                 html = _read.decode("utf-8", errors="ignore")
-            elif ext in (".css", ".js", ".json", ".svg", ".txt"):
-                resources[fname] = _read.decode("utf-8", errors="ignore")
+            else:
+                resource_files += 1
+                if ext in (".css", ".js", ".json", ".svg", ".txt"):
+                    resources[fname] = _read.decode("utf-8", errors="ignore")
     except zipfile.BadZipFile:
         raise HTTPException(400, "损坏的 zip 文件")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(400, f"解析失败: {e}")
+    if index_hits > 1:
+        raise HTTPException(400, "zip 内有多个根目录 index.html，请只保留一个")
     if not html:
-        raise HTTPException(400, "zip 内未找到 index.html")
+        raise HTTPException(400, "zip 根目录未找到 index.html（子目录里的不算）")
     missing = [p for p in REQUIRED_PLACEHOLDERS if p not in html]
     if missing:
         raise HTTPException(400, f"index.html 缺少系统占位符: {', '.join(missing)}")
+    # —— warning 级检测（不拦截，按请求 locale 中英双语，响应带回给前端）——
+    warnings = []
+    loc = req_locale(request)
+    if resource_files:
+        warnings.append(L(loc, "landing.tplWarnResourceFiles", n=resource_files))
+    if re.search(r'''fbq\(\s*['"]init['"]\s*,\s*['"]\d{6,}''', html) \
+            or re.search(r'''ttq\.load\(\s*['"][Cc]?\d{6,}''', html):
+        warnings.append(L(loc, "landing.tplWarnHardcodedPixel"))
+    # 写死外链（排除带占位符的——那些发布时会被替换，是正确写法）
+    _hard_links = [u for u in re.findall(r'''href\s*=\s*['"]([^'"]+)['"]''', html)
+                   if u.lower().startswith(("http://", "https://"))
+                   and "__LP_" not in u and "{{" not in u]
+    if _hard_links:
+        warnings.append(L(loc, "landing.tplWarnHardcodedLink"))
+    supports_tt = "__LP_TT_PIXELS_JSON__" in html
+    if not supports_tt:
+        warnings.append(L(loc, "landing.tplWarnNoTtPixel"))
     # 同名覆盖：有则 UPDATE，无则 INSERT
     existing_tpl = db.query(LandingTemplate).filter(
         LandingTemplate.tenant_id == user.tenant_id,
@@ -581,7 +609,9 @@ async def upload_template(
               actor_user_id=user.id, target_type="landing_template", target_id=str(row.id),
               action_type=action, source="user", result="success", metadata={"name": name})
     db.commit()
-    return {"id": row.id, "name": name, "action": action, "validation": {"ok": True, "resources": len(resources)}}
+    return {"id": row.id, "name": name, "action": action,
+            "warnings": warnings, "supports_tt": supports_tt,
+            "validation": {"ok": True, "resources": len(resources)}}
 
 
 @router.delete("/templates/{tid}")
@@ -603,7 +633,7 @@ def delete_template(
 
 @router.get("/templates/reference")
 def template_reference(user: CurrentUser = Depends(require_permission("ads.read"))):
-    """下载参考模板 zip（双模式适配：_d 解码 + 多转化 + 动态 target）。"""
+    """下载参考模板 zip（守卫范式：像素/转化 fallback 全带 _d 守卫 + 占位符 + README 规范）。"""
     import zipfile, io
     html = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -612,24 +642,59 @@ def template_reference(user: CurrentUser = Depends(require_permission("ads.read"
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
 <style>
-body{margin:0;padding:0;font-family:-apple-system,sans-serif;background:#f5f5f7;color:#1d1d1f}
-.c{max-width:480px;margin:0 auto;padding:40px 20px;text-align:center}
-h1{font-size:28px;margin:0 0 16px}
-p{font-size:16px;color:#6e6e73;line-height:1.6;margin:0 0 32px}
-.cta{display:inline-block;padding:14px 40px;background:#0071e3;color:#fff;text-decoration:none;border-radius:10px;font-size:17px;font-weight:600}
+body{margin:0;padding:0;font-family:-apple-system,'Segoe UI',sans-serif;background:#f5f5f7;color:#1d1d1f}
+.c{max-width:480px;margin:0 auto;padding:48px 20px;text-align:center}
+h1{font-size:26px;margin:0 0 14px}
+p{font-size:15px;color:#6e6e73;line-height:1.6;margin:0 0 32px}
+.cta{display:inline-block;padding:14px 44px;background:#0071e3;color:#fff;text-decoration:none;border-radius:10px;font-size:17px;font-weight:600}
 </style>
 <script>
-!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-var _d=new URLSearchParams(location.search).get('_d');var _info={};try{_info=JSON.parse(decodeURIComponent(escape(atob(_d))))}catch(e){}
-var LP_PIXELS=(_info.p&&_info.p.length)?_info.p.split(',').filter(Boolean):(__LP_PIXELS_JSON__||[]);
-var LP_TARGET_URL=_info.t||"__LP_TARGET_URL__";
-var _rawConv=_info.c?_info.c.split(','):(__LP_CONV_EVENT_JSON__||[]);
-var LP_CONV=(Array.isArray(_rawConv)?_rawConv:[_rawConv]).filter(Boolean);
-var _eid=_info.eid||'';
+// 像素 fallback：必须带 _d 守卫（照抄这几行）
+// URL 带 ?_d= 的流量（广告访客）由系统注入的 _d_decode / _d_decode_tt 脚本统一
+// fire 像素加载、PageView 和 CTA 点击转化；模板 fallback 只管直访（URL 无 _d）。
+// 少了 (_d)?[]:(...) 守卫会同一事件双发、像素数据翻倍。
+var _d=new URLSearchParams(location.search).get('_d');
+var LP_PIXELS=(_d)?[]:(__LP_PIXELS_JSON__||[]);
+var LP_CONV=(_d)?[]:(__LP_CONV_EVENT_JSON__||[]);
+var LP_TT_PIXELS=(_d)?[]:(__LP_TT_PIXELS_JSON__||[]);
+var LP_TT_CONV=(_d)?[]:(__LP_TT_CONV_JSON__||[]);
+var LP_TARGET_URL="__LP_TARGET_URL__";
+
+// FB 像素（仅直访加载；加载后 fire 一次 PageView）
+if(LP_PIXELS.length){
+!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+document,'script','https://connect.facebook.net/en_US/fbevents.js');
 LP_PIXELS.forEach(function(pid){if(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');}});
-var _cta=document.getElementById('cta');if(_cta&&LP_TARGET_URL)_cta.href=LP_TARGET_URL;
-function trackConversion(){if(!window.fbq||!Array.isArray(LP_PIXELS)||!LP_CONV.length)return;LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});}
-function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion();setTimeout(function(){window.location.href=LP_TARGET_URL;},300);return false;}
+}
+
+// TikTok 像素（仅直访；有 TT 像素才加载）
+if(LP_TT_PIXELS.length){
+!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];
+ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];
+ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};
+for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);
+ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";
+ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;
+ttq._o=ttq._o||{};ttq._o[e]={};
+var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;
+var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};
+LP_TT_PIXELS.forEach(function(pid){if(pid)ttq.load(pid);});
+ttq.page();
+}(window,document,'ttq');
+}
+
+// CTA 点击：fire 全部转化事件后 300ms 跳转（守卫的空数组 = 不 fire，_d 流量交给注入脚本）
+function trackConversion(){
+  if(window.fbq&&LP_PIXELS.length&&LP_CONV.length)
+    LP_PIXELS.forEach(function(pid){if(!pid)return;LP_CONV.forEach(function(evt){fbq('trackSingle',pid,evt);});});
+  if(window.ttq&&LP_TT_CONV.length)
+    LP_TT_CONV.forEach(function(evt){ttq.track(evt);});
+}
+function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion();
+  setTimeout(function(){window.location.href=LP_TARGET_URL;},300);return false;}
 </script>
 </head>
 <body>
@@ -640,30 +705,53 @@ function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion
 </div>
 </body>
 </html>"""
-    readme = (
-        "落地页模板规范（双模式适配版）\n"
-        "================================\n\n"
-        "适配说明（开发者必读）：\n\n"
-        "1. _d 参数：系统在落地页模式下通过 URL ?_d=xxx 传入 base64 编码的 JSON，\n"
-        "   含 p（像素ID逗号分隔）、t（CTA跳转目标）、c（转化事件逗号分隔）。\n"
-        "   HTML JS 优先从 _d 解码读取（动态，子码级），fallback 到 publish 注入的占位符。\n\n"
-        "2. 必须包含的系统占位符（publish 时自动替换）：\n"
-        "   {{TITLE}}              页面标题\n"
-        "   {{DESCRIPTION}}        描述\n"
-        "   __LP_TARGET_URL__      CTA 跳转目标（fallback，运行时被 _d.t 覆盖）\n"
-        "   __LP_PIXELS_JSON__     像素 ID 数组（fallback，运行时被 _d.p 覆盖）\n"
-        "   __LP_CONV_EVENT_JSON__ 转化事件（fallback，运行时被 _d.c 覆盖）\n\n"
-        "3. 多转化事件：LP_CONV 是数组（如 ['Purchase','Contact']），\n"
-        "   CTA 点击时 forEach 对每个像素 fire 每个事件。\n"
-        "   fire 带 eventID=_d.eid（与后端 S2S/CAPI 同 UUID，平台按 event_id 去重防双计）。\n\n"
-        "4. CTA 跳转：goNext() 先 trackConversion() 再 setTimeout 300ms 跳 LP_TARGET_URL。\n\n"
-        "5. 规则：\n"
-        "   - zip 根目录必须有 index.html\n"
-        "   - index.html 必须含上述占位符（否则上传校验失败）\n"
-        "   - 支持类型：html/css/js/json/svg/png/jpg/gif/woff2/txt\n"
-        "   - 禁止：exe/php/sh/so/dll/bat/cmd/py 等\n"
-        "   - zip <=10MB，解压 <=50MB，文件数 <=100\n"
-    )
+    readme = """落地页模板规范（2026-09-10 守卫版）
+================================
+
+一、占位符（发布时自动替换；必填缺一上传被拒）
+  必填：
+    {{TITLE}}               页面标题（<title> + 页面主标题）
+    __LP_TARGET_URL__       CTA 跳转目标（替换为页配置的第一个目标）
+    __LP_PIXELS_JSON__      FB 像素 ID 数组（直访 fallback）
+  可选（不写 = 对应功能不 fire，不影响发布）：
+    {{DESCRIPTION}}           页面描述
+    __LP_CONV_EVENT_JSON__  FB 转化事件，如 ["Purchase","Contact"]
+    __LP_TT_PIXELS_JSON__   TikTok 像素 ID 数组（直访 fallback）
+    __LP_TT_CONV_JSON__     TikTok 转化事件，如 ["CompletePayment"]
+
+二、像素脚本机制（最重要，照抄 index.html 的写法）
+  系统发布时自动注入 _d_decode（FB）/_d_decode_tt（TT）两段脚本：
+  广告流量（URL 带 ?_d=）的像素加载、PageView、CTA 点击转化全部由注入脚本 fire。
+  模板里只写「直访 fallback」（URL 无 _d 时才生效），并且必须带守卫：
+
+    var _d=new URLSearchParams(location.search).get('_d');
+    var LP_PIXELS=(_d)?[]:(__LP_PIXELS_JSON__||[]);
+
+  守卫 (_d)?[]:(...) 不能省——省了模板 fallback 和注入脚本会同一事件双发，
+  像素数据直接翻倍。index.html 里 LP_PIXELS/LP_CONV/LP_TT_PIXELS/LP_TT_CONV
+  四个数组全都带守卫，直接照抄。
+
+三、禁止事项（上传会出 warning，而且实际投放必出问题）
+  1. 硬编码像素：fbq('init','1234567890') / ttq.load('CXXXXXXXXXX')
+     ——系统按页配置动态注入像素，写死会把数据发到错误像素。
+  2. 写死 CTA 链接：href="https://xxx.com"
+     ——CTA 必须用 __LP_TARGET_URL__ 占位符，否则不跟随目标轮换/子码跳转。
+  3. 引用外部 css/js 文件——当前仅部署 index.html，资源文件不会上线，
+     样式/脚本请全部内联进 index.html。
+
+四、上传校验规则
+  - 只支持 .zip；根目录必须有 index.html（子目录的不算，多个会被拒）
+  - index.html 必须含 3 个必填占位符
+  - zip <= 10MB，解压 <= 50MB，文件数 <= 100
+  - 类型白名单：html/css/js/json/svg/png/jpg/jpeg/gif/woff/woff2/txt；
+    禁止 exe/php/sh/so/dll/bat/cmd/py 等
+  - 硬编码像素/写死链接/缺 TT 占位符/含资源文件只出 warning 不拦截
+
+五、上传前建议
+  本地把占位符手动替换成假值检查效果（如 __LP_PIXELS_JSON__ 换成
+  ["111111111111111"]、__LP_TARGET_URL__ 换成 https://example.com），
+  浏览器打开确认排版和按钮跳转正常后再上传。
+"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("index.html", html)

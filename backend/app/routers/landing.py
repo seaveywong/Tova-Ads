@@ -41,6 +41,9 @@ def get_asn_blocklist(user: CurrentUser = Depends(require_permission("landing.ma
 
 
 # 默认落地页 HTML 模板（双模式适配：_d 解码 + 多转化 + 动态 target）
+# 像素/转化 fallback 全带 (_d)?[] 守卫：广告流量（URL 带 _d）由注入的 _d_decode/_d_decode_tt
+# 脚本统一 fire（PageView + CTA 转化都归它），模板 fallback 只管直访——不守卫会同一事件双发、
+# 像素数据翻倍。TT 侧一直有守卫，FB 侧 2026-09-10 对齐（同文件内两套写法不一致即 bug）。
 LANDING_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,11 +57,11 @@ n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
 t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
 document,'script','https://connect.facebook.net/en_US/fbevents.js');
 var _d=new URLSearchParams(location.search).get('_d');var _info={};try{_info=JSON.parse(decodeURIComponent(escape(atob(_d))))}catch(e){}
-var LP_PIXELS=(_info.p&&_info.p.length)?_info.p.split(',').filter(Boolean):(__LP_PIXELS_JSON__||[]);
+var LP_PIXELS=(_d)?[]:(__LP_PIXELS_JSON__||[]);
 var LP_TARGET_URL=_info.t||"__LP_TARGET_URL__";
-var _rc=_info.c?_info.c.split(','):(__LP_CONV_EVENT_JSON__||[]);
+var _rc=(_d)?[]:(__LP_CONV_EVENT_JSON__||[]);
 var LP_CONV=(Array.isArray(_rc)?_rc:[_rc]).filter(Boolean);
-var LP_TT_CONV=__LP_TT_CONV_JSON__||[];
+var LP_TT_CONV=(_d)?[]:(__LP_TT_CONV_JSON__||[]);
 var _eid=_info.eid||'';
 LP_PIXELS.forEach(function(pid){if(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');}});
 var LP_TT_PIXELS=(_d)?[]:(__LP_TT_PIXELS_JSON__||[]);if(LP_TT_PIXELS.length){!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};LP_TT_PIXELS.forEach(function(pid){if(pid)ttq.load(pid);});ttq.page();}(window,document,'ttq');}

@@ -326,6 +326,23 @@ DATA = {
     "landing.protSampleBlockedCountry": {"zh": "非允许国（中国）", "en": "Non-allowed country (China)"},
     "landing.protSampleDebugQuery": {"zh": "带调试参数", "en": "With debug param"},
     "landing.protSampleDebugReferer": {"zh": "调试来源 Referer", "en": "Debug source Referer"},
+    # ── landing_lib.py：模板上传 warning（不拦截，提示用户改模板）──
+    "landing.tplWarnResourceFiles": {
+        "zh": "检测到 {n} 个资源文件：当前仅部署 index.html，资源文件不会上线（多文件模板支持开发中）——请将样式/脚本内联进 index.html",
+        "en": "Detected {n} resource file(s): currently only index.html is deployed and resource files will NOT go live (multi-file template support is in development) — please inline styles/scripts into index.html",
+    },
+    "landing.tplWarnHardcodedPixel": {
+        "zh": "检测到硬编码像素 ID——系统按页配置动态注入像素，硬编码会导致数据发到错误像素，请删除",
+        "en": "Hardcoded pixel ID detected — the system injects pixels dynamically per page config; a hardcoded one sends data to the wrong pixel, please remove it",
+    },
+    "landing.tplWarnHardcodedLink": {
+        "zh": "检测到写死的外部链接——CTA 应使用 __LP_TARGET_URL__ 占位符才会跟随目标轮换/子码跳转",
+        "en": "Hardcoded external link detected — the CTA should use the __LP_TARGET_URL__ placeholder so it follows target rotation / subcode redirects",
+    },
+    "landing.tplWarnNoTtPixel": {
+        "zh": "未检测到 TikTok 像素占位符：TT 流量不会 fire 像素（只投 FB 可忽略）",
+        "en": "No TikTok pixel placeholder detected: TT traffic will not fire pixels (ignorable if you only run FB)",
+    },
 }
 
 
