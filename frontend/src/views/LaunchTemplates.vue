@@ -522,6 +522,7 @@ const openJob = async (jobId) => { historyOpen.value = false; openProgress(jobId
 // 模板已部署清单（卡片「已部署 N」入口）
 const openDeployments = async (tpl) => {
   depTpl.value = tpl; depOpen.value = true
+  ensureAccNames()   // 账户名映射（不阻塞清单加载）
   depJobs.value = []; depJobDetail.value = null; depLoading.value = true
   try { const r = await GET('/launch-templates/' + tpl.id + '/deployments'); depJobs.value = r.jobs || [] }
   catch (e) { showError(e, t('common.opFail')) }
@@ -2261,6 +2262,7 @@ const startDeploy = async () => {
 const onProgressClose = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
 const openProgress = async (jobId) => {
   progressOpen.value = true; activeJob.value = null
+  ensureAccNames()   // 账户名映射（不阻塞轮询）
   await pollJob(jobId)
   if (pollTimer) clearTimeout(pollTimer)
   startPoll(jobId, 0)
@@ -2292,18 +2294,81 @@ const retryItem = async (it) => {
     if (!pollTimer) startPoll(activeJob.value.id, 0) } catch (e) { showError(e, t('launch.retryFail')) }
 }
 const statusText = (s) => itemStatus(s).label
-// 错误文案展示：partial（批量部分失败）汇总含「成功X/Y系列+失败明细」是决策信息——不截断、
-// 允许换行；普通错误沿用截断（60/40 字，完整文案在 title 悬浮）。
-// partial 必须直用 it.error（复审R2-P0）：fbErrorText 对未知 code 返回兜底翻译，
-// 非空字符串会遮蔽 it.error——后端精心构造的「成功X/Y系列」汇总用户永远看不到
-const itemErrText = (it, n) => {
-  const txt = it.error_code === 'partial'
-    ? (it.error || '')
-    : (fbErrorText(it.error_code) || it.error || '')
-  return it.error_code === 'partial' ? txt : txt.slice(0, n)
-}
-const statusColor = (s) => { const c = itemStatus(s).cls; return c === 'ok' ? 'var(--success)' : c === 'err' ? 'var(--error)' : c === 'warn' ? 'var(--ac)' : 'var(--t3)' }
 const jobText = (s) => jobStatus(s).label
+
+// ── 部署结果展示共用辅助（进度弹窗 / 已部署清单 / 部署历史）──
+// 账户名解析：优先部署抽屉已装的 accounts（单平台过滤过的），缺则懒拉全量账户建
+// {act_id: name} 映射（复用 /fb/accounts，不加接口）——进度弹窗/已部署清单也能显示真实账户名
+const accNames = ref({})
+let _accNamesLoaded = false
+const ensureAccNames = async () => {
+  if (_accNamesLoaded) return
+  try {
+    const all = await GET('/fb/accounts')
+    const m = {}
+    for (const a of (all || [])) if (a.act_id) m[a.act_id] = a.name || ''
+    accNames.value = m; _accNamesLoaded = true
+  } catch {}
+}
+const accName = (actId) => accNames.value[actId] || accounts.value.find(a => a.act_id === actId)?.name || ''
+// 账户列主行：有名字用名字；没名字退 act_id 尾 4 位（全 ID 固定在副行）
+const accNameOrTail = (actId) => accName(actId) || 'act ' + String(actId).replace(/^act_/, '').slice(-4)
+// 时间解析（与 useTz.fmtTime 同规则：裸 "YYYY-MM-DD HH:MM:SS" 当 UTC）
+const parseTime = (s) => {
+  if (!s) return null
+  let d = new Date(s)
+  if (isNaN(d) && typeof s === 'string') {
+    const hasTz = s.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(s)
+    d = new Date(s.replace(' ', 'T') + (hasTz ? '' : 'Z'))
+  }
+  return isNaN(d) ? null : d
+}
+// 耗时：finished_at - created_at。后端重试会刷新 created_at（语义=最近一次执行），
+// 所以 finished_at 有值时=最近一轮耗时；未完成=距最近一次执行的已耗时（渲染时静态快照）
+const jobElapsed = (j) => {
+  const s = parseTime(j?.created_at); if (!s) return null
+  const e = parseTime(j?.finished_at) || new Date()
+  const ms = e - s
+  return ms < 0 ? 0 : ms
+}
+const fmtDur = (ms) => {
+  if (ms == null) return '—'
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return sec + 's'
+  const m = Math.floor(sec / 60)
+  if (m < 60) return m + 'm ' + (sec % 60) + 's'
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'
+}
+const jobRunningCount = (j) => (j?.items || []).filter(it => ['pending', 'creating'].includes(it.status)).length
+// 成功但带 error = 部署提示留痕（[像素]自愈/[受众]降级等）——info 级，别染成失败红
+const isItemNote = (it) => it.status === 'success' && !!it.error
+// 提示类 error_code/前缀（非失败）：直用 it.error 原文，不走 FB 译表
+const isNoteCode = (it) => it.error_code === 'auto_subcode_degraded' || /^\[(像素|受众)\]/.test(it.error || '')
+// 已知失败类 error_code：有真翻译才走译表（fbErrorText 对未知 code 返回 generic 兜底
+// 「Facebook 返回错误」非空串会掩盖真实原因——auto_subcode_degraded 提示被盖即是此坑）
+const FB_KNOWN_ERR_CODES = new Set(['cert_required', 'invalid_param', 'bid_required', 'regulated_opt', 'regulated_missing',
+  'audience', 'audience_size', 'abuse', 'dev_mode', 'rate_limited', 'has_spend', 'no_write_token',
+  'has_keepalive', 'no_page', 'no_page_token', 'no_asset', 'asset_missing'])
+// 原因列文案：partial/提示类直用原文；失败类仅已知 code 翻译；未知 code（含 'error'）
+// 显示 it.error 原文——翻译不到宁可不译，不给 generic 兜底
+const itemErrDisplay = (it) => {
+  if (!it.error) return ''
+  if (it.error_code === 'partial' || isNoteCode(it)) return it.error
+  if (FB_KNOWN_ERR_CODES.has(it.error_code)) return fbErrorText(it.error_code) || it.error
+  return it.error
+}
+// 悬浮全文：一律 it.error 原文（显示列可能已是翻译，title 补原始完整信息）
+const itemErrTitle = (it) => it.error || ''
+const itemCodeText = (it) => it.error_code === 'partial' ? t('launch.errPartial')
+  : it.error_code === 'auto_subcode_degraded' ? t('launch.errDegrade')
+  : it.error_code === 'no_id' ? t('launch.errNoId') : (it.error_code || '')
+const subcodeCount = (it) => (it.subcode_slug || '').split(',').filter(Boolean).length
+// 状态徽标：ok=绿实心✓ / err=红 / run=中性转圈 / stuck=橙（job 已终态还停 pending/creating）
+const itemBadgeCls = (it, job) => {
+  if (it.status === 'success') return 'ok'
+  if (it.status === 'fail') return 'err'
+  return ['pending', 'running'].includes(job?.status) ? 'run' : 'stuck'
+}
 const fbAdsUrl = (actId, campId) => `https://www.facebook.com/adsmanager/manage/campaigns?act=${actId}&selected_campaign_ids=${campId}`
 // TT 跳 TikTok Ads Manager（aadvid=广告主 ID）；plat 由调用点显式传（activeJob/depJobDetail 各自的平台，不共享状态）
 const ttAdsUrl = (actId) => `https://ads.tiktok.com/am/manage/campaigns?aadvid=${actId}`
@@ -3325,8 +3390,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
             <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" @change="toggleAcc(a.act_id)" />
-            <span class="acc-name">{{ a.name || a.act_id }}</span>
-            <span class="acc-id">{{ a.act_id }} · {{ a.currency }}</span>
+            <span class="acc-main">
+              <span class="acc-name">{{ a.name || a.act_id }}</span>
+              <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span></span>
+            </span>
+            <span v-if="a.available_usd != null || a.balance_usd != null" class="acc-bal tnum" :title="t('launch.accAvailable')">{{ '$' + (a.available_usd != null ? a.available_usd : a.balance_usd) }}</span>
             <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
             <span v-if="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
 </label>
@@ -3363,26 +3431,75 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </template>
 </el-drawer>
 
-    <!-- 进度 -->
-    <el-dialog v-model="progressOpen" :title="t('launch.deployProgress')" width="720px" :close-on-click-modal="false" @close="onProgressClose">
+    <!-- 进度（表格式网格：账户/状态/创建物/原因/操作 定宽列对齐） -->
+    <el-dialog v-model="progressOpen" :title="t('launch.progTitle', { name: activeJob?.template_name || '' })" width="880px" :close-on-click-modal="false" @close="onProgressClose">
       <div v-if="activeJob" class="prog">
-        <div class="prog-head">
-          <span>{{ activeJob.template_name }}</span>
-          <span class="prog-stat">{{ activeJob.succeeded }}✓ / {{ activeJob.failed }}✗ / {{ activeJob.total }}</span>
-          <span :class="['prog-status',activeJob.status]">{{ jobText(activeJob.status) }}</span>
-</div>
-        <div class="prog-items">
-          <div v-for="it in activeJob.items" :key="it.id" class="prog-item">
-            <span class="dot" :style="{background:statusColor(it.status)}"></span>
-            <span class="pi-act">{{ it.act_id }}</span>
-            <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
-            <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(activeJob?.platform) }}→</a>
-            <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 60) }}</span>
-            <button v-if="it.status==='fail' || (['pending','creating'].includes(it.status) && !['pending','running'].includes(activeJob.status))" class="op primary sm" :title="it.status!=='fail' ? t('launch.retryStuckTip') : ''" @click="retryItem(it)">{{ t('common.retry') }}</button>
-</div>
-</div>
-</div>
-</el-dialog>
+        <div class="prog-sum">
+          <span class="ps-job mono tnum" :title="t('launch.jobIdTip')">#{{ activeJob.id }}</span>
+          <span :class="['prog-status', activeJob.status]">{{ jobText(activeJob.status) }}</span>
+          <span class="ps-metric"><em>{{ t('launch.sumAccounts') }}</em><b class="tnum">{{ activeJob.total }}</b></span>
+          <span class="ps-metric ok"><em>{{ t('launch.sumOk') }}</em><b class="tnum">{{ activeJob.succeeded }}</b></span>
+          <span class="ps-metric err"><em>{{ t('launch.sumFail') }}</em><b class="tnum">{{ activeJob.failed }}</b></span>
+          <span class="ps-metric run"><em>{{ t('launch.sumRunning') }}</em><b class="tnum">{{ jobRunningCount(activeJob) }}</b></span>
+          <span class="ps-metric"><em>{{ t('launch.elapsed') }}</em><b class="tnum">{{ fmtDur(jobElapsed(activeJob)) }}</b></span>
+        </div>
+        <div class="ps-times tnum">
+          <span>{{ t('launch.lastRunAt') }}：{{ fmtTime(activeJob.created_at) }}</span>
+          <span v-if="activeJob.finished_at">{{ t('launch.finishedAt') }}：{{ fmtTime(activeJob.finished_at) }}</span>
+        </div>
+        <div class="pj-wrap">
+          <div class="pj-grid pj-head">
+            <span>{{ t('launch.colAccount') }}</span>
+            <span>{{ t('launch.colStatus') }}</span>
+            <span>{{ t('launch.colCreated') }}</span>
+            <span>{{ t('launch.colReason') }}</span>
+            <span class="pj-col-ops">{{ t('launch.colOps') }}</span>
+          </div>
+          <div class="prog-items">
+            <div v-for="it in activeJob.items" :key="it.id" class="pj-grid pj-row">
+              <div class="pj-acc" :title="accName(it.act_id) || it.act_id">
+                <div class="pj-acc-name">{{ accNameOrTail(it.act_id) }}</div>
+                <div class="pj-acc-id mono">{{ it.act_id }}</div>
+              </div>
+              <div><span :class="['pj-badge', itemBadgeCls(it, activeJob)]"><i v-if="itemBadgeCls(it, activeJob) === 'run'" class="pj-spin"></i>{{ itemBadgeCls(it, activeJob) === 'stuck' ? t('launch.itemStuck') : statusText(it.status) }}</span></div>
+              <div class="pj-obj">
+                <template v-if="it.campaign_id || it.adset_id || it.ad_id">
+                  <div class="pj-obj-line">
+                    <span class="pj-obj-k">{{ t('launch.objCampaign') }}</span>
+                    <a v-if="it.campaign_id" :href="adsUrl(it, activeJob?.platform)" target="_blank" class="pj-obj-id mono link" :title="adsLinkLabel(activeJob?.platform) + ' →'">{{ it.campaign_id }}</a>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                  <div class="pj-obj-line">
+                    <span class="pj-obj-k">{{ t('launch.objAdset') }}</span>
+                    <span v-if="it.adset_id" class="pj-obj-id mono">{{ it.adset_id }}</span>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                  <div class="pj-obj-line">
+                    <span class="pj-obj-k">{{ t('launch.objAd') }}</span>
+                    <span v-if="it.ad_id" class="pj-obj-id mono">{{ it.ad_id }}</span>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                  <div v-if="subcodeCount(it)" class="pj-obj-line sub" :title="it.subcode_slug">{{ t('launch.subcodesN', { n: subcodeCount(it) }) }}</div>
+                </template>
+                <span v-else class="pj-obj-none">—</span>
+              </div>
+              <div class="pj-reason-cell">
+                <span v-if="it.error" :class="['pj-reason', { note: isItemNote(it), wrap: it.error_code === 'partial' }]" :title="itemErrTitle(it)">
+                  <span v-if="isItemNote(it) || itemCodeText(it)" :class="['pj-code', { note: isItemNote(it) }]">{{ isItemNote(it) ? t('launch.deployNote') : itemCodeText(it) }}</span>
+                  <span class="pj-reason-txt">{{ itemErrDisplay(it) }}</span>
+                </span>
+                <span v-else class="pj-obj-none">—</span>
+              </div>
+              <div class="pj-ops">
+                <button v-if="it.status==='fail' || (['pending','creating'].includes(it.status) && !['pending','running'].includes(activeJob.status))" class="op primary sm" :title="it.status!=='fail' ? t('launch.retryStuckTip') : ''" @click="retryItem(it)">{{ t('common.retry') }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="!(activeJob.items||[]).length" class="empty-sm">{{ t('launch.noJobItems') }}</div>
+      </div>
+      <div v-else class="prog-loading">{{ t('launch.loadingJob') }}</div>
+    </el-dialog>
     <!-- 预检结果（结构化展示） -->
     <el-dialog v-model="preflightVisible" :title="preflightResult?.platform === 'tt' ? t('launch.ttPreflightTitle') : t('launch.preflightTitle')" width="700px" append-to-body>
       <div v-if="preflightResult" class="preflight">
@@ -3456,47 +3573,92 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dialog>
 
     <!-- 部署历史 -->
-    <el-dialog v-model="historyOpen" :title="t('launch.deployHistory')" width="600px" append-to-body>
+    <el-dialog v-model="historyOpen" :title="t('launch.deployHistory')" width="640px" append-to-body>
       <div class="history-list">
         <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
           <div class="hi-main">
             <span class="hi-name">{{ j.template_name }}</span>
+            <span class="hi-jobid mono tnum" :title="t('launch.jobIdTip')">#{{ j.id }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
 </div>
-          <div class="hi-meta">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }} · {{ fmtTime(j.created_at) }}</div>
+          <div class="hi-meta tnum">
+            <span>{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
+            <span>{{ t('launch.lastRunAt') }} {{ fmtTime(j.created_at) }}</span>
+            <span v-if="j.finished_at">{{ t('launch.finishedAt') }} {{ fmtTime(j.finished_at) }}</span>
+            <span>{{ t('launch.elapsed') }} {{ fmtDur(jobElapsed(j)) }}</span>
+          </div>
 </div>
         <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
 </div>
 </el-dialog>
 
-    <!-- 模板已部署清单（卡片「已部署 N」入口；展开单次看明细+广告当前状态） -->
-    <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="640px">
+    <!-- 模板已部署清单（卡片「已部署 N」入口；展开单次看明细+广告当前状态；表格式网格对齐） -->
+    <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="720px">
       <div v-loading="depLoading">
         <div v-for="j in depJobs" :key="j.id" class="dep-job">
           <div class="dep-job-head" @click="toggleDepJob(j)">
-            <span class="dep-job-time">{{ fmtTime(j.created_at) }}</span>
-            <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
-            <span class="dep-job-counts">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
             <span class="dep-arrow" :class="{open: depJobDetail?.id === j.id}">▶</span>
-</div>
-          <div v-if="depJobDetail?.id === j.id" class="dep-items" v-loading="depItemsLoading">
-            <div v-for="it in (depJobDetail.items||[])" :key="it.id" class="dep-item">
-              <span class="dot" :style="{background:statusColor(it.status)}"></span>
-              <span class="pi-act">{{ it.act_id }}</span>
-              <span :class="['pi-status',it.status]">{{ statusText(it.status) }}</span>
-              <span v-if="it.ad_id" class="dep-ad-id" :title="t('launch.clickCopyAdId')" @click="copyAdId(it.ad_id)">{{ it.ad_id }}</span>
-              <span v-if="it.status === 'success'" class="dep-live" :style="{color: liveStatusColor(it.live_status)}" :title="t('launch.liveStatusHint')">
-                {{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}
-</span>
-              <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pi-link">{{ adsLinkLabel(depJobDetail?.platform) }}→</a>
-              <span v-if="it.error" :class="['pi-err',{wrap:it.error_code==='partial'}]" :title="it.error_code === 'partial' ? it.error : (fbErrorText(it.error_code) || it.error)">{{ itemErrText(it, 40) }}</span>
-</div>
+            <span class="dep-job-id mono tnum" :title="t('launch.jobIdTip')">#{{ j.id }}</span>
+            <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
+            <span class="dep-job-counts tnum">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
+            <span class="dep-job-times tnum" :title="t('launch.lastRunAt') + '：' + fmtTime(j.created_at) + (j.finished_at ? ' · ' + t('launch.finishedAt') + '：' + fmtTime(j.finished_at) : '')">
+              {{ t('launch.lastRunAt') }} {{ fmtTime(j.created_at) }}<template v-if="j.finished_at"> · {{ t('launch.elapsed') }} {{ fmtDur(jobElapsed(j)) }}</template>
+            </span>
+          </div>
+          <div v-if="depJobDetail?.id === j.id" v-loading="depItemsLoading">
+            <div class="pj-wrap">
+              <div class="pj-grid pj-grid-5 pj-head">
+                <span>{{ t('launch.colAccount') }}</span>
+                <span>{{ t('launch.colStatus') }}</span>
+                <span>{{ t('launch.colCreated') }}</span>
+                <span>{{ t('launch.colAdNow') }}</span>
+                <span>{{ t('launch.colReason') }}</span>
+              </div>
+              <div class="dep-items">
+                <div v-for="it in (depJobDetail.items||[])" :key="it.id" class="pj-grid pj-grid-5 pj-row">
+                  <div class="pj-acc" :title="accName(it.act_id) || it.act_id">
+                    <div class="pj-acc-name">{{ accNameOrTail(it.act_id) }}</div>
+                    <div class="pj-acc-id mono">{{ it.act_id }}</div>
+                  </div>
+                  <div><span :class="['pj-badge', itemBadgeCls(it, depJobDetail)]">{{ statusText(it.status) }}</span></div>
+                  <div class="pj-obj">
+                    <template v-if="it.campaign_id || it.adset_id || it.ad_id">
+                      <div class="pj-obj-line">
+                        <span class="pj-obj-k">{{ t('launch.objCampaign') }}</span>
+                        <a v-if="it.campaign_id" :href="adsUrl(it, depJobDetail?.platform)" target="_blank" class="pj-obj-id mono link" :title="adsLinkLabel(depJobDetail?.platform) + ' →'">{{ it.campaign_id }}</a>
+                        <span v-else class="pj-obj-none">—</span>
+                      </div>
+                      <div class="pj-obj-line">
+                        <span class="pj-obj-k">{{ t('launch.objAd') }}</span>
+                        <span v-if="it.ad_id" class="pj-obj-id mono link" :title="t('launch.clickCopyAdId')" @click="copyAdId(it.ad_id)">{{ it.ad_id }}</span>
+                        <span v-else class="pj-obj-none">—</span>
+                      </div>
+                      <div v-if="subcodeCount(it)" class="pj-obj-line sub" :title="it.subcode_slug">{{ t('launch.subcodesN', { n: subcodeCount(it) }) }}</div>
+                    </template>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                  <div class="pj-live">
+                    <template v-if="it.status === 'success'">
+                      <span class="dep-live" :style="{color: liveStatusColor(it.live_status)}" :title="t('launch.liveStatusHint')">{{ it.live_status ? fbAdStatus(it.live_status).label : t('launch.pendingSync') }}</span>
+                    </template>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                  <div class="pj-reason-cell">
+                    <span v-if="it.error" :class="['pj-reason', { note: isItemNote(it), wrap: it.error_code === 'partial' }]" :title="itemErrTitle(it)">
+                      <span v-if="isItemNote(it) || itemCodeText(it)" :class="['pj-code', { note: isItemNote(it) }]">{{ isItemNote(it) ? t('launch.deployNote') : itemCodeText(it) }}</span>
+                      <span class="pj-reason-txt">{{ itemErrDisplay(it) }}</span>
+                    </span>
+                    <span v-else class="pj-obj-none">—</span>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div v-if="!(depJobDetail.items||[]).length && !depItemsLoading" class="empty-sm">{{ t('launch.noJobItems') }}</div>
-</div>
-</div>
+          </div>
+        </div>
         <div v-if="!depJobs.length && !depLoading" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
-</div>
-</el-drawer>
+      </div>
+    </el-drawer>
     <!-- 表单预览 -->
     <el-dialog v-model="formPreviewOpen" :title="t('launch.formPreview')" width="400px" append-to-body>
       <div v-if="formPreviewTpl" class="phone-mockup">
@@ -3564,17 +3726,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 /* 已部署清单入口（卡片 meta 行尾）+ 抽屉 */
 .card-dep{background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:0;font-family:inherit;margin-left:auto;white-space:nowrap}
 .card-dep:hover{text-decoration:underline}
-.dep-job{border:1px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:8px}
-.dep-job-head{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--bg3)}
-.dep-job-head:hover{background:var(--bg2)}
-.dep-job-time{font-size:12px;color:var(--t1);font-variant-numeric:tabular-nums}
-.dep-job-counts{font-size:11px;color:var(--t3);margin-left:auto}
-.dep-arrow{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);transition:transform .15s;display:inline-block}
+.dep-job{border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden;margin-bottom:8px}
+.dep-job-head{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--bg3);min-width:0}
+.dep-job-head:hover{background:var(--bgh)}
+.dep-job-id{font-size:11px;color:var(--t3);flex:none}
+.dep-job-counts{font-size:12px;color:var(--t2);flex:none;font-variant-numeric:tabular-nums}
+.dep-job-times{font-size:11px;color:var(--t3);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-variant-numeric:tabular-nums}
+.dep-arrow{font-size:10px;color:var(--t3);transition:transform .15s;display:inline-block;flex:none}
 .dep-arrow.open{transform:rotate(90deg)}
-.dep-items{border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:2px;padding:6px 0;max-height:40vh;overflow-y:auto}
-.dep-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:4px 12px;font-size:12px}
-.dep-ad-id{font-family:monospace;color:var(--ac);cursor:pointer;font-size:11px}
-.dep-ad-id:hover{text-decoration:underline}
+.dep-items{border-top:1px solid var(--bd);max-height:40vh;overflow-y:auto}
 .dep-live{font-size:11px;white-space:nowrap}
 /* 受众来源选择器 */
 .saved-aud-card{border:1px solid var(--bd);background:var(--bg2);border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:4px}
@@ -3587,7 +3747,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .card-ops{display:flex;gap:3px;margin-top:4px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
 .op.primary{color:var(--ac);border-color:var(--ac)}
-.op.primary.sm{padding:2px 6px;font-size:10px}
+.op.primary.sm{padding:2px 8px;font-size:11px}
 .op.danger{color:var(--error)}
 .op.dots{font-size:15px;line-height:1;padding:3px 10px}
 .op:hover{background:var(--bg3)}
@@ -3596,7 +3756,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .form{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
 .row label{font-size:11px;color:var(--t3);font-weight:600;letter-spacing:.02em}
-.api-hint{font-size:10px;color:var(--t3);opacity:.6;font-family:'SF Mono',ui-monospace,monospace;font-weight:400}
+.api-hint{font-size:10px;color:var(--t3);opacity:.6;font-family:var(--font-mono);font-weight:400}
 .inp{padding:6px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit}
 .inp:focus{border-color:var(--ac);outline:none}
 .inp.ta{resize:vertical}
@@ -3670,7 +3830,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .reuse-mini-preview{display:flex;gap:8px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:8px}
 .reuse-mini-thumb{width:56px;height:56px;object-fit:cover;border-radius:4px;flex:none}
 .reuse-mini-text{font-size:12px;color:var(--t2);line-height:1.4;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.reuse-post-id{font-size:11px;color:var(--t2);font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reuse-post-id{font-size:11px;color:var(--t2);font-family:var(--font-mono);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-no-img{display:flex;align-items:center;justify-content:center;background:var(--bg3);color:var(--t3);font-size:11px}
 .deploy-reuse-hint{padding:8px 12px;background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.3);border-radius:6px;font-size:12px;color:var(--warning);margin:8px 0}
 .deploy-video-hint{padding:8px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2);margin:8px 0}
@@ -3697,12 +3857,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
 .acc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .acc-batch-row{display:flex;gap:6px;margin-bottom:2px}
-.acc-block{border:1px solid var(--bd);border-radius:8px;overflow:hidden}
-.acc-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}
+.acc-block{border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden}
+/* 账户行网格对齐：勾选框 / 名称+ID 两行 / 可用额度 / 状态徽标 / 权限标记 */
+.acc-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:10px;align-items:center;padding:8px 12px;cursor:pointer}
 .acc-row.on{background:var(--acg)}
-.acc-name{font-size:13px;color:var(--t1);flex:1}
-.acc-id{font-size:11px;color:var(--t3);font-family:monospace}
-.acc-status{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;white-space:nowrap}
+.acc-main{min-width:0;display:flex;flex-direction:column;gap:1px}
+.acc-name{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-sub{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--t3);min-width:0}
+.acc-id{font-family:var(--font-mono);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc-bal{font-size:12px;color:var(--t2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.acc-status{font-size:11px;padding:1px 8px;border-radius:var(--rs);font-weight:600;white-space:nowrap;line-height:1.5}
 .acc-status.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .acc-status.warn{color:var(--warning);background:rgba(255,159,10,.13)}
 .acc-block.disabled{opacity:.5}
@@ -3723,11 +3887,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .batch-card.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}
 .batch-check{position:absolute;top:6px;right:6px;min-width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:var(--ac);color:#fff;font-size:11px}
 .batch-preview{margin-top:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2)}
-.pi-err.wrap{white-space:normal;overflow:visible;text-overflow:clip;flex-basis:100%;line-height:1.45;font-size:11px}
 .pf-series-count{padding:8px 0 0;font-size:13px;color:var(--ac)}
 .deploy-search-row .inp{flex:1}
-.acc-config{padding:8px 10px;background:var(--bg3);display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px;align-items:center}
-.acc-config label{font-size:11px;color:var(--t3)}
+/* 账户行内主页/像素配置：label 定宽对齐（FB 双下拉 / TT 单下拉共用） */
+.acc-config{padding:8px 12px;background:var(--bg3);display:grid;grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr);gap:6px 10px;align-items:center}
+.acc-config label{font-size:12px;color:var(--t3)}
 .sel-count{font-size:12px;color:var(--t3);margin-right:auto}
 /* 主页权限总览（部署抽屉折叠面板）+ 像素策略 */
 .pp-ov{border:1px solid var(--bd);border-radius:8px;margin:8px 0;overflow:hidden}
@@ -3743,28 +3907,69 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pp-table td{padding:4px 6px;border-bottom:1px solid var(--bd);color:var(--t2);vertical-align:top}
 .pp-table tr:last-child td{border-bottom:none}
 .pp-name{color:var(--t1);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pp-pid{font-family:monospace;color:var(--t3);font-size:10px}
+.pp-pid{font-family:var(--font-mono);color:var(--t3);font-size:11px}
 .pp-table td.ok{color:var(--success);font-weight:600}
 .pp-table td.dim{color:var(--t3)}
 .ps-row{gap:8px;flex-wrap:wrap}
 .ps-hint{font-size:11px;color:var(--t3);line-height:1.4;min-width:0;flex:1}
 
-.prog-head{display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:13px}
-.prog-stat{color:var(--t2);font-variant-numeric:tabular-nums}
-.prog-status{font-size:11px;padding:2px 8px;border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;font-weight:600}
+/* ── 部署进度弹窗 / 已部署清单：表格式网格（定宽列，行高统一，斑马纹）── */
+.prog-sum{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 12px;margin-bottom:6px;background:var(--bg3);border:1px solid var(--bd);border-radius:var(--rs)}
+.ps-job{font-size:12px;color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:4px;padding:1px 7px;line-height:1.6;flex:none}
+.prog-status{font-size:11px;padding:2px 10px;border-radius:var(--rs);font-weight:600;white-space:nowrap;flex:none}
 .prog-status.completed{color:var(--success);background:rgba(52,199,89,.13)}
 .prog-status.partial_failed{color:var(--warning);background:rgba(255,159,10,.13)}
 .prog-status.running{color:var(--ac);background:rgba(10,132,255,.13)}
 .prog-status.failed{color:var(--error);background:rgba(255,69,58,.13)}
-.prog-items{display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow-y:auto}
-.prog-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 8px;font-size:12px;border-bottom:1px solid var(--bd)}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.pi-act{font-family:monospace;color:var(--t2);width:130px}
-.pi-status{font-size:11px;width:50px}
-.pi-status.success{color:var(--success)}
-.pi-status.fail{color:var(--error)}
-.pi-link{color:var(--ac);text-decoration:none;font-size:11px}
-.pi-err{color:var(--error);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prog-status.pending{color:var(--t2);background:var(--bg2)}
+.ps-metric{display:flex;align-items:baseline;gap:5px;white-space:nowrap}
+.ps-metric em{font-style:normal;font-size:11px;color:var(--t3)}
+.ps-metric b{font-size:14px;font-weight:600;color:var(--t1);font-variant-numeric:tabular-nums}
+.ps-metric.ok b{color:var(--success)}
+.ps-metric.err b{color:var(--error)}
+.ps-metric.run b{color:var(--ac)}
+.ps-times{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--t3);padding:0 2px 8px;font-variant-numeric:tabular-nums}
+.pj-wrap{border:1px solid var(--bd);border-radius:var(--rs);overflow-x:auto}
+.pj-grid{display:grid;grid-template-columns:minmax(150px,1.1fr) 96px minmax(200px,1.5fr) minmax(160px,1.7fr) 72px;gap:8px 12px;align-items:center;padding:8px 12px;font-size:12px;min-width:700px}
+/* 已部署清单（抽屉，720px）：5 列=账户/状态/创建物/当前状态/原因 */
+.pj-grid-5{grid-template-columns:minmax(140px,1.15fr) 92px minmax(170px,1.3fr) minmax(88px,.65fr) minmax(150px,1.2fr);min-width:620px}
+.pj-head{background:var(--bg2);color:var(--t3);font-size:11px;font-weight:600;padding:6px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.pj-col-ops{text-align:center}
+.prog-items{max-height:52vh;overflow-y:auto}
+.pj-row{border-bottom:1px solid var(--bd);font-variant-numeric:tabular-nums;min-height:56px}
+.pj-row:last-child{border-bottom:none}
+.pj-row:nth-child(even){background:color-mix(in srgb, var(--bg3) 55%, transparent)}
+.pj-acc{min-width:0}
+.pj-acc-name{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5}
+.pj-acc-id{font-family:var(--font-mono);font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5}
+/* 状态徽标：成功=绿实心 / 失败=红描边 / 进行=中性转圈 / 卡死=橙 */
+.pj-badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;line-height:1}
+.pj-badge.ok{background:var(--success);color:#0b2916}
+.pj-badge.err{color:var(--error);background:rgba(255,69,58,.13);border:1px solid rgba(255,69,58,.45)}
+.pj-badge.run{color:var(--t2);background:var(--bg3);border:1px solid var(--bd)}
+.pj-badge.stuck{color:var(--warning);background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.5)}
+.pj-spin{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--bd2);border-top-color:var(--ac);animation:pjspin .8s linear infinite;flex:none}
+@keyframes pjspin{to{transform:rotate(360deg)}}
+/* 创建物列：系列/组/广告 ID 各一行（label 定宽，ID 用 mono 对齐） */
+.pj-obj{display:flex;flex-direction:column;gap:1px;min-width:0}
+.pj-obj-line{display:flex;align-items:baseline;gap:8px;min-width:0}
+.pj-obj-k{font-size:11px;color:var(--t3);flex:none;width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pj-obj-id{font-family:var(--font-mono);font-size:11px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
+.pj-obj-id.link:hover{text-decoration:underline}
+.pj-obj-line.sub{font-size:11px;color:var(--t3)}
+.pj-obj-none{font-size:12px;color:var(--t3);opacity:.6}
+.pj-live{min-width:0}
+/* 原因列：error_code 徽标 + 文本截断（title 悬浮全文）；note=成功行的部署提示（中性，非红） */
+.pj-reason-cell{min-width:0}
+.pj-reason{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pj-code{align-self:flex-start;font-size:10px;padding:0 6px;border-radius:4px;line-height:1.6;font-weight:600;white-space:nowrap;color:var(--error);background:rgba(255,69,58,.12)}
+.pj-code.note{color:var(--ac);background:rgba(10,132,255,.12)}
+.pj-reason-txt{font-size:11px;color:var(--error);line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;word-break:break-all}
+.pj-reason.wrap .pj-reason-txt{-webkit-line-clamp:4}
+.pj-reason.note .pj-reason-txt{color:var(--t2)}
+.pj-ops{display:flex;justify-content:center}
+.prog-loading{padding:40px;text-align:center;color:var(--t3);font-size:13px}
 
 /* 预检结构化 */
 .preflight{display:flex;flex-direction:column;gap:12px}
@@ -3774,7 +3979,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pf-fields{padding:4px 0}
 .pf-field{display:flex;gap:8px;padding:3px 10px;font-size:11px;border-bottom:1px solid var(--bd)}
 .pf-field:last-child{border:none}
-.pf-k{color:var(--t3);min-width:160px;font-family:'SF Mono',ui-monospace,monospace;flex-shrink:0}
+.pf-k{color:var(--t3);min-width:160px;font-family:var(--font-mono);flex-shrink:0}
 .pf-v{color:var(--t1);word-break:break-all}
 .pf-notes{font-size:11px;color:var(--t3);padding:6px 0}
 .pf-note{line-height:1.6}
@@ -3783,14 +3988,16 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .history-list{display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow-y:auto}
 .history-item{padding:10px;background:var(--bg3);border-radius:8px;cursor:pointer;border:1px solid transparent}
 .history-item:hover{border-color:var(--ac)}
-.hi-main{display:flex;justify-content:space-between;align-items:center}
-.hi-name{font-size:13px;color:var(--t1);font-weight:500}
-.hi-status{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:600}
+.hi-main{display:flex;align-items:center;gap:10px;min-width:0}
+.hi-name{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.hi-jobid{font-size:11px;color:var(--t3);flex:none}
+.hi-status{font-size:11px;padding:2px 8px;border-radius:var(--rs);font-weight:600;margin-left:auto;white-space:nowrap;flex:none}
 .hi-status.completed{color:var(--success);background:rgba(52,199,89,.13)}
 .hi-status.partial_failed{color:var(--warning);background:rgba(255,159,10,.13)}
 .hi-status.running{color:var(--ac);background:rgba(10,132,255,.13)}
 .hi-status.failed{color:var(--error);background:rgba(255,69,58,.13)}
-.hi-meta{font-size:11px;color:var(--t3);margin-top:3px}
+.hi-status.pending{color:var(--t2);background:var(--bg2)}
+.hi-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--t3);margin-top:4px;font-variant-numeric:tabular-nums}
 .empty-sm{padding:30px;text-align:center;color:var(--t3);font-size:13px}
 
 /* 部署加载 */
@@ -4046,8 +4253,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
   .pp-head{min-height:40px}
   .pp-body{overflow-x:auto}
   .pp-table{min-width:460px}
-  /* 已部署清单条目头 ≥40px */
+  /* 已部署清单条目头 ≥40px；执行时间行允许换行（窄屏不截断关键时间） */
   .dep-job-head{min-height:40px}
+  .dep-job-times{white-space:normal;word-break:break-all}
+  /* 部署结果表格（进度弹窗/已部署清单）横向滚动保持列对齐；汇总条/时间行收窄换行 */
+  .prog-sum{gap:10px}
+  .ps-times{flex-direction:column;gap:4px}
   /* 预检弹窗（92vw≈345px）：字段行 label 上置（对齐全局 .form .row 堆叠约定）；树表行换行不横向溢出 */
   .pf-field{flex-direction:column;gap:2px}
   .pf-k{min-width:0}

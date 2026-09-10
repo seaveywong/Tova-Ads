@@ -53,6 +53,14 @@ export default {
     searchAccountPlaceholder: '搜索账户名/ID（模糊）', accountsUnit: '个账户', accNormal: '正常', accAbnormal: '异常',
     loadingPagePixel: '加载主页/像素…', page: '主页', pixel: '像素', none: '无', defaultVal: '默认({v})',
     selectedCount: '已选 {n}', submitting: '提交中…', startDeploy: '开始部署', deployProgress: '部署进度', fbAds: 'FB广告',
+    // 部署进度/已部署清单 表格化重做（部署 UI 精细化批）
+    progTitle: '部署进度 · {name}', jobIdTip: '任务 ID（点击行内重试会保持该任务）',
+    sumAccounts: '账户', sumOk: '成功', sumFail: '失败', sumRunning: '进行中',
+    lastRunAt: '最近执行', finishedAt: '完成时间', elapsed: '耗时',
+    colAccount: '账户', colStatus: '状态', colCreated: '创建物', colReason: '原因', colOps: '操作', colAdNow: '当前状态',
+    objCampaign: '系列', objAdset: '广告组', objAd: '广告', subcodesN: '子码 ×{n}',
+    errPartial: '部分失败', errDegrade: '自动降级', errNoId: '缺ID', deployNote: '提示', itemStuck: '卡住',
+    loadingJob: '加载任务明细…', accAvailable: '可用额度',
     totalBudgetHint: '· 合计 ≈ ${total}/天（每账户 ${per}/天）',
     deploySelectAll: '全选', deploySelectActive: '只选正常账户', deployClear: '清空',
     // 部署侧主页/像素自动化三件套：随机分配主页 + 主页权限总览 + 像素策略
@@ -298,6 +306,14 @@ export default {
     searchAccountPlaceholder: 'Search account name/ID (fuzzy)', accountsUnit: 'accounts', accNormal: 'Normal', accAbnormal: 'Abnormal',
     loadingPagePixel: 'Loading page/pixel…', page: 'Page', pixel: 'Pixel', none: 'None', defaultVal: 'Default ({v})',
     selectedCount: '{n} selected', submitting: 'Submitting…', startDeploy: 'Start Deploy', deployProgress: 'Deploy Progress', fbAds: 'FB Ads',
+    // Deploy progress / deployments table rework (deploy UI polish batch)
+    progTitle: 'Deploy Progress · {name}', jobIdTip: 'Job ID (in-row retries keep this job)',
+    sumAccounts: 'Accounts', sumOk: 'Succeeded', sumFail: 'Failed', sumRunning: 'Running',
+    lastRunAt: 'Last run', finishedAt: 'Finished', elapsed: 'Elapsed',
+    colAccount: 'Account', colStatus: 'Status', colCreated: 'Created', colReason: 'Reason', colOps: 'Actions', colAdNow: 'Live status',
+    objCampaign: 'Campaign', objAdset: 'Ad set', objAd: 'Ad', subcodesN: 'Subcodes ×{n}',
+    errPartial: 'Partial', errDegrade: 'Auto-adjusted', errNoId: 'No ID', deployNote: 'Note', itemStuck: 'Stuck',
+    loadingJob: 'Loading job details…', accAvailable: 'Available',
     totalBudgetHint: '· Total ≈ ${total}/day (${per}/day per account)',
     deploySelectAll: 'Select all', deploySelectActive: 'Active only', deployClear: 'Clear',
     // Deploy-side page/pixel automation trio: random page assignment + page permission overview + pixel strategy

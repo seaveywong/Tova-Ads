@@ -82,6 +82,13 @@
   --shadow-dropdown: 0 8px 32px rgba(0,0,0,0.12);
 }
 
+/* ── 代码类内容字体（act_id/slug/ID/命令等）全站唯一真相源：组件禁止散写 font-family:monospace。
+   栈内带中文字体兜底——mono 段落里的中文不再落回浏览器默认衬线（治混排"歪歪扭扭"）。── */
+:root { --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'PingFang SC', 'Microsoft YaHei', monospace; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 数字列（预算/计数/ID）防跳动 */
+.tnum { font-variant-numeric: tabular-nums; }
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 /* 主题切换过渡：所有元素的背景/文字/边框一起缓慢过渡（不只是 body 瞬切）。
