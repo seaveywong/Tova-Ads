@@ -21,7 +21,8 @@ from ..core.ad_builder import (build_targeting, build_campaign, build_adset, bui
                                normalize_objective, CONV_LOCATIONS_BY_OBJECTIVE,
                                OPT_GOALS_BY_OBJECTIVE, OPT_GOALS_BY_LOCATION)
 from ..core.ad_ops import (deploy_one_account, ensure_image_hash_for_account,
-                           ensure_video_id_for_account, usd_to_fb_amount, pick_cta,
+                           ensure_video_id_for_account, ensure_video_thumb_hash,
+                           usd_to_fb_amount, pick_cta,
                            bind_link_ad_id, post_adset_resilient as _post_adset_with_fallback)
 from ..core.tt_client import TtApiError
 from ..models.launch_template import LaunchTemplate, LaunchJob, LaunchJobItem
@@ -1524,8 +1525,9 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
     except ValueError as e:
         raise HTTPException(400, f"预算换算失败：{e}")
     is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
+    import secrets as _sec
     from datetime import datetime as _dtn
-    campaign_name = f"{t.name_prefix or t.name or 'Tova Ads'} {_dtn.now().strftime('%m%d')}"[:100]
+    campaign_name = f"{t.name_prefix or t.name or 'Tova Ads'} {_dtn.now().strftime('%m%d-%H%M')}-{_sec.token_hex(2)}"[:100]
     # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；
     # 批次III 统一缺汇率口径：_usd_to_account_minor 缺汇率 raise→调用处 400，不再静默 1.0 兜底）
     try:
@@ -2514,6 +2516,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     # per-account 素材缓存（FB image_hash / video_id 都按账户隔离）
     image_hash = ""
     video_id = ""
+    video_thumb_hash = ""
     if asset and asset.type in ("image", "video"):
         filepath = os.path.join(ASSET_DIR, asset.storage_key)
         if not os.path.exists(filepath):
@@ -2522,6 +2525,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
         else:
             video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
+            video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, item.act_id, filepath)
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
     pixel_id = item.pixel_id or tpl.pixel_id
@@ -2616,7 +2620,7 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
         page_id=page_id, pixel_id=pixel_id, landing_url=_lp_url,
         daily_budget=daily_budget_fb, budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
         name_prefix=series_name or tpl.name_prefix, headline=_headline, body=_body, cta_type=tpl.cta_type,
-        image_hash=image_hash, video_id=video_id,
+        image_hash=image_hash, video_id=video_id, video_thumb_hash=video_thumb_hash,
         subcode_slug=(_a_slug or tpl.subcode_slug), subcode_link=(_a_link if _a_slug else link),
         targeting=targeting, ad_language=tpl.ad_language,
         dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",
@@ -2713,9 +2717,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         d.update(ov)
         return SimpleNamespace(**d)
 
-    # 批AK：系列名加日期后缀（账户本地日 MMDD）——多账户批量部署系列名不再全同名
+    # 批BO：系列名唯一化——日期(MMDD)+时刻(HHMM)+4 位随机（同模板一天多次部署/重试/多账户
+    # 都不重名；FB 系列名仅账户内需唯一，但这套后缀跨场景也唯一，追溯部署来源更方便）
+    import secrets as _sec
     from datetime import datetime as _dtn
-    _suffix = _dtn.now().strftime("%m%d")
+    _suffix = _dtn.now().strftime("%m%d-%H%M") + "-" + _sec.token_hex(2)
     campaign_name = f"{tpl.name_prefix or tpl.name or 'Tova Ads'} {_suffix}"[:100]
     is_cbo = (tpl.budget_mode or "ABO").upper() == "CBO"
     _cats = []
@@ -2983,7 +2989,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     if asset is not None and (asset.type or "image") not in ("image", "video"):
                         raise FbApiError("no_id", f"素材「{asset.name or asset.id}」不是图片/视频")
                     # 素材上传缓存（FB image_hash / video_id 按账户隔离）
-                    image_hash, video_id = "", ""
+                    image_hash, video_id, video_thumb_hash = "", "", ""
                     if asset is not None:
                         filepath = os.path.join(ASSET_DIR, asset.storage_key)
                         if not os.path.exists(filepath):
@@ -2992,6 +2998,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                             image_hash = ensure_image_hash_for_account(fb, sdb, asset, item.act_id, filepath)
                         else:
                             video_id = ensure_video_id_for_account(fb, sdb, asset, item.act_id, filepath)
+                            video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, item.act_id, filepath)
                         sdb.commit()
                     # 节点视图（表单/消息/跟帖/落地按节点覆盖，空 = 回退模板级）
                     vtpl = _view(
@@ -3126,7 +3133,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         page_id=_ad_page, objective=tpl.objective, conversion_goal=tpl.conversion_goal,
                         landing_url=effective_url, headline=_headline, body=_body,
                         cta_type=(anode.get("cta_type") or tpl.cta_type or ""),
-                        image_hash=image_hash, video_id=video_id,
+                        image_hash=image_hash, video_id=video_id, video_thumb_hash=video_thumb_hash,
                         lead_form_id=lead_form_id, welcome_message=welcome_msg,
                         description=(anode.get("link_description") or tpl.link_description or ""),
                         instagram_actor_id=(tpl.instagram_actor_id or ""),
@@ -3778,6 +3785,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 return
             image_hash = ""
             video_id = ""
+            video_thumb_hash = ""
             if asset and asset.type in ("image", "video"):
                 filepath = os.path.join(ASSET_DIR, asset.storage_key)
                 if not os.path.exists(filepath):
@@ -3786,6 +3794,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     image_hash = ensure_image_hash_for_account(fb, sdb, asset, it.act_id, filepath)
                 else:
                     video_id = ensure_video_id_for_account(fb, sdb, asset, it.act_id, filepath)
+                    video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
             _px_id = it.pixel_id or tpl.pixel_id
@@ -3850,6 +3859,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy, name_prefix=tpl.name_prefix,
                 headline=_headline, body=_body, cta_type=tpl.cta_type, image_hash=image_hash,
                 video_id=video_id,
+                video_thumb_hash=video_thumb_hash,
                 subcode_slug=(_a_slug or tpl.subcode_slug), subcode_link=(_a_link if _a_slug else link),
                 targeting=targeting, ad_language=tpl.ad_language,
                 dsa_beneficiary=tpl.beneficiary or "", dsa_payor=tpl.payer or "",

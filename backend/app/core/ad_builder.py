@@ -580,6 +580,7 @@ def build_creative(
     image_hash: str = "",
     cta_type: str = "",
     video_id: str = "",
+    video_thumb_hash: str = "",            # 视频缩略图 image_hash（API 建视频创意必填，缺失=FB 拒"缺少视频缩略图"）
     lead_form_id: str = "",
     welcome_message: dict | None = None,
     description: str = "",                  # 链接描述（正文下方灰色小字，FB「描述」字段）
@@ -647,6 +648,8 @@ def build_creative(
         }
         if welcome_message:
             video_data["page_welcome_message"] = welcome_message  # 02_附录 §2.1
+        if video_thumb_hash:
+            video_data["image_hash"] = video_thumb_hash  # 缩略图必填（用户 12 条视频广告全拒实证）
         story_spec = {
             "page_id": page_id,
             "video_data": video_data,

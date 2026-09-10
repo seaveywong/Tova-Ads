@@ -92,6 +92,25 @@ def _merge_asset_cache(db, asset, col_name: str, act_id: str, value: str) -> Non
     setattr(asset, col_name, json.dumps(merged, ensure_ascii=False))
 
 
+def ensure_video_thumb_hash(fb: FbClient, db, asset, act_id: str, video_filepath: str) -> str:
+    """视频缩略图的 image_hash（FB API 建视频创意必填 video_data.image_hash——缺失=
+    「你的广告缺少视频缩略图」整广告被拒，2026-09-10 用户 12 条视频广告全失败实证）。
+
+    首帧 JPG 落盘 {video}.thumb.jpg（一次抽取多账户/多次部署复用）；hash 复用
+    ensure_image_hash_for_account 的按账户缓存列——视频素材的 fb_image_hashes 只有
+    缩略图会写，与图片素材的正式 hash 不冲突。抽帧失败抛 FbApiError（明确归因）。"""
+    import os
+    from .media_util import extract_keyframes
+    thumb_path = video_filepath + ".thumb.jpg"
+    if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) < 1000:
+        frames = extract_keyframes(video_filepath, 1)
+        if not frames:
+            raise FbApiError("no_id", f"视频抽帧失败（ffmpeg 缺失或视频损坏），无法生成缩略图: {asset.storage_key}")
+        with open(thumb_path, "wb") as f:
+            f.write(frames[0])
+    return ensure_image_hash_for_account(fb, db, asset, act_id, thumb_path)
+
+
 def ensure_video_id_for_account(fb: FbClient, db, asset, act_id: str, filepath: str) -> str:
     """取该账户的视频 video_id（FB 视频按账户隔离，不能跨账户复用）。
 
@@ -228,7 +247,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
                        page_id: str, pixel_id: str, landing_url: str,
                        daily_budget: int, budget_mode: str, bid_strategy: str,
                        name_prefix: str, headline: str, body: str, cta_type: str,
-                       image_hash: str = "", video_id: str = "",
+                       image_hash: str = "", video_id: str = "", video_thumb_hash: str = "",
                        subcode_slug: str = "", subcode_link=None,
                        targeting=None, ad_language: str = "",
                        lead_form_id: str = "", message_template: str = "",
@@ -343,6 +362,7 @@ def deploy_one_account(fb: FbClient, *, act_id: str, objective: str, conversion_
         page_id=page_id, objective=objective, conversion_goal=conversion_goal,
         landing_url=effective_url, headline=headline, body=body,
         image_hash=image_hash, cta_type=cta_type, video_id=video_id,
+        video_thumb_hash=video_thumb_hash,
         lead_form_id=lead_form_id, welcome_message=welcome_msg,
         description=description,
         instagram_actor_id=instagram_actor_id,
