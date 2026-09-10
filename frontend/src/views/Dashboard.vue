@@ -706,6 +706,13 @@ const filteredCoverageAccs = computed(() => {
   }
   return accs
 })
+// KPI 明细面板复制当前显示的账户 ID（跟随搜索过滤——搜完再复制=复制筛选结果）
+const copyCoverageIds = () => {
+  const ids = filteredCoverageAccs.value.map(a => a.act_id)
+  if (!ids.length) return ElMessage.warning(t('dashboard.noSelection'))
+  navigator.clipboard?.writeText(ids.join('\n'))
+  ElMessage.success(t('dashboard.copiedSelected', { n: ids.length }))
+}
 
 // 告警详情改用抽屉（el-drawer）展示——彻底避开 sticky 顶条遮挡（之前 inline 展开被顶部条挡）
 const notifDrawerOpen = ref(false)
@@ -1274,6 +1281,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
               <span>{{ kpiDetail.title }}</span>
               <div class="detail-tools">
                 <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
+                <button v-if="kpiDetail.type === 'accounts'" class="copy-ids-btn" :title="t('dashboard.copySpendTitle')" @click="copyCoverageIds">{{ t('dashboard.copySelected') }} ({{ filteredCoverageAccs.length }})</button>
                 <el-icon class="detail-close" @click="kpiMode = null"><Close /></el-icon>
               </div>
             </div>
