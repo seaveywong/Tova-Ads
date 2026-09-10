@@ -323,8 +323,8 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         </div>
         <div class="card-copy">{{ (item.config||{}).form_title || '—' }}</div>
         <div class="card-meta">
-          <span>{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
-          <span>{{ item.locale }}</span>
+          <span class="meta-chip">{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
+          <span class="meta-chip">{{ item.locale }}</span>
         </div>
         <div class="card-ops">
           <button class="op primary" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
@@ -353,7 +353,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           <span class="card-name"><span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>{{ item.name }}</span>
         </div>
         <div class="card-copy">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
-        <div class="card-meta"><span>{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
+        <div class="card-meta"><span class="meta-chip">{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
         <div class="card-ops">
           <button class="op primary" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
           <button class="op" @click="previewMsg(item)">{{ t('common.preview') }}</button>
@@ -659,8 +659,9 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .plat-ro.tt{background:rgba(254,44,85,.08);color:#ff6f8d;border-color:rgba(254,44,85,.35)}
 .ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s,transform .15s}
+.card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-copy{font-size:11px;color:var(--t2);line-height:1.5;font-style:italic;max-height:32px;overflow:hidden}
@@ -668,7 +669,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.draft{color:var(--t3);background:var(--bg3)}
-.card-ops{display:flex;gap:3px;margin-top:4px}
+.card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
 .op.primary{color:var(--ac);border-color:var(--ac)}
 .op.danger{color:var(--error)}

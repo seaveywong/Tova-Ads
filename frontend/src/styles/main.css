@@ -127,6 +127,10 @@ a { color: var(--ac); text-decoration: none; }
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 
+/* ── 卡片 meta 行 chip（批BS：投放模板/表单/素材库三页共用——纯文本拼接→细边框 chip，有层次不花哨） ── */
+.meta-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--t2); border: 1px solid var(--bd); border-radius: 5px; padding: 1px 7px; white-space: nowrap; line-height: 1.6; }
+.meta-chip.accent { color: var(--ac); background: var(--acg); border-color: transparent; }
+
 /* ── 全局平台上下文条（MainLayout：topbar 正下方全宽，滚动时保持可见）──
    左=PlatformSeg(bar) 切换，右=当前范围说明；全站唯一平台切换入口。 */
 .platform-context-bar {

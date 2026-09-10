@@ -401,6 +401,7 @@ const remove = async (a) => {
 // 卡片 ⋯ 下拉分发（低频操作收进下拉，卡片只留 AI分析/详情 主按钮）
 const onCardCmd = (cmd, a) => {
   if (cmd === 'copy') openEdit(a)
+  else if (cmd === 'detail') openPreview(a)   // 批BS：详情入口收进 ⋯（缩略图点击即预览）
   else if (cmd === 'rename') startRename(a)
   else if (cmd === 'tags') editTags(a)
   else if (cmd === 'delete') remove(a)
@@ -531,12 +532,13 @@ const countryLabel = (code) => {
           <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
             {{ analyzingIds.has(a.id) ? analyzeStageText(a) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
           </button>
-          <button class="op" @click="openPreview(a)">{{ t('assets.detail') }}</button>
+          <!-- 批BS：「文案」放出（喂投放的高价值入口）；「详情」撤下——点缩略图即预览，按钮冗余 -->
+          <button class="op" @click="onCardCmd('copy', a)">{{ t('assets.copyAudience') }}</button>
           <el-dropdown trigger="click" @command="cmd => onCardCmd(cmd, a)">
             <button class="op dots" @click.stop>⋯</button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="copy">{{ t('assets.copyAudience') }}</el-dropdown-item>
+                <el-dropdown-item command="detail">{{ t('assets.detail') }}</el-dropdown-item>
                 <el-dropdown-item command="rename">{{ t('assets.rename') }}</el-dropdown-item>
                 <el-dropdown-item command="tags">{{ t('assets.editTagsMenu') }}</el-dropdown-item>
                 <el-dropdown-item command="delete" divided class="danger">{{ t('common.delete') }}</el-dropdown-item>
@@ -733,7 +735,7 @@ const countryLabel = (code) => {
 .country-chip { font-size: 10px; padding: 1px 5px; background: var(--acg); color: var(--ac); border-radius: 4px; font-weight: 600; }
 
 /* AI 参数条 */
-.ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; }
+.ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; position: sticky; top: var(--plat-bar-h, 44px); z-index: 90; box-shadow: 0 6px 12px -8px rgba(0,0,0,.25); }
 .ai-field { display: flex; align-items: center; gap: 6px; }
 .ai-field-label { font-size: 12px; color: var(--t3); }
 .seg-grp { display: flex; gap: 2px; background: var(--bg3); border-radius: 6px; padding: 2px; }
@@ -753,8 +755,8 @@ const countryLabel = (code) => {
 
 /* 网格 */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; min-height: 200px; }
-.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s; display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: 320px; }
-.card:hover { border-color: var(--ac); }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s, box-shadow .15s, transform .15s; display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: 320px; }
+.card:hover { border-color: var(--ac); box-shadow: var(--shadow-card); transform: translateY(-1px); }
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
 .thumb { max-width: 100%; max-height: 100%; object-fit: cover; width: 100%; height: 100%; }
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }

@@ -15,10 +15,15 @@ const { t } = useI18n()
 const route = useRoute()
 
 const list = ref([])
+const searchQ = ref('')   // 批BS：按名称搜索（本地列表 computed 即时过滤）
 const loading = ref(false)
 // 平台筛选（模板列表顶部 chip）：all / fb / tt——也是新建模板的默认平台来源之一
 const platFilter = ref('all')
-const filteredList = computed(() => platFilter.value === 'all' ? list.value : list.value.filter(x => (x.platform || 'fb') === platFilter.value))
+const filteredList = computed(() => {
+  const q = searchQ.value.trim().toLowerCase()
+  return list.value.filter(x => (platFilter.value === 'all' || (x.platform || 'fb') === platFilter.value)
+    && (!q || (x.name || '').toLowerCase().includes(q)))
+})
 const editOpen = ref(false)
 const editing = ref(null)
 const form = ref({})
@@ -2391,6 +2396,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span class="ph-fresh">{{ t('launch.tplCount', { n: filteredList.length }) }}</span>
 </div>
       <div class="ph-actions">
+        <el-input v-model="searchQ" :placeholder="t('launch.searchPh')" clearable class="head-search" />
         <div class="seg plat-filter">
           <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
           <button class="pf-fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="pf-dot fb"></span>Facebook</button>
@@ -2413,24 +2419,24 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     <div class="grid" v-loading="loading">
       <div v-for="tpl in filteredList" :key="tpl.id" class="card">
         <div class="card-head">
-          <span class="card-name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
+          <span class="card-name" :title="tpl.name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
           <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
             {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
 </span>
 </div>
         <div class="card-meta">
-          <span class="card-obj">{{ objLabel(tpl.objective) }}</span>
-          <span>{{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}</span>
+          <span class="meta-chip accent">{{ objLabel(tpl.objective) }}</span>
+          <span class="meta-chip">{{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}</span>
           <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
 </div>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
+          <button class="op" @click="onCardCmd('edit', tpl)">{{ t('common.edit') }}</button>
           <el-dropdown trigger="click" @command="cmd => onCardCmd(cmd, tpl)">
             <button class="op dots" @click.stop>⋯</button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="edit">{{ t('common.edit') }}</el-dropdown-item>
                 <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
                 <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
                 <el-dropdown-item command="archive" divided class="danger">{{ t('launch.archive') }}</el-dropdown-item>
@@ -2440,7 +2446,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dropdown>
 </div>
 </div>
-      <div v-if="!filteredList.length && !loading" class="empty">{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</div>
+      <div v-if="!filteredList.length && !loading" class="empty">
+        <span>{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</span>
+        <button v-if="!list.length" class="btn primary empty-cta" @click="openNew('fb')">+ {{ t('launch.newTemplate') }}</button>
+      </div>
 </div>
 
     <!-- 新建 FB 模板第一步：目标选择（对齐 FB Objective Picker；TT/跟帖预填不经过此弹窗） -->
@@ -3724,11 +3733,11 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s,transform .15s}
+.card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-obj{font-size:11px;color:var(--ac);white-space:nowrap}
 .card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.pending{color:var(--warning);background:rgba(255,159,10,.13)}
@@ -3756,14 +3765,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .sa-note{font-size:12px;color:var(--t2);line-height:1.5}
 .sa-meta{font-size:11px;color:var(--t3)}
 .aud-actions-row{display:flex;gap:6px}
-.card-ops{display:flex;gap:3px;margin-top:4px}
+.card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
+.head-search{width:180px;flex:none}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
 .op.primary{color:var(--ac);border-color:var(--ac)}
 .op.primary.sm{padding:2px 8px;font-size:11px}
 .op.danger{color:var(--error)}
 .op.dots{font-size:15px;line-height:1;padding:3px 10px}
 .op:hover{background:var(--bg3)}
-.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px}
+.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:200px}
 
 .form{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}

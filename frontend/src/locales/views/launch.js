@@ -1,7 +1,7 @@
 // LaunchTemplates namespace（投放模板）。zh/en 同文件。
 export default {
   zh: {
-    title: '投放模板', tplCount: '{n} 个模板', subtitle: '选模板 + 选账户 → 一键批量部署到多账户。',
+    title: '投放模板', tplCount: '{n} 个模板', searchPh: '搜索模板', subtitle: '选模板 + 选账户 → 一键批量部署到多账户。',
     deployHistory: '部署历史', newTemplate: '新建模板', editTemplate: '编辑模板',
     emptyHint: '暂无模板，点「+ 新建模板」。', ready: '就绪', pending: '待完善', perDay: '天', missing: '缺',
     newTplFb: 'Facebook 模板', newTplTt: 'TikTok 模板', noTemplatesForPlat: '该平台暂无模板',
@@ -255,7 +255,7 @@ export default {
     noMsgTplForType: '暂无 {type} 类型的消息模板，去「表单模板」页新建',
   },
   en: {
-    title: 'Launch Templates', tplCount: '{n} templates', subtitle: 'Pick a template + pick accounts → one-click batch deploy to multiple accounts.',
+    title: 'Launch Templates', tplCount: '{n} templates', searchPh: 'Search templates', subtitle: 'Pick a template + pick accounts → one-click batch deploy to multiple accounts.',
     deployHistory: 'Deploy History', newTemplate: 'New Template', editTemplate: 'Edit Template',
     emptyHint: 'No templates yet. Click "+ New Template".', ready: 'Ready', pending: 'Incomplete', perDay: 'day', missing: 'Missing',
     newTplFb: 'Facebook template', newTplTt: 'TikTok template', noTemplatesForPlat: 'No templates for this platform yet',
