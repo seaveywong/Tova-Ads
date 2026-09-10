@@ -687,14 +687,14 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </div>
         <div class="lp-body lp-stats">
           <template v-if="p.redirect_mode === 'redirect'">
-            <div class="stat-num"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
-            <div class="stat-num"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stJumps') }}</span></div>
-            <div class="stat-num"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
+            <div class="stat-num" :title="t('landing.stVisitsTip')"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassTip')"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stPass') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
           </template>
           <template v-else>
             <div class="stat-num"><b>{{ p.subcode_count || 0 }}</b><span>{{ t('landing.stSubcodes') }}</span></div>
-            <div class="stat-num"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
-            <div class="stat-num"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stConvs') }}</span></div>
+            <div class="stat-num" :title="t('landing.stVisitsTip')"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassTip')"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stPass') }}</span></div>
             <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
           </template>
           <div v-if="(p.block_count||0) > 0" class="stat-num warn"><b>{{ p.block_count }}</b><span>{{ t('landing.stBlocked') }}</span></div>

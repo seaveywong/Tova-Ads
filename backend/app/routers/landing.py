@@ -730,7 +730,7 @@ class PageUpdateIn(BaseModel):
 
 
 def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
-    """stats（列表调用方可传）= {"sub_counts": {pid: n}, "event_counts": {(pid, event_type): n}}
+    """stats（列表调用方可传）= {"sub_counts": {pid: n}, "page_stats": {pid: {visits, pass, blocked}}}
     —— 批量预取，替代每页 4 条 COUNT（N+1）；单页调用不传则逐项查（原行为）。"""
     import json as _json
     from ..models.launch import LandingAdLink
@@ -791,18 +791,32 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
         pub_host = p.custom_domain.split("://", 1)[-1].split("/")[0]
     preview_url = (f"https://{pub_host}/?_pv={p.preview_token}"
                    if (p.preview_enabled and p.preview_token and pub_host) else "")
+    # 卡片三指标的口径与广告管理器/看板统一（真人口径）：
+    # 访问 = visit + redirect（redirect 模式只发 redirect 事件，只数 visit 会恒为 0）
+    # 通过 = click + redirect 按访客 ip_hash 去重（点 CTA 或自动跳转到达目标）
+    # 屏蔽 = block（爬虫的 block 在 ingest 已丢弃，这里再滤一道历史残留）
+    # 爬虫/审核机器人（ASN 32934 或 bot UA）全部不计——FB 扫描一来否则访问量虚高、通过率失真
     visit_count = click_count = block_count = 0
     if stats is not None:
-        ec = stats["event_counts"]
-        visit_count = ec.get((p.id, "visit"), 0)
-        click_count = ec.get((p.id, "click"), 0) + ec.get((p.id, "submit"), 0)
-        block_count = ec.get((p.id, "block"), 0)
+        ps = (stats.get("page_stats") or {}).get(p.id) or {}
+        visit_count = ps.get("visits", 0)
+        click_count = ps.get("pass", 0)
+        block_count = ps.get("blocked", 0)
     elif db is not None:
         try:
             from ..models.landing_event import LandingEvent
-            visit_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type == "visit").count()
-            click_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type.in_(["click", "submit"])).count()
-            block_count = db.query(LandingEvent).filter(LandingEvent.page_id == p.id, LandingEvent.event_type == "block").count()
+            from ..core.landing_source import crawler_filter_cond
+            from sqlalchemy import func as _fn
+            _human = ~crawler_filter_cond(LandingEvent)
+            visit_count = db.query(LandingEvent).filter(
+                LandingEvent.page_id == p.id,
+                LandingEvent.event_type.in_(["visit", "redirect"]), _human).count()
+            click_count = db.query(_fn.count(_fn.distinct(LandingEvent.ip_hash))).filter(
+                LandingEvent.page_id == p.id,
+                LandingEvent.event_type.in_(["click", "redirect"]), _human).scalar() or 0
+            block_count = db.query(LandingEvent).filter(
+                LandingEvent.page_id == p.id,
+                LandingEvent.event_type == "block", _human).count()
         except Exception:
             pass
     pass_rate = round(click_count / visit_count * 100, 1) if visit_count else 0
@@ -857,22 +871,30 @@ def list_landing_pages(
     ).order_by(LandingPage.id.desc()).all()
     # 计数批量预取（原每页 4 条 COUNT = N+1）
     pids = [p.id for p in rows]
-    sub_counts, event_counts = {}, {}
+    sub_counts, page_stats = {}, {}
     if pids:
         sub_counts = dict(db.query(
             LandingAdLink.page_id, _f.count(LandingAdLink.id)
         ).filter(
             LandingAdLink.page_id.in_(pids), LandingAdLink.status != "archived"
         ).group_by(LandingAdLink.page_id).all())
-        event_counts = {
-            (pid_, et): c for pid_, et, c in db.query(
-                LandingEvent.page_id, LandingEvent.event_type, _f.count(LandingEvent.id)
-            ).filter(
-                LandingEvent.page_id.in_(pids),
-                LandingEvent.event_type.in_(["visit", "click", "submit", "block"]),
-            ).group_by(LandingEvent.page_id, LandingEvent.event_type).all()
-        }
-    stats = {"sub_counts": sub_counts, "event_counts": event_counts}
+        # 事件三指标一条 GROUP BY 出（口径与 _page_to_dict 单页兜底一致，真人口径剔爬虫）：
+        # 访问=visit+redirect，通过=redirect|click 按访客去重，屏蔽=block
+        from ..core.landing_source import crawler_filter_cond
+        from sqlalchemy import case as _case
+        for _pid, _v, _p, _b in db.query(
+            LandingEvent.page_id,
+            _f.count(_case((LandingEvent.event_type.in_(["visit", "redirect"]), 1))),
+            _f.count(_f.distinct(_case((LandingEvent.event_type.in_(["click", "redirect"]),
+                                        LandingEvent.ip_hash)))),
+            _f.count(_case((LandingEvent.event_type == "block", 1))),
+        ).filter(
+            LandingEvent.page_id.in_(pids),
+            LandingEvent.event_type.in_(["visit", "click", "redirect", "block"]),
+            ~crawler_filter_cond(LandingEvent),
+        ).group_by(LandingEvent.page_id).all():
+            page_stats[_pid] = {"visits": int(_v or 0), "pass": int(_p or 0), "blocked": int(_b or 0)}
+    stats = {"sub_counts": sub_counts, "page_stats": page_stats}
     return [_page_to_dict(p, db, stats) for p in rows]
 
 

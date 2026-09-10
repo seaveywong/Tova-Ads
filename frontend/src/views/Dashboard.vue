@@ -246,10 +246,10 @@ const landingKpiExpanded = ref(null)
 const landingCards = computed(() => {
   const tk = landing.value.totals || {}
   return [
-    { label: t('dashboard.kpiVisits'), value: fmt(tk.visits), color: 'blue', mode: 'visits', clickable: true },
-    { label: t('dashboard.kpiPass'), value: fmt(tk.clicks), color: 'green', mode: 'clicks', clickable: true },
-    { label: t('dashboard.kpiBlocked'), value: fmt(tk.blocked), color: 'red', mode: 'blocked', clickable: (tk.blocked || 0) > 0 },
-    { label: t('dashboard.kpiPassRate'), value: fmtPct(tk.pass_rate), color: 'gray', mode: 'pass_rate', clickable: true },
+    { label: t('dashboard.kpiVisits'), value: fmt(tk.visits), color: 'blue', mode: 'visits', clickable: true, tip: t('dashboard.landingHumanTip') },
+    { label: t('dashboard.kpiPass'), value: fmt(tk.clicks), color: 'green', mode: 'clicks', clickable: true, tip: t('dashboard.landingHumanTip') },
+    { label: t('dashboard.kpiBlocked'), value: fmt(tk.blocked), color: 'red', mode: 'blocked', clickable: (tk.blocked || 0) > 0, tip: t('dashboard.landingHumanTip') },
+    { label: t('dashboard.kpiPassRate'), value: fmtPct(tk.pass_rate), color: 'gray', mode: 'pass_rate', clickable: true, tip: t('dashboard.landingHumanTip') },
     { label: t('dashboard.kpiBlockRate'), value: fmtPct(tk.block_rate), color: 'orange', mode: 'block_rate', clickable: (tk.blocked || 0) > 0 },
     { label: t('dashboard.kpiSpend'), value: fmtUsd(tk.spend_usd), color: 'blue', mode: 'spend', clickable: true },
     { label: t('dashboard.kpiCpc'), value: tk.cpc ? '$'+tk.cpc : '—', color: 'gray', mode: 'cpc', clickable: true },
@@ -1456,7 +1456,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
     <!-- 落地页 Tab：与数据 Tab 同语言——平级卡片，无大盒套小卡 -->
     <div v-show="mainTab === 'landing'" v-if="landing.totals && landing.totals.visits != null" class="stat-grid">
-        <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" @click="toggleLandingKpi(i)">
+        <div v-for="(card, i) in landingCards" :key="i" class="stat-card" :class="[card.color, { clickable: card.clickable, active: landingKpiExpanded === i }]" :title="card.tip" @click="toggleLandingKpi(i)">
           <span class="stat-label">{{ card.label }}</span>
           <span class="stat-value">{{ card.value }}</span>
           <span v-if="card.sub" class="stat-sub">{{ card.sub }}</span>

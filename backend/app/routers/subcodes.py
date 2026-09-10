@@ -92,13 +92,24 @@ def list_subcodes(
         like = f"%{q}%"
         base = base.filter(or_(LandingAdLink.slug.ilike(like), LandingAdLink.ad_id.ilike(like)))
     links = base.order_by(LandingAdLink.id.desc()).all()
-    # 批量统计每子码 visit/click（避免 N+1）
+    # 批量统计每子码 访问/通过（避免 N+1）。口径与广告管理器统一（真人口径）：
+    # 访问 = visit + redirect；通过 = click + redirect 按访客 ip_hash 去重；
+    # 爬虫/审核机器人（ASN 32934 或 bot UA）不计——否则 FB 扫描把子码访问量刷虚高
     stats = {}
     ad_counts: dict = {}
     slugs = [l.slug for l in links]
     # 批AL：统计默认时间窗=北京业务日「今日」（range=all 才看全量）——看总数无运营意义
-    _stats_q = db.query(LandingEvent.slug, LandingEvent.event_type, func.count()).filter(
-        LandingEvent.slug.in_(slugs))
+    from ..core.landing_source import crawler_filter_cond
+    from sqlalchemy import case as _case
+    _stats_q = db.query(
+        LandingEvent.slug,
+        func.count(_case((LandingEvent.event_type.in_(["visit", "redirect"]), 1))),
+        func.count(func.distinct(_case((LandingEvent.event_type.in_(["click", "redirect"]),
+                                        LandingEvent.ip_hash)))),
+    ).filter(
+        LandingEvent.slug.in_(slugs),
+        LandingEvent.event_type.in_(["visit", "redirect", "click"]),
+        ~crawler_filter_cond(LandingEvent))
     if stats_range != "all":
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz
         _BZ = _tz(_td(hours=8))
@@ -106,13 +117,8 @@ def list_subcodes(
         _since = _dt.strptime(_today, "%Y-%m-%d").replace(tzinfo=_BZ).astimezone(_tz.utc)
         _stats_q = _stats_q.filter(LandingEvent.created_at >= _since)
     if slugs:
-        rows = _stats_q.group_by(LandingEvent.slug, LandingEvent.event_type).all()
-        for slug, etype, cnt in rows:
-            d = stats.setdefault(slug, {"visit": 0, "click": 0})
-            if etype == "visit":
-                d["visit"] = cnt
-            elif etype in ("click", "submit"):
-                d["click"] += cnt
+        for slug, _v, _c in _stats_q.group_by(LandingEvent.slug).all():
+            stats[slug] = {"visit": int(_v or 0), "click": int(_c or 0)}
         # 该子码被多少个不同广告用过（多广告复用一个子码时，归因靠 ?ad= 区分；这里聚合去重 ad_id）
         ad_counts = dict(db.query(LandingEvent.slug, func.count(LandingEvent.ad_id.distinct())).filter(
             LandingEvent.slug.in_(slugs),

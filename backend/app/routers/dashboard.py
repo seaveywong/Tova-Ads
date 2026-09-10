@@ -14,6 +14,7 @@ from ..models.fb import Account
 from ..models.perf import PerfSnapshot
 from ..models.log import ActionLog
 from ..models.guard import GuardAllowance
+from ..core.landing_source import crawler_not_sql
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -714,10 +715,10 @@ def landing_overview(
 ):
     """落地页数据看板：访问/通过/屏蔽/CPC，按子码(slug)聚合。
 
-    口径（对齐 1.0，列含义在前端 tooltip 标注）：
-      - 访问量 = event_type='visit'（到达落地页的有效访问，已通过防护）
-      - 通过量 = event_type='click'（点 CTA 进入目标，≈ 1.0"通过=redirect"）
-      - 屏蔽量 = event_type='block'（被防护规则拦截）
+    口径（与广告管理器/规则引擎统一，真人口径——爬虫/审核机器人不计）：
+      - 访问量 = event_type IN ('visit','redirect')（到达的有效访问，redirect 模式也算）
+      - 通过量 = redirect|click 按访客 ip_hash 去重（自动跳转 或 点 CTA 到达目标）
+      - 屏蔽量 = event_type='block'（被防护规则拦截的真人；爬虫 block 在 ingest 已丢弃）
       - CPC = 广告消耗 ÷ 通过量(CTA点击)（落地 CPC，评估每个有效点击的成本）
     时间窗按业务日（北京）→ UTC（landing_events.created_at 是 UTC timestamptz；
     perf_snapshots.snapshot_date 是账户本地日，按业务日历日字符串匹配各账户本地该日）。
@@ -750,7 +751,7 @@ def landing_overview(
     utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ).astimezone(timezone.utc) + timedelta(days=1)
     tid = user.tenant_id
 
-    # ① 落地事件按子码聚合（访问/通过/屏蔽）
+    # ① 落地事件按子码聚合（访问/通过/屏蔽）——真人口径，爬虫/审核机器人整行剔除
     #    访问 = visit + redirect（到达的有效访问，redirect 模式也算）
     #    通过 = redirect + click（到达目标：自动跳转 或 点了按钮）
     #    屏蔽 = block（被防护拦截）
@@ -766,11 +767,12 @@ def landing_overview(
           AND e.created_at >= :s
           AND e.created_at < :e
           AND e.slug IS NOT NULL
+          AND %s
         GROUP BY e.slug, e.ad_id
         HAVING SUM(CASE WHEN e.event_type IN ('visit','redirect','click','block') THEN 1 ELSE 0 END) > 0
         ORDER BY visits DESC
         LIMIT 50
-    """), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()
+    """ % crawler_not_sql("e.")), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()
 
     # ② 广告消耗 by ad_id（业务日 snapshot_date 范围；perf_snapshots 是账户本地日）。
     #    platform 过滤：ad_id 跨平台可能撞号（fb/tt 各一行）——按 platform 列收窄
@@ -822,12 +824,14 @@ def landing_overview(
         return (aid or ""), (acc_map.get(aid, "") if aid else "")
 
     # ③ 屏蔽明细分布（reason / country / platform 各 top 8；field 为白名单硬编码，无注入）
+    #    与上方 blocked 列同一真人口径（爬虫 block 剔除）——分布加总才能和 KPI 对上
     def _block_top(field: str):
         return [{"key": r.k, "count": r.cnt} for r in db.execute(text(f"""
             SELECT COALESCE({field}, '未知') AS k, COUNT(*) AS cnt
             FROM landing_events
             WHERE tenant_id = :tid AND event_type = 'block'
               AND created_at >= :s AND created_at < :e
+              AND {crawler_not_sql()}
             GROUP BY k ORDER BY cnt DESC LIMIT 8
         """), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()]
     block_detail = {
@@ -892,7 +896,8 @@ def landing_trend(
 ):
     """落地页趋势：landing_events 按业务日聚合 访问/通过/屏蔽 三序列。
 
-    事件口径与 /dashboard/landing 相同（访问=visit+redirect，通过=redirect|click 去重 ip，屏蔽=block）。
+    事件口径与 /dashboard/landing 相同（访问=visit+redirect，通过=redirect|click 去重 ip，
+    屏蔽=block；真人口径——爬虫/审核机器人不计）。
     30s 内存缓存（同 _CACHE 样板）。
     """
     cache_key = f"ltrend:{user.tenant_id}:{date_preset}:{date_from}:{date_to}"
@@ -931,8 +936,9 @@ def landing_trend(
         WHERE e.tenant_id = :tid
           AND e.created_at >= :s AND e.created_at < :e
           AND e.event_type IN ('visit','redirect','click','block')
+          AND %s
         GROUP BY day ORDER BY day
-    """), {"tid": user.tenant_id, "s": utc_start, "e": utc_end}).fetchall()
+    """ % crawler_not_sql("e.")), {"tid": user.tenant_id, "s": utc_start, "e": utc_end}).fetchall()
 
     by_day = {r.day: r for r in rows}
     labels, visits, clicks, blocked = [], [], [], []
