@@ -600,6 +600,7 @@ def list_ads(
     # 父层若仍用 perf 的 FB-only 汇总会出现「系列 1 / 广告 4」上下不一致
     _ads_out = _attach_perf(all_ads, perf)
     _adset_conv, _camp_conv = {}, {}
+    _camp_land = {}   # 批BP：系列层「访问/通过」=子广告落地数据汇总（与转化同口径 rollup）
     for a in _ads_out:
         _cv = int(a.get("conversions") or 0)
         _k = ad_to_adset.get(_entity_key(a))
@@ -608,12 +609,22 @@ def list_ads(
         _k = ad_to_camp.get(_entity_key(a))
         if _k:
             _camp_conv[_k] = _camp_conv.get(_k, 0) + _cv
+            d = _camp_land.setdefault(_k, {"landing_visits": 0, "landing_pass": 0})
+            d["landing_visits"] += int(a.get("landing_visits") or 0)
+            d["landing_pass"] += int(a.get("landing_pass") or 0)
 
     def _patch_conv(items, sums):
         for it in items:
             _v = sums.get(_entity_key(it))
             if _v is not None:
                 it["conversions"] = _v
+        return items
+
+    def _patch_landing(items):
+        for it in items:
+            _d = _camp_land.get(_entity_key(it))
+            if _d:
+                it.update(_d)
         return items
 
     return {
@@ -625,7 +636,7 @@ def list_ads(
         "refreshing": refreshing,
         "mixed_currency": mixed_currency,
         "currency": "USD" if mixed_currency else (next(iter(_curs)) if _curs else "USD"),
-        "campaigns": _patch_conv(_conv_budget(_attach_perf(all_campaigns, camp_perf)), _camp_conv),
+        "campaigns": _patch_landing(_patch_conv(_conv_budget(_attach_perf(all_campaigns, camp_perf)), _camp_conv)),
         "adsets": _patch_conv(_conv_budget(_attach_perf(all_adsets, adset_perf)), _adset_conv),
         "ads": _ads_out,
     }

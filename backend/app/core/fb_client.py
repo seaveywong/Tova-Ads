@@ -56,6 +56,9 @@ FB_ERROR_MAP = {
     # 批AZ：User request limit reached（广告账户级限流，subcode 2446079）此前落 generic
     # 「Facebook 返回错误」——部署清单实况查询撞限时显示不可读
     2446079:  ("rate_limited",   "该账户 API 调用过多被限流，请稍后重试"),
+    # 并发写限流（管理器批量启动/暂停实测 subcode 4841018：写操作 30 秒窗口内太快，被拒
+    # 那次未生效——不是数据/逻辑问题，稍等重试即可）
+    613:      ("rate_concurrent", "FB 并发限流：写操作太快（30 秒窗口），本次未生效，请稍等重试"),
 }
 
 

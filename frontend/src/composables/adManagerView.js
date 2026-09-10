@@ -19,13 +19,14 @@ export const METRIC_COLUMNS = [
   { id: 'clicks', label: 'diagClicks', width: 100, sort: 'clicks' },
   { id: 'ctr', label: 'ctrLabel', width: 100, sort: 'ctr' },
   { id: 'slug', label: 'colSubcode', levels: ['ad'], width: 140 },
-  { id: 'landing_visits', label: 'colVisits', levels: ['ad'], width: 115, sort: 'landing_visits' },
-  { id: 'landing_pass', label: 'colPass', levels: ['ad'], width: 115, sort: 'landing_pass' },
+  { id: 'landing_visits', label: 'colVisits', levels: ['campaign', 'ad'], width: 115, sort: 'landing_visits' },
+  { id: 'landing_pass', label: 'colPass', levels: ['campaign', 'ad'], width: 115, sort: 'landing_pass' },
   { id: 'pass_rate', label: 'colPassRate', levels: ['ad'], width: 110 },
 ]
 export const columnsFor = level => METRIC_COLUMNS.filter(c => !c.levels || c.levels.includes(level))
 // 批BG：删「综合转化（访问）」列（用户拍板——已有「访问」「通过」两列，转化口径后端保留不动）
-export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass', 'landing_visits'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
+// 批BP：系列层也默认带「通过/访问」（后端 rollup 子广告落地数据）
+export const defaultColumns = level => ['results_fb', 'spend', 'cost_per_result', 'budget', ...(level === 'adset' ? ['pixel'] : []), ...(level === 'campaign' ? ['landing_pass', 'landing_visits'] : []), ...(level === 'ad' ? ['ctr', 'landing_pass', 'landing_visits'] : []).filter(id => columnsFor(level).some(c => c.id === id))]
 
 export function entityContext(data) {
   const campaigns = new Map((data.campaigns || []).map(row => [entityKey(row), row]))
@@ -71,8 +72,8 @@ export function compareRows(a, b, { key, direction, mixedCurrency, blocked, stat
 // 老用户 localStorage 里存过自定义列 → defaultColumns 的新增列对他们永不生效
 // （批AT 实证：landing_pass/landing_visits 加了默认但老配置用户看不到）。改默认列时
 // 把新列 id 加进 _COLS_MIGRATION 并 bump 版本号即可
-const _COLS_MIGRATION = 2
-const _MIGRATION_ADDS = { 2: { ad: ['landing_pass', 'landing_visits'] } }
+const _COLS_MIGRATION = 3
+const _MIGRATION_ADDS = { 2: { ad: ['landing_pass', 'landing_visits'] }, 3: { campaign: ['landing_pass', 'landing_visits'] } }
 
 export function normalizeViewPreferences(raw) {
   const out = {}

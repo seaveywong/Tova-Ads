@@ -154,6 +154,7 @@ export default {
     abuse: '内容触发风控',
     dev_mode: 'Meta App 处于开发者模式',
     rate_limited: '请求过频，稍后重试',
+    rate_concurrent: 'FB 并发限流：写操作 30 秒窗口内太快，本次未生效，请稍等重试',
     has_spend: '近期有消耗，无需保活',
     no_write_token: '无写令牌',
     has_keepalive: '已有保活广告',

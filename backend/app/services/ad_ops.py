@@ -72,6 +72,8 @@ def _classify_write_error(e: FbApiError) -> str:
         return "操作号权限不足，请在 BM 授权后重试"
     if code == 1487067:
         return "预算金额无效（过低或超出范围）"
+    if code == 4841018 or e.raw.get("code") == 613:   # subcode-first 取的是 4841018，code 得另查
+        return "FB 并发限流：写操作 30 秒窗口内太快，本次未生效（非数据问题）——请约 30 秒后重试"
     return e.friendly
 
 

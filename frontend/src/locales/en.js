@@ -152,6 +152,7 @@ export default {
     abuse: 'Content triggered risk control',
     dev_mode: 'Meta App is in development mode',
     rate_limited: 'Rate limited, retry later',
+    rate_concurrent: 'FB concurrent-write limit: too many writes in 30s, the call did not take effect — retry shortly',
     has_spend: 'Has recent spend, keepalive not needed',
     no_write_token: 'No write token',
     has_keepalive: 'Keepalive ad already exists',

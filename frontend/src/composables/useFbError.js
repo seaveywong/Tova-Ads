@@ -14,6 +14,7 @@ const FB_ERRORS = {
   abuse: 'fbError.abuse',
   dev_mode: 'fbError.dev_mode',
   rate_limited: 'fbError.rate_limited',
+  rate_concurrent: 'fbError.rate_concurrent',
   has_spend: 'fbError.has_spend',
   no_write_token: 'fbError.no_write_token',
   has_keepalive: 'fbError.has_keepalive',
