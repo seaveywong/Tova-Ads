@@ -313,27 +313,46 @@ def _auto_landing_gate(db, adsets: list, tenant_id: int) -> None:
 
 
 def _post_adset_with_fallback(fb, act_id: str, payload: dict) -> dict:
-    """建 adset + 1870227 自动降级（批U3，实测定论）。
+    """建 adset + 两类自动降级（重试一次，成功响应带留痕标记，调用方必须留痕——不静默铁律）。
 
-    dev App（无 Standard Access）下 FB 强制 Advantage+ 受众：年龄/性别/兴趣等
-    经典受众字段一律 1870227 拒收，显式 targeting_automation.advantage_audience=0 也被无视
-    （v19/v22/v25 同行为，O322/O324 同拒——非版本非账户问题）。降级 = 剥 targeting 至
-    纯 geo + Advantage+ 开重试一次；成功响应带 "_advantage_forced": True，调用方必须留痕
-    （受众语义从窄定向变为 AI 扩展，不静默铁律）。其余错误原样外抛。"""
+    ① 1870227（批U3 实测定论）：dev App 下 FB 强制 Advantage+ 受众，经典受众字段一律拒收，
+      显式 advantage_audience=0 也被无视。降级 = 剥 targeting 至纯 geo + Advantage+ 开。
+    ② 1487429（批AZ 实测）：模板/节点引用的像素当前令牌无权使用（共享 BM 像素+令牌更换后
+      高发：像素 1726 属外部 BM，重新授权的新令牌用不了 → 全组 adset 被拒）。降级 = 换成
+      该账户实际可用的第一个像素（act_/adspixels 实查）重试；响应带 "_pixel_swapped"=新像素。
+    其余错误原样外抛。"""
     try:
         return fb.post(f"act_{act_id}/adsets", payload)
     except FbApiError as e:
         raw = getattr(e, "raw", None) or {}
-        if raw.get("error_subcode") != 1870227:
-            raise
-        p2 = dict(payload)
-        geo = (p2.get("targeting") or {}).get("geo_locations")
-        p2["targeting"] = {"geo_locations": geo} if geo else {}
-        p2["targeting"]["targeting_automation"] = {"advantage_audience": 1}   # 批V：嵌套（顶层=白发）
-        r = fb.post(f"act_{act_id}/adsets", p2)
-        if isinstance(r, dict):
-            r["_advantage_forced"] = True
-        return r
+        sub = raw.get("error_subcode")
+        if sub == 1870227:
+            p2 = dict(payload)
+            geo = (p2.get("targeting") or {}).get("geo_locations")
+            p2["targeting"] = {"geo_locations": geo} if geo else {}
+            p2["targeting"]["targeting_automation"] = {"advantage_audience": 1}   # 批V：嵌套（顶层=白发）
+            r = fb.post(f"act_{act_id}/adsets", p2)
+            if isinstance(r, dict):
+                r["_advantage_forced"] = True
+            return r
+        if sub == 1487429:
+            pxs = []
+            try:
+                pxs = fb.get(f"act_{act_id}/adspixels", {"fields": "id", "limit": 10}).get("data") or []
+            except Exception:
+                pxs = []
+            if pxs:
+                new_px = str(pxs[0].get("id") or "")
+                if new_px:
+                    p2 = dict(payload)
+                    po = dict(p2.get("promoted_object") or {})
+                    po["pixel_id"] = new_px
+                    p2["promoted_object"] = po
+                    r = fb.post(f"act_{act_id}/adsets", p2)
+                    if isinstance(r, dict):
+                        r["_pixel_swapped"] = new_px
+                    return r
+        raise
 
 
 def _bind_pixel_to_landing_page(sdb, tenant_id: int, landing_page_id: int, pixel_id: str,
@@ -2914,6 +2933,15 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                 # 受众被强制 Advantage+：窄定向（年龄/性别/兴趣）被剥为纯 geo+AI 扩展——留痕不静默
                 auto_warns.append(f"[受众] {sname}: 受众被强制 Advantage+（App 未过审无经典定向权限），"
                                   f"已按国家+AI 扩展投放")
+            _sw_px = adset.get("_pixel_swapped")
+            if _sw_px:
+                # 像素自愈留痕（批AZ）：模板像素令牌无权 → 已换账户可用像素；落地页必须同步
+                # 回写新像素（worker fire 页自身的 pixel_ids——只换 adset 页还发旧像素=FB 零转化）
+                auto_warns.append(f"[像素] {sname}: 模板像素当前令牌无权使用(1487429)，"
+                                  f"已自动换为账户可用像素 {_sw_px}")
+                _grp_pixel = _sw_px
+                if _grp_lpid:
+                    _bind_pixel_to_landing_page(sdb, tenant_id, _grp_lpid, _sw_px, item.act_id)
         except FbApiError as e:
             _fail_group(sname, snode, (e.friendly or str(e)))
             continue
