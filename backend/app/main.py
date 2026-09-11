@@ -71,7 +71,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-New-Token", "X-Import-Default-All"],  # 滑动续期：前端读新 token
+    expose_headers=["X-New-Token", "X-Import-Default-All", "X-Loadable-Degraded"],  # 滑动续期：前端读新 token；载入弹窗读降级令牌清单
 )
 
 

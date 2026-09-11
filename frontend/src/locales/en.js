@@ -315,6 +315,7 @@ export default {
     emptyStep1b: 'to bind a token',
     emptyStep2: '② Come back here and click "Load Accounts" to import',
     noLoadable: 'No loadable accounts (bind a Facebook token or connect TikTok on the Tokens page first)',
+    loadDegraded: '⚠ These tokens failed to load (possibly rate-limited); accounts under them are not listed: {names} — reopen this dialog later',
     importedTag: 'Imported',
     importableTag: 'Importable',
     importing: 'Importing…',

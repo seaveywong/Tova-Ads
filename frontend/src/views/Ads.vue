@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { GET, POST, PUT, DELETE } from '../api'
+import { GET, POST, PUT, DELETE, GETWithHeaders } from '../api'
 import { isSuperadminSync } from '../router'
 import { accountStatus, disableReason } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
@@ -164,15 +164,23 @@ const load = async () => {
   } catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.opFail')) }
   if (isLatest()) loading.value = false
 }
+const loadDegraded = ref([])
 const openLoad = async () => {
-  loadOpen.value = true; loadLoading.value = true
+  loadOpen.value = true; loadLoading.value = true; loadDegraded.value = []
   // 平台分流：FB 勾选清单 + TT 授权未纳管账户并拉（一侧失败不影响另一侧展示）
   const rows = []
   const [fb, tt] = await Promise.allSettled([
-    GET('/fb/credentials/loadable-accounts'),
+    GETWithHeaders('/fb/credentials/loadable-accounts'),
     GET('/tt/loadable-accounts'),
   ])
-  if (fb.status === 'fulfilled') for (const a of fb.value) rows.push({ ...a, platform: 'fb', _checked: false })
+  if (fb.status === 'fulfilled') {
+    for (const a of fb.value.data) rows.push({ ...a, platform: 'fb', _checked: false })
+    // 拉取失败令牌（限流/失效）→ 名下账户不在列表里，显式提示防「以为账户不存在」
+    try {
+      const d = JSON.parse(fb.value.headers.get('X-Loadable-Degraded') || '[]')
+      if (Array.isArray(d) && d.length) loadDegraded.value = d
+    } catch {}
+  }
   if (tt.status === 'fulfilled') for (const a of tt.value) rows.push({ account_id: a.act_id, name: a.name || a.act_id, platform: 'tt', _checked: false })
   if (fb.status === 'rejected' && tt.status === 'rejected') ElMessage.error(fb.reason?.message || t('common.opFail'))
   loadables.value = rows
@@ -384,6 +392,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
     <div v-if="loadOpen" class="overlay" @click.self="loadOpen = false">
       <div class="modal">
         <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="loadOpen = false">✕</button></div>
+        <div v-if="loadDegraded.length" class="load-degraded">{{ t('ads.loadDegraded', { names: loadDegraded.map(d => d.alias).join(', ') }) }}</div>
         <div class="load-list" v-loading="loadLoading">
           <div v-for="a in loadables" :key="a.platform + ':' + a.account_id" class="load-row">
             <input type="checkbox" v-model="a._checked" :disabled="a.imported" />
@@ -497,6 +506,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }
 .load-list { max-height: 360px; overflow: auto }
+.load-degraded { margin-bottom: 10px; padding: 8px 10px; border: 1px solid rgba(230, 162, 60, .4); background: rgba(230, 162, 60, .08); border-radius: 8px; font-size: 12px; line-height: 1.5; }
 .load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px }
 .lm-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .load-row code { color: var(--t3); font-size: 11px }

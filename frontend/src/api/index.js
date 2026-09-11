@@ -32,7 +32,7 @@ function _errMsg(detail) {
   return String(detail)
 }
 
-export async function api(method, path, body, timeoutMs = 30000) {
+export async function api(method, path, body, timeoutMs = 30000, withHeaders = false) {
   const opts = { method, headers: headers() }
   if (body) opts.body = JSON.stringify(body)
   // 超时 + 中止：防止空闲时 fetch 堆积（网络瞬断→pending 连接耗尽→页面卡死）
@@ -65,6 +65,7 @@ export async function api(method, path, body, timeoutMs = 30000) {
     let data = {}
     try { data = JSON.parse(text) } catch {}
     if (!res.ok) throw new Error(_errMsg(data.detail) || data.message || text || `HTTP ${res.status}`)
+    if (withHeaders) return { data, headers: res.headers }   // 载入弹窗读 X-Loadable-Degraded 用
     return data
   } catch (e) {
     if (e.name === 'AbortError') throw new Error(i18n.global.t('error.timeout'))
@@ -75,6 +76,8 @@ export async function api(method, path, body, timeoutMs = 30000) {
 }
 
 export const GET = (p, timeoutMs) => api('GET', p, undefined, timeoutMs)
+// GET + 响应头一起返回（需要读自定义头的端点用，如载入账户的降级令牌清单）
+export const GETWithHeaders = (p, timeoutMs) => api('GET', p, undefined, timeoutMs, true)
 export const POST = (p, b, timeoutMs) => api('POST', p, b, timeoutMs)
 export const PUT = (p, b, timeoutMs) => api('PUT', p, b, timeoutMs)
 export const PATCH = (p, b, timeoutMs) => api('PATCH', p, b, timeoutMs)

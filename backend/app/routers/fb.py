@@ -1271,7 +1271,7 @@ def loadable_accounts(
     大代理令牌可见 3k+ 账户（轻字段全量 ~30s）——进程内 5 分钟缓存，
     /fb/import 复用同一缓存（勾选导入零 FB 调用，秒回）。
     """
-    rows = _get_loadable_rows(db, user.tenant_id)
+    rows, degraded = _get_loadable_rows(db, user.tenant_id)
     imported_ids = {a.act_id for a in db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
     ).all()}
@@ -1289,19 +1289,27 @@ def loadable_accounts(
             _da = bool(json.loads(_row2.value))
     except Exception:
         pass
-    return JSONResponse(content=out, headers={"X-Import-Default-All": "1" if _da else "0"})
+    # 拉取失败令牌清单进响应头（前端弹横幅提示「列表不全」）；裸 list 形状不动
+    return JSONResponse(content=out, headers={
+        "X-Import-Default-All": "1" if _da else "0",
+        "X-Loadable-Degraded": json.dumps(degraded, ensure_ascii=True) if degraded else "[]",
+    })
 
 
 _LOADABLE_CACHE: dict = {}   # tenant_id -> (ts, rows)；rows 含 tokens[]（无 imported——每次现算）
 _LOADABLE_TTL = 300
 
 
-def _get_loadable_rows(db, tenant_id: int) -> list[dict]:
-    """载入列表原始行（FB 拉取 + 合并），带 5 分钟进程内缓存。"""
+def _get_loadable_rows(db, tenant_id: int) -> tuple[list[dict], list[dict]]:
+    """载入列表原始行（FB 拉取 + 合并），带 5 分钟进程内缓存。返回 (rows, degraded)。
+
+    degraded = 拉取失败的令牌清单（限流/失效等）——这些令牌名下的账户在 rows 里不可见，
+    前端必须显式提示「列表不全」，否则用户以为账户不存在（V11 案：限流窗口内导入找不到）。
+    """
     import time as _t
     ent = _LOADABLE_CACHE.get(tenant_id)
     if ent and _t.time() - ent[0] < _LOADABLE_TTL:
-        return ent[1]
+        return ent[1], ent[2]
     from ..core.fb_tokens import _is_cred_available
     from concurrent.futures import ThreadPoolExecutor
     creds = db.query(FbCredential).filter(
@@ -1311,14 +1319,21 @@ def _get_loadable_rows(db, tenant_id: int) -> list[dict]:
     def _pull(c):
         fb = FbClient(decrypt(c.access_token_enc))
         try:
-            return c, fb.get_ad_accounts(light=True)
-        except (FbApiError, TtApiError):
-            return c, None
+            return c, fb.get_ad_accounts(light=True), None
+        except (FbApiError, TtApiError) as e:
+            return c, None, e
 
     merged: dict = {}
+    degraded: list[dict] = []
     if creds:
         with ThreadPoolExecutor(max_workers=min(4, len(creds))) as ex:
-            for c, accounts in ex.map(_pull, creds):
+            for c, accounts, err in ex.map(_pull, creds):
+                if err is not None:
+                    degraded.append({
+                        "alias": c.alias or c.fb_user_name or f"cred#{c.id}",
+                        "error": str(getattr(err, "friendly", "") or err)[:120],
+                    })
+                    continue
                 if not accounts:
                     continue
                 avail = _is_cred_available(c)
@@ -1337,8 +1352,8 @@ def _get_loadable_rows(db, tenant_id: int) -> list[dict]:
                     merged[aid]["tokens"].append(
                         {"id": c.id, "alias": c.alias or c.fb_user_name, "available": avail})
     rows = list(merged.values())
-    _LOADABLE_CACHE[tenant_id] = (_t.time(), rows)
-    return rows
+    _LOADABLE_CACHE[tenant_id] = (_t.time(), rows, degraded)
+    return rows, degraded
 
 
 def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
@@ -1463,6 +1478,11 @@ def import_accounts(
     ent = _LOADABLE_CACHE.get(user.tenant_id)
     if ent and _t.time() - ent[0] < _LOADABLE_TTL:
         rows = {r["account_id"]: r for r in ent[1]}
+        # 缓存可能残缺：拉列表时有令牌限流失败 → 其名下账户不在缓存（V11 案：
+        # 限流窗口内导入连续 5 分钟「找不到」）。缺的 ID 实时点查补齐，不再盲信缓存。
+        _missing = [a for a in cleaned if a not in rows]
+        if _missing:
+            rows.update(_verify_ids_pointwise(db, user.tenant_id, _missing))
     else:
         rows = _verify_ids_pointwise(db, user.tenant_id, cleaned)
     if not rows:
