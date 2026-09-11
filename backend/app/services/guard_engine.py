@@ -3274,12 +3274,11 @@ def run_keepalive():
                     "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
                     "promoted_object": json.dumps({"page_id": page_id}),
                     "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                    # lifetime=总预算花完自动停（配置语义；原误用 daily_budget=$5/天无上限烧钱）。
-                    # 批CC：lifetime 必须配 end_time——「No End Date Entered」今晨全败实证；
-                    # +30 天兜底（预算 $1 通常远早花完自动停，没花完也自然到期不再烧）
-                    "lifetime_budget": str(budget),
-                    "end_time": (datetime.now(timezone.utc) + timedelta(days=30)
-                                 ).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
+                    # 批CD：daily_budget=配置值（默认 $1/天）——保活语义是「每天最多 $1 的持续小额
+                    # 活动」。$1 lifetime 有两个死穴（今晨全败实证）：①lifetime 最低 $30（1885272）
+                    # ②即使能建、$1 花完自停 = 账户又闲置，保活失效。花销上界=budget/天/账户，
+                    # 账户一旦有真实投放（has_spend 检查）保活不再新建。
+                    "daily_budget": str(budget),
                 })
                 adset_id = adset.get("id")
                 if not adset_id:
