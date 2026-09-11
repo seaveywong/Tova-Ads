@@ -2098,3 +2098,9 @@ smoke：build✓ + 单测 5/5 + i18n 全 key 成对 + en 零 CJK。CF master ×2
 用户 BM 授权像素后重试仍报「无可用像素（BM未分配且自动创建失败）」。根因不是缓存/权限：journal 实证 `pixel self-heal failed: name LandingPixel is not defined`——_ensure_account_pixel 缺 LandingPixel import（批BR 改造时 _account_pixel_ids/_resolve_tree_pixel 都带了局部 import，这个老函数没有），自愈首行 NameError 被外层 except 吞掉 → 返空 → 误报「无像素」。批U2 写下它时自愈路径几乎不被触发（库总有 sync 行），批BR「账户自有优先」让库空账户常态化走自愈 → 暴露。
 修复：函数头补局部 import（一行）。smoke（服务器真码）：…709/…652 两账户 _pick_group_pixel 均返回新授权像素 1115107991087337 ✓。
 教训再证：裸 except 吞 NameError = 报错归因全偏（同 bare-except-silent-failure 铁律）。
+
+## 批BY：写路径砍全租牌RR兜底（Radar #33 根因，2026-09-11）
+
+用户实证 Radar-SC38 报「广告账户无写权限」但界面能建。完整根因链：绑定的 Fama Bah 令牌此前撞限流 → rate_limited+cooldown(05:24Z) → 用户 05:00 重试时在冷却中 → cred_for_account_op 候选池空 → **全租户 RR 兜底选中 Kritins Rae**（对 Radar 无任何权限）→ FB #33「无写权限」——误导性报错掩盖真因（正确令牌在限流冷却）。debug_token 实证 Rae 令牌健康 scopes 全、Fama Bah 冷却过期后读写 Radar 全通。
+修复：兜底段 write/pause 直接 return None（read 保留兜底——租户令牌读权普遍，批token-dispatch 生产验证）；调用方报「无可用写令牌」可诊断。smoke：Radar write/read 现在都正确选 Fama Bah。
+连带：批BX（像素自愈 NameError）同日修。
