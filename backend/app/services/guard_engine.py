@@ -1046,7 +1046,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
         else:
             cred = cred_for_account_op(db, tenant_id, acc.act_id, "read")
             if not cred:
-                res["skip_reasons"].append(f"{acc.name}({acc.act_id}): 无令牌")
+                # 候选池+主绑定都不可用：多为首选令牌限流冷却（read 兜底已砍，见 fb_tokens）
+                # ——区分文案，避免把限流误读成"账户没绑令牌"
+                _pc = db.query(FbCredential).join(
+                    Account, Account.fb_credential_id == FbCredential.id).filter(
+                    Account.tenant_id == tenant_id, Account.act_id == acc.act_id).first()
+                _cooling = bool(_pc and _pc.cooldown_until
+                                and _pc.cooldown_until > datetime.now(timezone.utc))
+                res["skip_reasons"].append(f"{acc.name}({acc.act_id}): "
+                                           f"{'首选令牌限流冷却中' if _cooling else '无令牌'}")
                 return res
             fb = FbClient(decrypt(cred.access_token_enc))
         _rid = str(cred.id)   # 巡检成功路径也需记录令牌身份（pause write_log 用）

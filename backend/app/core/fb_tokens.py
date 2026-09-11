@@ -183,25 +183,14 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
         bound = cred_map[acc.fb_credential_id]
         if _is_cred_available(bound) and _op_ok(bound, op_kind):
             return bound
-    # 批BY：写/暂停不再做全租户 RR 兜底（0911 Radar 实证——绑定的 Fama Bah 限流冷却中
+    # 批BY：写/暂停不做全租户 RR 兜底（0911 Radar 实证——绑定的 Fama Bah 限流冷却中
     # → 兜底选中毫无该账户权限的 Kritins Rae → #33「无写权限」误导性报错，真因被掩盖）。
-    # read 保留兜底（租户令牌读权普遍存在，批token-dispatch 生产验证）；写返回 None
-    # → 调用方报「无可用写令牌」，比拿错令牌硬打可诊断得多。主令牌（上方 bound）不受影响。
-    if op_kind in ("write", "pause"):
-        return None
-    avail = [c for c in creds if _is_cred_available(c) and _op_ok(c, op_kind)]
-    if not avail:
-        return None
-    if op_kind in ("write", "pause"):
-        # 回退段补写路径 tiebreaker（全库审查 P1：回退曾纯 RR——operate 未先于 manage，
-        # 候选池空时写操作又撞回管理号"权限不足"，池内修复被旁路）
-        avail.sort(key=lambda c: ((c.token_type or "manage").strip().strip("'\"").lower() != "operate", c.id))
-        return avail[0]
-    key = (tenant_id, act_id, op_kind)
-    cursor = _RR_STATE.get(key, 0)
-    pick = avail[cursor % len(avail)]
-    _RR_STATE[key] = cursor + 1
-    return pick
+    # 2026-09-12 O311~O315 案：read 的全租户 RR 兜底同样砍掉——首选令牌（候选池/主绑定，
+    # Kritins Rae）限流冷却时，兜底会选中「/me/adaccounts 能看见但读不了」的令牌
+    # （Gia/Noorhlha）→ #200「权限不足」假象掩盖限流真因（昨晚告警风暴 + 今晨 V11 导入
+    # 找不到，两案同根）。候选池/主绑定都不可用 → None：调用方报「首选令牌限流中/无令牌」，
+    # 诚实可诊断；冷却过期令牌自动回池恢复。主令牌（上方 bound）不受影响。
+    return None
 
 
 def tt_client_for_account(db: Session, tenant_id: int, act_id: str, op_kind: str = "read"):
