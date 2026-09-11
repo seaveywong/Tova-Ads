@@ -327,6 +327,7 @@ export default {
     emptyStep2: '② 回到本页点「载入账户」导入',
     noLoadable: '无可载入账户（先在令牌页绑定 Facebook 令牌或连接 TikTok）',
     loadDegraded: '⚠ 以下令牌拉取失败（可能限流中），其名下账户暂未列出：{names}——稍后重开本弹窗即可',
+    runKeepalive: '立即保活',
     importedTag: '已导入',
     importableTag: '可导入',
     importing: '导入中…',
