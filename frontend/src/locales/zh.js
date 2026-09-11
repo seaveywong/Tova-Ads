@@ -573,7 +573,7 @@ export default {
     ttAppSaved: '已保存',
     ttAppFillBoth: 'App ID 和 App Secret 都要填',
     ttAppsTitle: 'TikTok App', ttAddApp: '添加 App', ttAppNamePh: 'App 名称（可选）',
-    ttManageInSettings: '管理 App（设置）', ttNoAppsGoSettings: '暂无 App——管理员在 设置 → 应用配置 添加', ttNoAppsSuper: '还没有配置 TikTok App——点右上「添加 App」填入开发者后台的 App ID / Secret',
+    ttNoAppsGoSettings: '暂无 App——管理员在 设置 → 应用配置 添加', ttNoAppsSuper: '还没有配置 TikTok App——点右上「添加 App」填入开发者后台的 App ID / Secret',
     ttNoAppsUser: '尚未配置 TikTok App，请联系平台管理员配置',
     ttAppDeleteConfirm: '删除 App「{name}」？（使用中的令牌不受影响，但无法再发起新授权）',
     ttLoadHint: '仅显示已授权但未纳管的 TikTok 账户，勾选后导入纳管。',
@@ -851,7 +851,7 @@ export default {
     emNoRoutes: '暂无映射',
     emDeleted: '已删除',
 
-    faTitle: 'FB App 配置', faDesc: '管理用于 OAuth 授权与 webhook 验签的 Facebook App（新建/修改 Secret/删除）。系统级 App 全团队共用。', faFbSubTitle: 'Facebook 应用', ttSubTitle: 'TikTok 应用（令牌页 TT 分区发起连接）', ttAdd: '+ 新增 TikTok App', ttEmpty: '暂无 TikTok App', ttDefaultTag: '默认', ttFillBoth: '请填写 app_id 和 app_secret', ttDeleteConfirm: '删除 TikTok App「{name}」？使用它授权的令牌将失效。',
+    faTitle: '应用配置', faDesc: '管理平台应用：Facebook App（OAuth 授权与 webhook 验签）+ TikTok App（TT 令牌连接）。新建/修改 Secret/删除；系统级 App 全团队共用。', faFbSubTitle: 'Facebook 应用', ttSubTitle: 'TikTok 应用（令牌页 TT 分区发起连接）', ttAdd: '+ 新增 TikTok App', ttEmpty: '暂无 TikTok App', ttDefaultTag: '默认', ttFillBoth: '请填写 app_id 和 app_secret', ttDeleteConfirm: '删除 TikTok App「{name}」？使用它授权的令牌将失效。',
     faAdd: '+ 新建 App', faName: '名称', faNamePh: '如 Main App', faAppId: 'App ID', faSecret: 'App Secret',
     faSecretKeep: '留空 = 保持原 Secret 不变', faSystem: '系统级', faSystemOpt: '系统级 App（全团队共用，仅超管可建）',
     faFillBoth: 'App ID 和 Secret 必填', faDeleteConfirm: '删除 App {id}？使用它授权的令牌将无法续期，webhook 验签也将失效。', faEmpty: '暂无 App——点下方新建',

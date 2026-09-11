@@ -712,11 +712,10 @@ const deleteToken = async (tk) => {
     <div :key="platform" class="plat-pane">
     <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
       <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
-      <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接） -->
+      <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接）。
+           App 增删改只在设置页「应用配置」——本页纯连接入口，与 FB 侧一致 -->
       <div class="tt-apps-head">
         <span class="tt-app-title">{{ t('tokens.ttAppsTitle') }}</span>
-        <!-- 批CA：App 管理统一进设置页（与 FB 一致）——这里只留连接入口；超管从这跳去管理 -->
-        <button v-if="isSuper" class="btn ghost" @click="router.push('/settings?sec=sec-fbapps')">{{ t('tokens.ttManageInSettings') }}</button>
       </div>
       <div v-if="ttApps.length" class="tt-apps">
         <div v-for="a in ttApps" :key="`${a.source}:${a.id}`" class="oauth-app">
