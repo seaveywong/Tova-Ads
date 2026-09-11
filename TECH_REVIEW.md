@@ -2104,3 +2104,8 @@ smoke：build✓ + 单测 5/5 + i18n 全 key 成对 + en 零 CJK。CF master ×2
 用户实证 Radar-SC38 报「广告账户无写权限」但界面能建。完整根因链：绑定的 Fama Bah 令牌此前撞限流 → rate_limited+cooldown(05:24Z) → 用户 05:00 重试时在冷却中 → cred_for_account_op 候选池空 → **全租户 RR 兜底选中 Kritins Rae**（对 Radar 无任何权限）→ FB #33「无写权限」——误导性报错掩盖真因（正确令牌在限流冷却）。debug_token 实证 Rae 令牌健康 scopes 全、Fama Bah 冷却过期后读写 Radar 全通。
 修复：兜底段 write/pause 直接 return None（read 保留兜底——租户令牌读权普遍，批token-dispatch 生产验证）；调用方报「无可用写令牌」可诊断。smoke：Radar write/read 现在都正确选 Fama Bah。
 连带：批BX（像素自愈 NameError）同日修。
+
+## 批BZ：部署进度展示令牌（用户点名，2026-09-11）
+
+Radar 令牌事故的后续可观测性：部署进度里成功失败都要能看到用的谁的令牌。落地：迁移 0096（launch_job_items.cred_name）+ _cred_label_for（client token 反查 fb_credentials 名）+ 主/重试两 runner 选定 fb 后写入 + _item_dict 透传 + 前端进度表账户格下「🔑 令牌名」chip（hover 说明）。存量的旧 item 无 cred_name（空=不显示）。
+smoke：…652/…709 write 令牌反查均正确返回 Fama Bah。迁移 applied、health 绿、CF master。
