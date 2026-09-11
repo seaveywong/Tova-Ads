@@ -784,7 +784,7 @@ export default {
     retentionSaved: '保留策略已保存（每日 4:33 自动清理）',
     retentionCleanItem: '{table}:{n}删', retentionCleanDone: '清理完成 · {detail}', cleanFail: '清理失败：{msg}', retentionRunTitle: '立即清理数据', retentionRunConfirm: '按当前保留策略立即删除过期数据（落地日志/操作日志/巡检历史等）——删除不可恢复。确定执行？', retentionRunBtn: '确认清理',
     keepaliveEnabled: '保活已全局开启',
-    kaRunNow: '立即扫描一次', kaResultTitle: '保活扫描结果', kaBuilt: '新建', kaSkipped: '跳过', kaFailed: '失败', kaSuccess: '成功', kaSkip: '跳过', kaFail: '失败', kaNoAccounts: '没有符合条件的账户',
+    kaRunNow: '立即扫描一次', kaRunHint: '扫描中（约 10~60 秒），完成后自动弹出结果', kaResultTitle: '保活扫描结果', kaBuilt: '新建', kaSkipped: '跳过', kaFailed: '失败', kaSuccess: '成功', kaSkip: '跳过', kaFail: '失败', kaNoAccounts: '没有符合条件的账户',
     accountTitle: '账户',
     grpPersonal: '个人', grpPlatform: '平台',
     accountDesc: '登录用户名（邮箱）和密码。修改密码后需用新密码重新登录。',

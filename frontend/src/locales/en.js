@@ -773,7 +773,7 @@ export default {
     retentionSaved: 'Retention policy saved (auto cleanup daily at 4:33)',
     retentionCleanItem: '{table}: {n} deleted', retentionCleanDone: 'Cleanup done · {detail}', cleanFail: 'Cleanup failed: {msg}', retentionRunTitle: 'Clean Data Now', retentionRunConfirm: 'Permanently delete expired data per current retention policy (landing logs / audit logs / patrol history) — irreversible. Proceed?', retentionRunBtn: 'Confirm clean',
     keepaliveEnabled: 'Keepalive enabled globally',
-    kaRunNow: 'Scan now', kaResultTitle: 'Keepalive Scan Result', kaBuilt: 'Built', kaSkipped: 'Skipped', kaFailed: 'Failed', kaSuccess: 'Success', kaSkip: 'Skip', kaFail: 'Fail', kaNoAccounts: 'No eligible accounts',
+    kaRunNow: 'Scan now', kaRunHint: 'Scanning (10–60s); the result dialog opens when done', kaResultTitle: 'Keepalive Scan Result', kaBuilt: 'Built', kaSkipped: 'Skipped', kaFailed: 'Failed', kaSuccess: 'Success', kaSkip: 'Skip', kaFail: 'Fail', kaNoAccounts: 'No eligible accounts',
     accountTitle: 'Account',
     grpPersonal: 'Personal', grpPlatform: 'Platform',
     accountDesc: 'Login username (email) and password. After changing the password you must log in again with the new one.',

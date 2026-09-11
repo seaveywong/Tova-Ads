@@ -220,8 +220,10 @@ const kaResMeta = (r) => ({
 }[r] || { cls: 'off', label: r })
 const runKeepaliveNow = async () => {
   kaRunning.value = true
+  ElMessage.info(t('settings.kaRunHint'))
   try {
-    const r = await POST('/guard/keepalive/run')
+    // 后端同步跑完整扫描（逐账户 FB 调用，10~60s+），默认 30s 超时会掐断导致结果弹窗不出现
+    const r = await POST('/guard/keepalive/run', undefined, 180000)
     kaRunning.value = false
     if (r.skipped === 'lock_busy') { ElMessage.warning(t('settings.kaLockBusy')); return }
     if (r.error) { ElMessage.error(t('settings.kaRunError', { msg: r.error })); return }
