@@ -3485,6 +3485,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <div class="pj-acc" :title="accName(it.act_id) || it.act_id">
                 <div class="pj-acc-name">{{ accNameOrTail(it.act_id) }}</div>
                 <div class="pj-acc-id mono">{{ it.act_id }}</div>
+                <div v-if="it.cred_name" class="pj-cred" :title="t('launch.credNameTip')">🔑 {{ it.cred_name }}</div>
               </div>
               <div><span :class="['pj-badge', itemBadgeCls(it, activeJob)]"><i v-if="itemBadgeCls(it, activeJob) === 'run'" class="pj-spin"></i>{{ itemBadgeCls(it, activeJob) === 'stuck' ? t('launch.itemStuck') : statusText(it.status) }}</span></div>
               <div class="pj-obj">
@@ -3973,6 +3974,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .pj-acc{min-width:0}
 .pj-acc-name{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5}
 .pj-acc-id{font-family:var(--font-mono);font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.5}
+.pj-cred{font-size:11px;color:var(--ac);background:var(--acg);border-radius:4px;padding:0 6px;display:inline-block;line-height:1.6;margin-top:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 状态徽标：成功=绿实心 / 失败=红描边 / 进行=中性转圈 / 卡死=橙 */
 .pj-badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;line-height:1}
 .pj-badge.ok{background:var(--success);color:#0b2916}

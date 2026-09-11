@@ -1223,6 +1223,25 @@ def _validate_batch_assets(db, asset_ids: list[int], tenant_id: int) -> list:
     return out
 
 
+def _cred_label_for(sdb, tenant_id: int, act_id: str, fb) -> str:
+    """批BZ：本次部署实际使用的令牌名（进度归因用）。按 token 反查 fb_credentials；
+    反查不到（候选列表传参会直接给 cred 对象更省一次解密对比）返空串。"""
+    if fb is None:
+        return ""
+    tok = getattr(fb, "token", None) or ""
+    if not tok:
+        return ""
+    from ..models.fb import FbCredential
+    from ..core.encryption import decrypt as _dec
+    for c in sdb.query(FbCredential).filter(FbCredential.tenant_id == tenant_id).all():
+        try:
+            if _dec(c.access_token_enc) == tok:
+                return c.fb_user_name or c.alias or f"#{c.id}"
+        except Exception:
+            continue
+    return ""
+
+
 def _write_fb_with_fallback(sdb, tenant_id: int, act_id: str):
     """写令牌候选兜底（批AK）：逐候选返回 FbClient 列表——裸 Invalid parameter（无
     error_data，跨 App/无写权限令牌的伪装形态，2026-09-09 批量部署 3 账户失败实例）
@@ -3395,10 +3414,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     if not fb:
                         raise FbApiError("no_id", f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
                 else:
-                    _fb_list, _ = _write_fb_with_fallback(sdb, tenant_id, item.act_id)
+                    _fb_list, _fb_list_creds = _write_fb_with_fallback(sdb, tenant_id, item.act_id)
                     if not _fb_list:
                         raise FbApiError("no_id", f"act_{item.act_id} 未绑定写令牌")
                     fb = _fb_list[0]
+                # 批BZ：进度里可见本次用谁的令牌下发（成功失败都可归因——0911 Radar 兜底选错令牌事故）
+                item.cred_name = _cred_label_for(sdb, tenant_id, item.act_id, fb)
+                sdb.commit()
                 # 批量模式（按素材批量生成系列）：item 内逐素材克隆系列，单素材失败不中断后续
                 # （partial 汇总）。item = 账户 的粒度不变——job.total / 前端进度轮询 / 重试入口零改动
                 if batch_assets:
@@ -3493,6 +3515,7 @@ def _item_dict(it: LaunchJobItem) -> dict:
         "ad_id": it.ad_id or "", "subcode_slug": it.subcode_slug or "", "error": it.error or "",
         "error_code": it.error_code or "", "page_post_id": it.page_post_id or "",
         "progress": it.progress or "",                    # 批BQ：实时进度注记
+        "cred_name": it.cred_name or "",                  # 批BZ：本次下发用的令牌名
         "updated_at": str(it.created_at) if it.created_at else "",   # 心跳时间戳（=最后更新）
     }
 
@@ -3821,6 +3844,8 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                 if not _fb_list:
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
                 fb = _fb_list[0]
+            it.cred_name = _cred_label_for(sdb, tenant_id, it.act_id, fb)   # 批BZ：令牌归因可见
+            sdb.commit()
             # 结构模式重试（0088）：整树重跑（仅全败 item——部分成功在端点层已拒）；
             # 不走 _find_existing_campaign 幂等捷径（树有多组多名，同名命中无法确认归属）
             tree_adsets = _parse_structure(tpl)

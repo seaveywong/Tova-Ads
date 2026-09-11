@@ -118,4 +118,5 @@ class LaunchJobItem(Base):
     subcode_slug = Column(Text)
     error = Column(Text)
     progress = Column(Text)                        # 批BQ：部署中实时进度注记（"广告 3/12：US4"）——creating 不再黑盒
+    cred_name = Column(Text)                       # 批BZ：本次下发用的令牌名（成功失败都可归因到令牌——0911 Radar 兜底选错令牌事故）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
