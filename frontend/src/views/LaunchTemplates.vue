@@ -3613,7 +3613,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
 </div>
           <div class="hi-meta tnum">
-            <span>{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
+            <span class="hi-counts"><b class="c-ok">{{ j.succeeded }}</b>{{ t('launch.sumOk') }} · <b class="c-err">{{ j.failed }}</b>{{ t('launch.sumFail') }} · <b>{{ j.total }}</b>{{ t('launch.sumAccounts') }}</span>
             <span>{{ t('launch.lastRunAt') }} {{ fmtTime(j.created_at) }}</span>
             <span v-if="j.finished_at">{{ t('launch.finishedAt') }} {{ fmtTime(j.finished_at) }}</span>
             <span>{{ t('launch.elapsed') }} {{ fmtDur(jobElapsed(j)) }}</span>
@@ -3631,7 +3631,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
             <span class="dep-arrow" :class="{open: depJobDetail?.id === j.id}">▶</span>
             <span class="dep-job-id mono tnum" :title="t('launch.jobIdTip')">#{{ j.id }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
-            <span class="dep-job-counts tnum">{{ j.succeeded }}✓ / {{ j.failed }}✗ / {{ j.total }}</span>
+            <span class="dep-job-counts tnum"><b class="c-ok">{{ j.succeeded }}</b>{{ t('launch.sumOk') }} · <b class="c-err">{{ j.failed }}</b>{{ t('launch.sumFail') }} · <b>{{ j.total }}</b>{{ t('launch.sumAccounts') }}</span>
             <span class="dep-job-times tnum" :title="t('launch.lastRunAt') + '：' + fmtTime(j.created_at) + (j.finished_at ? ' · ' + t('launch.finishedAt') + '：' + fmtTime(j.finished_at) : '')">
               {{ t('launch.lastRunAt') }} {{ fmtTime(j.created_at) }}<template v-if="j.finished_at"> · {{ t('launch.elapsed') }} {{ fmtDur(jobElapsed(j)) }}</template>
             </span>
@@ -3762,6 +3762,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .dep-job-head:hover{background:var(--bgh)}
 .dep-job-id{font-size:11px;color:var(--t3);flex:none}
 .dep-job-counts{font-size:12px;color:var(--t2);flex:none;font-variant-numeric:tabular-nums}
+/* 批BZ2：任务计数「N✓ / N✗ / N」→「N成功 · N失败 · N账户」数字着色（符号暗号不可读） */
+.hi-counts b, .dep-job-counts b{font-weight:600;color:var(--t1)}
+.hi-counts .c-ok, .dep-job-counts .c-ok{color:var(--success)}
+.hi-counts .c-err, .dep-job-counts .c-err{color:var(--error)}
 .dep-job-times{font-size:11px;color:var(--t3);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-variant-numeric:tabular-nums}
 .dep-arrow{font-size:10px;color:var(--t3);transition:transform .15s;display:inline-block;flex:none}
 .dep-arrow.open{transform:rotate(90deg)}
