@@ -2109,3 +2109,8 @@ smoke：build✓ + 单测 5/5 + i18n 全 key 成对 + en 零 CJK。CF master ×2
 
 Radar 令牌事故的后续可观测性：部署进度里成功失败都要能看到用的谁的令牌。落地：迁移 0096（launch_job_items.cred_name）+ _cred_label_for（client token 反查 fb_credentials 名）+ 主/重试两 runner 选定 fb 后写入 + _item_dict 透传 + 前端进度表账户格下「🔑 令牌名」chip（hover 说明）。存量的旧 item 无 cred_name（空=不显示）。
 smoke：…652/…709 write 令牌反查均正确返回 Fama Bah。迁移 applied、health 绿、CF master。
+
+## 批CA：App 管理入口对齐 FB/TT（2026-09-11）
+
+用户点名：TK App 配置在令牌页、FB App 在设置页——不一致。对齐方向按 FB 成熟模式：**密钥管理=设置页、连接=令牌页**。落地：Settings sec-fbapps 分区改「应用配置」双小节（新增 TikTok App 列表/新建/删除——POST/DELETE /tt/apps 已有；source=default 行只读标「默认」）；Tokens TT 分区去掉新建/删除按钮和弹窗（saveTtApp/delTtApp 及其 ref 删除），保留 App 卡片连接入口 + 超管「管理 App（设置）」跳转链接；空态文案指路设置页。i18n zh/en 成对。
+smoke：build✓ + EN 零 CJK + 死引用清零（grep ttAppForm/saveTtApp 无残留）。CF master。
