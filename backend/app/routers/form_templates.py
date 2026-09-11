@@ -232,8 +232,8 @@ def deploy_form(fid: int, body: dict,
         except: cfg = {}
     fb = client_for_page(db, user.tenant_id, page_id)   # 审计#5：按页实测选令牌（曾任一 active，无页权即 400）
     if not fb: raise HTTPException(400, "没有能管理该主页的可用令牌（请到令牌页核查主页权限）")
-    # 感谢页按钮：显式选了 website 才带按钮字段；whatsapp/none 是本地配置，不进 FB payload
-    # （无 thank_you_button_type 的存量 config 保持旧行为：文字+URL 齐即带）。见 0090 批。
+    # 感谢页按钮（2026-09-12 FB v25 实测对齐）：website=URL 按钮 / whatsapp=页绑 WhatsApp
+    # （button_text 必填）/ none。无 button_type 的存量 config 保持旧语义（文字+URL 齐即 website）。
     _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()
     _btn_website = (_ty_btn_type == "website") if _ty_btn_type else True
     payload = build_lead_form_payload(
@@ -247,7 +247,8 @@ def deploy_form(fid: int, body: dict,
         privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
         thank_you_title=cfg.get("thank_you_title", ""),
         thank_you_body=cfg.get("thank_you_body", ""),
-        thank_you_button_text=cfg.get("thank_you_button_text", "") if _btn_website else "",
+        ty_btn_type=_ty_btn_type or ("website" if _btn_website else "none"),
+        thank_you_button_text=cfg.get("thank_you_button_text", "") if (_btn_website or _ty_btn_type == "whatsapp") else "",
         thank_you_website_url=cfg.get("thank_you_website_url", "") if _btn_website else "",
         follow_up_url=cfg.get("follow_up_url", ""),
         context_card_title=cfg.get("context_card_title", ""),

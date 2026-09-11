@@ -706,6 +706,7 @@ def build_lead_form_payload(
     privacy_link_text: str = "Privacy Policy",
     thank_you_title: str = "",
     thank_you_body: str = "",
+    ty_btn_type: str = "",             # none / website / whatsapp（按钮形态显式化，与编辑器一致）
     thank_you_button_text: str = "",
     thank_you_website_url: str = "",
     follow_up_url: str = "",
@@ -775,15 +776,32 @@ def build_lead_form_payload(
         payload["description"] = description
 
     # ── 感谢页（安全 URL 过滤）──
-    if thank_you_title:
-        typ_page: dict[str, Any] = {"title": thank_you_title}
+    # 按钮形态（2026-09-12 FB v25 实测定版）：
+    #   - VIEW_WEBSITE：website_url（安全过滤）
+    #   - WHATSAPP：仅 button_text（必填）——号码用主页绑定的 WhatsApp，API 不收 phone_number 键
+    #   - CALL_BUSINESS：需未文档化的商户电话键 → 暂不放开
+    #   - MESSAGE_BUSINESS：FB 报 not yet supported → 不可用
+    # 其余枚举（DOWNLOAD/PROMO_CODE/预约等）缺配套参数载体，同样不放开。
+    ty_btn = (ty_btn_type or "").strip().lower()
+    if thank_you_title or ty_btn not in ("", "none"):
+        typ_page: dict[str, Any] = {}
+        if thank_you_title:
+            typ_page["title"] = thank_you_title
         if thank_you_body:
             typ_page["body"] = thank_you_body
-        if thank_you_button_text and _is_safe_external_url(thank_you_website_url):
+        if ty_btn == "website":
+            if not (thank_you_button_text and _is_safe_external_url(thank_you_website_url)):
+                raise ValueError("感谢页「访问网站」按钮需同时填按钮文字与安全的网站链接（http/https）")
             typ_page["button_type"] = "VIEW_WEBSITE"
             typ_page["button_text"] = thank_you_button_text
             typ_page["website_url"] = thank_you_website_url
+        elif ty_btn == "whatsapp":
+            if not (thank_you_button_text or "").strip():
+                raise ValueError("感谢页「WhatsApp」按钮需填按钮文字（FB #100 Button text is missing）")
+            typ_page["button_type"] = "WHATSAPP"
+            typ_page["button_text"] = thank_you_button_text.strip()
         else:
+            typ_page.setdefault("title", thank_you_title)
             typ_page["button_type"] = "NONE"
         payload["thank_you_page"] = typ_page
 
@@ -947,6 +965,12 @@ def build_welcome_message(
         response = (ib.get("response") or "").strip()
         if not title or not response:
             raise ValueError("ice_breakers 每项必须含非空 title + response（02_附录 §五 不变量4）")
+        # FB Messenger 限制（2026-09-12 对齐）：ice breakers 最多 4 条、按钮文字 ≤20 字符
+        # （超限 FB 创建创意时报错，提前在此拦截给人话）
+        if len(ice_breakers) > 4:
+            raise ValueError("快捷回复（ice breakers）最多 4 条——FB Messenger 平台限制")
+        if len(title) > 20:
+            raise ValueError(f"快捷回复「{title[:10]}…」按钮文字 {len(title)} 字符超限（FB 上限 20）")
         if not allow_cjk and (_contains_cjk(title) or _contains_cjk(response)):
             raise ValueError("非 CJK 语言禁用中/日/韩字符（02_附录 §3.2）")
         msg["ice_breakers"].append({"title": title, "response": response})

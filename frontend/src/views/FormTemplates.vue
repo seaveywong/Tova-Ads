@@ -200,7 +200,7 @@ const saveForm = async () => {
   if (!fCfg.value.form_title.trim()) return ElMessage.warning(t('formtpl.needFormTitle'))
   if (!fCfg.value.privacy_url.trim()) return ElMessage.warning(t('formtpl.needPrivacyUrl'))
   if (tyBtnTypeOf(fCfg.value) === 'website' && !fCfg.value.thank_you_website_url.trim()) return ElMessage.warning(t('formtpl.needBtnUrl'))
-  if (tyBtnTypeOf(fCfg.value) === 'whatsapp' && !fCfg.value.whatsapp_number.trim()) return ElMessage.warning(t('formtpl.needWaNumber'))
+  if (tyBtnTypeOf(fCfg.value) !== 'none' && !fCfg.value.thank_you_button_text.trim()) return ElMessage.warning(t('formtpl.needBtnText'))
   saving.value = true
   try {
     // 剥掉前端内部标记（_keyAuto）+ 净化：空问题不存、选择题空选项剔除（剩 0 个即开放式）
@@ -286,7 +286,11 @@ const aiGenerateMsg = async (a) => {
 // ── 消息 ──
 const openMsgNew = () => { editingMsg.value = null; mCfg.value = { name: '', type: 'messenger', welcome_text: '', ice_breakers: [] }; msgOpen.value = true }
 const openMsgEdit = (tpl) => { editingMsg.value = tpl; mCfg.value = { name: tpl.name, type: tpl.type || 'messenger', welcome_text: tpl.welcome_text, ice_breakers: [...(tpl.ice_breakers||[])] }; msgOpen.value = true }
-const addIB = () => mCfg.value.ice_breakers.push({ title: '', response: '' })
+// FB Messenger 限制：ice breakers 最多 4 条、按钮文字 ≤20 字符（对齐 2026-09-12）
+const addIB = () => {
+  if (mCfg.value.ice_breakers.length >= 4) return ElMessage.warning(t('formtpl.ibLimit'))
+  mCfg.value.ice_breakers.push({ title: '', response: '' })
+}
 const removeIB = (i) => mCfg.value.ice_breakers.splice(i, 1)
 const saveMsg = async () => {
   if (!mCfg.value.name.trim()) return ElMessage.warning(t('formtpl.needName'))
@@ -524,7 +528,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
               <div v-if="tyBtnTypeOf(fCfg)!=='none'" class="row"><label>{{ t('formtpl.buttonText') }}</label><input v-model="fCfg.thank_you_button_text" class="inp" :placeholder="t('formtpl.buttonTextPh')" /></div>
               <div v-if="tyBtnTypeOf(fCfg)==='website'" class="row"><label>{{ t('formtpl.buttonLink') }}</label><input v-model="fCfg.thank_you_website_url" class="inp" placeholder="https://..." /></div>
               <template v-if="tyBtnTypeOf(fCfg)==='whatsapp'">
-                <div class="row"><label>{{ t('formtpl.waNumber') }}</label><input v-model="fCfg.whatsapp_number" class="inp" :placeholder="t('formtpl.waNumberPh')" /></div>
+                <div class="hint">{{ t('formtpl.waPageNote') }}</div>
                 <div class="row"><label>{{ t('formtpl.waMsgTpl') }}</label>
                   <el-select v-model="fCfg.whatsapp_msg_tpl_id" style="width:100%" size="small" clearable filterable :placeholder="t('formtpl.waMsgTplPh')">
                     <el-option v-for="m in waMsgOptions" :key="m.id" :value="m.id" :label="m.name" />
@@ -583,13 +587,17 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           <textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" :placeholder="isWaMsg ? t('formtpl.welcomeTextWaPh') : t('formtpl.welcomeTextPh')"></textarea>
         </div>
         <hr class="sep" />
+        <!-- WhatsApp 型：FB 预填消息形态无快捷回复（互斥，build_wa_welcome_message 忽略）——隐藏编辑区 -->
+        <template v-if="!isWaMsg">
         <div class="sec-title-row"><span class="sec-title">{{ t('formtpl.secQuickReplies') }}</span><button class="btn sm" @click="addIB">{{ t('formtpl.addOne') }}</button></div>
         <div v-for="(ib,i) in mCfg.ice_breakers" :key="i" class="ib-block">
           <div class="qb-head"><span>{{ t('formtpl.quickReplyN', { n: i+1 }) }}</span><button class="del-btn" @click="removeIB(i)">✕</button></div>
-          <input v-model="ib.title" class="inp" :placeholder="t('formtpl.ibButtonTextPh')" />
+          <input v-model="ib.title" class="inp" maxlength="20" :placeholder="t('formtpl.ibButtonTextPh')" />
+          <div class="char-count">{{ (ib.title||'').length }}/20</div>
           <textarea v-model="ib.response" class="inp ta sm-mt" rows="2" :placeholder="t('formtpl.ibResponsePh')"></textarea>
         </div>
-        <div v-if="!mCfg.ice_breakers.length" class="hint">{{ isWaMsg ? t('formtpl.ibEmptyHintWa') : t('formtpl.ibEmptyHint') }}</div>
+        <div v-if="!mCfg.ice_breakers.length" class="hint">{{ t('formtpl.ibEmptyHint') }}</div>
+        </template>
       </div>
       <template #footer>
         <button class="btn" @click="msgOpen=false">{{ t('common.cancel') }}</button>

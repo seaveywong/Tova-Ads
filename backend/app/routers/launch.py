@@ -285,6 +285,7 @@ class LeadFormIn(BaseModel):
     privacy_link_text: str = "Privacy Policy"
     thank_you_title: str = ""
     thank_you_body: str = ""
+    ty_btn_type: str = ""   # none / website / whatsapp（与表单模板编辑器同枚举）
     thank_you_button_text: str = ""
     thank_you_website_url: str = ""
     follow_up_url: str = ""
@@ -314,6 +315,7 @@ def create_lead_form(body: LeadFormIn, user: CurrentUser = Depends(require_permi
         extra_contact_fields=body.extra_contact_fields,
         privacy_link_text=body.privacy_link_text,
         thank_you_title=body.thank_you_title, thank_you_body=body.thank_you_body,
+        ty_btn_type=body.ty_btn_type,
         thank_you_button_text=body.thank_you_button_text,
         thank_you_website_url=body.thank_you_website_url,
         follow_up_url=body.follow_up_url,
