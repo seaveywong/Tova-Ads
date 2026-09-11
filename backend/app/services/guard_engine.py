@@ -3258,63 +3258,83 @@ def run_keepalive():
                 _ka_msg = _rb or "Welcome!"
                 _ka_name = _rh or "Like our page"
 
-                # 6. 建 Page Like（campaign→adset→creative→ad；任一步失败 _ka_rollback 回滚已建对象，避免 orphan 卡去重）
-                camp = fb.post(f"act_{acc.act_id}/campaigns", {
-                    "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
-                    "status": "ACTIVE", "buying_type": "AUCTION", "special_ad_categories": [],
-                    "is_adset_budget_sharing_enabled": False,
-                })
-                camp_id = camp.get("id")
-                if not camp_id:
-                    raise Exception(f"FB 未返回 campaign_id: {str(camp)[:200]}")
-                built.append(camp_id)
-                adset = fb.post(f"act_{acc.act_id}/adsets", {
-                    "name": f"{prefix} AdSet", "campaign_id": camp_id, "status": "ACTIVE",
-                    "optimization_goal": "PAGE_LIKES", "billing_event": "IMPRESSIONS",
-                    "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
-                    "promoted_object": json.dumps({"page_id": page_id}),
-                    "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                    # 批CD：daily_budget=配置值（默认 $1/天）——保活语义是「每天最多 $1 的持续小额
-                    # 活动」。$1 lifetime 有两个死穴（今晨全败实证）：①lifetime 最低 $30（1885272）
-                    # ②即使能建、$1 花完自停 = 账户又闲置，保活失效。花销上界=budget/天/账户，
-                    # 账户一旦有真实投放（has_spend 检查）保活不再新建。
-                    "daily_budget": str(budget),
-                })
-                adset_id = adset.get("id")
-                if not adset_id:
-                    raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
-                built.append(adset_id)
-                creative = fb.post(f"act_{acc.act_id}/adcreatives", {
-                    "name": f"{prefix} Creative",
-                    "object_story_spec": json.dumps({
-                        "page_id": page_id,
-                        "link_data": {
-                            "image_hash": image_hash,
-                            "message": _ka_msg,
-                            "name": _ka_name,
-                            "link": f"https://www.facebook.com/{page_id}",
-                            "call_to_action": {"type": "LIKE_PAGE"}
-                        }
-                    })
-                })
-                creative_id = creative.get("id")
-                if not creative_id:
-                    raise Exception(f"FB 未返回 creative_id: {str(creative)[:200]}")
-                built.append(creative_id)
-                ad = fb.post(f"act_{acc.act_id}/ads", {
-                    "name": f"{prefix} Ad", "adset_id": adset_id,
-                    "creative": json.dumps({"creative_id": creative_id}), "status": "ACTIVE",
-                })
-                ad_id = ad.get("id") or ""
-                created += 1
-                results.append(_ka_res(acc, "success", "ok"))
-                write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
-                          actor_type="system", target_type="ad", target_id=str(ad_id),
-                          action_type="keepalive", source="keepalive", result="success",
-                          metadata={"act_id": acc.act_id, "campaign_id": camp_id,
-                                    "budget_cents": budget, "page_id": page_id})
-                db.commit()
-                logger.info(f"[Keepalive] 账户 {acc.act_id} 建保活 {camp_id}/{ad_id}")
+                # 6. 建 Page Like（campaign→adset→creative→ad；任一步失败 _ka_rollback 回滚已建对象）
+                # 批CD：强绑定主页型账户（1815645「可推广对象不匹配」）逐主页尝试——
+                # pages 列表里第一个有权主页未必是账户创建时指定的那个；每个候选主页完整走一遍
+                # 三件套，1815645 换下一个，全败才报 fail（今晨 5/12 败于此）。
+                _ka_err = None
+                for _pg in adv_pages:
+                    page_id = _pg.get("id")
+                    if not page_id:
+                        continue
+                    try:
+                        camp = fb.post(f"act_{acc.act_id}/campaigns", {
+                            "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
+                            "status": "ACTIVE", "buying_type": "AUCTION", "special_ad_categories": [],
+                            "is_adset_budget_sharing_enabled": False,
+                        })
+                        camp_id = camp.get("id")
+                        if not camp_id:
+                            raise Exception(f"FB 未返回 campaign_id: {str(camp)[:200]}")
+                        built.append(camp_id)
+                        adset = fb.post(f"act_{acc.act_id}/adsets", {
+                            "name": f"{prefix} AdSet", "campaign_id": camp_id, "status": "ACTIVE",
+                            "optimization_goal": "PAGE_LIKES", "billing_event": "IMPRESSIONS",
+                            "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
+                            "promoted_object": json.dumps({"page_id": page_id}),
+                            "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
+                            # 批CD：daily_budget=配置值（默认 $1/天）——保活语义是「每天最多 $1 的
+                            # 持续小额活动」。$1 lifetime 两个死穴（今晨全败实证）：①lifetime 最低 $30
+                            # （1885272）②花完自停=账户又闲置，保活失效。花销上界=budget/天/账户，
+                            # 账户有真实投放后（has_spend 检查）保活不再新建。
+                            "daily_budget": str(budget),
+                        })
+                        adset_id = adset.get("id")
+                        if not adset_id:
+                            raise Exception(f"FB 未返回 adset_id: {str(adset)[:200]}")
+                        built.append(adset_id)
+                        creative = fb.post(f"act_{acc.act_id}/adcreatives", {
+                            "name": f"{prefix} Creative",
+                            "object_story_spec": json.dumps({
+                                "page_id": page_id,
+                                "link_data": {
+                                    "image_hash": image_hash,
+                                    "message": _ka_msg,
+                                    "name": _ka_name,
+                                    "link": f"https://www.facebook.com/{page_id}",
+                                    "call_to_action": {"type": "LIKE_PAGE"}
+                                }
+                            })
+                        })
+                        creative_id = creative.get("id")
+                        if not creative_id:
+                            raise Exception(f"FB 未返回 creative_id: {str(creative)[:200]}")
+                        built.append(creative_id)
+                        ad = fb.post(f"act_{acc.act_id}/ads", {
+                            "name": f"{prefix} Ad", "adset_id": adset_id,
+                            "creative": json.dumps({"creative_id": creative_id}), "status": "ACTIVE",
+                        })
+                        ad_id = ad.get("id") or ""
+                        created += 1
+                        results.append(_ka_res(acc, "success", "ok"))
+                        write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                                  actor_type="system", target_type="ad", target_id=str(ad_id),
+                                  action_type="keepalive", source="keepalive", result="success",
+                                  metadata={"act_id": acc.act_id, "campaign_id": camp_id,
+                                            "budget_cents": budget, "page_id": page_id})
+                        db.commit()
+                        logger.info(f"[Keepalive] 账户 {acc.act_id} 建保活 {camp_id}/{ad_id}")
+                        _ka_err = None
+                        break   # 成功即出循环
+                    except FbApiError as _e:
+                        _ka_rollback(fb, built)
+                        built.clear()
+                        _ka_err = _e
+                        if getattr(_e, "raw", {}).get("error_subcode") != 1815645:
+                            break   # 非「主页不匹配」类错误不换主页（预算/权限等换页没用）
+                        continue   # 1815645：换下一个候选主页重试
+                if _ka_err is not None:
+                    raise _ka_err
             except FbApiError as e:
                 failed += 1; results.append(_ka_res(acc, "fail", e.category, e.friendly))
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 失败: {e.friendly}")
