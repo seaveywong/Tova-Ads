@@ -94,6 +94,14 @@ NOTIFY = {
             "en": "Account: {name} (<code>{act_id}</code>)\nToken: {alias}\nRead failed: <b>{friendly}</b>\nThe token may lack ad-read permission, please re-authorize.",
         },
     },
+    # 按令牌聚合的权限不足（#200 账户主未授权 App——BM 共享账户典型；2026-09-12 改聚合：曾每账户一条刷屏）
+    "account_permission_batch": {
+        "title": {"zh": "🔴 权限不足 · 令牌 {alias}（{n} 个账户）", "en": "🔴 Permission Denied · Token {alias} ({n} accounts)"},
+        "body": {
+            "zh": "令牌 <b>{alias}</b> 读取以下账户被拒（#200 账户主未授权本系统 App，BM 共享账户典型）：\n{detail}\n这些账户在授权修复前无法巡检止损；短期可先移除纳管止住告警，修复后重导即可。",
+            "en": "Token <b>{alias}</b> was denied reading the accounts below (#200 account owner has not granted the app ads access; typical for BM-shared accounts):\n{detail}\nThese accounts cannot be inspected until access is fixed; unmanage them to stop alerts, re-import after the fix.",
+        },
+    },
     "unsupported_currency": {
         "title": {"zh": "🔴 未知币种，金额类止损已跳过", "en": "🔴 Unknown Currency, Money Rules Skipped"},
         "body": {

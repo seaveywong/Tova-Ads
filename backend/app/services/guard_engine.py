@@ -1176,21 +1176,18 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 emit_token_expired_if_due(db, tenant_id, _alias,
                                       cred_id=(_cred.id if _cred else None))
             elif e.category in ("permissions", "permission"):
-                # 权限不足告警（交接包 §6.2：分级告警）。dedup 6h/账户。此分支自带 dedup+commit，
-                # 在线程私有 session 上自洽（低频、按账户去重），不经 events 队列
-                if not dedup_recent(db, tenant_id, "account_permission_error", acc.act_id, 360):
-                    _loc = tenant_locale(db, tenant_id)
-                    _title, _body = notify_text(_loc, "account_permission_error",
-                        name=_esc(acc.name), act_id=acc.act_id,
-                        alias=_esc(_alias or '未命名'), friendly=_esc(e.friendly))
-                    emit_notification(db, tenant_id=tenant_id, level="critical",
-                        event_type="account_permission_error",
-                        title=_title, body=_body, platform=platform, act_id=acc.act_id)
-                    write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
-                        target_type="account", target_id=acc.act_id,
-                        action_type="account_permission_error", source="guard",
-                        result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
-                    db.commit()
+                # 权限不足（#200 账户主未授权 App，BM 共享账户典型）：通知改由主循环按令牌聚合
+                # 发一条（2026-09-12 前每账户一条 critical，5 账户=5 条 TG 刷屏）；此处只留
+                # per-account 审计日志（日志中心可按账户查）+ 回传聚合数据（res.perm_denied）
+                write_log(db, tenant_id=tenant_id, trace_id=trace_id, actor_type="system",
+                    target_type="account", target_id=acc.act_id,
+                    action_type="account_permission_error", source="guard",
+                    result="fail", trigger_detail=f"act_id={acc.act_id} alias={_alias}")
+                db.commit()
+                res.setdefault("perm_denied", []).append({
+                    "cred_id": (cred.id if cred else None),
+                    "alias": _alias or "未命名",
+                    "name": acc.name or acc.act_id, "act_id": acc.act_id})
             elif e.category == "rate_limited":
                 # 限流：FB 写冷却（下轮 client_for_account 跳过该 token）+ 告警；
                 # TT 无 cooldown 列（TtClient 进程内自计数限流已退避封路），只告警
@@ -1939,6 +1936,7 @@ def run_inspection(force: bool = False):
     _tenant_skipped: dict = {}  # 按租户分桶（coverage_lost 告警要发给正确的租户）
     _tenant_skipped_names: dict = {}  # tenant_id -> [广告名（id）]——告警带名单（用户第一问"哪些"）
     _tenant_skipped_accs: dict = {}  # tenant_id -> ["账户名(act_id): 原因"]——本轮整账户跳过清单（聚合告警）
+    _perm_agg: dict = {}             # (tenant_id, cred_id) -> {alias, items:[{name,act_id}]}——权限不足按令牌聚合（B1）
     _tenant_kpi_issues: dict = {}    # tenant_id -> KPI/评估口径异常计数（kpi_errors+rule_eval_errors+objective_gaps）
     paused_details = []  # [{act_id, ad_id, ad_name, level, target, reason}]
     scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
@@ -2032,6 +2030,12 @@ def run_inspection(force: bool = False):
                 _tenant_skipped_names.setdefault(_res["tenant_id"], []).extend(_res.get("skipped_ads") or [])
             # 整账户跳过（无令牌/insights 失败）——按租户分桶，轮末聚合告警（曾只剩服务日志一条 warning）
             _tenant_skipped_accs.setdefault(_res["tenant_id"], []).extend(_res.get("skip_reasons") or [])
+            # 权限不足按令牌聚合（B1）：worker 只回传数据，主线程统一发——多线程不共写 session
+            for _pd in (_res.get("perm_denied") or []):
+                _pk = (_res["tenant_id"], _pd.get("cred_id"))
+                _ent = _perm_agg.setdefault(_pk, {"alias": _pd["alias"], "items": []})
+                if not any(i["act_id"] == _pd["act_id"] for i in _ent["items"]):
+                    _ent["items"].append(_pd)
             # KPI/评估口径异常分桶（复审R1：静默降级必须发声——kpi_resolver 异常会让 conv=0
             # 误杀、objectives 缺口让转化口径漂移、评估异常跳过单条规则）
             _ke = (_res.get("kpi_errors", 0) + _res.get("rule_eval_errors", 0)
@@ -2142,15 +2146,43 @@ def run_inspection(force: bool = False):
                 event_type="coverage_lost", trace_id=trace_id,
                 title=_t_cl, body=_b_cl, platform="fb",
             )
+        # ── 权限不足按令牌聚合告警（B1）：#200 账户主未授权 App——BM 共享账户典型。
+        # 曾每账户一条 critical（5 账户=5 条 TG 刷屏）；现按 (租户,令牌) 一条 + 名单 ≤10，
+        # dedup 6h/令牌；per-account 审计日志仍在 worker 里写（日志中心按账户可查）。──
+        for (_tid, _cred_id), _agg in _perm_agg.items():
+            try:
+                _ck = f"cred:{_agg['alias']}"
+                if dedup_recent(db, _tid, "account_permission_error", _ck, 360):
+                    continue
+                _loc = tenant_locale(db, _tid)
+                _lines = [f"· {_esc(i['name'])}（{i['act_id']}）" for i in _agg["items"][:10]]
+                if len(_agg["items"]) > 10:
+                    _lines.append(f"… 共 {len(_agg['items'])} 个")
+                _t_pm, _b_pm = notify_text(_loc, "account_permission_batch",
+                                           alias=_esc(_agg["alias"]), n=len(_agg["items"]),
+                                           detail="\n".join(_lines))
+                emit_notification(db, tenant_id=_tid, level="critical",
+                                  event_type="account_permission_error", trace_id=trace_id,
+                                  title=_t_pm, body=_b_pm, platform="fb")
+                write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
+                          target_type="fb_credential", target_id=str(_cred_id or ""),
+                          action_type="account_permission_error", source="guard", result="fail",
+                          trigger_detail=f"cred:{_agg['alias']} accounts={len(_agg['items'])}")
+            except Exception as _pe:
+                logger.warning(f"[Guard] 权限聚合告警发出异常 cred={_cred_id}: {_pe}")
         # ── 整账户跳过聚合告警：无令牌/insights 失败的账户曾只留一条服务日志——止损对其
         # 失效但用户无感。按租户聚合一条 warning（6h 去重；token 三类白名单已有专项告警，
         # dedup 挡频不叠加 spam；明细 ≤5，全量见日志中心）。──
         for _tid, _sk_list in _tenant_skipped_accs.items():
             # 同因抑制（2026-09-08 用户决策"维持两条"）：skip 原因为 token_expired 的账户已被
             # 同轮根因告警（emit_token_expired_if_due，worker 置 expired 时已发）+ sync_stalled
-            # 接棒覆盖，从名单剔除——一次令牌故障只报根因与持续两条，不报中间态；其他原因
-            # （限流/权限/无令牌稳态）照报不吞
-            _sk_list = [s for s in _sk_list if "token_expired" not in s]
+            # 接棒覆盖，从名单剔除——一次令牌故障只报根因与持续两条，不报中间态。
+            # B2（2026-09-12）：本轮已按令牌聚合发过权限告警的账户同样剔除——同一故障
+            # 不双报（曾 05:08 五条权限 + 05:09 跳过名单再列一遍）；限流/无令牌稳态照报不吞
+            _perm_acts = {i["act_id"] for (_t2, _c2), _a2 in _perm_agg.items()
+                          if _t2 == _tid for i in _a2["items"]}
+            _sk_list = [s for s in _sk_list if "token_expired" not in s
+                        and not any(f"({aid})" in s for aid in _perm_acts)]
             if not _sk_list or dedup_recent(db, _tid, "inspection_skipped", "*", 360):
                 continue
             write_log(db, tenant_id=_tid, trace_id=trace_id, actor_type="system",
@@ -2516,8 +2548,32 @@ def run_watchdog():
                 or_(Account.created_at.is_(None), Account.created_at < _grace_cutoff),
             ).all()
             _stale_by_tenant: dict = {}
+            # B3（2026-09-12）：行内带最近原因——只列账户名看不出为什么没巡检（用户要去日志中心猜）。
+            # 原因优先级：近期权限告警 → 权限不足；绑定令牌限流冷却中 → 令牌限流；否则 未巡检
+            _perm_acts: set = set()
+            try:
+                _prows = db.query(ActionLog.target_id).filter(
+                    ActionLog.action_type == "account_permission_error",
+                    ActionLog.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
+                ).all()
+                _perm_acts = {r[0] for r in _prows}
+            except Exception:
+                pass
+            _cool_creds: set = set()
+            try:
+                _cool_creds = {cid for (cid,) in db.query(FbCredential.id).filter(
+                    FbCredential.cooldown_until > datetime.now(timezone.utc)).all()}
+            except Exception:
+                pass
             for _a in _stale:
-                _stale_by_tenant.setdefault(_a.tenant_id, []).append(_a.name or _a.act_id)
+                if _a.act_id in _perm_acts:
+                    _why = "权限不足"
+                elif _a.fb_credential_id and _a.fb_credential_id in _cool_creds:
+                    _why = "令牌限流"
+                else:
+                    _why = "未巡检"
+                _stale_by_tenant.setdefault(_a.tenant_id, []).append(
+                    f"{_a.name or _a.act_id}（{_why}）")
             # 同因抑制（2026-09-08 用户决策"维持两条"）：租户 FB+TT 活跃凭证全为 0 时，账户
             # 不进巡检是必然（主循环按活跃凭证建任务），该场景由 sync_stalled（critical，
             # ads_cache_sync 同源发现）接棒——stale 是"有心跳但漏巡"的盲检兜底，不该为已知
