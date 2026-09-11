@@ -248,7 +248,7 @@ export default {
     sentinel: '哨兵',
     rulesCount: '规则 {n} 条',
     safetyGuard: '安全守护',
-    emergencyPause: '全局紧急暂停', lastEmergency: '上次暂停', emgDone: '停{n}系列', emgViewLog: '点击查看完整执行报告（守护页 · 暂停记录）',
+    emergencyPause: '全局紧急暂停', lastEmergency: '上次暂停', emgDone: '停{n}系列 · 扫{m}账户', emgBad: '核验未过/报错 {n} 条', emgViewLog: '点击查看完整执行报告（守护页 · 暂停记录）',
     pausing: '暂停中…',
     emergencyTitle: '⚠️ 紧急暂停',
     emergencyConfirm: '确定要全局紧急暂停？将关闭所有 ACTIVE 系列（campaign 级，与哨兵同口径）。此操作不可撤销。',

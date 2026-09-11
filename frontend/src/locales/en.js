@@ -237,7 +237,7 @@ export default {
     sentinel: 'Sentinel',
     rulesCount: '{n} rules',
     safetyGuard: 'Safety Guard',
-    emergencyPause: 'Emergency Pause All', lastEmergency: 'Last pause', emgDone: '{n} campaigns paused', emgViewLog: 'Click to view the full execution report (Guard · Pause Log)',
+    emergencyPause: 'Emergency Pause All', lastEmergency: 'Last pause', emgDone: '{n} campaigns paused · {m} accounts scanned', emgBad: '{n} verify/error issues', emgViewLog: 'Click to view the full execution report (Guard · Pause Log)',
     pausing: 'Pausing…',
     emergencyTitle: '⚠️ Emergency Pause',
     emergencyConfirm: 'Pause everything now? All ACTIVE campaigns will be paused (campaign-level, same as sentinel). This cannot be undone.',

@@ -121,8 +121,16 @@ const emgSummary = computed(() => {
   const e = lastEmergency.value
   if (!e || !e.started_at) return ''
   const n = e.campaigns ?? e.paused ?? 0
+  const m = e.total_accounts ?? 0
   const bad = (e.verify_failed || 0) + ((e.errors || []).length)
-  return `${fmtShort(e.started_at)} · ${t('layout.emgDone', { n })}${bad ? ` ⚠${bad}` : ' ✓'}`
+  const tm = (() => { try { return (fmtTime(e.started_at).split(' ')[1] || '').slice(0, 5) } catch { return '' } })()   // HH:mm
+  return `${fmtShort(e.started_at)}${tm ? ' ' + tm : ''} · ${t('layout.emgDone', { n, m })}${bad ? ` ⚠${bad}` : ' ✓'}`
+})
+// hover 完整提示：入口说明 + 核验/报错计数（有异常时摘要只显 ⚠N，这里给人话）
+const emgTitle = computed(() => {
+  const e = lastEmergency.value
+  const bad = e ? (e.verify_failed || 0) + ((e.errors || []).length) : 0
+  return bad ? `${t('layout.emgViewLog')} · ${t('layout.emgBad', { n: bad })}` : t('layout.emgViewLog')
 })
 const loadGuard = async () => {
   try {
@@ -292,7 +300,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           <span class="guard-dot" :class="{ on: guardStatus.rules_enabled > 0 }"></span>
         </div>
         <div v-if="emgSummary" class="guard-row emg-last" @click="router.push({ name: 'guard', query: { tab: 'log' } })"
-             :title="t('layout.emgViewLog')">
+             :title="emgTitle">
           <span>{{ t('layout.lastEmergency') }}</span>
           <span class="emg-last-v">{{ emgSummary }} →</span>
         </div>
@@ -436,9 +444,10 @@ watch(() => route.path, () => { sidebarOpen.value = false })
   padding: 4px 0; font-size: 13px; color: var(--t2);
 }
 /* 批BV：最近全局暂停摘要行（点击进守护页暂停记录看全报告） */
-.guard-row.emg-last { cursor: pointer; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; }
+.guard-row.emg-last { cursor: pointer; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; flex-wrap: wrap; }
 .guard-row.emg-last:hover { background: var(--bg3); }
-.emg-last-v { font-size: 11px; color: var(--t3); white-space: nowrap; }
+/* 摘要信息量增大（日期+时间+扫描/停用数）——换行到标签下方独占一行，不挤压「上次暂停」标签 */
+.emg-last-v { flex-basis: 100%; font-size: 11px; color: var(--t3); white-space: normal; text-align: left; padding-left: 2px; }
 .guard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--t3); }
 .guard-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .emergency-btn {
