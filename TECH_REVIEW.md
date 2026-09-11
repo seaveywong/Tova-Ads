@@ -2122,3 +2122,13 @@ smoke：build✓ + EN 零 CJK + 死引用清零（grep ttAppForm/saveTtApp 无�
 ③**Landing 子码事件死入口激活**：openSubEvents 函数自 TK 接入起无调用（子码事件弹窗整体不可达）。子码行「日志」旁加「事件」按钮接上现成弹窗。
 i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdDone en）。后端 rbac.py 双门+restart 绿；CF master。
 审计挂账全清（巡检报告/Ads同步报告两个中件仍挂，按需再做）。
+
+## 批CC：保活真跑两 bug 修复（2026-09-11）
+
+用户问「保活能真正成功么」——查实况：今晨 02:17（北京 10:17）一轮 **100% 失败**，两类 FB 拒收：
+① 「No End Date Entered」——lifetime_budget 必须配 end_time（FB 硬规则，保活代码漏传）；
+② 1487202「主页缺少广告权限」——pages[0] 常是无 ADVERTISE 权限的主页（keepalive-creative-fix 记忆同源坑）。
+修复：adset 加 end_time=now+30d（UTC Z 格式；预算 $1 通常远早花完自动停，未花完 30 天自然到期）；主页选择过滤 tasks 含 ADVERTISE 的（无则回退全列表，与部署链主页自动识别同款思路）。
+验证：restart 后 inspect 确认服务进程载入修复代码 ✓。
+
+**保活流程速记**（回用户问）：cron 每日 02:17Z 扫 warming 账户（或租户 enabled=true 全部 managed）→ 近 idle_days(3) 天零消耗 → 查无 [Tova-保活] 存量系列 → 选有 ADVERTISE 权限主页 + YR 前缀随机素材 → 建 $1 lifetime Page Like（巡检/哨兵见 [Tova-保活] 标记永不停）。日志：操作日志 action_type=keepalive 逐账户成败+原因（日志中心可筛）；journal [Keepalive]；手动触发 POST /guard/keepalive/run（超管）。无部署式 job 进度弹窗——逐账户结果在操作日志。
