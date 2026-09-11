@@ -209,6 +209,16 @@ const doImport = async () => {
 }
 const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('ads.idCopied', { id })) }
 
+// ── 保活徽标按状态区分（曾清一色"保活"看不出实际情况）──
+// active_ad=保活广告在跑 / has_spend=近期有消耗免保活 / burnt=强绑主页熔断(手动可重试) /
+// failed=上次失败(note 有原因) / 其他(未扫描)=普通"保活"
+const kaBadgeText = (a) => ({
+  active_ad: t('ads.kaActiveAd'), has_spend: t('ads.kaHasSpend'),
+  burnt: t('ads.kaBurnt'), failed: t('ads.kaFailed'),
+}[a.keepalive_state] || t('ads.warmupShort'))
+const kaBadgeCls = (s) => ({ burnt: 'burnt', failed: 'burnt', has_spend: 'spend' }[s] || '')
+const kaBadgeTip = (a) => a.keepalive_note || t('ads.warmupBadgeTip')
+
 // ── 手动触发保活扫描（与设置→保活「立即运行」同一端点/结果弹窗，超管可见）──
 const kaRunning = ref(false)
 const kaResultOpen = ref(false)
@@ -357,7 +367,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         <div v-else class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
         <div class="st-cell">
-          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :title="t('ads.warmupBadgeTip')">{{ t('ads.warmupShort') }}</span><span v-if="d.a.no_token" class="tag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></div>
+          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :class="kaBadgeCls(d.a.keepalive_state)" :title="kaBadgeTip(d.a)">{{ kaBadgeText(d.a) }}</span><span v-if="d.a.no_token" class="tag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></div>
           <div v-if="drInfo(d.a)" class="dr-line" :class="drInfo(d.a).tone">{{ t('ads.drPrefix') }}{{ drInfo(d.a).label }}</div>
           <div v-if="throttleInfo(d.a)" class="dr-line" :class="throttleInfo(d.a).tone">{{ throttleInfo(d.a).label }}</div>
         </div>
@@ -550,6 +560,9 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
 .warmup-badge { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle }
+/* 保活状态变体：spend=有消耗免保活(蓝灰)；burnt/failed=熔断/失败(红，hover 看 note) */
+.warmup-badge.spend { background: rgba(59,130,246,.12); color: #3b82f6 }
+.warmup-badge.burnt { background: rgba(239,68,68,.14); color: #ef4444 }
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: var(--z-modal)   /* UI审计C：z token 落地 */ }
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }

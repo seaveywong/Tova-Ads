@@ -3213,9 +3213,13 @@ def _ka_budget_minor(usd: float, currency: str) -> int:
     return max(1, int(round(amt * (1 if (currency or "USD").upper() in _ZD else 100))))
 
 
-def run_keepalive():
-    """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $5 lifetime Page Like。
-    保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。花完 $5 自动停（FB lifetime_budget）。
+def run_keepalive(reset_burnt: bool = False):
+    """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $1/天 Page Like（详见各分支注释）。
+    保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。
+
+    每轮把每账户结果落库 accounts.keepalive_state（active_ad/has_spend/failed/burnt）——
+    Ads 页徽标按状态区分显示。burnt=熔断（强绑户连续 2 页撞 1815645），cron 跳过；
+    reset_burnt=True（手动「立即保活」）时对 burnt 账户重试一次。
     """
     import os, random
     from ..core.keepalive_config import get_keepalive_config, DEFAULT_KEEPALIVE
@@ -3259,6 +3263,9 @@ def run_keepalive():
         created = skipped = failed = 0
         results = []  # 每账户结果（success/skip/fail + category），供前端结果弹窗
         for acc in warming:
+            # 熔断账户：cron 跳过；手动触发（reset_burnt=True）重试一次（再撞会重新熔断）
+            if acc.keepalive_state == "burnt" and not reset_burnt:
+                continue
             built = []
             fb = None
             try:
@@ -3280,12 +3287,16 @@ def run_keepalive():
                     PerfSnapshot.snapshot_date >= cutoff,
                 ).scalar() or 0
                 if float(spend) > 0:
+                    acc.keepalive_state = "has_spend"; acc.keepalive_note = None
+                    db.commit()
                     results.append(_ka_res(acc, "skip", "has_spend", "近期有消耗，无需保活")); skipped += 1
                     continue
 
                 # 2. 写令牌
                 fb = client_for_account(db, acc.tenant_id, acc.act_id, "write")
                 if not fb:
+                    acc.keepalive_state = "failed"; acc.keepalive_note = "无写令牌"
+                    db.commit()
                     results.append(_ka_res(acc, "skip", "no_write_token", "无写令牌")); skipped += 1
                     continue
 
@@ -3299,6 +3310,8 @@ def run_keepalive():
                     for c in (camps.get("data") or [])
                 )
                 if has_keepalive:
+                    acc.keepalive_state = "active_ad"; acc.keepalive_note = None
+                    db.commit()
                     skipped += 1; results.append(_ka_res(acc, "skip", "has_keepalive", "已有保活广告"))
                     continue
 
@@ -3308,6 +3321,8 @@ def run_keepalive():
                 adv_pages = [p for p in pages
                              if "ADVERTISE" in (p.get("tasks") or [])] or pages
                 if not adv_pages:
+                    acc.keepalive_state = "failed"; acc.keepalive_note = "无可用主页"
+                    db.commit()
                     failed += 1; results.append(_ka_res(acc, "fail", "no_page", "无可用主页"))
                     continue
                 page_id = adv_pages[0].get("id")
@@ -3318,11 +3333,15 @@ def run_keepalive():
                     Asset.tenant_id == acc.tenant_id,
                 ).all()
                 if not assets_q:
+                    acc.keepalive_state = "failed"; acc.keepalive_note = f"无 {asset_prefix} 保活素材"
+                    db.commit()
                     failed += 1; results.append(_ka_res(acc, "fail", "no_asset", f"无 {asset_prefix} 保活素材"))
                     continue
                 asset = random.choice(assets_q)
                 filepath = os.path.join(asset_dir, asset.storage_key)
                 if not os.path.exists(filepath):
+                    acc.keepalive_state = "failed"; acc.keepalive_note = "素材文件丢失"
+                    db.commit()
                     failed += 1; results.append(_ka_res(acc, "fail", "asset_missing", "素材文件丢失"))
                     continue
                 # 素材 image_hash + 随机 AI 文案+标题（object_story_spec 模式，完整内容+CTA）
@@ -3338,6 +3357,7 @@ def run_keepalive():
                 # pages 列表里第一个有权主页未必是账户创建时指定的那个；每个候选主页完整走一遍
                 # 三件套，1815645 换下一个，全败才报 fail（今晨 5/12 败于此）。
                 _ka_err = None
+                _m185_hits = 0   # 1815645（强绑主页不匹配）连续命中计数——熔断用
                 for _pg in adv_pages:
                     page_id = _pg.get("id")
                     if not page_id:
@@ -3391,6 +3411,7 @@ def run_keepalive():
                         })
                         ad_id = ad.get("id") or ""
                         created += 1
+                        acc.keepalive_state = "active_ad"; acc.keepalive_note = None
                         results.append(_ka_res(acc, "success", "ok"))
                         write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                                   actor_type="system", target_type="ad", target_id=str(ad_id),
@@ -3407,11 +3428,44 @@ def run_keepalive():
                         _ka_err = _e
                         if getattr(_e, "raw", {}).get("error_subcode") != 1815645:
                             break   # 非「主页不匹配」类错误不换主页（预算/权限等换页没用）
+                        _m185_hits += 1
+                        if _m185_hits >= 2:
+                            # 熔断（用户 2026-09-12 拍板）：强绑户指定主页与令牌可用主页对不上，
+                            # 剩余候选页大概率同样不匹配——连试整页列表只会刷 FB 写请求+风控信号
+                            # （昨夜 O313/O315 每户连试 8 页实证）。停试、标 burnt：cron 永久跳过，
+                            # 手动「立即保活」重试；发告警告知用户。
+                            break
                         continue   # 1815645：换下一个候选主页重试
+                if _m185_hits >= 2:
+                    # 熔断落库 + 告知用户（dedup 24h/账户——notify 必带 dedup 铁律）
+                    acc.keepalive_state = "burnt"
+                    acc.keepalive_note = ("强绑主页不匹配(1815645)×2 已熔断——请号商对齐账户指定主页后，"
+                                           "在广告账户页手动「立即保活」重试")
+                    failed += 1
+                    results.append(_ka_res(acc, "fail", "keepalive_burnt", acc.keepalive_note))
+                    write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                              actor_type="system", action_type="keepalive", source="keepalive",
+                              result="fail", friendly_error=acc.keepalive_note,
+                              metadata={"act_id": acc.act_id})
+                    if not dedup_recent(db, acc.tenant_id, "keepalive_burnt", acc.act_id, 1440):
+                        _loc = tenant_locale(db, acc.tenant_id)
+                        _t_kb, _b_kb = notify_text(_loc, "keepalive_burnt",
+                                                   name=_esc(acc.name or acc.act_id), act_id=acc.act_id)
+                        emit_notification(db, tenant_id=acc.tenant_id, level="warning",
+                                          event_type="keepalive_burnt", trace_id=new_trace_id(),
+                                          title=_t_kb, body=_b_kb, platform="fb", act_id=acc.act_id)
+                        write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
+                                  actor_type="system", action_type="keepalive_burnt",
+                                  source="keepalive", result="success",
+                                  trigger_detail=f"act={acc.act_id} pages_mismatch=2")
+                    db.commit()
+                    logger.warning(f"[Keepalive] 账户 {acc.act_id} 强绑主页不匹配×2，已熔断（cron 跳过，手动可重试）")
+                    continue
                 if _ka_err is not None:
                     raise _ka_err
             except FbApiError as e:
                 failed += 1; results.append(_ka_res(acc, "fail", e.category, e.friendly))
+                acc.keepalive_state = "failed"; acc.keepalive_note = e.friendly[:150]
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 失败: {e.friendly}")
                 write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                           actor_type="system", action_type="keepalive", source="keepalive",
@@ -3421,7 +3475,12 @@ def run_keepalive():
                 _ka_rollback(fb, built)
             except Exception as e:
                 failed += 1; results.append(_ka_res(acc, "fail", "error", str(e)[:120]))
+                acc.keepalive_state = "failed"; acc.keepalive_note = str(e)[:150]
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 异常: {e}")
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
                 _ka_rollback(fb, built)
         if created:
             logger.info(f"[Keepalive] 检查 {len(warming)} 个 warming 账户，建 {created} 条保活，跳过 {skipped}，失败 {failed}")

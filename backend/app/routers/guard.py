@@ -700,7 +700,6 @@ def manual_watchdog(user: CurrentUser = Depends(require_superadmin)):
 @router.post("/keepalive/run")
 def manual_keepalive(user: CurrentUser = Depends(require_superadmin)):
     """手动触发保活扫描（平台级花钱操作——全租户扫描建广告，只能超管）。
-    检查 warming/团队开关账户连续 idle_days 天无消耗 → 建 $5 主页赞。
-    返回 {checked, created, skipped, failed}。"""
+    reset_burnt=True：熔断账户（强绑主页不匹配×2）也会重试一次——手动重触发是唯一解封途径。"""
     from ..services.guard_engine import run_keepalive
-    return run_keepalive()
+    return run_keepalive(reset_burnt=True)

@@ -102,6 +102,14 @@ NOTIFY = {
             "en": "Token <b>{alias}</b> was denied reading the accounts below (#200 account owner has not granted the app ads access; typical for BM-shared accounts):\n{detail}\nThese accounts cannot be inspected until access is fixed; unmanage them to stop alerts, re-import after the fix.",
         },
     },
+    # 保活熔断（强绑户指定主页与令牌可用主页对不上，#1815645×2；2026-09-12 用户拍板）
+    "keepalive_burnt": {
+        "title": {"zh": "⚠ 保活已熔断 · {name}", "en": "⚠ Keepalive Halted · {name}"},
+        "body": {
+            "zh": "账户 {name}（<code>{act_id}</code>）连续 2 个候选主页被 FB 拒绝（#1815645 指定主页不匹配——强绑主页户）。\n已停止自动重试（每日扫描将跳过该账户）：请让号商把<b>账户创建时指定的主页</b>与令牌可用主页对齐，然后在广告账户页手动点「立即保活」重试。",
+            "en": "Account {name} (<code>{act_id}</code>) had 2 candidate pages rejected by Facebook (#1815645 page mismatch — page-bound account).\nAutomatic retries are stopped (daily scan will skip this account): ask the vendor to align the account's designated page with the token's accessible pages, then click \"Run keepalive\" manually on the Ad Accounts page to retry.",
+        },
+    },
     "unsupported_currency": {
         "title": {"zh": "🔴 未知币种，金额类止损已跳过", "en": "🔴 Unknown Currency, Money Rules Skipped"},
         "body": {

@@ -64,6 +64,11 @@ class Account(Base):
     sentinel_auto_armed = Column(Boolean, default=False)
     last_inspected_at = Column(DateTime(timezone=True))
     keepalive_post_id = Column(Text)  # 保活种子帖 id（per 账户复用；跟帖模式 object_story_id 引用）
+    # 保活扫描结果落库（run_keepalive 每轮写；Ads 页徽标按状态区分显示）：
+    # active_ad=保活广告在跑 / has_spend=近期有消耗免保活 / failed=上次失败(note 有原因) /
+    # burnt=熔断（强绑户连续 2 页撞 1815645，cron 跳过，手动「立即保活」重试）
+    keepalive_state = Column(Text)
+    keepalive_note = Column(Text)
     is_managed = Column(Boolean, nullable=False, default=True)  # false=已取消纳管（软删：保留行+名字+历史消耗）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
