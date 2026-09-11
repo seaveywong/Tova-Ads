@@ -376,7 +376,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { if (isSuper.value) { loadFaApps(); loadIb() } await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
+onMounted(async () => { if (isSuper.value) { loadFaApps(); loadTtApps(); loadIb() } await Promise.all([loadSched(), loadAi(), loadCf(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -455,6 +455,35 @@ const kaRunning = ref(false)
 
 // ── FB App 配置管理（重建入口：列表/新建/改 secret/删除——OAuth 授权与 webhook 验签依赖）──
 const faApps = ref([])
+// 批CA：TT App 管理并进本分区（原在令牌页——FB/TT 入口不一致；令牌页只留连接入口）
+const ttApps = ref([])
+const ttLoading = ref(false)
+const ttDialog = ref(false)
+const ttSaving = ref(false)
+const ttForm = ref({ name: '', app_id: '', app_secret: '' })
+const loadTtApps = async () => {
+  ttLoading.value = true
+  try { ttApps.value = (await GET('/tt/apps')) || [] }
+  catch { ttApps.value = [] }
+  ttLoading.value = false
+}
+const ttOpenNew = () => { ttForm.value = { name: '', app_id: '', app_secret: '' }; ttDialog.value = true }
+const ttSave = async () => {
+  if (!ttForm.value.app_id.trim() || !ttForm.value.app_secret.trim()) return ElMessage.warning(t('settings.ttFillBoth'))
+  ttSaving.value = true
+  try {
+    await POST('/tt/apps', { name: ttForm.value.name.trim(), app_id: ttForm.value.app_id.trim(), app_secret: ttForm.value.app_secret.trim() })
+    ttDialog.value = false
+    ElMessage.success(t('common.savedOk'))
+    await loadTtApps()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  ttSaving.value = false
+}
+const ttDelete = async (a) => {
+  try { await ElMessageBox.confirm(t('settings.ttDeleteConfirm', { name: a.name || a.app_id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) } catch { return }
+  try { await DELETE(`/tt/apps/${a.id}`); ElMessage.success(t('common.savedOk')); await loadTtApps() }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
 const faLoading = ref(false)
 const faEditId = ref(null)   // null=新建
 const faForm = ref({ name: '', app_id: '', app_secret: '', is_system: false })
@@ -762,6 +791,37 @@ const runKeepaliveNow = async () => {
     <div v-if="activeSection==='sec-fbapps'" id="sec-fbapps" class="card">
       <div class="t">{{ t('settings.faTitle') }}</div>
       <div class="d" style="margin-bottom:10px">{{ t('settings.faDesc') }}</div>
+      <!-- 批CA：TT App 小节（管理统一进设置页；令牌页 TT 分区只留连接入口） -->
+      <div class="fa-sub-t" style="margin-top:6px">{{ t('settings.ttSubTitle') }}</div>
+      <div v-loading="ttLoading" class="fa-list" style="margin-bottom:8px">
+        <div v-for="a in ttApps" :key="`${a.source}:${a.id}`" class="fa-row">
+          <div class="fa-info">
+            <span class="fa-name">{{ a.name || a.app_id }}</span>
+            <code class="fa-id">{{ a.app_id }}</code>
+            <span v-if="a.source === 'default'" class="st-tag off">{{ t('settings.ttDefaultTag') }}</span>
+          </div>
+          <div class="fa-ops">
+            <button v-if="a.source !== 'default'" class="ctrl-btn sm" style="color: var(--error)" @click="ttDelete(a)">{{ t('common.delete') }}</button>
+          </div>
+        </div>
+        <div v-if="!ttApps.length && !ttLoading" class="empty">{{ t('settings.ttEmpty') }}</div>
+      </div>
+      <button class="btn" @click="ttOpenNew">{{ t('settings.ttAdd') }}</button>
+      <el-dialog v-model="ttDialog" :title="t('settings.ttAdd')" width="420px" append-to-body>
+        <div class="rd-form">
+          <label>{{ t('settings.faName') }}</label>
+          <input v-model.trim="ttForm.name" class="budget-input" :placeholder="t('settings.faNamePh')" />
+          <label>app_id</label>
+          <input v-model.trim="ttForm.app_id" class="budget-input" placeholder="TikTok Sandbox/正式 App ID" />
+          <label>app_secret</label>
+          <input v-model.trim="ttForm.app_secret" type="password" class="budget-input" placeholder="app_secret" />
+        </div>
+        <template #footer>
+          <button class="ctrl-btn" @click="ttDialog = false">{{ t('common.cancel') }}</button>
+          <button class="ctrl-btn primary" :disabled="ttSaving" @click="ttSave">{{ ttSaving ? t('common.saving') : t('common.save') }}</button>
+        </template>
+      </el-dialog>
+      <div class="fa-sub-t" style="margin-top:16px">{{ t('settings.faFbSubTitle') }}</div>
       <div v-loading="faLoading" class="fa-list">
         <div v-for="a in faApps" :key="a.id" class="fa-row">
           <div class="fa-info">

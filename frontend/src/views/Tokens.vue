@@ -60,9 +60,6 @@ const platform = ref('fb')
 const ttLoading = ref(false)
 const ttCreds = ref([])
 const ttApps = ref([])                      // App 卡片列表（照 FB apps 模式）
-const ttAppForm = ref({ name: '', app_id: '', app_secret: '' })
-const ttAppDialog = ref(false)
-const ttAppSaving = ref(false)
 const nowTick = ref(Date.now())
 let ttTimer = null
 
@@ -97,34 +94,6 @@ const copyTtOAuth = async (a) => {  // 与 FB copyOAuth 同款：复制授权链
   } catch (e) {
     ElMessageBox.alert(url, t('tokens.oauthUrlTitle'), { confirmButtonText: t('common.close') }).catch(() => {})
   }
-}
-const saveTtApp = async () => {
-  if (!ttAppForm.value.app_id.trim() || !ttAppForm.value.app_secret.trim()) return ElMessage.warning(t('tokens.ttAppFillBoth'))
-  ttAppSaving.value = true
-  try {
-    await POST('/tt/apps', {
-      name: ttAppForm.value.name.trim(),
-      app_id: ttAppForm.value.app_id.trim(),
-      app_secret: ttAppForm.value.app_secret.trim(),
-    })
-    ElMessage.success(t('tokens.ttAppSaved'))
-    ttAppDialog.value = false
-    ttAppForm.value = { name: '', app_id: '', app_secret: '' }
-    await loadTtApps()
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  ttAppSaving.value = false
-}
-const delTtApp = async (a) => {
-  try {
-    await ElMessageBox.confirm(t('tokens.ttAppDeleteConfirm', { name: a.name }), t('common.confirm'), {
-      type: 'warning', confirmButtonClass: 'el-button--danger',
-    })
-  } catch { return }
-  try {
-    await DELETE(`/tt/apps/${a.id}`)
-    ElMessage.success(t('common.savedOk'))
-    await loadTtApps()
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const parseTT = (s) => {
   if (!s || s === 'None') return null
@@ -746,34 +715,22 @@ const deleteToken = async (tk) => {
       <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接） -->
       <div class="tt-apps-head">
         <span class="tt-app-title">{{ t('tokens.ttAppsTitle') }}</span>
-        <button v-if="isSuper" class="btn" @click="ttAppDialog = true">{{ t('tokens.ttAddApp') }}</button>
+        <!-- 批CA：App 管理统一进设置页（与 FB 一致）——这里只留连接入口；超管从这跳去管理 -->
+        <button v-if="isSuper" class="btn ghost" @click="router.push('/settings?sec=sec-fbapps')">{{ t('tokens.ttManageInSettings') }}</button>
       </div>
       <div v-if="ttApps.length" class="tt-apps">
         <div v-for="a in ttApps" :key="`${a.source}:${a.id}`" class="oauth-app">
           <span class="oa-name">{{ a.name || a.app_id }}</span>
           <span class="badge" :class="{sys:true}">{{ a.source==='env' ? 'ENV' : t('tokens.systemApp') }}</span>
           <span class="oa-actions">
-            <button v-if="isSuper && a.id" class="oa-btn ghost" @click="delTtApp(a)">{{ t('common.delete') }}</button>
             <button class="oa-btn ghost" @click="copyTtOAuth(a)">{{ t('tokens.copyOAuthUrl') }}</button>
             <button class="oa-btn" @click="startTtOAuth(a)">{{ t('tokens.openInBrowser') }}</button>
           </span>
         </div>
       </div>
       <div v-else class="tt-app-card">
-        <div class="tt-app-hint">{{ isSuper ? t('tokens.ttNoAppsSuper') : t('tokens.ttNoAppsUser') }}</div>
+        <div class="tt-app-hint">{{ t('tokens.ttNoAppsGoSettings') }}</div>
       </div>
-      <!-- 超管添加/更新 App 弹窗（name 可选；同 app_id 再存=更新 secret） -->
-      <el-dialog v-model="ttAppDialog" :title="t('tokens.ttAddApp')" width="420px" append-to-body>
-        <div class="form-l">
-          <input v-model="ttAppForm.name" class="input" :placeholder="t('tokens.ttAppNamePh')" />
-          <input v-model="ttAppForm.app_id" class="input" :placeholder="t('tokens.ttAppIdPh')" />
-          <input v-model="ttAppForm.app_secret" type="password" autocomplete="new-password" class="input" :placeholder="t('tokens.ttAppSecretPh')" />
-        </div>
-        <template #footer>
-          <button class="btn" @click="ttAppDialog = false">{{ t('common.cancel') }}</button>
-          <button class="btn primary" :disabled="ttAppSaving" @click="saveTtApp">{{ t('tokens.ttAppSave') }}</button>
-        </template>
-      </el-dialog>
       <div v-if="ttCreds.length" class="tt-list">
         <div v-for="c in ttCreds" :key="c.id" class="tt-card">
           <span class="c-st"><span class="dot" :class="ttStatusMeta(c).dot"></span>{{ ttStatusMeta(c).label }}</span>

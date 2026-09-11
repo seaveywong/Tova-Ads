@@ -561,7 +561,7 @@ export default {
     ttAppSaved: 'Saved',
     ttAppFillBoth: 'Both App ID and App Secret are required',
     ttAppsTitle: 'TikTok App', ttAddApp: 'Add App', ttAppNamePh: 'App name (optional)',
-    ttNoAppsSuper: 'No TikTok App configured yet — click "Add App" and fill in the App ID / Secret from the developer portal',
+    ttNoAppsSuper: 'No TikTok App configured yet — click "Add App" and fill in the App ID / Secret from the developer portal', ttManageInSettings: 'Manage apps (Settings)', ttNoAppsGoSettings: 'No apps yet — admin adds them in Settings → App configuration',
     ttNoAppsUser: 'No TikTok App configured yet. Please contact the platform administrator.',
     ttAppDeleteConfirm: 'Delete app "{name}"? (Existing tokens keep working; no new authorization can be started)',
     ttLoadHint: 'Only TikTok accounts that are authorized but not yet managed are listed; check them to import.',
@@ -822,7 +822,7 @@ export default {
     emNoRoutes: 'No mappings yet',
     emDeleted: 'Deleted',
 
-    faTitle: 'FB App Config', faDesc: 'Manage Facebook Apps used for OAuth and webhook signature verification (create / rotate secret / delete). System apps are shared by all teams.',
+    faTitle: 'FB App Config', faDesc: 'Manage Facebook Apps used for OAuth and webhook signature verification (create / rotate secret / delete). System apps are shared by all teams.', faFbSubTitle: 'Facebook Apps', ttSubTitle: 'TikTok Apps (connect from the Tokens TT section)', ttAdd: '+ Add TikTok App', ttEmpty: 'No TikTok apps yet', ttDefaultTag: 'Default', ttFillBoth: 'app_id and app_secret are required', ttDeleteConfirm: 'Delete TikTok app "{name}"? Tokens authorized with it will stop working.',
     faAdd: '+ New App', faName: 'Name', faNamePh: 'e.g. Main App', faAppId: 'App ID', faSecret: 'App Secret',
     faSecretKeep: 'Leave empty to keep current secret', faSystem: 'System', faSystemOpt: 'System app (shared, superadmin only)',
     faFillBoth: 'App ID and Secret are required', faDeleteConfirm: 'Delete App {id}? Tokens authorized with it cannot renew, webhook verification breaks.', faEmpty: 'No apps yet — create one below',
