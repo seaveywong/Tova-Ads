@@ -3227,12 +3227,15 @@ def run_keepalive():
                     skipped += 1; results.append(_ka_res(acc, "skip", "has_keepalive", "已有保活广告"))
                     continue
 
-                # 4. 获取主页
+                # 4. 获取主页（批CC：只挑令牌有 ADVERTISE 权限的——今晨全败实证：
+                # pages[0] 常是无广告权限的主页 → 1487202 整批拒收）
                 pages = fb.get_pages()
-                if not pages:
+                adv_pages = [p for p in pages
+                             if "ADVERTISE" in (p.get("tasks") or [])] or pages
+                if not adv_pages:
                     failed += 1; results.append(_ka_res(acc, "fail", "no_page", "无可用主页"))
                     continue
-                page_id = pages[0].get("id")
+                page_id = adv_pages[0].get("id")
 
                 # 5. 选素材（租户内 YR 前缀随机——BYPASSRLS 必须显式 tenant 过滤）
                 assets_q = db.query(Asset).filter(
@@ -3271,8 +3274,12 @@ def run_keepalive():
                     "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
                     "promoted_object": json.dumps({"page_id": page_id}),
                     "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                    # lifetime=总预算花完自动停（配置语义；原误用 daily_budget=$5/天无上限烧钱）
+                    # lifetime=总预算花完自动停（配置语义；原误用 daily_budget=$5/天无上限烧钱）。
+                    # 批CC：lifetime 必须配 end_time——「No End Date Entered」今晨全败实证；
+                    # +30 天兜底（预算 $1 通常远早花完自动停，没花完也自然到期不再烧）
                     "lifetime_budget": str(budget),
+                    "end_time": (datetime.now(timezone.utc) + timedelta(days=30)
+                                 ).strftime("%Y-%m-%dT%H:%M:%S") + "Z",
                 })
                 adset_id = adset.get("id")
                 if not adset_id:
