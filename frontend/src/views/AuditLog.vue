@@ -95,16 +95,35 @@ const ACTION_ZH = {
   landing_health_alert: 'audit.actionLandingHealthAlert', coverage_lost: 'audit.actionCoverageLost', create: 'audit.actionCreate', update: 'audit.actionUpdate',
   delete: 'audit.actionDelete', archive: 'audit.actionArchive', rule_pause: 'audit.actionRulePause', sentinel_pause: 'audit.actionSentinelPause',
   emergency_pause: 'audit.actionEmergencyPause', token_expired: 'audit.actionTokenExpired', token_invalid: 'audit.actionTokenInvalid',
+  // 批CD：生产日志实际出现过的动作全量补齐（此前显示英文原文）
+  keepalive: 'audit.actionKeepalive', orphan_account_alert: 'audit.actionOrphanAccountAlert', low_balance_alert: 'audit.actionLowBalanceAlert',
+  rule_pause_notified: 'audit.actionRulePauseNotified', live_fetch_degraded: 'audit.actionLiveFetchDegraded',
+  account_status_change: 'audit.actionAccountStatusChange', inspection_stalled_alert: 'audit.actionInspectionStalledAlert',
+  manual_paused: 'audit.actionManualPaused', manual_active: 'audit.actionManualActive', group_update: 'audit.actionGroupUpdate',
+  ai_analyze: 'audit.actionAiAnalyze', ai_edit: 'audit.actionAiEdit', sentinel_failure_alert: 'audit.actionSentinelFailureAlert',
+  sentinel_arm: 'audit.actionSentinelArm', sentinel_disarm: 'audit.actionSentinelDisarm', sentinel_perm_denied: 'audit.actionSentinelPermDenied',
+  sentinel_pause_batch_alert: 'audit.actionSentinelBatchAlert', unmanage: 'audit.actionUnmanage', hard_delete: 'audit.actionHardDelete',
+  warmup_arm: 'audit.actionWarmupArm', inspection_skipped: 'audit.actionInspectionSkipped', update_token: 'audit.actionUpdateToken',
+  upload: 'audit.actionUpload', rename: 'audit.actionRename', sync_stalled: 'audit.actionSyncStalled',
+  restore: 'audit.actionRestore', spend_spike: 'audit.actionSpendSpike',
 }
 const TARGET_ZH = {
   scheduler: 'audit.targetScheduler', ad: 'audit.targetAd', account: 'audit.targetAccount', fb_credential: 'audit.targetFbCredential',
   landing_page: 'audit.targetLandingPage', launch_template: 'audit.targetLaunchTemplate', launch_job: 'audit.targetLaunchJob',
   form_template: 'audit.targetFormTemplate', user: 'audit.targetUser', team: 'audit.targetTeam', subcode: 'audit.targetSubcode', rule: 'audit.targetRule',
+  // 批CD：生产实际出现的 target 全量补齐
+  tenant: 'audit.targetTenant', asset: 'audit.targetAsset', campaign: 'audit.targetCampaign', system_setting: 'audit.targetSystemSetting',
+  sync: 'audit.targetSync', landing_template: 'audit.targetLandingTemplate', audience: 'audit.targetAudience',
+  lead: 'audit.targetLead', page: 'audit.targetPage',
 }
 const SOURCE_ZH = {
   scheduled: 'audit.sourceScheduled', rule_engine: 'audit.sourceRuleEngine', fb_api: 'audit.sourceFbApi', guard: 'audit.sourceGuard',
   landing: 'audit.sourceLanding', launch: 'audit.sourceLaunch', sentinel: 'audit.sourceSentinel', watchdog: 'audit.sourceWatchdog',
   user: 'audit.sourceUser', warmup: 'audit.sourceWarmup', sync: 'audit.sourceSync',
+  // 批CD：生产实际出现的 source 全量补齐
+  account_sync: 'audit.sourceAccountSync', cf_api: 'audit.sourceCfApi', keepalive: 'audit.sourceKeepalive', ad_ops: 'audit.sourceAdOps',
+  auth: 'audit.sourceAuth', ai_vision: 'audit.sourceAiVision', ads_cache_sync: 'audit.sourceAdsCacheSync', admin: 'audit.sourceAdmin',
+  emergency_pause: 'audit.sourceEmergencyPause', kpi_resolver: 'audit.sourceKpiResolver', sentinel_patrol: 'audit.sourceSentinelPatrol',
 }
 const rowColor = (r) => r.result === 'fail' ? 'var(--error)' : 'var(--success)'
 const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value = ''; dateRange.value = []; page.value = 1; load() }

@@ -640,6 +640,23 @@ export default {
     actionEmergencyPause: '紧急暂停',
     actionTokenExpired: '令牌过期',
     actionTokenInvalid: '令牌失效',
+
+    // 批CD：日志动作/目标/来源全量 i18n（生产实际出现的枚举）
+    actionKeepalive: '保活建广告', actionOrphanAccountAlert: '孤儿账户告警', actionLowBalanceAlert: '余额不足告警',
+    actionRulePauseNotified: '规则停已通知', actionLiveFetchDegraded: '实况拉取降级', actionAccountStatusChange: '账户状态变更',
+    actionInspectionStalledAlert: '巡检停滞告警', actionManualPaused: '手动暂停', actionManualActive: '手动开启',
+    actionGroupUpdate: '广告组更新', actionAiAnalyze: 'AI 分析', actionAiEdit: 'AI 文案编辑',
+    actionSentinelFailureAlert: '哨兵失败告警', actionSentinelArm: '哨兵布防', actionSentinelDisarm: '哨兵解除',
+    actionSentinelPermDenied: '哨兵权限拒绝', actionSentinelBatchAlert: '哨兵批量停告警',
+    actionUnmanage: '解除纳管', actionHardDelete: '永久删除', actionWarmupArm: '预热布防',
+    actionInspectionSkipped: '巡检跳过', actionUpdateToken: '令牌更新', actionUpload: '上传',
+    actionRename: '重命名', actionSyncStalled: '同步停滞', actionRestore: '恢复', actionSpendSpike: '消耗激增',
+    targetTenant: '租户', targetAsset: '素材', targetCampaign: '广告系列', targetSystemSetting: '系统设置',
+    targetSync: '同步任务', targetLandingTemplate: '落地模板', targetAudience: '受众', targetLead: '潜客', targetPage: '主页',
+    sourceAccountSync: '账户同步', sourceCfApi: 'CF 接口', sourceKeepalive: '保活引擎', sourceAdOps: '广告操作',
+    sourceAuth: '认证', sourceAiVision: 'AI 视觉', sourceAdsCacheSync: '缓存同步', sourceAdmin: '管理后台',
+    sourceEmergencyPause: '紧急暂停', sourceKpiResolver: 'KPI 解析', sourceSentinelPatrol: '哨兵巡逻',
+
     targetScheduler: '调度器',
     targetAd: '广告',
     targetAccount: '账户',

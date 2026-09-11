@@ -629,6 +629,23 @@ export default {
     actionEmergencyPause: 'Emergency Pause',
     actionTokenExpired: 'Token Expired',
     actionTokenInvalid: 'Token Invalid',
+
+    // Batch CD: full i18n for log action/target/source enums (as seen in prod)
+    actionKeepalive: 'Keepalive ad', actionOrphanAccountAlert: 'Orphan account alert', actionLowBalanceAlert: 'Low balance alert',
+    actionRulePauseNotified: 'Rule pause notified', actionLiveFetchDegraded: 'Live fetch degraded', actionAccountStatusChange: 'Account status change',
+    actionInspectionStalledAlert: 'Inspection stalled alert', actionManualPaused: 'Manual pause', actionManualActive: 'Manual activate',
+    actionGroupUpdate: 'Ad set update', actionAiAnalyze: 'AI analysis', actionAiEdit: 'AI copy edit',
+    actionSentinelFailureAlert: 'Sentinel failure alert', actionSentinelArm: 'Sentinel arm', actionSentinelDisarm: 'Sentinel disarm',
+    actionSentinelPermDenied: 'Sentinel permission denied', actionSentinelBatchAlert: 'Sentinel batch alert',
+    actionUnmanage: 'Unmanage', actionHardDelete: 'Hard delete', actionWarmupArm: 'Warmup arm',
+    actionInspectionSkipped: 'Inspection skipped', actionUpdateToken: 'Token update', actionUpload: 'Upload',
+    actionRename: 'Rename', actionSyncStalled: 'Sync stalled', actionRestore: 'Restore', actionSpendSpike: 'Spend spike',
+    targetTenant: 'Tenant', targetAsset: 'Asset', targetCampaign: 'Campaign', targetSystemSetting: 'System setting',
+    targetSync: 'Sync job', targetLandingTemplate: 'Landing template', targetAudience: 'Audience', targetLead: 'Lead', targetPage: 'Page',
+    sourceAccountSync: 'Account sync', sourceCfApi: 'CF API', sourceKeepalive: 'Keepalive engine', sourceAdOps: 'Ad ops',
+    sourceAuth: 'Auth', sourceAiVision: 'AI vision', sourceAdsCacheSync: 'Ads cache sync', sourceAdmin: 'Admin console',
+    sourceEmergencyPause: 'Emergency pause', sourceKpiResolver: 'KPI resolver', sourceSentinelPatrol: 'Sentinel patrol',
+
     targetScheduler: 'Scheduler',
     targetAd: 'Ad',
     targetAccount: 'Account',
