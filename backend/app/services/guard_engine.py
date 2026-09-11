@@ -2814,7 +2814,8 @@ def run_sentinel_patrol():
                     continue   # 退避期内：静默跳过（告警已在写入标记时发过）
                 db.delete(_deny_row)   # 过期：清标记，本轮重试探权限（可能已恢复）
                 db.commit()
-            # 预热账户哨兵也跑（只跳过保活系列）
+            # 保活名单（warming）账户哨兵也跑——warmup_state 不豁免哨兵/止损（豁免只有加白），
+            # 哨兵只跳过 [Tova-保活] 系列广告本身
             if (acc.platform or "fb") == "tt":
                 from ..core.fb_tokens import tt_client_for_account
                 tt, _cred = tt_client_for_account(db, acc.tenant_id, acc.act_id, "pause")

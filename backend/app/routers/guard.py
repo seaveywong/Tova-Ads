@@ -639,7 +639,12 @@ def pause_log(
     } for r in rows]
 
 
-# ── 预热（warmup）arm/disarm（doc 03 §6）──
+# ── 保活名单（warmup）arm/disarm（doc 03 §6）──
+# 术语澄清（2026-09-12 全站统一「保活」）：warmup_state 唯一生效逻辑 = 保活扫描候选名单
+# （团队未开全量时，run_keepalive 只扫 warming 账户）。巡检/哨兵**不看**该状态——
+# 哨兵只跳过 [Tova-保活] 系列广告；止损豁免走加白（GuardAllowance），与此无关。
+# 曾有 docstring 写「预热→巡检/哨兵跳过（新账户保护期）」——该功能从未实现，
+# 且与「不允许任何保护期」铁律相悖，勿再照抄。
 class WarmupArmIn(BaseModel):
     act_ids: list[str] | None = None  # None=名下全部；指定=仅那些
 
@@ -647,12 +652,12 @@ class WarmupArmIn(BaseModel):
 @router.post("/warmup/arm")
 def warmup_arm(body: WarmupArmIn, user: CurrentUser = Depends(require_permission("ads.pause")),
                db: Session = Depends(get_db)):
-    """设置账户预热（warmup_state=warming）→ 巡检/哨兵跳过（新账户保护期）。"""
+    """加入保活名单（warmup_state=warming）——保活扫描覆盖该账户（仅此作用）。"""
     query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
     if body.act_ids:
         query = query.filter(Account.act_id.in_(body.act_ids))
     else:
-        # 全名下批量预热只碰在管账户（软删账户不 arm warming；显式点名不受限）
+        # 全名下批量加入只碰在管账户（软删账户不 arm warming；显式点名不受限）
         query = query.filter(Account.is_managed.is_(True))
     count = query.update({Account.warmup_state: "warming"}, synchronize_session="fetch")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
@@ -665,7 +670,7 @@ def warmup_arm(body: WarmupArmIn, user: CurrentUser = Depends(require_permission
 @router.post("/warmup/disarm")
 def warmup_disarm(body: WarmupArmIn, user: CurrentUser = Depends(require_permission("ads.pause")),
                   db: Session = Depends(get_db)):
-    """取消预热（warmup_state=none）→ 恢复巡检/哨兵。"""
+    """移出保活名单（warmup_state=none）——保活扫描不再覆盖该账户。"""
     query = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.warmup_state == "warming")
     if body.act_ids:
