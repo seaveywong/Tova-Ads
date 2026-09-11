@@ -12,7 +12,7 @@ from typing import Optional
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.log_utils import write_log, new_trace_id
-from ..core.fb_tokens import first_client
+from ..core.fb_tokens import client_for_page   # 审计#5：建表单按页实测选令牌（曾任一 active）
 from ..core.fb_client import FbApiError
 from ..core.ad_builder import (build_lead_form_payload, lead_form_safe_payload,
                                build_tt_lead_form_payload, tt_lead_form_id_from_result,
@@ -230,8 +230,8 @@ def deploy_form(fid: int, body: dict,
     if t.config_json:
         try: cfg = json.loads(t.config_json)
         except: cfg = {}
-    fb = first_client(db, user.tenant_id)
-    if not fb: raise HTTPException(400, "未绑定 FB 凭证")
+    fb = client_for_page(db, user.tenant_id, page_id)   # 审计#5：按页实测选令牌（曾任一 active，无页权即 400）
+    if not fb: raise HTTPException(400, "没有能管理该主页的可用令牌（请到令牌页核查主页权限）")
     # 感谢页按钮：显式选了 website 才带按钮字段；whatsapp/none 是本地配置，不进 FB payload
     # （无 thank_you_button_type 的存量 config 保持旧行为：文字+URL 齐即带）。见 0090 批。
     _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()

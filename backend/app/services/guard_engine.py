@@ -3089,7 +3089,7 @@ def run_subcode_autobind():
             if not unbound_links:
                 continue
             for acc in [a for a in accounts if a.tenant_id == tid]:
-                fb = client_for_account(db, tid, acc.act_id)
+                fb = client_for_account(db, tid, acc.act_id, op_kind="read")   # 审计#9：显式声明（防后人复制成写路径）
                 if not fb:
                     continue
                 try:

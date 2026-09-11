@@ -484,8 +484,8 @@ def list_ads(
     # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
     # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）。
     # 按 platform 分发：FB 走 cred_for_account_op；TT 走 tt_client_for_account（FB 版对
-    # platform='tt' 直接 raise，曾恒 True 漏标）。FB 的租户级 RR 兜底保留——巡检同一函数
-    # 选令牌，兜底令牌拉得动就真会更新（同源判定自洽），拉不动 skip 告警会发声。
+    # platform='tt' 直接 raise，曾恒 True 漏标）。FB 无租户级兜底（9db0196 已砍）——
+    # 候选池/主绑定不可用 → None → 标「无令牌/冷却中」（与巡检同源判定自洽）。
     from ..core.fb_tokens import cred_for_account_op as _cred_ok
     _token_status = {}
     for _a in _acc_rows:

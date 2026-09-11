@@ -300,10 +300,11 @@ def create_lead_form(body: LeadFormIn, user: CurrentUser = Depends(require_permi
     实现规格见 02_附录_表单字段.md：嵌套字段 JSON 编码、安全 URL 过滤、
     368/1346003 风控重试安全版、联系字段国家路由。
     """
-    from ..core.fb_tokens import first_client
-    fb = first_client(db, user.tenant_id)  # lead-form 是 page 级，无 act_id → 任一 active token
+    from ..core.fb_tokens import client_for_page
+    # 审计#5（2026-09-12）：按页实测选令牌——曾任一 active token，无该主页权限即 400
+    fb = client_for_page(db, user.tenant_id, body.page_id)
     if not fb:
-        raise HTTPException(400, "未绑定 FB 凭证")
+        raise HTTPException(400, "没有能管理该主页的可用令牌（请到令牌页核查主页权限）")
     trace_id = new_trace_id()
 
     payload = build_lead_form_payload(

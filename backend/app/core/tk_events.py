@@ -197,13 +197,20 @@ def send_fb_capi_for_visit(db, tenant_id: int, fb_pixel_ids: list[str],
             continue
         token = ""
         try:
-            from .fb_tokens import cred_for_account
-            cred = cred_for_account(db, tenant_id, row.act_id) if row.act_id else None
-            if not cred:
-                cred = db.query(FbCredential).filter(
+            # 审计#3（2026-09-12）：绑定了账户的像素走 cred_for_account_op(read)——按账户
+            # 候选池选牌（尊重冷却/多令牌）；曾用 legacy cred_for_account + 无序 .first()
+            # 随机租户令牌，令牌对该像素无权时事件被 FB 静默丢弃（S2S 无报错面）。
+            if row.act_id:
+                from .fb_tokens import cred_for_account_op
+                cred = cred_for_account_op(db, tenant_id, row.act_id, "read")
+            else:
+                # 手填像素无账户绑定：无判归属渠道，取第一个可用令牌（status+冷却过滤），
+                # 失败仅记日志——比按账户选弱，但比无序 .first()（冷却中也选）强
+                from .fb_tokens import _is_cred_available
+                cred = next((c for c in db.query(FbCredential).filter(
                     FbCredential.tenant_id == tenant_id,
-                    FbCredential.status == "active",
-                ).first()
+                    FbCredential.status.in_(("active", "rate_limited")),
+                ).order_by(FbCredential.id).all() if _is_cred_available(c)), None)
             if cred:
                 token = decrypt(cred.access_token_enc)
         except Exception as e:

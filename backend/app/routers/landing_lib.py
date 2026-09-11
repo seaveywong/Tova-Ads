@@ -322,7 +322,12 @@ def sync_pixels(
     from ..core.fb_client import FbClient
     from ..core.encryption import decrypt
     from ..models.fb import FbCredential, Account
-    creds = db.query(FbCredential).filter(FbCredential.status == "active").all()
+    # 审计#2/#9：显式按 cred.tenant_id 过滤（RLS 端点内本就隐式，但防被 cron/SuperSession
+    # 复用时跨租户）+ 含 rate_limited（同口径——status 卡 rate_limited 的令牌像素不再同步）
+    creds = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
+    ).all()
     added = 0
     for cred in creds:
         try:

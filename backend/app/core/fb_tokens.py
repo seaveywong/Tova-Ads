@@ -7,7 +7,7 @@
 
 TikTok（TK 接入 P0）：accounts.platform 分发——'fb' 走原逻辑不动；'tt' 在
 client_for_account/cred_for_account_op fail-fast（TtClient P1 接入）；聚合函数
-（iter_tenant_clients/first_client/run_with_fallback/reassociate）已留 TT 分支，
+（iter_tenant_clients/first_client/reassociate）已留 TT 分支，
 TtClient（core/tt_client.py）合入前该分支为空集，FB 行为逐字节不变。
 """
 from typing import Optional
@@ -115,8 +115,9 @@ def _op_ok(c, op_kind: str) -> bool:
         scopes = snap.get("scopes") or []
         if "ads_management" in scopes:
             return True
-        # fallback: 看 token_type 标签（清引号）
-        tt = (c.token_type or "").strip().strip("'\"").lower() or "manage"
+        # fallback: 看 token_type 标签（清引号）。空值默认 user（审计#8：曾默认 manage——
+        # 空标签令牌获得写资格，比模型默认 user 权限更大；无快照+空标签=权限未知，宁拒勿放）
+        tt = (c.token_type or "").strip().strip("'\"").lower() or "user"
         return tt in ("manage", "operate")
     return True
 
@@ -343,6 +344,28 @@ def client_for_account_page(db: Session, tenant_id: int, act_id: str, page_id: s
     return FbClient(decrypt(cred.access_token_enc)) if cred else None
 
 
+def client_for_page(db: Session, tenant_id: int, page_id: str) -> Optional[FbClient]:
+    """选能管 page_id 的写令牌 → FbClient（page 级操作用，无 act_id 上下文——Instant Form 等）。
+
+    审计#5（2026-09-12）：form_templates/launch 建 leadgen form 曾用 first_client「任一 active
+    令牌」——不校验该令牌能否管此主页，creds[0] 无页权限即 400。此处按 可用性+写权限 过滤后
+    逐个 get_page_access_token 实测（每令牌一次轻调用），返第一个真管得了的；无则 None。"""
+    if not page_id:
+        return None
+    for c in db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
+    ).order_by(FbCredential.id).all():
+        if not _is_cred_available(c) or not _op_ok(c, "write"):
+            continue
+        try:
+            if FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id):
+                return FbClient(decrypt(c.access_token_enc))
+        except Exception:
+            continue
+    return None
+
+
 def mark_cred_cooldown(db: Session, cred_id: int, minutes: int = 30,
                        status: str = "rate_limited") -> None:
     """标记 cred 冷却（巡检/操作遇限流时调，下轮 client_for_account 自动跳过）。"""
@@ -354,7 +377,8 @@ def mark_cred_cooldown(db: Session, cred_id: int, minutes: int = 30,
 
 
 def cred_for_account(db: Session, tenant_id: int, act_id: str) -> Optional[FbCredential]:
-    """账户绑定的 cred 对象（写 accounts.fb_credential_id / 审计用）。"""
+    """[DEPRECATED 2026-09-12 审计#3] 最后调用方（tk_events S2S）已改走 cred_for_account_op。
+    保留仅防外部引用：无冷却/无权限门 + 无绑定兜底 creds[0]（任意令牌），勿在新代码使用。"""
     acc = db.query(Account).filter(
         Account.tenant_id == tenant_id, Account.act_id == act_id,
     ).first()
@@ -445,67 +469,8 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
             "tt": _reassociate_tt_accounts(db, tenant_id)}
 
 
-def run_with_fallback(db: Session, tenant_id: int, act_id: str, op_fn):
-    """token fallback 执行器（照搬 1.0 _run_with_token_fallback 思路）。
-
-    op_fn(client) -> result。按"账户绑定的 token 优先"排序，遇 token_expired/permissions
-    错误轮换其他 active token；全失败抛最后一个错。返回 (result, used_cred)。
-    只对【读操作 / 幂等操作】用——写操作（建广告）若中途换 token 会产生孤儿对象，应绑死 token + 失败告警。
-    平台分发：account.platform='tt' → 遍历 tt_credentials（TtClient 未合入时无候选，返 (None, None)）。
-    """
-    acc = db.query(Account).filter(
-        Account.tenant_id == tenant_id, Account.act_id == act_id,
-    ).first()
-    if acc and (acc.platform or "fb") == "tt":
-        return _run_with_fallback_tt(db, tenant_id, acc, op_fn)
-    creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-    ).order_by(FbCredential.id).all()
-    if not creds:
-        return None, None
-    bound_id = acc.fb_credential_id if acc else None
-    # 绑定 token 优先
-    ordered = sorted(creds, key=lambda c: 0 if c.id == bound_id else 1)
-    last_err = None
-    for cred in ordered:
-        fb = FbClient(decrypt(cred.access_token_enc))
-        try:
-            return op_fn(fb), cred
-        except Exception as e:
-            from .fb_client import FbApiError
-            last_err = e
-            # 仅 token/权限类错误才轮换；其余（参数错等）直接抛
-            if isinstance(e, FbApiError) and e.category in ("token_expired", "permissions",
-                                                              "permission_denied") and len(ordered) > 1:
-                continue
-            raise
-    raise last_err
-
-
-def _run_with_fallback_tt(db: Session, tenant_id: int, acc, op_fn):
-    """run_with_fallback 的 TikTok 分支：遍历 tt_credentials（主令牌优先），token 类错误轮换。
-    TtClient（core/tt_client.py）未合入或无 active TT 凭证时返 (None, None)——调用方按
-    无可用令牌处理，与 FB 无凭证路径同语义。"""
-    TtClient = _tt_client_cls()
-    if TtClient is None:
-        return None, None
-    creds = _iter_tt_creds(db, tenant_id)
-    if not creds:
-        return None, None
-    ordered = sorted(creds, key=lambda c: 0 if c.id == acc.tt_credential_id else 1)
-    last_err = None
-    for cred in ordered:
-        client = TtClient(decrypt(cred.access_token_enc))
-        try:
-            return op_fn(client), cred
-        except Exception as e:
-            last_err = e
-            # 仅 token/权限类错误轮换（TtApiError.category 与 FB 同名分类，P1 接入时对齐）
-            cat = getattr(e, "category", None)
-            if cat in ("token_expired", "permissions", "permission_denied") and len(ordered) > 1:
-                continue
-            raise
-    raise last_err
+# [已删 2026-09-12 审计#9] run_with_fallback/_run_with_fallback_tt 死代码移除——
+# 全库无调用方；其「读操作换令牌重试」语义与砍兜底教义（9db0196/批BY）相反，留着会误导复用。
 
 
 def _reassociate_tt_accounts(db: Session, tenant_id: int) -> dict:
