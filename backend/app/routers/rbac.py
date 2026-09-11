@@ -241,6 +241,25 @@ def invite_member(body: InviteIn,
     return {"invited": True, "email": email, "default_password": pwd}
 
 
+@router.post("/members/{membership_id}/reset-password")
+def reset_member_password(membership_id: int, user: CurrentUser = Depends(require_permission("members.manage")),
+                          db: Session = Depends(get_db)):
+    """重发临时密码（批CB）：邀请默认密码弹窗只显示一次，管理员丢了就无处再查
+    （后端只存哈希）。生成新临时密码 + 置 must_change_password——旧密码立即作废。"""
+    import secrets as _sec
+    m = db.query(TenantMembership).filter(TenantMembership.id == membership_id).first()
+    if not m or m.tenant_id != user.tenant_id:
+        raise HTTPException(404, "成员不存在")
+    u = db.query(User).filter(User.id == m.user_id).first()
+    if not u:
+        raise HTTPException(404, "用户不存在")
+    pwd = _sec.token_urlsafe(8)
+    u.password_hash = hash_password(pwd)
+    u.status = "must_change_password"
+    db.commit()
+    return {"reset": True, "email": u.email, "default_password": pwd}
+
+
 class ChangeRoleIn(BaseModel):
     role: str
 

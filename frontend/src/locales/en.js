@@ -697,7 +697,7 @@ export default {
     roleChange: 'Role change',
     changeRoleFromOwner: 'Change {email} from [Owner] to [{role}]?\n\nDowngrading an owner immediately revokes their admin permissions (rules/config/invites).',
     changeRole: 'Change {email}\'s role to [{role}]?',
-    removeMemberConfirm: 'Remove member "{email}"?',
+    removeMemberConfirm: 'Remove member "{email}"?', resetPwd: 'Reset password', resetPwdConfirm: 'Issue a new temporary password for {email}? The old one stops working immediately; the member must change it at first login.', resetPwdDone: 'New temporary password: {pwd} — copy and send it to the member now (this dialog will not show again)',
     removed: 'Removed',
     deleted: 'Deleted',
     perm: {

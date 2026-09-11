@@ -37,6 +37,27 @@ const editingMsg = ref(null)
 const mCfg = ref({ name: '', type: 'messenger', welcome_text: '', ice_breakers: [] })
 const isWaMsg = computed(() => mCfg.value.type === 'whatsapp')
 
+// 批CB：dirty-guard（两个编辑器抽屉都点遮罩即关+destroy-on-close——半成品静默全丢；
+// 照 Guard/LaunchTemplates 的 confirmDiscard 模式。快照在打开时拍，关闭前比对）
+const fSnap = ref('')
+const mSnap = ref('')
+const snapF = () => { fSnap.value = JSON.stringify({ m: fMeta.value, c: fCfg.value }) }
+const snapM = () => { mSnap.value = JSON.stringify(mCfg.value) }
+const fDirty = () => JSON.stringify({ m: fMeta.value, c: fCfg.value }) !== fSnap.value
+const mDirty = () => JSON.stringify(mCfg.value) !== mSnap.value
+const onFormBeforeClose = (done) => {
+  if (!fDirty()) return done()
+  ElMessageBox.confirm(t('formtpl.discardConfirm'), t('formtpl.closeConfirm'),
+    { type: 'warning', confirmButtonText: t('common.discard'), cancelButtonText: t('formtpl.keepEditing') })
+    .then(() => done()).catch(() => {})
+}
+const onMsgBeforeClose = (done) => {
+  if (!mDirty()) return done()
+  ElMessageBox.confirm(t('formtpl.discardConfirm'), t('formtpl.closeConfirm'),
+    { type: 'warning', confirmButtonText: t('common.discard'), cancelButtonText: t('formtpl.keepEditing') })
+    .then(() => done()).catch(() => {})
+}
+
 // 预览
 const previewOpen = ref(false)
 const previewData = ref(null)
@@ -375,7 +396,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </div>
 
     <!-- 表单编辑抽屉：左手机实时预览 + 右设置分区（Header=标题+平台/类型 chip，与投放模板编辑器一致） -->
-    <el-drawer v-model="formOpen" direction="rtl" size="min(1120px, 96vw)" :destroy-on-close="true">
+    <el-drawer v-model="formOpen" direction="rtl" size="min(1120px, 96vw)" :destroy-on-close="true" :before-close="onFormBeforeClose" @open="snapF">
       <template #header>
         <div class="dr-head">
           <span class="dr-title">{{ editingForm ? t('formtpl.editForm') : t('formtpl.newForm') }}</span>
@@ -540,7 +561,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </el-drawer>
 
     <!-- 消息编辑抽屉（Messenger / WhatsApp 按类型切换文案；宽度与投放模板资产选择器对齐） -->
-    <el-drawer v-model="msgOpen" direction="rtl" size="min(560px, 100vw)" :destroy-on-close="true">
+    <el-drawer v-model="msgOpen" direction="rtl" size="min(560px, 100vw)" :destroy-on-close="true" :before-close="onMsgBeforeClose" @open="snapM">
       <template #header>
         <div class="dr-head">
           <span class="dr-title">{{ editingMsg ? t('formtpl.editMsg') : t('formtpl.newMsg') }}</span>

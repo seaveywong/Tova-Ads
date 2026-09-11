@@ -114,6 +114,18 @@ const changeRole = async (m, roleName) => {
     ElMessage.success(t('members.roleUpdated'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
+// 批CB：重发临时密码（邀请默认密码弹一次就没了，后端只存哈希——这是唯一恢复入口）
+const resetPwd = async (m) => {
+  try {
+    await ElMessageBox.confirm(t('members.resetPwdConfirm', { email: m.email }), t('members.resetPwd'),
+      { type: 'warning', confirmButtonText: t('members.resetPwd'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
+  } catch { return }
+  try {
+    const r = await POST(`/rbac/members/${m.membership_id}/reset-password`)
+    await ElMessageBox.alert(t('members.resetPwdDone', { pwd: r.default_password }), t('members.resetPwd'),
+      { confirmButtonText: t('common.ok'), type: 'success' })
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+}
 const removeMember = async (m) => {
   try {
     await ElMessageBox.confirm(t('members.removeMemberConfirm', { email: m.email }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
@@ -156,6 +168,7 @@ const permLabel = (key) => {
           </div>
           <div><span class="st" :class="memberStatus(m.status).cls">{{ memberStatus(m.status).label }}</span></div>
           <div class="ops">
+            <button v-if="!m.is_you" class="mb" @click="resetPwd(m)">{{ t('members.resetPwd') }}</button>
             <button v-if="!m.is_you" class="mb danger" @click="removeMember(m)">{{ t('common.remove') }}</button>
             <span v-else class="muted">—</span>
           </div>

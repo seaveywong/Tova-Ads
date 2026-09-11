@@ -708,7 +708,7 @@ export default {
     roleChange: '角色变更',
     changeRoleFromOwner: '将 {email} 从【管理员】改为【{role}】？\n\n管理员降级会立即收回其管理权限（含改规则/改配置/邀人）。',
     changeRole: '将 {email} 的角色改为【{role}】？',
-    removeMemberConfirm: '移除成员「{email}」？',
+    removeMemberConfirm: '移除成员「{email}」？', resetPwd: '重发密码', resetPwdConfirm: '为 {email} 生成新的临时密码？旧密码立即作废，成员首次登录需改密。', resetPwdDone: '新临时密码：{pwd} —— （请立即复制发给成员，此窗口不会再次显示）',
     removed: '已移除',
     deleted: '已删除',
     perm: {

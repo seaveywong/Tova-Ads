@@ -986,6 +986,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             <template v-if="subStatus !== 'trash'">
               <div class="sub-ops">
                 <button class="mb" @click="goSubLogs(s)">{{ t('landing.logsBtn') }}</button>
+                <button class="mb" :title="t('landing.subEventsTip')" @click="openSubEvents(s)">{{ t('landing.subEventsBtn') }}</button>
                 <button class="btn-link fb" @click="copyFbLink(s.slug)" :title="t('landing.copyFbLink')">f FB</button>
                 <button class="btn-link tt" @click="copyTtLink(s.slug)" :title="t('landing.copyTtLink')">♪ TK</button>
                 <a v-if="previewTestUrl(s.slug)" class="btn-link preview" :href="previewTestUrl(s.slug)" target="_blank" rel="noopener" :title="t('landing.previewTestLink')">👁</a>

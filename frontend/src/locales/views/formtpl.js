@@ -1,7 +1,7 @@
 // FormTemplates namespace（Instant Form 表单 + Messenger/WhatsApp 消息）。zh/en 同文件。
 export default {
   zh: {
-    pageTitle: '表单模板', countSummary: '{f} 表单 · {m} 消息',
+    pageTitle: '表单模板', discardConfirm: '有未保存的修改，放弃并关闭？', closeConfirm: '关闭编辑器', keepEditing: '继续编辑', countSummary: '{f} 表单 · {m} 消息',
     tabForm: 'Instant Form 即时表单', tabMsg: '消息（Messenger / WhatsApp）', newBtn: '+ 新建{kind}', formUnit: '表单', msgUnit: '消息', deployed: '已部署',
     newFormFb: '新建 Facebook 表单', newFormTt: '新建 TikTok 表单', pickPlatTitle: '选择表单平台', platform: '平台',
     pickPlatHint: '平台决定表单字段与部署链路，创建后不可更改。',
@@ -56,7 +56,7 @@ export default {
     contact: { email: '邮箱', phone: '电话', city: '城市', state: '州/省', zip: '邮编', country: '国家', dob: '生日', gender: '性别', marital: '婚姻状况', lastName: '姓' },
   },
   en: {
-    pageTitle: 'Form Templates', countSummary: '{f} form(s) · {m} message(s)',
+    pageTitle: 'Form Templates', discardConfirm: 'Discard unsaved changes and close?', closeConfirm: 'Close editor', keepEditing: 'Keep editing', countSummary: '{f} form(s) · {m} message(s)',
     tabForm: 'Instant Form', tabMsg: 'Messages (Messenger / WhatsApp)', newBtn: '+ New {kind}', formUnit: 'Form', msgUnit: 'Message', deployed: 'Deployed',
     newFormFb: 'New Facebook Form', newFormTt: 'New TikTok Form', pickPlatTitle: 'Choose form platform', platform: 'Platform',
     pickPlatHint: 'The platform determines form fields and the deployment pipeline; it cannot be changed after creation.',
