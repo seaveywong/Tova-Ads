@@ -183,6 +183,12 @@ def cred_for_account_op(db: Session, tenant_id: int, act_id: str,
         bound = cred_map[acc.fb_credential_id]
         if _is_cred_available(bound) and _op_ok(bound, op_kind):
             return bound
+    # 批BY：写/暂停不再做全租户 RR 兜底（0911 Radar 实证——绑定的 Fama Bah 限流冷却中
+    # → 兜底选中毫无该账户权限的 Kritins Rae → #33「无写权限」误导性报错，真因被掩盖）。
+    # read 保留兜底（租户令牌读权普遍存在，批token-dispatch 生产验证）；写返回 None
+    # → 调用方报「无可用写令牌」，比拿错令牌硬打可诊断得多。主令牌（上方 bound）不受影响。
+    if op_kind in ("write", "pause"):
+        return None
     avail = [c for c in creds if _is_cred_available(c) and _op_ok(c, op_kind)]
     if not avail:
         return None
