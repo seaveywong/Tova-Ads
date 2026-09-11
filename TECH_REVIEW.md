@@ -2114,3 +2114,11 @@ smoke：…652/…709 write 令牌反查均正确返回 Fama Bah。迁移 applie
 
 用户点名：TK App 配置在令牌页、FB App 在设置页——不一致。对齐方向按 FB 成熟模式：**密钥管理=设置页、连接=令牌页**。落地：Settings sec-fbapps 分区改「应用配置」双小节（新增 TikTok App 列表/新建/删除——POST/DELETE /tt/apps 已有；source=default 行只读标「默认」）；Tokens TT 分区去掉新建/删除按钮和弹窗（saveTtApp/delTtApp 及其 ref 删除），保留 App 卡片连接入口 + 超管「管理 App（设置）」跳转链接；空态文案指路设置页。i18n zh/en 成对。
 smoke：build✓ + EN 零 CJK + 死引用清零（grep ttAppForm/saveTtApp 无残留）。CF master。
+
+## 批CB：交互审计挂账三小件清账（2026-09-11）
+
+①**FormTemplates dirty-guard**：表单/消息两个编辑抽屉都点遮罩即关+destroy-on-close——半成品静默全丢。补 before-close（打开拍 JSON 快照，关闭前比对，脏则 confirm 丢弃/继续编辑；照 Guard/LaunchTemplates 模式）。
+②**Members 重发临时密码**：邀请默认密码弹窗一次即逝且后端只存哈希。新端点 POST /rbac/members/{id}/reset-password（生成新临时密码+must_change_password，旧密码立即作废；require_permission members.manage）+ 成员行「重发密码」按钮（confirm+结果弹窗提示立即复制）。
+③**Landing 子码事件死入口激活**：openSubEvents 函数自 TK 接入起无调用（子码事件弹窗整体不可达）。子码行「日志」旁加「事件」按钮接上现成弹窗。
+i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdDone en）。后端 rbac.py 双门+restart 绿；CF master。
+审计挂账全清（巡检报告/Ads同步报告两个中件仍挂，按需再做）。
