@@ -2132,3 +2132,15 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 验证：restart 后 inspect 确认服务进程载入修复代码 ✓。
 
 **保活流程速记**（回用户问）：cron 每日 02:17Z 扫 warming 账户（或租户 enabled=true 全部 managed）→ 近 idle_days(3) 天零消耗 → 查无 [Tova-保活] 存量系列 → 选有 ADVERTISE 权限主页 + YR 前缀随机素材 → 建 $1 lifetime Page Like（巡检/哨兵见 [Tova-保活] 标记永不停）。日志：操作日志 action_type=keepalive 逐账户成败+原因（日志中心可筛）；journal [Keepalive]；手动触发 POST /guard/keepalive/run（超管）。无部署式 job 进度弹窗——逐账户结果在操作日志。
+
+## 批CD：日志 i18n 全量 + 保活彻底跑通（/goal，2026-09-11）
+
+**日志 i18n**：AuditLog 三个映射表按生产实际枚举全量补齐——37 动作（keepalive/orphan_account_alert/low_balance_alert/sentinel 系/ai_analyze/unmanage…）+9 目标 +11 来源，此前显示英文原文，现随系统语言。
+
+**保活跑通（三轮真跑逐步剥洋葱）**：
+- 第一轮（批CC 已修）：No End Date（lifetime 补 end_time）+ 1487202（选有 ADVERTISE 权限主页）
+- 第二轮：1885272 **lifetime 最低 $30** 且「$1 花完自停」语义本身错误（停了=又闲置）→ 改 **daily_budget=配置值/天**（持续小额才是保活本意；账户有真实投放后自动不再建）
+- 第三轮：7/11 成功后剩余 1815645 强绑主页账户 → 加**逐主页尝试 fallback**（1815645 换页重试，非该类错不换）
+- 终态：**7 账户保活建成并在 FB 存活**（抽查 3 个：系列 ACTIVE + 广告 ACTIVE + [Tova-保活] 标记 ✓，第二轮 has_keepalive 去重生效）；4 个 has_spend 跳过（正确）；**5 个强绑主页账户全可见主页均拒**——绑定主页不在令牌可访问列表，属账户侧限制（同部署链结论），每日自动重试意味着号商给权限后自动恢复。
+
+花钱告知（用户要求人工可知）：7 保活 × $1/天上界 = 最多 $7/天；停法=设置页关保活开关 或 FB 侧停对应系列。
