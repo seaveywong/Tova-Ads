@@ -450,6 +450,7 @@ def _ensure_account_pixel(sdb, tenant_id: int, act_id: str, fb, allow_create: bo
     ③ FB 调用失败返空串（调用方走原 ValueError/fail 路径，不静默瞎猜）。
     预检传 allow_create=False（预检不写 FB：能绑既有就用，不能就给占位符）。"""
     from datetime import datetime as _dt, timezone as _tz
+    from ..models.landing_lib import LandingPixel   # 批BX：曾缺 import——自愈首行即 NameError 被外层吞成「无可用像素」（0911 实证：用户 BM 授权后重试仍报错）
     try:
         rows = sdb.query(LandingPixel).filter(
             LandingPixel.tenant_id == tenant_id, LandingPixel.act_id == act_id,
