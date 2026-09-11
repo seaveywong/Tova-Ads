@@ -127,6 +127,9 @@ def store_credential(
         existing.access_token_enc = encrypt(stored_token)
         existing.alias = body.alias or existing.alias
         existing.status = "active"
+        # 审计#4（2026-09-12）：换新令牌必须清旧冷却——否则新令牌被旧 cooldown_until
+        # 雪藏至多 30min（_is_cred_available 判不可用），换令牌反而"更糟"
+        existing.cooldown_until = None
         # 请求显式带了 token_type 才覆盖；未传保留旧值（schema 默认 "user" 会把 manage 静默降级）
         _tt_set = getattr(body, "_token_type_set", False)
         existing.token_type = ((body.token_type if _tt_set and body.token_type else None) or existing.token_type or "user")
@@ -486,6 +489,7 @@ def update_credential_token(
     # 更新
     cred.access_token_enc = encrypt(new_token)
     cred.status = "active"
+    cred.cooldown_until = None   # 审计#4：换新令牌清旧冷却（否则被旧 cooldown 雪藏≤30min）
     cred.consecutive_fails = 0
     cred.last_verified_at = datetime.now(timezone.utc)
     cred.permission_snapshot = perm_snapshot
@@ -540,6 +544,7 @@ def check_credential(
 
         if is_valid:
             cred.status = "active"
+            cred.cooldown_until = None   # 审计#4：实测可用即解除冷却（否则硬过滤处立刻复用冷却中令牌→再 429）
             result["now_valid"] = True
             result["detail"] = L(loc, "fb.checkOk", scopes=", ".join(scopes[:3]))
         else:
@@ -1312,8 +1317,11 @@ def _get_loadable_rows(db, tenant_id: int) -> tuple[list[dict], list[dict]]:
         return ent[1], ent[2]
     from ..core.fb_tokens import _is_cred_available
     from concurrent.futures import ThreadPoolExecutor
+    # 审计#2/#6（2026-09-12）：含 rate_limited——冷却中的令牌拉取失败会进 degraded 名单
+    # （弹窗提示"列表不全"），恢复后自动回到列表；曾硬过滤 active 让其账户静默消失
     creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
     ).all()
 
     def _pull(c):
@@ -1365,8 +1373,10 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
     返回 {aid: row}，row 结构与 _get_loadable_rows 行一致。
     """
     from ..core.fb_tokens import _is_cred_available
+    # 审计#2/#6：同 _get_loadable_rows——含 rate_limited（曾硬过滤让限流令牌的账户导入"找不到"）
     creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
     ).all()
     out: dict = {}
     for c in creds:
@@ -1488,7 +1498,8 @@ def import_accounts(
     if not rows:
         creds_exist = db.query(FbCredential.id).filter(
             FbCredential.tenant_id == user.tenant_id,
-            FbCredential.status == "active").first()
+            # 审计#2：同口径——全令牌限流中时报 not_found（真实状态）而非误导性的"未绑定凭证"
+            FbCredential.status.in_(("active", "rate_limited"))).first()
         if not creds_exist:
             raise HTTPException(400, "未绑定 FB 凭证")
         # 有令牌但点查全部不覆盖 → 明确返回 not_found（不是报错）

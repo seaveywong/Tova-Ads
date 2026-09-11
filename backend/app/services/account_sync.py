@@ -238,7 +238,11 @@ def run_account_status_sync():
     low_balance_alerts = 0
     threshold_usd = _balance_alert_threshold(db)  # 0=关；一次巡检读一遍
     try:
-        creds = db.query(FbCredential).filter(FbCredential.status == "active").all()
+        # 审计#2（2026-09-12）：含 rate_limited——status 永不自动回 active，硬过滤 active
+        # 会让限流过的令牌（哪怕冷却早已过期）的账户列表永久停更；仍在冷却中的调用失败
+        # 由 per-cred try 兜住跳过（下一轮再试）
+        creds = db.query(FbCredential).filter(
+            FbCredential.status.in_(("active", "rate_limited"))).all()
         for cred in creds:
             tenant_id = cred.tenant_id
             try:

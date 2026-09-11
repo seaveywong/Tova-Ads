@@ -227,8 +227,10 @@ def tt_client_for_account(db: Session, tenant_id: int, act_id: str, op_kind: str
     ).order_by(TtCredential.id).all()
     if acc and acc.tt_credential_id:
         _add(next((c for c in tenant_creds if c.id == acc.tt_credential_id), None))
-    for c in tenant_creds:
-        _add(c)
+    # 2026-09-12 令牌审计#1：砍掉「追加租户全部 active 凭证」的兜底——FB 侧同型事故
+    # （9db0196 read 全租户 RR 选无权令牌报假权限错）在 TT 的残留；TT 无冷却列，
+    # 撞无权令牌会被每轮反复重试。候选池+主绑定都无 → None：调用方报「无令牌」，
+    # 诚实可诊断（孤儿账户有专项告警在管）。
     if not ordered:
         return None, None
     if op_kind in ("write", "pause"):
@@ -296,13 +298,16 @@ def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
         ).filter(
             AccountFbCredential.account_id == acc.id,
             AccountFbCredential.status == "active",
-            FbCredential.status == "active",
+            # 审计#7：与 cred_for_account_op 同口径——rate_limited（冷却中/已过期）由
+            # _add 的 _is_cred_available 判可用性，不在此硬过滤（曾冷却过的令牌永久出局）
+            FbCredential.status.in_(("active", "rate_limited")),
         ).order_by(AccountFbCredential.priority, FbCredential.id).all():
             _add(c)
         if acc.fb_credential_id:
             _add(db.query(FbCredential).filter(FbCredential.id == acc.fb_credential_id).first())
     for c in db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active",
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
     ).order_by(FbCredential.id).all():
         _add(c)
     return ordered

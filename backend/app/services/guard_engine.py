@@ -1951,11 +1951,13 @@ def run_inspection(force: bool = False):
 
     try:
         learning_hours = _sys_float(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
-        # 取所有有 active FB 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔），
+        # 取所有有可用 FB 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔），
         # 并上「有 managed TT 账户」的租户——纯 TT 租户（无任何 FB 凭证）不再被整个跳过。
-        # FB 租户集合不变（有 FB 账户必有 FB 凭证），遍历顺序 FB 在前 → FB 行为不变
+        # 审计#2（2026-09-12）：status 含 rate_limited——rate_limited 永不自动回 active，
+        # 硬过滤 ==active 会让「全部令牌限流过一次」的租户整租户停止巡检（止损停摆）；
+        # 令牌真实可用性由 worker 内 cred_for_account_op 的 _is_cred_available 懒判定
         _fb_tids = [tid for (tid,) in db.query(FbCredential.tenant_id).filter(
-            FbCredential.status == "active"
+            FbCredential.status.in_(("active", "rate_limited"))
         ).distinct().all()]
         _tt_tids = {tid for (tid,) in db.query(Account.tenant_id).filter(
             Account.platform == "tt",
@@ -1973,10 +1975,10 @@ def run_inspection(force: bool = False):
             if not all_rules:
                 # 规则兜底：租户无规则时注入默认空耗止血线（保底防裸奔，用户可建规则覆盖）
                 all_rules = [_DEFAULT_BLEED_ABS_RULE]
-            # 本租户无 active FB 凭证且无 managed TT 账户 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
+            # 本租户无可用 FB 凭证且无 managed TT 账户 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
             cred_n = db.query(FbCredential).filter(
                 FbCredential.tenant_id == tenant_id,
-                FbCredential.status == "active",
+                FbCredential.status.in_(("active", "rate_limited")),   # 审计#2：同租户枚举口径
             ).count()
             if not cred_n and tenant_id not in _tt_tids:
                 logger.info(f"[Guard] 租户 {tenant_id} 无 FB 凭证且无 TT 账户，跳过")
@@ -2588,7 +2590,9 @@ def run_watchdog():
             # 无凭证状态叠报第三条。租户尚有活跃凭证时照发（真覆盖问题不吞）
             _active_cred_tids = {
                 tid for (tid,) in db.query(FbCredential.tenant_id).filter(
-                    FbCredential.status == "active").distinct().all()}
+                    # 审计#2：含 rate_limited（同巡检租户枚举口径——否则全令牌限流过的
+                    # 租户会被误判"无凭证"而抑制 stale 告警，盲区静默）
+                    FbCredential.status.in_(("active", "rate_limited"))).distinct().all()}
             try:
                 from ..models.tt import TtCredential
                 _active_cred_tids |= {
@@ -2624,7 +2628,10 @@ def run_watchdog():
             logger.warning(f"[Watchdog] 单账户停滞检测异常: {e}")
 
         # ── ② token 主动健康检查（debug_token，快过期/失效预警）──
-        creds = db.query(FbCredential).filter(FbCredential.status == "active").all()
+        # 审计#2：含 rate_limited——debug_token 走 App 令牌（批AP），不消耗该令牌配额；
+        # 曾硬过滤 active 让限流过（哪怕已恢复）的令牌有过期/失效盲区
+        creds = db.query(FbCredential).filter(
+            FbCredential.status.in_(("active", "rate_limited"))).all()
         since_day = datetime.now(timezone.utc) - timedelta(hours=24)
         for c in creds:
             # dedup 24h（每 token 每天最多一条 token_health）

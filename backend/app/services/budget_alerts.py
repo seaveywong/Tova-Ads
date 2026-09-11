@@ -172,12 +172,15 @@ def run_budget_alerts():
     trace_id = new_trace_id()
     total_alerts = 0
     try:
+        # 审计#2（2026-09-12）：含 rate_limited——status 永不自动回 active，硬过滤 active
+        # 会让"全部令牌限流过一次"的租户退出低额告警覆盖；真实可用性由各令牌调用结果判定
         tenant_ids = db.execute(text(
-            "SELECT DISTINCT tenant_id FROM fb_credentials WHERE status = 'active'"
+            "SELECT DISTINCT tenant_id FROM fb_credentials WHERE status IN ('active', 'rate_limited')"
         )).fetchall()
         for (tenant_id,) in tenant_ids:
             creds = db.query(FbCredential).filter(
-                FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+                FbCredential.tenant_id == tenant_id,
+                FbCredential.status.in_(("active", "rate_limited")),
             ).all()
             if not creds:
                 continue
