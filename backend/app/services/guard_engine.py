@@ -1199,11 +1199,21 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 _rid = str(_cred.id) if _cred else acc.act_id
                 if not dedup_recent(db, tenant_id, "token_rate_limited", _rid, 60):
                     if platform == "tt":
+                        # 受影响名单只列真正会被巡检的账户（managed+非死状态）——
+                        # 曾不过滤：已禁用/已移除的账户全被列进限流告警陪跑（用户 2026-09-12 拍板剔除）
                         _affected = [a.name for a in db.query(Account).filter(
-                            Account.tt_credential_id == cred.id).all()] if cred else []
+                            Account.tt_credential_id == cred.id,
+                            Account.is_managed.is_(True),
+                            or_(Account.account_status.is_(None),
+                                Account.account_status.notin_([2, 8, 100, 101])),
+                        ).all()] if cred else []
                     else:
                         _affected = [a.name for a in db.query(Account).filter(
-                            Account.fb_credential_id == cred.id).all()] if cred else []
+                            Account.fb_credential_id == cred.id,
+                            Account.is_managed.is_(True),
+                            or_(Account.account_status.is_(None),
+                                Account.account_status.notin_([2, 8, 100, 101])),
+                        ).all()] if cred else []
                     _loc = tenant_locale(db, tenant_id)
                     _t_rl, _b_rl = notify_text(_loc, "token_rate_limited",
                         alias=_esc(_alias or acc.act_id),
