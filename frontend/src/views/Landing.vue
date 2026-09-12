@@ -1174,7 +1174,6 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </div>
         <div v-if="!landingTemplates.length" class="empty">{{ t('landing.tplEmpty') }}</div>
       </div>
-      <div class="tpl-hint">💡 {{ t('landing.tplCycleHint') }}</div>
     </el-drawer>
     </div>
     <LandingLogs v-if="tab === 'logs'" />
@@ -1334,7 +1333,6 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .tpl-ops .mb.danger{color:var(--error);border-color:var(--error)}
 .tpl-rename{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0;padding:4px 0}
 .tpl-rename-ops{display:flex;gap:8px;justify-content:flex-end}
-.tpl-hint{margin-top:12px;font-size:11px;color:var(--t3);line-height:1.6}
 .sub-item{padding:4px 0;border-bottom:1px solid var(--bd)}
 .sub-target{display:flex;gap:6px;align-items:center;padding:6px 0}
 .sub-target-input{flex:1}
