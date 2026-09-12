@@ -559,7 +559,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .batch-btn.danger { border-color: var(--error); color: var(--error); background: rgba(239,68,68,.1) }
 .batch-btn.danger:hover { background: var(--error); color: #fff }
 .batch-btn:disabled { opacity: .5; cursor: wait }
-.warmup-badge { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle }
+.warmup-badge { font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 3px; background: rgba(249,115,22,.15); color: #f97316; margin-left: 4px; font-weight: 600; vertical-align: middle; white-space: nowrap   /* 长状态文案（有消耗·免保活）不换行 */ }
 /* 保活状态变体：spend=有消耗免保活(蓝灰)；burnt/failed=熔断/失败(红，hover 看 note) */
 .warmup-badge.spend { background: rgba(59,130,246,.12); color: #3b82f6 }
 .warmup-badge.burnt { background: rgba(239,68,68,.14); color: #ef4444 }
