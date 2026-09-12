@@ -2429,7 +2429,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-for="tpl in filteredList" :key="tpl.id" class="card">
         <div class="card-head">
           <span class="card-name" :title="tpl.name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
-          <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']" :title="_tplMissing(tpl).join('、')">
+          <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']">
             {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
 </span>
 </div>
@@ -2456,8 +2456,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
       <div v-if="!filteredList.length && !loading" class="empty">
-        <span>{{ list.length ? t('launch.noTemplatesForPlat') : t('launch.emptyHint') }}</span>
-        <button v-if="!list.length" class="btn primary empty-cta" @click="openNew('fb')">+ {{ t('launch.newTemplate') }}</button>
+        <!-- 审查P1：三态区分——搜索无结果（可一键清空）/ 平台筛选空 / 全库空 -->
+        <span v-if="searchQ.trim()">{{ t('launch.noSearchMatch') }}「{{ searchQ.trim() }}」</span>
+        <span v-else-if="list.length">{{ t('launch.noTemplatesForPlat') }}</span>
+        <span v-else>{{ t('launch.emptyHint') }}</span>
+        <button v-if="searchQ.trim()" class="btn empty-cta" @click="searchQ = ''">{{ t('common.clear') }}</button>
+        <button v-else-if="!list.length" class="btn primary empty-cta" @click="openNew('fb')">+ {{ t('launch.newTemplate') }}</button>
       </div>
 </div>
 
@@ -2488,7 +2492,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
     </el-dialog>
 
     <!-- 编辑抽屉：系列/组/广告 三级 -->
-    <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="760px" :destroy-on-close="true" :before-close="onEditBeforeClose">
+    <el-drawer v-model="editOpen" :title="editing ? t('launch.editTemplate') : t('launch.newTemplate')" direction="rtl" size="min(760px, 96vw)" :destroy-on-close="true" :before-close="onEditBeforeClose">
       <div class="edit-body">
       <!-- 平台（建模板时已定，编辑器内只读展示——FB/TT 三件套链路不同，不可中途切） -->
       <div class="plat-ro-row">
@@ -3278,7 +3282,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-drawer>
 
     <!-- 素材选择器 -->
-    <el-drawer v-model="assetPickerOpen" :title="t('launch.selectAsset')" direction="rtl" size="560px" append-to-body>
+    <el-drawer v-model="assetPickerOpen" :title="t('launch.selectAsset')" direction="rtl" size="min(560px, 96vw)" append-to-body>
       <div class="picker-bar" style="display:flex;justify-content:flex-end;margin-bottom:8px">
         <input ref="pickerFileInput" type="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo" style="display:none" @change="onPickerUpload" />
         <button class="btn sm" :disabled="pickerUploading || pickerLoading" @click="pickerFileInput?.click()">{{ pickerUploading ? t('launch.pickerUploading') : '↑ ' + t('launch.pickerUpload') }}</button>
@@ -3293,7 +3297,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-drawer>
 
     <!-- Post Picker（选已有主页帖 → 跟帖） -->
-    <el-drawer v-model="postPickerOpen" :title="t('launch.postPickerTitle')" direction="rtl" size="560px" append-to-body>
+    <el-drawer v-model="postPickerOpen" :title="t('launch.postPickerTitle')" direction="rtl" size="min(560px, 96vw)" append-to-body>
       <div class="hint" style="margin-bottom:10px">{{ t('launch.postPickerHint') }}</div>
       <div class="picker-grid" v-loading="postPickerLoading">
         <div v-for="p in pickerPosts" :key="p.id" class="picker-card" @click="pickPost(p)">
@@ -3314,7 +3318,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dialog>
 
     <!-- 部署抽屉 -->
-    <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="760px">
+    <el-drawer v-model="deployOpen" :title="t('launch.deployTitle', { name: deployTpl?.name||'' })" direction="rtl" size="min(760px, 96vw)">
       <div class="d">{{ deployTpl?.platform === 'tt' ? t('launch.ttDeploySubtitle') : t('launch.deploySubtitle') }}</div>
       <!-- 主页权限总览（令牌×主页权限面；FB 专属，懒加载折叠面板） -->
       <div v-if="deployTpl?.platform !== 'tt'" class="pp-ov">
@@ -3387,7 +3391,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-if="deployTpl?.post_source==='reuse'" class="deploy-reuse-hint">{{ t('launch.deployReuseHint') }}（{{ (deployTpl?.reuse_post_ref||'').split('_')[0] }}）</div>
       <div v-if="deployMode==='single' && deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
       <div class="deploy-search-row">
-        <input v-model="deploySearch" class="inp" :placeholder="t('launch.searchAccountPlaceholder')" />
+        <el-input v-model="deploySearch" clearable :placeholder="t('launch.searchAccountPlaceholder')" />
         <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
 </div>
       <div class="acc-batch-row">
@@ -3624,7 +3628,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dialog>
 
     <!-- 模板已部署清单（卡片「已部署 N」入口；展开单次看明细+广告当前状态；表格式网格对齐） -->
-    <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="720px">
+    <el-drawer v-model="depOpen" :title="t('launch.deployedListTitle', { name: depTpl?.name || '' })" direction="rtl" size="min(720px, 96vw)">
       <div v-loading="depLoading">
         <div v-for="j in depJobs" :key="j.id" class="dep-job">
           <div class="dep-job-head" @click="toggleDepJob(j)">
@@ -3925,6 +3929,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .batch-preview{margin-top:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;color:var(--t2)}
 .pf-series-count{padding:8px 0 0;font-size:13px;color:var(--ac)}
 .deploy-search-row .inp{flex:1}
+.deploy-search-row .el-input{flex:1}
 /* 账户行内主页/像素配置：label 定宽对齐（FB 双下拉 / TT 单下拉共用） */
 .acc-config{padding:8px 12px;background:var(--bg3);display:grid;grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr);gap:6px 10px;align-items:center}
 .acc-config label{font-size:12px;color:var(--t3)}

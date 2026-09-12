@@ -536,8 +536,9 @@ const countryLabel = (code) => {
           </div>
         </div>
         <div class="card-ops">
-          <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" @click="analyze(a)">
-            {{ analyzingIds.has(a.id) ? analyzeStageText(a) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
+          <!-- 审查P2：分析中固定宽度文案（阶段详情 hover 看）——长阶段文案曾致操作行抖动 -->
+          <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" :title="analyzingIds.has(a.id) ? analyzeStageText(a) : ''" @click="analyze(a)">
+            {{ analyzingIds.has(a.id) ? t('assets.analyzingSimple', { s: analyzeElapsed[a.id] || 0 }) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
           </button>
           <!-- 批BS：「文案」放出（喂投放的高价值入口）；「详情」撤下——点缩略图即预览，按钮冗余 -->
           <button class="op" @click="onCardCmd('copy', a)">{{ t('assets.copyAudience') }}</button>
@@ -769,7 +770,7 @@ const countryLabel = (code) => {
 .dur-badge { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 4px; }
 /* TK 竖屏徽章：TikTok 品牌红 + 加粗，一眼可辨 */
 .tk-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(254,44,85,.9); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; letter-spacing: .3px; }
-.type-badge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.6); color: #fff; font-size:10px   /* UI审计B：9px 中文笔画不可读 */; padding: 1px 5px; border-radius: 4px; }
+.type-badge { position: absolute; top: 4px; left: 30px; background: rgba(0,0,0,.6); color: #fff; font-size:10px; padding: 1px 5px; border-radius: 4px; }   /* left 30px 让位 hover 勾选框（审查P2 重叠） */
 .card-body { padding: 8px 10px; flex: 1; }
 .name { font-size: 13px; color: var(--t1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
 .name-edit { display: flex; }
@@ -781,7 +782,7 @@ const countryLabel = (code) => {
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; align-items: center; }
-.op { background: none; border: none; color: var(--t3); font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.op { background: none; border: 1px solid var(--bd); color: var(--t2); font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 4px; }   /* 审查P2：与 FormTemplates/LaunchTemplates 卡操作对齐（曾无边框三页割裂） */
 .op:hover { background: var(--bg3); color: var(--t1); }
 .op.danger:hover { color: var(--error); }
 .op.primary-op { color: var(--ac); }

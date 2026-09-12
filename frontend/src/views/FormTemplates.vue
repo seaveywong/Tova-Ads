@@ -220,7 +220,7 @@ const hardDelete = async (item, kind) => {
   try { await ElMessageBox.confirm(tip, t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }) } catch { return }
   try {
     await DELETE(kind === 'form' ? '/form-templates/forms/' + item.id : '/form-templates/messages/' + item.id)
-    ElMessage.success(t('common.savedOk'))
+    ElMessage.success(t('adm.deleted'))
     if (kind === 'form') { forms.value = forms.value.filter(x => x.id !== item.id) }
     else { messages.value = messages.value.filter(x => x.id !== item.id) }
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
@@ -317,7 +317,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     <header class="page-head">
       <div class="ph-left">
         <h1 class="ph-title">{{ t('formtpl.pageTitle') }}</h1>
-        <span class="ph-fresh">{{ t('formtpl.countSummary', { f: forms.length, m: messages.length }) }}</span>
+        <span class="ph-fresh">{{ t('formtpl.countSummary', { f: tab==='form' ? filteredForms.length : forms.length, m: messages.length }) }}</span>
       </div>
       <div class="ph-actions">
         <!-- 表单建时选平台（payload 按平台构建，建后不可改）；消息模板保持单按钮 -->
@@ -331,7 +331,8 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">{{ t('formtpl.tabForm') }}</button>
           <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
         </div>
-        <div v-if="tab==='form'" class="tabs">
+        <!-- 平台子筛选：与主 tab 同胶囊但弱化（审查P2：与上方主 tab 视觉区分） -->
+        <div v-if="tab==='form'" class="tabs sub-tabs">
           <button :class="['tab',{on:formPlatFilter==='all'}]" @click="formPlatFilter='all'">{{ t('common.all') }}</button>
           <button :class="['tab',{on:formPlatFilter==='fb'}]" @click="formPlatFilter='fb'">Facebook</button>
           <button :class="['tab',{on:formPlatFilter==='tt'}]" @click="formPlatFilter='tt'">TikTok</button>
@@ -377,7 +378,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <div class="card-head">
           <span class="card-name"><span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>{{ item.name }}</span>
         </div>
-        <div class="card-copy">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
+        <div class="card-copy" :title="item.welcome_text || ''">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
         <div class="card-meta"><span class="meta-chip">{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
         <div class="card-ops">
           <button class="op primary" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
@@ -559,7 +560,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         </div>
       </div>
       <template #footer>
-        <button class="btn" @click="formOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn" @click="onFormBeforeClose(() => { formOpen = false })">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="saving" @click="saveForm">{{ saving?t('formtpl.saving'):t('common.save') }}</button>
       </template>
     </el-drawer>
@@ -600,7 +601,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         </template>
       </div>
       <template #footer>
-        <button class="btn" @click="msgOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn" @click="onMsgBeforeClose(() => { msgOpen = false })">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="saving" @click="saveMsg">{{ saving?t('formtpl.saving'):t('common.save') }}</button>
       </template>
     </el-drawer>
@@ -675,6 +676,10 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .page{display:flex;flex-direction:column;gap:14px}
 .bar{display:flex;justify-content:space-between;align-items:center}
 .tabs{display:flex;gap:3px;background:var(--bg3);padding:3px;border-radius:8px}
+/* 平台子筛选（审查P2）：与主 tab 区分——透明底、小号、细字重 */
+.sub-tabs{background:transparent;padding:0;gap:2px}
+.sub-tabs .tab{padding:5px 12px;font-size:12px;font-weight:400}
+.sub-tabs .tab.on{background:var(--bg3);color:var(--t1)}
 .tab{padding:7px 16px;border:none;background:transparent;color:var(--t3);border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:500}
 .tab.on{background:var(--bg2);color:var(--t1)}
 .btn{padding:7px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}

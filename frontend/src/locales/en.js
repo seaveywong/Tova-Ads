@@ -929,6 +929,7 @@ export default {
     activated: 'Activated', paused: 'Paused', active: 'Active',
     budgetGtZero: 'Budget must be greater than 0', budgetUpdated: 'Budget updated',
     delConfirm: 'Delete "{name}"? This cannot be undone.', delCascadeCampaign: '⚠ Will also delete ALL ad sets and ads under it (irreversible on FB)', delCascadeAdset: '⚠ Will also delete all ads under it (irreversible on FB)', filterIdleTip: 'Container on but no ads effectively delivering under it', deleted: 'Deleted',
+    filterAbnormalTip: 'Disapproved / in review / with issues / banned and other abnormal states', accBannedTip: 'Account is disabled by Facebook or has a disable reason — status from cached snapshot', accUnmanagedTip: 'Token lost or unmanaged — data is the last snapshot; actions may not take effect', clearDrill: 'Exit drill-down',
     selectRowsFirst: 'Select ad rows first',
     batchPauseConfirm: 'Pause {n} ads?', batchPauseTitle: 'Confirm batch pause',
     batchResult: '{ok}/{n} succeeded', batchOpFail: 'Batch operation failed',

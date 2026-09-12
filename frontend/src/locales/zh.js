@@ -941,6 +941,7 @@ export default {
     activated: '已开启', paused: '已暂停', active: '投放中',
     budgetGtZero: '预算必须大于 0', budgetUpdated: '预算已更新',
     delConfirm: '删除「{name}」？删除后不可恢复。', delCascadeCampaign: '⚠ 将连带删除其下全部广告组和广告（FB 不可逆）', delCascadeAdset: '⚠ 将连带删除其下全部广告（FB 不可逆）', filterIdleTip: '容器开启但下面没有生效投放中的广告', deleted: '已删除',
+    filterAbnormalTip: '被拒/审核中/有问题/被封等非正常态', accBannedTip: '账户已被 FB 禁用或存在禁用原因——状态来自缓存快照', accUnmanagedTip: '账户令牌已失效或取消纳管——数据是最后快照，操作可能不生效', clearDrill: '退出下钻',
     selectRowsFirst: '先点选广告行',
     batchPauseConfirm: '批量暂停 {n} 条广告？', batchPauseTitle: '确认批量暂停',
     batchResult: '{ok}/{n} 成功', batchOpFail: '批量操作失败',

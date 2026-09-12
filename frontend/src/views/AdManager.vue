@@ -120,6 +120,7 @@ watch(tab, level => {
   const pref = viewPrefs.value[level]
   if (pref) { sortKey.value = pref.sortKey; sortDir.value = pref.sortDir }
   selected.value = new Set(); budgetDialog.value = false
+  batchResults.value = []   // 审查P2：批量结果条随 tab 切换清空（曾永驻且无关闭入口）
 }, { flush: 'sync' })
 sortKey.value = viewPrefs.value.campaign.sortKey
 sortDir.value = viewPrefs.value.campaign.sortDir
@@ -261,7 +262,6 @@ const viewCurs = computed(() => {
 const mixedCur = computed(() => viewCurs.value.size > 1)
 const viewCur = computed(() => (mixedCur.value || !viewCurs.value.size) ? 'USD' : [...viewCurs.value][0])
 // 预算列头币种标注：单一币种时显示 (XXX)；多币种混选不标（各行已带本币代码）
-const budgetCurTag = computed(() => (viewCurs.value.size && !mixedCur.value) ? ' (' + viewCur.value + ')' : '')
 const fmtSpendCol = (a) => mixedCur.value ? fmtMoney(a.spend_usd) : fmtAmount(a.spend, viewCur.value)
 const fmtCpaCol = (a) => mixedCur.value ? (a.cpa_usd ? fmtMoney(a.cpa_usd) : '-') : (a.cpa ? fmtAmount(a.cpa, viewCur.value) : '-')
 
@@ -899,7 +899,7 @@ const unsubscribeLeads = async () => {
         <div class="ctrl-bar">
       <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
       <button class="ctrl-btn create-btn" @click="router.push({ name: 'launch-templates' })">＋ {{ t('adm.createAd') }}</button>
-      <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
+      <el-select v-if="tab !== 'lead'" v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
         </template>
@@ -909,7 +909,7 @@ const unsubscribeLeads = async () => {
         </el-option>
       </el-select>
       <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
-      <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'">{{ t('adm.filterAbnormal') }}</button></div>
+      <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'" :title="t('adm.filterAbnormalTip')">{{ t('adm.filterAbnormal') }}</button></div>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
       <el-popover v-if="tab !== 'lead'" trigger="click" width="250" placement="bottom-end">
         <template #reference><button class="ctrl-btn">{{ t('adm.columns') }}</button></template>
@@ -917,7 +917,7 @@ const unsubscribeLeads = async () => {
           <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
         </el-checkbox-group>
       </el-popover>
-      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')"> {{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
+      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')">{{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheAdsStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
@@ -944,14 +944,13 @@ const unsubscribeLeads = async () => {
       <div :class="['tab', { on: tab === 'adset' }]" @click="tab = 'adset'; selected = new Set()">{{ t('adm.tabAdset') }}</div>
       <div :class="['tab', { on: tab === 'ad' }]" @click="tab = 'ad'; selected = new Set()">{{ t('adm.tabAd') }}</div>
       <div :class="['tab', { on: tab === 'lead' }]" @click="switchLeadTab">{{ t('adm.tabLead') }}</div>
-      <div v-if="drillName" class="drill-tag">{{ drillName }} <span @click="clearDrill">✕</span></div>
       <span v-if="platform !== 'all'" :class="['scope-chip', platform]">{{ platform === 'fb' ? 'Facebook' : 'TikTok' }} · {{ t('adm.scopeAccounts', { n: platAccounts.length }) }}</span>
     </div>
     <div v-if="tab !== 'lead'" class="manager-tools">
       <nav class="breadcrumbs" :aria-label="t('adm.pageTitle')">
         <button class="ctrl-btn sm" @click="tab = 'campaign'; clearDrill()">{{ t('adm.allCampaigns') }}</button>
         <template v-if="drillCampaign"><span>›</span><button class="ctrl-btn sm" @click="tab = 'adset'; drillAdset = ''">{{ campaignCrumb }}</button></template>
-        <template v-if="drillAdset"><span>›</span><span>{{ adsetCrumb }}</span></template>
+        <template v-if="drillAdset"><span>›</span><span>{{ adsetCrumb }}</span><span class="crumb-x" @click="clearDrill" :title="t('adm.clearDrill')">✕</span></template>
       </nav>
     </div>
     <div class="tbl" v-if="tab !== 'lead'" v-loading="loading">
@@ -960,7 +959,7 @@ const unsubscribeLeads = async () => {
           <th class="select-cell"><input type="checkbox" :aria-label="t('adm.selectAll')" :checked="allSelected" @change="selectAll" /></th>
           <th class="status-col"><button class="sort-button" @click="sortBy('_status_rank')">{{ t('common.status') }} {{ sortIcon('_status_rank') }}</button></th>
           <th class="name-col"><button class="sort-button" @click="sortBy('name')">{{ t(tab === 'campaign' ? 'adm.colSeries' : tab === 'adset' ? 'adm.colAdset' : 'adm.tabAd') }} {{ sortIcon('name') }}</button></th>
-          <th v-for="col in visibleColumns" :key="col.id" :style="{ width: col.width + 'px' }"><button class="sort-button" :disabled="!col.sort" @click="col.sort && sortBy(col.sort)">{{ t('adm.' + col.label) }} {{ ['spend','cpa','cost_per_result'].includes(col.id) ? '(' + viewCur + ')' : '' }} {{ sortIcon(col.sort) }}</button></th>
+          <th v-for="col in visibleColumns" :key="col.id" :style="{ width: col.width + 'px' }"><button class="sort-button" :disabled="!col.sort" @click="col.sort && sortBy(col.sort)">{{ t('adm.' + col.label) }} {{ ['spend','cpa','cost_per_result','budget'].includes(col.id) ? '(' + viewCur + ')' : '' }} {{ sortIcon(col.sort) }}</button></th>
           <th class="action-col">{{ t('adm.actions') }}</th>
         </tr></thead>
         <tbody>
@@ -969,14 +968,14 @@ const unsubscribeLeads = async () => {
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
               <td><div class="status-cell" :title="stIdleTitle(a, tab)">
                 <div class="st-line1"><el-switch :model-value="effectiveStatusOf(a, tab) === 'ACTIVE'" size="small" @change="toggleStatus(a)" :disabled="opLoading || !!accStateTag(a)" /><span :class="['st-badge', statusDot(effectiveStatusOf(a, tab))]">{{ statusLabel(effectiveStatusOf(a, tab)) }}</span></div>
-                <span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]">{{ accStateTag(a).label }}</span>
+                <span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]" :title="accStateTag(a).cls === 'banned' ? t('adm.accBannedTip') : t('adm.accUnmanagedTip')">{{ accStateTag(a).label }}</span>
               </div></td>
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
                   <div class="sid">{{ a.account_name }} · {{ a.id }}</div>
                   <div v-if="tab !== 'campaign'" class="sid">{{ contextOf(a).campaign?.name }}<template v-if="tab === 'ad' && contextOf(a).adset"> › {{ contextOf(a).adset.name }}</template></div>
-                  <div class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.snapshot_at ? t('adm.metricsAt', { time: fmtTime(a.snapshot_at) }) : ''">{{ snapshotText(a) }}</div>
+                  <div v-if="snapshotStale(a) || accDead(a)" class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.snapshot_at ? t('adm.metricsAt', { time: fmtTime(a.snapshot_at) }) : ''">{{ snapshotText(a) }}</div>
                   <span v-if="tab === 'ad' && redirectMap[a.id]" class="rd-mark" @click="openRedirect(a)">{{ t('adm.redirectShort') }}</span>
                 </div>
               </div></td>
@@ -1004,7 +1003,7 @@ const unsubscribeLeads = async () => {
         </tbody>
         <tfoot v-if="curList.length"><tr><td></td><td></td><td>{{ totalLabel }}</td><td v-for="col in visibleColumns" :key="col.id">{{ sumMetric(col.id) }}</td><td></td></tr></tfoot>
       </table>
-      <div v-if="!curList.length && !loading" class="empty">{{ t('adm.emptyAdsHint') }}</div>
+      <div v-if="!curList.length && !loading && !loadError" class="empty">{{ t('adm.emptyAdsHint') }}<button class="btn primary" style="margin-top:10px" @click="router.push({ name: 'launch-templates' })">+ {{ t('launch.newTemplate') }}</button></div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
       <div class="leads-bar">
@@ -1063,8 +1062,8 @@ const unsubscribeLeads = async () => {
       </div>
       <template #footer>
         <button class="ctrl-btn" :disabled="pagesLoading" @click="loadLeadPages">⟳ {{ t('common.refresh') }}</button>
-        <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected"> {{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
-        <button class="ctrl-btn" style="color: var(--error)" :disabled="opLoading" @click="purgeStalePages"> {{ t('adm.purgeStaleBtn') }}</button>
+        <button class="ctrl-btn" :disabled="opLoading || !pageSel.size" @click="subscribeSelected">{{ t('adm.ppSubscribeSelected', { n: pageSel.size }) }}</button>
+        <button class="ctrl-btn" style="color: var(--error)" :disabled="opLoading" @click="purgeStalePages">{{ t('adm.purgeStaleBtn') }}</button>
       </template>
     </el-dialog>
 
@@ -1228,11 +1227,11 @@ const unsubscribeLeads = async () => {
 .slide-enter-from, .slide-leave-to { opacity: 0; transform: translateY(-8px) }
 .batch-bar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; margin-bottom: 8px; background: var(--bg2); border: 1px solid var(--ac); border-radius: var(--rs) }
 .batch-count { font-size: 12px; color: var(--ac); font-weight: 600; margin-right: 4px }
-.tabs { display: flex; align-items: center; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--bd); padding-left: 4px }
+.tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--bd); padding-left: 4px }
 .tab { padding: 6px 14px; font-size: 13px; color: var(--t3); cursor: pointer; border-bottom: 2px solid transparent }
 .tab.on { color: var(--t1); border-bottom-color: var(--ac); font-weight: 600 }
-.drill-tag { margin-left: auto; font-size: 11px; color: var(--t2); background: var(--bg3); padding: 2px 8px; border-radius: 10px }
-.drill-tag span { cursor: pointer; color: var(--t3); margin-left: 4px }
+.crumb-x { cursor: pointer; color: var(--t3); margin-left: 4px; font-size: 11px }
+.crumb-x:hover { color: var(--t1) }
 /* Tab 行右缘平台范围 chip（平台≠all 时显示，品牌色语境） */
 .scope-chip { margin-left: auto; display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border-radius: 10px; background: var(--bg3); color: var(--t2); font-size: 11px; white-space: nowrap }
 .scope-chip.fb { background: rgba(24,119,242,.12); color: #5aa2ff }
