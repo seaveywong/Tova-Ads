@@ -1672,6 +1672,7 @@ def list_accounts(
             "is_managed": a.is_managed if a.is_managed is not None else True,
             "warmup_state": a.warmup_state or "none",
             "keepalive_state": a.keepalive_state or "", "keepalive_note": a.keepalive_note or "",
+            "keepalive_page_id": a.keepalive_page_id or "",
             "balance": bal, "balance_usd": (round(_tu, 2) if (bal is not None and (_tu := to_usd(bal, cur)) is not None) else None),   # 未知币种 None 不崩
             "spend_cap": from_minor_units(a.spend_cap, cur),
             "amount_spent": from_minor_units(a.amount_spent, cur),

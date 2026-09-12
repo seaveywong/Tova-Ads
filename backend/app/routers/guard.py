@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.log_utils import write_log, new_trace_id
+from ..core.fb_client import FbApiError
 from ..models.guard import GuardRule, GuardAllowance
 from ..models.fb import Account
 from pydantic import BaseModel
@@ -703,3 +704,78 @@ def manual_keepalive(user: CurrentUser = Depends(require_superadmin)):
     reset_burnt=True：熔断账户（强绑主页不匹配×2）也会重试一次——手动重触发是唯一解封途径。"""
     from ..services.guard_engine import run_keepalive
     return run_keepalive(reset_burnt=True)
+
+
+# ── 保活主页手动指定（迁移0098）：强绑户熔断后用户指明该用哪个页 ──
+
+class KeepalivePageIn(BaseModel):
+    act_id: str
+    page_id: str | None = None   # None/空 = 清除指定（回到自动挑选）
+
+
+@router.get("/keepalive/pages")
+def keepalive_pages(act_id: str, user: CurrentUser = Depends(require_permission("ads.pause")),
+                    db: Session = Depends(get_db)):
+    """账户写令牌可访问的主页列表（保活主页选择器用；标注 ADVERTISE 权限与当前指定）。"""
+    from ..core.fb_tokens import client_for_account
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    fb = client_for_account(db, user.tenant_id, act_id, "write")
+    if not fb:
+        raise HTTPException(400, "该账户无可用写令牌——无法拉取主页列表")
+    try:
+        pages = fb.get_pages()
+    except FbApiError as e:
+        raise HTTPException(400, e.friendly)
+    return {
+        "current_page_id": acc.keepalive_page_id or "",
+        "pages": [{
+            "id": p.get("id", ""), "name": p.get("name", ""),
+            "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
+            "fan_count": p.get("fan_count", 0),
+        } for p in pages],
+    }
+
+
+@router.put("/keepalive/page")
+def set_keepalive_page(body: KeepalivePageIn,
+                       user: CurrentUser = Depends(require_permission("ads.pause")),
+                       db: Session = Depends(get_db)):
+    """指定/清除保活主页。指定即解除 burnt（用户已知该用哪个页，熔断失去意义）；
+    下次扫描（每日 cron 或手动「立即保活」）固定用指定页。"""
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == body.act_id).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    old = acc.keepalive_page_id or ""
+    new = (body.page_id or "").strip() or None
+    acc.keepalive_page_id = new
+    if new and acc.keepalive_state == "burnt":
+        acc.keepalive_state = ""   # 解除熔断（重试失败会重新落 failed/burnt）
+        acc.keepalive_note = f"已指定主页 {new}，待下次保活扫描重试"
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, action_type="keepalive_set_page", source="user",
+              target_type="account", target_id=body.act_id, result="success",
+              trigger_detail=f"act={body.act_id} page={new or '(清除)'} was={old or '(无)'}")
+    db.commit()
+    return {"ok": True, "act_id": body.act_id, "page_id": new,
+            "unburnt": bool(new and old != new)}
+
+
+@router.post("/keepalive/retry")
+def keepalive_retry_one(body: KeepalivePageIn,
+                        user: CurrentUser = Depends(require_superadmin)):
+    """单账户保活重试（花钱操作同 /keepalive/run 口径——超管）。指定主页后「保存并重试」用；
+    只扫该账户，秒回单条结果。"""
+    from ..services.guard_engine import run_keepalive
+    if not (body.act_id or "").strip():
+        raise HTTPException(400, "act_id 必填")
+    r = run_keepalive(reset_burnt=True, only_act_id=body.act_id.strip())
+    if r.get("skipped") == "lock_busy":
+        raise HTTPException(409, "保活扫描正在运行中（另一进程持有锁），请稍后重试")
+    res = (r.get("results") or [None])[0] if r.get("results") else None
+    return {"checked": r.get("checked", 0), "result": res or
+            {"act_id": body.act_id, "result": "skip", "category": "not_scanned",
+             "reason": "账户不在扫描范围（未纳管/非正常状态/非 FB）"}}

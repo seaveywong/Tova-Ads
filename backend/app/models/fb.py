@@ -69,6 +69,7 @@ class Account(Base):
     # burnt=熔断（强绑户连续 2 页撞 1815645，cron 跳过，手动「立即保活」重试）
     keepalive_state = Column(Text)
     keepalive_note = Column(Text)
+    keepalive_page_id = Column(Text)   # 手动指定保活主页（强绑户熔断后指定；run_keepalive 优先用它）
     is_managed = Column(Boolean, nullable=False, default=True)  # false=已取消纳管（软删：保留行+名字+历史消耗）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

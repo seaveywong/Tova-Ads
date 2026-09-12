@@ -218,6 +218,55 @@ const kaBadgeText = (a) => ({
 }[a.keepalive_state] || t('ads.warmupShort'))
 const kaBadgeCls = (s) => ({ burnt: 'burnt', failed: 'burnt', has_spend: 'spend' }[s] || '')
 const kaBadgeTip = (a) => a.keepalive_note || t('ads.warmupBadgeTip')
+// 熔断/失败徽标可点 → 指定保活主页弹窗（最短修复路径：看到红的→点它→选页→重试）
+const kaBadgeClickable = (a) => ['burnt', 'failed'].includes(a.keepalive_state) && a.warmup_state === 'warming'
+
+// ── 指定保活主页弹窗 ──
+const kaPageOpen = ref(false)
+const kaPageAcc = ref(null)          // 目标账户行
+const kaPages = ref([])              // 写令牌可访问主页
+const kaPageSel = ref('')            // 选中 page_id（'' = 自动挑选）
+const kaPageLoading = ref(false)
+const kaPageSaving = ref(false)
+const kaPageRetrying = ref(false)
+const kaPageRetryRes = ref(null)     // 单账户重试结果（弹窗内直接展示）
+const openKaPage = async (a) => {
+  kaPageAcc.value = a; kaPageOpen.value = true
+  kaPageSel.value = ''; kaPages.value = []; kaPageRetryRes.value = null; kaPageLoading.value = true
+  try {
+    const r = await GET(`/guard/keepalive/pages?act_id=${a.act_id}`)
+    kaPages.value = r.pages || []
+    kaPageSel.value = r.current_page_id || ''
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')); kaPageOpen.value = false }
+  kaPageLoading.value = false
+}
+const saveKaPage = async (andRetry) => {
+  const a = kaPageAcc.value
+  if (!a) return
+  kaPageSaving.value = true
+  try {
+    await PUT('/guard/keepalive/page', { act_id: a.act_id, page_id: kaPageSel.value || null })
+    // 本地行同步（指定页/解除熔断），下次 load 校准
+    a.keepalive_page_id = kaPageSel.value || ''
+    if (kaPageSel.value && a.keepalive_state === 'burnt') { a.keepalive_state = ''; a.keepalive_note = '' }
+    if (!andRetry) {
+      ElMessage.success(kaPageSel.value ? t('ads.kaPageSaved') : t('ads.kaPageCleared'))
+      kaPageOpen.value = false; kaPageSaving.value = false
+      return
+    }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')); kaPageSaving.value = false; return }
+  kaPageSaving.value = false
+  // 保存并重试（超管；单账户秒回）
+  if (!isSuper.value) return ElMessage.warning(t('ads.kaRetrySuperOnly'))
+  kaPageRetrying.value = true; kaPageRetryRes.value = null
+  try {
+    const r = await POST('/guard/keepalive/retry', { act_id: a.act_id }, 120000)
+    kaPageRetryRes.value = r.result
+    // 重试后刷新账户行（状态徽标实时反映 active_ad/failed/burnt）
+    if (r.result && ['success', 'skip'].includes(r.result.result)) { await load() }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  kaPageRetrying.value = false
+}
 
 // ── 手动触发保活扫描（与设置→保活「立即运行」同一端点/结果弹窗，超管可见）──
 const kaRunning = ref(false)
@@ -250,6 +299,8 @@ const onCmd = async (cmd, a) => {
     catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   } else if (cmd === 'warmup') {
     await toggleWarmup([a.act_id], a.warmup_state !== 'warming')
+  } else if (cmd === 'kapage') {
+    openKaPage(a)
   } else if (cmd === 'remove') {
     try {
       await ElMessageBox.confirm(t('ads.removeConfirm', { name: a.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
@@ -367,7 +418,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         <div v-else class="row">
         <div @click.stop><input type="checkbox" :checked="isAccSelected(d.a.act_id)" @change="toggleAcc(d.a.act_id)" /></div>
         <div class="st-cell">
-          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :class="kaBadgeCls(d.a.keepalive_state)" :title="kaBadgeTip(d.a)">{{ kaBadgeText(d.a) }}</span><span v-if="d.a.no_token" class="tag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></div>
+          <div><span class="dot" :class="statusDot(d.a.account_status)"></span>{{ statusLabel(d.a.account_status) }}<span v-if="d.a.warmup_state === 'warming'" class="warmup-badge" :class="[kaBadgeCls(d.a.keepalive_state), { clickable: kaBadgeClickable(d.a) }]" :title="kaBadgeClickable(d.a) ? t('ads.kaBadgeClickTip') : kaBadgeTip(d.a)" @click="kaBadgeClickable(d.a) && openKaPage(d.a)">{{ kaBadgeText(d.a) }}<span v-if="d.a.keepalive_page_id" class="ka-pin">📌</span></span><span v-if="d.a.no_token" class="tag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></div>
           <div v-if="drInfo(d.a)" class="dr-line" :class="drInfo(d.a).tone">{{ t('ads.drPrefix') }}{{ drInfo(d.a).label }}</div>
           <div v-if="throttleInfo(d.a)" class="dr-line" :class="throttleInfo(d.a).tone">{{ throttleInfo(d.a).label }}</div>
         </div>
@@ -400,6 +451,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
                 <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
                 <el-dropdown-item command="group">{{ t('ads.groupEditTitle') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
+                <el-dropdown-item command="kapage">{{ t('ads.kaPageMenu') }}<span v-if="d.a.keepalive_page_id" class="ka-set-mark">✓</span></el-dropdown-item>
                 <el-dropdown-item command="remove" class="danger">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -442,6 +494,55 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
       </div>
     </div>
 
+    <!-- 指定保活主页弹窗（三入口复用：行菜单 / 熔断徽标点击 / 结果弹窗 burnt 行） -->
+    <el-dialog v-model="kaPageOpen" :title="t('ads.kaPageTitle')" width="480px" append-to-body>
+      <div v-if="kaPageAcc" class="kpg">
+        <!-- 账户条：名称 + ID + 当前保活状态徽标 -->
+        <div class="kpg-acc">
+          <span class="kpg-name" :title="kaPageAcc.name">{{ kaPageAcc.name }}</span>
+          <code class="kpg-id">{{ kaPageAcc.act_id }}</code>
+          <span class="warmup-badge" :class="kaBadgeCls(kaPageAcc.keepalive_state)">{{ kaBadgeText(kaPageAcc) }}</span>
+        </div>
+        <div v-if="kaPageAcc.keepalive_note" class="kpg-note" :title="kaPageAcc.keepalive_note">{{ kaPageAcc.keepalive_note }}</div>
+
+        <!-- 主页选择（radio 卡片式列表：自动 / 各主页带 ADVERTISE 权限与粉丝数） -->
+        <div v-loading="kaPageLoading" class="kpg-list">
+          <div class="kpg-opt" :class="{ on: kaPageSel === '' }" @click="kaPageSel = ''">
+            <span class="kpg-radio"></span>
+            <div class="kpg-opt-body">
+              <span class="kpg-opt-name">{{ t('ads.kaPageAuto') }}</span>
+              <span class="kpg-opt-sub">{{ t('ads.kaPageAutoHint') }}</span>
+            </div>
+          </div>
+          <div v-for="p in kaPages" :key="p.id" class="kpg-opt" :class="{ on: kaPageSel === p.id, warn: !p.can_advertise }" @click="kaPageSel = p.id">
+            <span class="kpg-radio"></span>
+            <div class="kpg-opt-body">
+              <span class="kpg-opt-name">{{ p.name }}<code class="kpg-opt-id">{{ p.id }}</code></span>
+              <span class="kpg-opt-sub">
+                {{ p.can_advertise ? t('ads.kaPageAdvOk') : t('ads.kaPageAdvNo') }}
+                <template v-if="p.fan_count"> · {{ Number(p.fan_count).toLocaleString() }} {{ t('ads.kaPageFans') }}</template>
+              </span>
+            </div>
+          </div>
+          <div v-if="!kaPages.length && !kaPageLoading" class="kpg-empty">{{ t('ads.kaPageNone') }}</div>
+        </div>
+
+        <div class="kpg-hint">💡 {{ t('ads.kaPageHint') }}</div>
+
+        <!-- 重试结果（保存并重试后原地展示，不用再开结果弹窗） -->
+        <div v-if="kaPageRetryRes" class="kpg-retry" :class="kaPageRetryRes.result === 'success' ? 'ok' : 'bad'">
+          <template v-if="kaPageRetryRes.result === 'success'">✓ {{ t('ads.kaRetryOk') }}</template>
+          <template v-else-if="kaPageRetryRes.result === 'skip'">⊘ {{ t('ads.kaRetrySkip') }}{{ kaPageRetryRes.reason ? '：' + kaPageRetryRes.reason : '' }}</template>
+          <template v-else>✗ {{ t('ads.kaRetryFail') }}{{ kaPageRetryRes.reason ? '：' + kaPageRetryRes.reason : '' }}</template>
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn" :disabled="kaPageSaving" @click="kaPageSel = ''; saveKaPage(false)">{{ t('ads.kaPageClearBtn') }}</button>
+        <button class="btn" :disabled="kaPageSaving || kaPageLoading" @click="saveKaPage(false)">{{ kaPageSaving ? t('common.saving') : t('common.save') }}</button>
+        <button v-if="isSuper" class="btn primary" :disabled="kaPageSaving || kaPageRetrying || kaPageLoading" @click="saveKaPage(true)">{{ kaPageRetrying ? t('ads.kaRetrying') : t('ads.kaPageSaveRetry') }}</button>
+      </template>
+    </el-dialog>
+
     <!-- 保活扫描结果（与设置→保活同款：汇总三数 + 每账户 成功/跳过原因/失败原因） -->
     <el-dialog v-model="kaResultOpen" :title="t('settings.kaResultTitle')" width="560px" append-to-body>
       <div v-if="kaResult" class="ka-result">
@@ -456,6 +557,9 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
             <span class="ka-name" :title="r.name">{{ r.name }}</span>
             <span class="ka-st" :class="kaResMeta(r.result).cls">{{ kaResMeta(r.result).label }}</span>
             <span v-if="r.result !== 'success'" class="ka-reason" :title="fbErrorText(r.category) || r.reason">{{ fbErrorText(r.category) || r.reason }}</span>
+            <!-- 熔断/失败行：快捷「指定主页」（入口三：结果弹窗直达修复） -->
+            <button v-if="r.result === 'fail' && ['keepalive_burnt','page_not_accessible','invalid_param'].includes(r.category)"
+                    class="ka-fix" @click="kaResultOpen = false; openKaPage({ act_id: r.act_id, name: r.name, keepalive_state: 'burnt', keepalive_note: r.reason })">{{ t('ads.kaPageFix') }}</button>
           </div>
           <div v-if="!(kaResult.results||[]).length" class="ka-empty">{{ t('settings.kaNoAccounts') }}</div>
         </div>
@@ -563,6 +667,37 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 /* 保活状态变体：spend=有消耗免保活(蓝灰)；burnt/failed=熔断/失败(红，hover 看 note) */
 .warmup-badge.spend { background: rgba(59,130,246,.12); color: #3b82f6 }
 .warmup-badge.burnt { background: rgba(239,68,68,.14); color: #ef4444 }
+.warmup-badge.clickable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px }
+.warmup-badge.clickable:hover { filter: brightness(1.2) }
+.ka-pin { font-size: 9px; margin-left: 2px }
+.ka-set-mark { margin-left: 6px; color: var(--success) }
+
+/* 指定保活主页弹窗（kpg）：radio 卡片列表 + 账户条 + 重试结果条 */
+.kpg { display: flex; flex-direction: column; gap: 10px }
+.kpg-acc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.kpg-name { font-weight: 600; font-size: 14px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.kpg-id { font-size: 11px; color: var(--t3) }
+.kpg-note { font-size: 11px; color: var(--warning); line-height: 1.5; padding: 6px 10px; background: rgba(255,159,10,.07); border-radius: 6px; max-height: 60px; overflow: auto }
+.kpg-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow: auto; min-height: 60px }
+.kpg-opt { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--bd); border-radius: 8px; cursor: pointer; transition: border-color .12s, background .12s }
+.kpg-opt:hover { border-color: var(--bd2) }
+.kpg-opt.on { border-color: var(--ac); background: var(--acg, rgba(10,132,255,.06)) }
+.kpg-opt.warn { opacity: .6 }
+.kpg-radio { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--t3); flex-shrink: 0; position: relative }
+.kpg-opt.on .kpg-radio { border-color: var(--ac) }
+.kpg-opt.on .kpg-radio::after { content: ''; position: absolute; inset: 2px; border-radius: 50%; background: var(--ac) }
+.kpg-opt-body { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
+.kpg-opt-name { font-size: 13px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.kpg-opt-id { font-size: 10px; color: var(--t3); margin-left: 6px }
+.kpg-opt-sub { font-size: 11px; color: var(--t3) }
+.kpg-empty { padding: 20px; text-align: center; color: var(--t3); font-size: 12px }
+.kpg-hint { font-size: 11px; color: var(--t3); line-height: 1.6 }
+.kpg-retry { font-size: 12px; padding: 8px 12px; border-radius: 6px; line-height: 1.5 }
+.kpg-retry.ok { background: rgba(48,209,97,.1); color: var(--success) }
+.kpg-retry.bad { background: rgba(255,69,58,.08); color: var(--error) }
+.ka-fix { margin-left: auto; flex-shrink: 0; font-size: 11px; color: var(--ac); background: none; border: 1px solid var(--ac); border-radius: 4px; padding: 1px 8px; cursor: pointer }
+.ka-fix:hover { background: var(--acg, rgba(10,132,255,.08)) }
+@media (max-width: 600px) { .kpg-name { max-width: 140px } }
 .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; z-index: var(--z-modal)   /* UI审计C：z token 落地 */ }
 .modal { background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 20px; width: 540px; max-width: 92vw; max-height: 80vh; overflow: auto }
 .modal-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-weight: 600 }

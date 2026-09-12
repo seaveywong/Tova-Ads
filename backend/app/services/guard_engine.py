@@ -3220,13 +3220,15 @@ def _ka_budget_minor(usd: float, currency: str) -> int:
     return max(1, int(round(amt * (1 if (currency or "USD").upper() in _ZD else 100))))
 
 
-def run_keepalive(reset_burnt: bool = False):
+def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
     """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $1/天 Page Like（详见各分支注释）。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。
 
     每轮把每账户结果落库 accounts.keepalive_state（active_ad/has_spend/failed/burnt）——
     Ads 页徽标按状态区分显示。burnt=熔断（强绑户连续 2 页撞 1815645），cron 跳过；
     reset_burnt=True（手动「立即保活」）时对 burnt 账户重试一次。
+    only_act_id：单账户重试（指定保活主页后「保存并重试」用）——只扫该账户，
+    bypass warming/纳管过滤不适用（重试对象必然在管且 warming/burnt）。
     """
     import os, random
     from ..core.keepalive_config import get_keepalive_config, DEFAULT_KEEPALIVE
@@ -3258,7 +3260,11 @@ def run_keepalive(reset_burnt: bool = False):
             Account.platform == "fb",
         )
         enabled_tenants = {tid for tid, c in tenant_cfgs.items() if c.get("enabled")}
-        if enabled_tenants:
+        if only_act_id:
+            # 单账户重试：不套 warming/租户开关过滤（指定主页后的「保存并重试」直达，
+            # 目标账户可能既非 warming 也非 enabled 租户——重试意图本身就是权威）
+            warming_q = warming_q.filter(Account.act_id == only_act_id)
+        elif enabled_tenants:
             warming_q = warming_q.filter(or_(
                 Account.warmup_state == "warming",
                 Account.tenant_id.in_(enabled_tenants),
@@ -3270,8 +3276,10 @@ def run_keepalive(reset_burnt: bool = False):
         created = skipped = failed = 0
         results = []  # 每账户结果（success/skip/fail + category），供前端结果弹窗
         for acc in warming:
-            # 熔断账户：cron 跳过；手动触发（reset_burnt=True）重试一次（再撞会重新熔断）
-            if acc.keepalive_state == "burnt" and not reset_burnt:
+            # 熔断账户：cron 跳过；手动触发（reset_burnt=True / 单账户重试）重试一次
+            if acc.keepalive_state == "burnt" and not reset_burnt and not only_act_id:
+                continue
+            if only_act_id and acc.act_id != only_act_id:
                 continue
             built = []
             fb = None
@@ -3324,9 +3332,23 @@ def run_keepalive(reset_burnt: bool = False):
 
                 # 4. 获取主页（批CC：只挑令牌有 ADVERTISE 权限的——今晨全败实证：
                 # pages[0] 常是无广告权限的主页 → 1487202 整批拒收）
+                # 指定主页（迁移0098）优先：强绑户熔断后用户手动指定的页只用它、不自动挑——
+                # 指定错会明确失败提示人工改（用户主动指定=权威，静默换页反而误导）
                 pages = fb.get_pages()
-                adv_pages = [p for p in pages
-                             if "ADVERTISE" in (p.get("tasks") or [])] or pages
+                if acc.keepalive_page_id:
+                    _spec = next((p for p in pages if p.get("id") == acc.keepalive_page_id), None)
+                    if not _spec:
+                        acc.keepalive_state = "failed"
+                        acc.keepalive_note = (f"指定保活主页 {acc.keepalive_page_id} 不在当前写令牌"
+                                              "的可访问主页列表——请换令牌或在弹窗重新指定")
+                        db.commit()
+                        failed += 1
+                        results.append(_ka_res(acc, "fail", "page_not_accessible", acc.keepalive_note))
+                        continue
+                    adv_pages = [_spec]
+                else:
+                    adv_pages = [p for p in pages
+                                 if "ADVERTISE" in (p.get("tasks") or [])] or pages
                 if not adv_pages:
                     acc.keepalive_state = "failed"; acc.keepalive_note = "无可用主页"
                     db.commit()
