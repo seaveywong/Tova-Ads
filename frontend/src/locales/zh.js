@@ -307,7 +307,7 @@ export default {
     batchSyncNoToken: '选中账户均未绑定令牌',
     selected: '已选 {n}',
     batchSync: '批量同步',
-    batchRemove: '批量移除',
+    batchRemove: '批量移除纳管',
     warmupArm: '开启保活',
     warmupDisarm: '取消保活',
     warmupShort: '保活',

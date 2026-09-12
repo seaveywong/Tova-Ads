@@ -295,7 +295,7 @@ export default {
     batchSyncNoToken: 'None of the selected accounts have a bound token',
     selected: '{n} selected',
     batchSync: 'Batch Sync',
-    batchRemove: 'Batch Remove',
+    batchRemove: 'Batch Unmanage',
     warmupArm: 'Enable Keepalive',
     warmupDisarm: 'Disable Keepalive',
     warmupShort: 'Keepalive',
