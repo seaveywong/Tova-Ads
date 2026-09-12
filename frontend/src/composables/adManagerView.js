@@ -49,12 +49,18 @@ export function searchMatches(row, query, context) {
 
 export const fbResult = row => row.results_fb_complete === false || row.results_fb == null || row.results_fb_available === false ? null : Number(row.results_fb)
 
-export function compareRows(a, b, { key, direction, mixedCurrency, blocked, statusRank }) {
+export function compareRows(a, b, { key, direction, mixedCurrency, blocked, statusRank, statusOf }) {
   const availability = Number(blocked(a)) - Number(blocked(b))
   if (availability) return availability
+  // 状态取行级函数（P0-1：派生态 NO_ACTIVE_ADS 等在此生效，而非恒读原始 effective_status——
+  // 曾 _rankMap 写了 NO_ACTIVE_ADS:2 却永远不可达，容器开着但零在投广告的系列与投放中同层）
+  const _st = row => (statusOf ? statusOf(row) : row.effective_status) || row.effective_status
   if (key === '_status_rank') {
-    const diff = statusRank(a.effective_status) - statusRank(b.effective_status)
-    return direction === 'desc' ? diff : -diff
+    // 状态列：desc=投放中在顶；同状态内 spend 降序作次级（曾直接返回掉到不稳定比较）
+    const diff = statusRank(_st(a)) - statusRank(_st(b))
+    if (diff) return direction === 'desc' ? diff : -diff
+    const sa = Number(a.spend_usd ?? a.spend ?? 0) || 0, sb = Number(b.spend_usd ?? b.spend ?? 0) || 0
+    return sb - sa || entityKey(a).localeCompare(entityKey(b))
   }
   let field = key
   if (mixedCurrency && ['spend', 'cpa', 'cost_per_result'].includes(field)) field += '_usd'
@@ -65,7 +71,7 @@ export function compareRows(a, b, { key, direction, mixedCurrency, blocked, stat
   if (va == null || vb == null) return va == null ? (vb == null ? entityKey(a).localeCompare(entityKey(b)) : 1) : -1
   const diff = key === 'name' ? String(va).localeCompare(String(vb), undefined, { numeric: true }) : Number(va) - Number(vb)
   if (diff) return direction === 'asc' ? diff : -diff
-  return statusRank(a.effective_status) - statusRank(b.effective_status) || entityKey(a).localeCompare(entityKey(b))
+  return statusRank(_st(a)) - statusRank(_st(b)) || entityKey(a).localeCompare(entityKey(b))
 }
 
 // 默认列后续新增时，给已保存列配置的用户一次性补上（列迁移版本号）：
@@ -92,10 +98,20 @@ export function normalizeViewPreferences(raw) {
     }
     out[level] = {
       columns: cols,
-      sortKey: sortKeys.has(saved.sortKey) ? saved.sortKey : 'spend',
+      // P0-2：默认排序改 '_status_rank'（投放中>暂停>无在投>异常，同态内 spend 降序）——
+      // 曾默认 spend desc 无状态层，烧完钱被停的系列因历史 spend 高排在投放中前面。
+      // sortV=2 迁移：已存 'spend'（从未显式点过状态列的旧默认）一次性迁到 '_status_rank'；
+      // 用户显式选过的其他列（name/cpa 等）保留不动。
+      sortKey: sortKeys.has(saved.sortKey) ? saved.sortKey : '_status_rank',
       sortDir: saved.sortDir === 'asc' ? 'asc' : 'desc',
     }
   }
+  if (Number(raw?.sortV) < 2) {
+    for (const level of ['campaign', 'adset', 'ad']) {
+      if (raw?.[level]?.sortKey === 'spend') out[level].sortKey = '_status_rank'
+    }
+  }
+  out.sortV = 2
   out.colsV = _COLS_MIGRATION
   return out
 }

@@ -610,6 +610,43 @@ const uploadLandingTpl = async () => {
 const delLandingTpl = async (tpl) => {
   try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
 }
+// 下载已上传模板（zip 打包回本地——可改后经上传同名覆盖传回；用户 2026-09-12 要求）
+const downloadLandingTpl = async (tpl) => {
+  const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
+  try {
+    const r = await fetch(BASE + `/landing-lib/templates/${tpl.id}/download`, { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') } })
+    if (!r.ok) throw new Error(`${r.status}`)
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${tpl.name || ('template-' + tpl.id)}.zip`
+    document.body.appendChild(a); a.click()
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 800)
+    ElMessage.success(t('landing.tplDlStarted', { name: tpl.name }))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+// 模板改名/描述（内容更新走上传同名 zip 覆盖）
+const tplRenameId = ref(null)
+const tplRenameForm = ref({ name: '', description: '' })
+const tplRenameSaving = ref(false)
+const openTplRename = (tpl) => {
+  tplRenameId.value = tpl.id
+  tplRenameForm.value = { name: tpl.name, description: tpl.description || '' }
+}
+const saveTplRename = async () => {
+  if (!tplRenameForm.value.name.trim()) return ElMessage.warning(t('landing.warnTplName'))
+  tplRenameSaving.value = true
+  try {
+    await PUT(`/landing-lib/templates/${tplRenameId.value}/meta`, {
+      name: tplRenameForm.value.name.trim(),
+      description: tplRenameForm.value.description.trim(),
+    })
+    ElMessage.success(t('common.saved'))
+    tplRenameId.value = null
+    await loadLandingTemplates()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  tplRenameSaving.value = false
+}
 const downloadTplRef = () => {
   const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
   fetch(BASE + '/landing-lib/templates/reference', { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || ''), 'X-Locale': localStorage.getItem('tova_locale') || 'zh' } })
@@ -1110,13 +1147,34 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <button class="btn primary" :disabled="tplUploading" @click="uploadLandingTpl">{{ tplUploading ? t('landing.uploading') : t('landing.uploadAndCheck') }}</button>
       <div class="sec-title">{{ t('landing.uploadedTpls') }}</div>
       <div class="sub-list">
-        <div v-for="tpl in landingTemplates" :key="tpl.id" class="sub-row">
-          <code>{{ tpl.name }}</code>
-          <span v-if="tpl.has_resources" class="tag" :title="t('landing.multiFileTip')">{{ t('landing.multiFile') }}</span>
-          <button class="mb danger" style="margin-left:auto" @click="delLandingTpl(tpl)">{{ t('common.delete') }}</button>
+        <div v-for="tpl in landingTemplates" :key="tpl.id" class="sub-row tpl-row">
+          <template v-if="tplRenameId !== tpl.id">
+            <div class="tpl-info">
+              <code :title="tpl.name">{{ tpl.name }}</code>
+              <span v-if="tpl.is_builtin" class="tag">{{ t('landing.tplBuiltin') }}</span>
+              <span v-if="tpl.has_resources" class="tag" :title="t('landing.multiFileTip')">{{ t('landing.multiFile') }}</span>
+              <span v-if="tpl.description" class="tpl-desc" :title="tpl.description">{{ tpl.description }}</span>
+            </div>
+            <div class="tpl-ops">
+              <button class="mb" :title="t('landing.tplDlTip')" @click="downloadLandingTpl(tpl)">{{ t('landing.tplDl') }}</button>
+              <button v-if="!tpl.is_builtin" class="mb" @click="openTplRename(tpl)">{{ t('common.rename') }}</button>
+              <button v-if="!tpl.is_builtin" class="mb danger" @click="delLandingTpl(tpl)">{{ t('common.delete') }}</button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="tpl-rename">
+              <input v-model="tplRenameForm.name" class="input" :placeholder="t('landing.fTplNamePh')" />
+              <input v-model="tplRenameForm.description" class="input" :placeholder="t('landing.fTplDescPh')" />
+              <div class="tpl-rename-ops">
+                <button class="btn" @click="tplRenameId = null">{{ t('common.cancel') }}</button>
+                <button class="btn primary" :disabled="tplRenameSaving" @click="saveTplRename">{{ tplRenameSaving ? t('common.saving') : t('common.save') }}</button>
+              </div>
+            </div>
+          </template>
         </div>
         <div v-if="!landingTemplates.length" class="empty">{{ t('landing.tplEmpty') }}</div>
       </div>
+      <div class="tpl-hint">💡 {{ t('landing.tplCycleHint') }}</div>
     </el-drawer>
     </div>
     <LandingLogs v-if="tab === 'logs'" />
@@ -1265,6 +1323,18 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .rule-row > label{font-size:11px;color:var(--t2);width:84px;flex-shrink:0;text-align:right}
 .sub-list{display:flex;flex-direction:column;gap:0;margin-top:8px}
 .sub-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px;flex-wrap:wrap;row-gap:4px}
+/* 模板管理行（2026-09-12 重构：信息/操作两栏 + 行内改名） */
+.tpl-row{justify-content:space-between;align-items:center}
+.tpl-info{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap}
+.tpl-info code{font-size:12px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.tpl-desc{font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.tpl-ops{display:flex;gap:4px;flex-shrink:0}
+.tpl-ops .mb{border:1px solid var(--bd);border-radius:4px;padding:2px 8px;font-size:11px;background:var(--bg2);color:var(--t2);cursor:pointer}
+.tpl-ops .mb:hover{color:var(--t1);border-color:var(--bd2)}
+.tpl-ops .mb.danger{color:var(--error);border-color:var(--error)}
+.tpl-rename{display:flex;flex-direction:column;gap:6px;flex:1;min-width:0;padding:4px 0}
+.tpl-rename-ops{display:flex;gap:8px;justify-content:flex-end}
+.tpl-hint{margin-top:12px;font-size:11px;color:var(--t3);line-height:1.6}
 .sub-item{padding:4px 0;border-bottom:1px solid var(--bd)}
 .sub-target{display:flex;gap:6px;align-items:center;padding:6px 0}
 .sub-target-input{flex:1}

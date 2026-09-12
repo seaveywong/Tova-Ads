@@ -2427,17 +2427,25 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 
     <div class="grid" v-loading="loading">
       <div v-for="tpl in filteredList" :key="tpl.id" class="card">
+        <!-- 卡头：平台 chip + 名称占满行宽 + 状态小圆点（tooltip 详情）——
+             曾徽章「✓ 就绪」挤掉半行名称致「FBUS 45+ 购…」截断 -->
         <div class="card-head">
           <span class="card-name" :title="tpl.name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
-          <span :class="['card-badge', _tplReady(tpl) ? 'ready' : 'pending']">
-            {{ _tplReady(tpl) ? '✓ ' + t('launch.ready') : t('launch.pending') }}
-</span>
-</div>
+          <span :class="['card-dot', _tplReady(tpl) ? 'ok' : 'warn']"
+                :title="_tplReady(tpl) ? t('launch.ready') : t('launch.missing') + '：' + _tplMissing(tpl).join('、')"></span>
+        </div>
+        <!-- meta 行：纯文本 · 分隔（chips 在窄卡换行参差）；已部署保持链接样式可点 -->
         <div class="card-meta">
-          <span class="meta-chip accent">{{ objLabel(tpl.objective) }}</span>
-          <span class="meta-chip">{{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}</span>
-          <button v-if="tpl.deploy_count" class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
-</div>
+          <span class="meta-line">
+            <b class="meta-obj">{{ objLabel(tpl.objective) }}</b>
+            <span class="meta-sep">·</span>
+            {{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}
+            <template v-if="tpl.deploy_count">
+              <span class="meta-sep">·</span>
+              <button class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
+            </template>
+          </span>
+        </div>
         <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
@@ -3750,16 +3758,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s,transform .15s}
 .card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
-.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
-.card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
-.card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
-.card-badge.pending{color:var(--warning);background:rgba(255,159,10,.13)}
+.card-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+/* 状态小圆点（替代原「✓ 就绪」徽章——不再挤名称，hover 看详情） */
+.card-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.card-dot.ok{background:var(--success)}
+.card-dot.warn{background:var(--warning);box-shadow:0 0 0 3px rgba(255,159,10,.15)}
 .card-warn{font-size:11px;color:var(--warning);padding:2px 0}
-.card-meta{display:flex;gap:10px;font-size:11px;color:var(--t3);flex-wrap:wrap;align-items:center}
+.card-meta{display:flex;font-size:11.5px;color:var(--t3);align-items:baseline}
+.meta-line{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.meta-obj{color:var(--ac);font-weight:600}
+.meta-sep{margin:0 5px;color:var(--bd2)}
 .card-copy{font-size:11px;color:var(--t2);font-style:italic;max-height:32px;overflow:hidden}
 /* 已部署清单入口（卡片 meta 行尾）+ 抽屉 */
-.card-dep{background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:0;font-family:inherit;margin-left:auto;white-space:nowrap}
+.card-dep{background:none;border:none;color:var(--ac);font-size:11.5px;cursor:pointer;padding:0;font-family:inherit;white-space:nowrap}
 .card-dep:hover{text-decoration:underline}
 .dep-job{border:1px solid var(--bd);border-radius:var(--rs);overflow:hidden;margin-bottom:8px}
 .dep-job-head{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--bg3);min-width:0}

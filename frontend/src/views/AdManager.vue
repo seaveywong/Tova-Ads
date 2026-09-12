@@ -107,7 +107,7 @@ const _leadsGuard = useLatest()
 const drillCampaign = ref('')
 const drillAdset = ref('')
 const statusFilter = ref('all')
-const sortKey = ref('spend')
+const sortKey = ref('_status_rank')
 const sortDir = ref('desc')
 const searchQ = ref('')
 let savedView = {}
@@ -392,7 +392,9 @@ const curList = computed(() => {
     arr = arr.filter(a => searchMatches(a, q, contextOf.value))
   }
   return arr.slice().sort((a, b) => {
-    return compareRows(a, b, { key: sortKey.value, direction: sortDir.value, mixedCurrency: mixedCur.value, blocked: _deadRank, statusRank })
+    // P0-1：statusOf 物化派生态（NO_ACTIVE_ADS/联动暂停）——曾只传字符串 rank 函数读原始
+    // effective_status，_rankMap 的 NO_ACTIVE_ADS:2 是不可达死配置，「无在投」与投放中同层
+    return compareRows(a, b, { key: sortKey.value, direction: sortDir.value, mixedCurrency: mixedCur.value, blocked: _deadRank, statusRank, statusOf: r => effectiveStatusOf(r, tab.value) })
 
   })
 })

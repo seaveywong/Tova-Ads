@@ -627,6 +627,83 @@ async def upload_template(
             "validation": {"ok": True, "resources": len(resources)}}
 
 
+@router.get("/templates/{tid}/download")
+def download_template(
+    tid: int,
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    db: Session = Depends(get_db),
+):
+    """下载已上传模板（现打 zip）：index.html + 资源文件原样打包回本地——可改后经上传（同名覆盖）传回。
+    内置模板同样可下载（当参考/起点）。资源从 resources_meta（{路径: 文本内容}）重建。"""
+    import zipfile, io, json as _json
+    r = db.query(LandingTemplate).filter(
+        LandingTemplate.id == tid, LandingTemplate.tenant_id == user.tenant_id).first()
+    if not r:
+        raise HTTPException(404, "模板不存在")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.html", r.html or "")
+        try:
+            resources = _json.loads(r.resources_meta) if r.resources_meta else {}
+        except Exception:
+            resources = {}
+        for path, content in (resources or {}).items():
+            # 路径穿越守卫（上传时已验，重建时双保险）
+            if ".." in path or path.startswith(("/", "\\")):
+                continue
+            zf.writestr(path, content)
+        zf.writestr("_downloaded_at.txt", f"template={r.id} name={r.name}\n")
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    fname = f"{r.name or ('template-' + str(r.id))}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+class TemplateMetaIn(BaseModel):
+    name: str
+    description: str = ""
+
+
+@router.put("/templates/{tid}/meta")
+def rename_template(
+    tid: int,
+    body: TemplateMetaIn,
+    user: CurrentUser = Depends(require_permission("landing.manage")),
+    db: Session = Depends(get_db),
+):
+    """改模板元数据（名称/描述）——内容更新走上传同名 zip 覆盖。"""
+    r = db.query(LandingTemplate).filter(
+        LandingTemplate.id == tid, LandingTemplate.tenant_id == user.tenant_id).first()
+    if not r:
+        raise HTTPException(404, "模板不存在")
+    if r.is_builtin:
+        raise HTTPException(400, "内置模板不可改名")
+    new_name = (body.name or "").strip()
+    if not new_name:
+        raise HTTPException(400, "模板名称不能为空")
+    dup = db.query(LandingTemplate).filter(
+        LandingTemplate.tenant_id == user.tenant_id,
+        LandingTemplate.name == new_name,
+        LandingTemplate.id != tid,
+        LandingTemplate.is_builtin == False,  # noqa: E712
+    ).first()
+    if dup:
+        raise HTTPException(400, f"已有同名模板「{new_name}」")
+    old_name = r.name
+    r.name = new_name
+    r.description = body.description or r.description
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="landing_template", target_id=str(tid),
+              action_type="rename", source="user", result="success",
+              metadata={"from": old_name, "to": new_name})
+    db.commit()
+    return {"id": tid, "name": new_name}
+
+
 @router.delete("/templates/{tid}")
 def delete_template(
     tid: int,
