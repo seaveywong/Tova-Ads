@@ -446,46 +446,6 @@ const onEditBeforeClose = (done) => {
   } else { done() }
 }
 
-// #3 草稿自动保存（2026-09-14）：编辑中跳去素材库/表单模板等页面，抽屉状态随组件卸载
-// 全丢且无法恢复。编辑器打开期间三态（form/树/模式）debounce 落 localStorage；保存成功/
-// 明确丢弃即清草稿；重开编辑器（同键：新建=new、编辑=模板 id）检测到未恢复草稿 → 顶部
-// 横幅 恢复/丢弃。恢复后不重拍快照——内容保持「未保存」态，关闭仍有 dirty 确保护栏。
-const _draftKey = () => 'launch_tpl_draft:' + (editing.value?.id || 'new')
-const draftAvailable = ref(false)
-let _draftTimer = null
-const _flushDraft = () => {
-  if (!editOpen.value || !isDirty.value) return
-  try { localStorage.setItem(_draftKey(), _editSnapshot()) } catch {}
-}
-watch([form, tree, editMode], () => {
-  if (!editOpen.value) return
-  clearTimeout(_draftTimer); _draftTimer = setTimeout(_flushDraft, 1200)
-}, { deep: true })
-const checkDraft = () => {
-  draftAvailable.value = false
-  try {
-    const raw = localStorage.getItem(_draftKey())
-    if (raw && raw !== _formSnapshot) draftAvailable.value = true
-  } catch {}
-}
-const restoreDraft = () => {
-  try {
-    const d = JSON.parse(localStorage.getItem(_draftKey()) || '{}')
-    if (d.f) form.value = d.f
-    if (d.m) editMode.value = d.m
-    if (d.t) tree.value = d.t
-    expandedTreeKeys.value = new Set(); expandAllTree()
-    if (form.value.lead_form_template_id) { try { selectedFormTpl.value = formTemplates.value.find(x => x.id === form.value.lead_form_template_id) || null } catch {} }
-    if (form.value.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === form.value.message_template_id) || null } catch {} }
-    ElMessage.success(t('launch.draftRestored'))
-  } catch { ElMessage.error(t('common.opFail')) }
-  draftAvailable.value = false
-}
-const discardDraft = () => {
-  try { localStorage.removeItem(_draftKey()) } catch {}
-  draftAvailable.value = false
-}
-
 // #1 保存前校验
 const validationErrors = ref([])
 // 校验错误定位（批次II 修审计 G1）：结构化错误 { msg, sec, key }——sec=三层 Tab 段名
@@ -989,6 +949,47 @@ const _nk = (p) => `${p}_${++_keySeq}`
 const tree = ref({ adsets: [] })
 const treeSel = ref({ type: 'campaign', si: -1, ai: -1 })   // campaign / adset / ad（现仅作选择器目标锚点）
 const expandedTreeKeys = ref(new Set())
+
+// #3 草稿自动保存（2026-09-14）：编辑中跳去素材库/表单模板等页面，抽屉状态随组件卸载
+// 全丢且无法恢复。编辑器打开期间三态（form/树/模式）debounce 落 localStorage；保存成功/
+// 明确丢弃即清草稿；重开编辑器（同键：新建=new、编辑=模板 id）检测到未恢复草稿 → 顶部
+// 横幅 恢复/丢弃。恢复后不重拍快照——内容保持「未保存」态，关闭仍有 dirty 确保护栏。
+// 位置必须在此（tree/editMode 声明后）——setup 求值期 watch 数组即解引用，放前面 TDZ 崩页。
+const _draftKey = () => 'launch_tpl_draft:' + (editing.value?.id || 'new')
+const draftAvailable = ref(false)
+let _draftTimer = null
+const _flushDraft = () => {
+  if (!editOpen.value || !isDirty.value) return
+  try { localStorage.setItem(_draftKey(), _editSnapshot()) } catch {}
+}
+watch([form, tree, editMode], () => {
+  if (!editOpen.value) return
+  clearTimeout(_draftTimer); _draftTimer = setTimeout(_flushDraft, 1200)
+}, { deep: true })
+const checkDraft = () => {
+  draftAvailable.value = false
+  try {
+    const raw = localStorage.getItem(_draftKey())
+    if (raw && raw !== _formSnapshot) draftAvailable.value = true
+  } catch {}
+}
+const restoreDraft = () => {
+  try {
+    const d = JSON.parse(localStorage.getItem(_draftKey()) || '{}')
+    if (d.f) form.value = d.f
+    if (d.m) editMode.value = d.m
+    if (d.t) tree.value = d.t
+    expandedTreeKeys.value = new Set(); expandAllTree()
+    if (form.value.lead_form_template_id) { try { selectedFormTpl.value = formTemplates.value.find(x => x.id === form.value.lead_form_template_id) || null } catch {} }
+    if (form.value.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === form.value.message_template_id) || null } catch {} }
+    ElMessage.success(t('launch.draftRestored'))
+  } catch { ElMessage.error(t('common.opFail')) }
+  draftAvailable.value = false
+}
+const discardDraft = () => {
+  try { localStorage.removeItem(_draftKey()) } catch {}
+  draftAvailable.value = false
+}
 // 三层 Tab（系列/广告组/广告；同一时间只显示一层——面包屑合进 Tab，各 Tab 带完备度指示）
 const editTab = ref('campaign')
 const EDIT_TABS = [
