@@ -1353,8 +1353,20 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 except Exception:
                     pass
                 continue  # 已停/被拒/删除的广告跳过（用户：准备中/学习中 ACTIVE 就纳入）
-            # 保活广告永不停（巡检跳过 [Tova-保活] 系列）
+            # 保活广告永不停（巡检跳过 [Tova-保活] 系列评估）——但当日快照照写（与下方
+            # 已停广告分支同款）：看板口径=账户全量，曾在此直接 continue → ACTIVE 保活广告
+            # 的当日消耗永远进不了 perf_snapshots，「今日」全天 0 假象，要等日界翻转后
+            # 7d 回填才补上（2026-09-13 数据看板 0 值事故）
             if "[Tova-保活]" in (ad.get("campaign_name") or ""):
+                try:
+                    _obj_k, _opt_k = obj_map.get(ad.get("campaign_id", ""), ("", ""))
+                    _kpi_k = resolve_kpi(db, tenant_id, ad.get("campaign_id", ""),
+                                         _obj_k, adset_og_map.get(ad.get("adset_id", "")) or _opt_k,
+                                         ad.get("actions", []))
+                    _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id,
+                                        _kpi_k, _kpi_k["conversions"], biz_today)
+                except Exception:
+                    pass
                 continue
             ad_objective, ad_opt_goal = obj_map.get(ad.get("campaign_id", ""), ("", ""))
             # 组优化目标优先（批I 成效口径；系列级 og 恒空作兜底）
