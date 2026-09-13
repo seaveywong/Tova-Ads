@@ -2144,3 +2144,36 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 - 终态：**7 账户保活建成并在 FB 存活**（抽查 3 个：系列 ACTIVE + 广告 ACTIVE + [Tova-保活] 标记 ✓，第二轮 has_keepalive 去重生效）；4 个 has_spend 跳过（正确）；**5 个强绑主页账户全可见主页均拒**——绑定主页不在令牌可访问列表，属账户侧限制（同部署链结论），每日自动重试意味着号商给权限后自动恢复。
 
 花钱告知（用户要求人工可知）：7 保活 × $1/天上界 = 最多 $7/天；停法=设置页关保活开关 或 FB 侧停对应系列。
+
+## 批CE：数据看板「今日」恒 0 + 非购物「成效」恒 0 两事故修复（2026-09-13）
+
+### 概述
+同日两起数据完整性事故，根因同族——**巡检循环的豁免/路径不对称导致部分广告行永远写不进 perf_snapshots**：
+- **事故一**（用户：「数据看板昨天查看一直是 0，过了北京 0 点看昨天才有消耗」）：`[Tova-保活]` 系列的「永不停」豁免 `continue` 写在快照写入（循环尾 `_upsert_ad_snapshot`）之前 → ACTIVE 保活广告的当日消耗永远进不了快照表；仅剩保活在投时「今日」全天 0，日界翻转后靠 7d 回填补昨日行——正是用户看到的时序。
+- **事故二**（用户：「非购物广告的成效是 0」）：AdManager「成效」列数据源是 `perf_snapshots.results_fb`，仅当日路径写它；**近 7 天回填（插入+昨日修正）都不写** → 保活等非购物广告昨日及更早恒 0。购物「正常」是错觉（当日写入的旧值残留）。伴生缺陷：`obj_map` 只含今日在投 campaign，回填历史行 resolve 时 obj='' → 非购物类掉 L5 劣质黑名单死路（like/post_engagement 全被跳）→ kpi=''、转化分类筛不中。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| 保活快照照写 | `guard_engine.py` | 保活豁免分支照「已停广告分支」同款：先 resolve_kpi + 写当日快照再 continue（豁免不停，但数据照进） | 生产部署后 3 轮巡检 09-13 快照 0→7 行/$9.03，O350 实时增长 $1.19→$1.24 与 FB 一致 |
+| 回填补写 results_fb | `guard_engine.py` | 回填插入 + 昨日修正两处都写 `results_fb`（AdManager 成效数据源） | 新代码一轮后 09-12/13 conv 与 results_fb 完全一致（540/540、204/204），缺口 0 无回退 |
+| obj_map 覆盖 7 天 | `guard_engine.py` | `_campaign_objectives` 输入 = 今日行 campaign ∪ 近 7 天历史行 campaign（一次 batch 调用，无额外 API 成本） | 回填历史行（已停广告）可正确解析 kpi 字段，非购物不再掉 L5 死路 |
+| 一次性数据修复 | 生产 DB | `UPDATE results_fb=conversions WHERE results_fb=0 AND conversions>0`（127 行；语义等价——resolver 两值同源 `_action_count(actions, kpi_field)`，conversions>0 ⇒ 必等） | 修后 09-08..13 各日「有 conv 但 rf=0」全部清零 |
+
+### DB 迁移
+- 无（复用既有列；results_fb 列 0093 迁移已建）。
+
+### 生产环境变更
+- 两次 restart（09:20 保活快照修复 f0817ec；10:0x results_fb 修复 1fb6acb），均双门 + /health ok。
+- 一次性 UPDATE 127 行（历史 results_fb 补齐）。备份：`guard_engine.py.bak-0913` / `.bak-0913b`。
+
+### 复审结论（已知限制/风险）
+- **诊断方法论**：心跳「评估 0 条+哨兵armed-全部跳过」是设计行为（armed 只跳规则评估），与快照无关——先排除故障再查数据，本次靠「心跳无 skip/无兜底后缀 → worker 干净 → insights 合法空」反转到数据写入侧。
+- **conversions 与 results_fb 双口径**：看板成效=SUM(conversions)，AdManager 成效=results_fb，正常同值；唯一理论分歧点 = resolver L5-obj-fallback 路径（og 未知时 conversions=0 但 results_fb 可为劣质字段计数）——罕见（仅组级 og 缺失时），暂不改，此备注即文档。
+- **09-11 的 9 行 $199 conv=0 是真值**（被止损的空耗购物广告，FB actions 无 purchase），非统计问题；但其 resolved_kpi='' 使转化分类筛不中——见批CF 标签修复。
+- 保活豁免语义现在 = 豁免止损 + 豁免规则评估，**不豁免数据**（快照/tick/回填全照跑）——此为长期口径，后续新增豁免分支必须遵守（数据完整性在动作豁免之前）。
+- 哨兵巡逻对 [Tova-保活] 系列的豁免（2931）与巡检豁免同族——巡逻侧无数据写入需求，不适用本条。
+
+### Commits
+- `f0817ec` fix(guard): 保活广告当日快照照写——看板「今日」全天 0 事故
+- `1fb6acb` fix(guard): 回填路径补写 results_fb + obj_map 覆盖近7天 campaign——非购物广告「成效」恒 0

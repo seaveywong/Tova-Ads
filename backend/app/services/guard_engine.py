@@ -1887,6 +1887,14 @@ def _inspect_account_worker(ctx: dict) -> dict:
                                 _e7.actions_json = json.dumps(r7.get("actions", []))[:4000]
                                 _e7.resolved_kpi = _kpi7.get("kpi_field", "")
                                 _e7.kpi_source = _kpi7.get("source", "")
+                            elif (_e7.resolved_kpi or "") == "" and _kpi7.get("kpi_field"):
+                                # 标签修复：kpi='' 历史行（obj_map 曾只含今日在投 → 回填解析走
+                                # L5 劣质黑名单死路）只补 resolved_kpi/kpi_source/results_fb，
+                                # spend/conversions 终值不动（历史稳定原则）。修完即非空，
+                                # 后续轮次不再进此分支。转化分类筛从此能命中这些行。
+                                _e7.resolved_kpi = _kpi7.get("kpi_field", "")
+                                _e7.kpi_source = _kpi7.get("source", "")
+                                _e7.results_fb = _kpi7.get("results_fb", 0)
                             continue
                         db.add(PerfSnapshot(
                             tenant_id=tenant_id, act_id=acc.act_id, ad_id=_aid7,
