@@ -52,6 +52,9 @@ const taskLabel = (k) => t(_TASK_LABEL_KEYS[k] || '') || k
 const schedSaving = ref(false)
 const ka = ref({ enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' })
 const kaSaving = ref(false)
+// 哨兵倒计时（dead-man switch）：无交互超时自动 arm（默认关）
+const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
+const scdSaving = ref(false)
 const TASK_ORDER = ['inspect', 'watchdog', 'account_sync', 'budget', 'subcode', 'reassociate']
 const effOf = (k) => {
   const base = Number(sched.value?.base_minutes) || 0
@@ -74,6 +77,8 @@ const loadSched = async () => {
     if ((myPerms.value || []).includes('ads.pause') || isSuper.value) {
       try { ka.value = await GET('/settings/keepalive') }
       catch { ka.value = { enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' } }
+      try { scd.value = await GET('/settings/sentinel-countdown') }
+      catch { scd.value = { auto_arm_enabled: false, auto_arm_hours: 48 } }
     }
   } catch {}
 }
@@ -451,6 +456,14 @@ const saveKeepalive = async () => {
   } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   kaSaving.value = false
 }
+const saveSentinelCountdown = async () => {
+  scdSaving.value = true
+  try {
+    scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value })
+    ElMessage.success(scd.value.auto_arm_enabled ? t('settings.scdOn') : t('common.saved'))
+  } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
+  scdSaving.value = false
+}
 const kaRunning = ref(false)
 
 // ── FB App 配置管理（重建入口：列表/新建/改 secret/删除——OAuth 授权与 webhook 验签依赖）──
@@ -559,7 +572,10 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
   }
   secs.push({ id: 'sec-tg', label: t('settings.tgTitle') })
-  if (isSuper.value || (myPerms.value || []).includes('ads.pause')) secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
+  if (isSuper.value || (myPerms.value || []).includes('ads.pause')) {
+    secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
+    secs.push({ id: 'sec-sentinel', label: t('settings.scdTitle') })
+  }
   return secs
 })
 // 分组展示：个人（账户/时区/TG）vs 平台（其余超管/运营项）
@@ -947,6 +963,23 @@ const runKeepaliveNow = async () => {
       <div class="ka-actions">
         <button class="btn primary" :disabled="kaSaving" @click="saveKeepalive">{{ kaSaving ? t('settings.saving') : t('common.save') }}</button>
         <button v-if="isSuper" class="btn" :disabled="kaRunning" @click="runKeepaliveNow">{{ kaRunning ? t('common.loading') : t('settings.kaRunNow') }}</button>
+      </div>
+    </div>
+
+    <!-- 哨兵倒计时（dead-man switch）：无交互超时自动 arm 哨兵（默认关） -->
+    <div v-if="(isSuper || (myPerms || []).includes('ads.pause')) && activeSection==='sec-sentinel'" id="sec-sentinel" class="card">
+      <div class="t">{{ t('settings.scdTitle') }}</div>
+      <div class="d">{{ t('settings.scdDesc') }}</div>
+      <div class="ka-switch-row">
+        <el-switch v-model="scd.auto_arm_enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+        <span class="ka-switch-label">{{ scd.auto_arm_enabled ? t('settings.scdOnLabel') : t('settings.scdOffLabel') }}</span>
+      </div>
+      <div class="ka-grid">
+        <div class="ka-field"><label>{{ t('settings.scdHours') }}</label><div class="ka-input-wrap"><input v-model.number="scd.auto_arm_hours" type="number" min="1" step="1" class="ka-input" /><span class="ka-unit">{{ t('settings.hours') }}</span></div></div>
+      </div>
+      <div class="d">{{ t('settings.scdNote') }}</div>
+      <div class="ka-actions">
+        <button class="btn primary" :disabled="scdSaving" @click="saveSentinelCountdown">{{ scdSaving ? t('settings.saving') : t('common.save') }}</button>
       </div>
     </div>
 

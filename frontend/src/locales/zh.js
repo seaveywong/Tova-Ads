@@ -661,6 +661,7 @@ export default {
     actionInspectionStalledAlert: '巡检停滞告警', actionManualPaused: '手动暂停', actionManualActive: '手动开启',
     actionGroupUpdate: '广告组更新', actionAiAnalyze: 'AI 分析', actionAiEdit: 'AI 文案编辑',
     actionSentinelFailureAlert: '哨兵失败告警', actionSentinelArm: '哨兵布防', actionSentinelDisarm: '哨兵解除',
+    actionSentinelAutoArmed: '哨兵自动开启（无交互超时）', actionSentinelAutoArmWarning: '哨兵倒计时预警',
     actionSentinelPermDenied: '哨兵权限拒绝', actionSentinelBatchAlert: '哨兵批量停告警',
     actionUnmanage: '解除纳管', actionHardDelete: '永久删除', actionWarmupArm: '开启保活',
     actionInspectionSkipped: '巡检跳过', actionUpdateToken: '令牌更新', actionUpload: '上传',
@@ -909,6 +910,11 @@ export default {
     keepaliveDesc: '连续 N 天无消耗的账户自动建主页赞广告防 FB 封号。保活广告永不被止损/哨兵停。',
     kaOnLabel: '已开启（本团队所有账户自动纳入）', kaOffLabel: '关闭（仅逐个开启保活的账户生效）',
     kaBudget: '单条预算', kaTriggerDays: '触发天数', days: '天', kaAssetPrefix: '素材前缀', saving: '保存中…',
+    // 哨兵倒计时（dead-man switch）
+    scdTitle: '哨兵倒计时', scdDesc: '团队长时间无人登录时自动开启哨兵（全部纳管账户的投放系列将被停止），防止无人盯盘时持续空耗。倒计时内任意成员打开任意页面即刷新。',
+    scdOnLabel: '已开启（超时自动开哨兵）', scdOffLabel: '关闭（不自动开启）',
+    scdHours: '无交互阈值', hours: '小时', scdOn: '哨兵倒计时已开启',
+    scdNote: '到点前 25% 时间会先发预警通知；自动开启不会自动解除，需到守护页手动关闭哨兵恢复投放。',
   },
   teams: {
     title: '团队管理',

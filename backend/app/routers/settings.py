@@ -401,6 +401,21 @@ def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ad
     return save_keepalive_config(db, user.tenant_id, body)
 
 
+# ── 哨兵倒计时（dead-man switch，2026-09-13 定稿）：无交互超时自动 arm（默认关）──
+@router.get("/sentinel-countdown")
+def get_sentinel_countdown(user: CurrentUser = Depends(require_permission("ads.pause")),
+                           db: Session = Depends(get_db)):
+    from ..core.sentinel_config import get_sentinel_config
+    return get_sentinel_config(db, user.tenant_id)
+
+
+@router.put("/sentinel-countdown")
+def set_sentinel_countdown(body: dict, user: CurrentUser = Depends(require_permission("ads.pause")),
+                           db: Session = Depends(get_db)):
+    from ..core.sentinel_config import save_sentinel_config
+    return save_sentinel_config(db, user.tenant_id, body)
+
+
 # ── 账户导入行为（超管，system_settings）──
 # import_default_all: 载入账户弹窗是否默认全选未导入账户（true=授权后一键全导入）
 # import_default_cap: 新 operate 令牌的默认绑定上限（建令牌时写入 max_accounts；0=不限）

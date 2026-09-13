@@ -649,6 +649,7 @@ export default {
     actionInspectionStalledAlert: 'Inspection stalled alert', actionManualPaused: 'Manual pause', actionManualActive: 'Manual activate',
     actionGroupUpdate: 'Ad set update', actionAiAnalyze: 'AI analysis', actionAiEdit: 'AI copy edit',
     actionSentinelFailureAlert: 'Sentinel failure alert', actionSentinelArm: 'Sentinel arm', actionSentinelDisarm: 'Sentinel disarm',
+    actionSentinelAutoArmed: 'Sentinel auto-armed (inactivity timeout)', actionSentinelAutoArmWarning: 'Sentinel countdown warning',
     actionSentinelPermDenied: 'Sentinel permission denied', actionSentinelBatchAlert: 'Sentinel batch alert',
     actionUnmanage: 'Unmanage', actionHardDelete: 'Hard delete', actionWarmupArm: 'Enable keepalive',
     actionInspectionSkipped: 'Inspection skipped', actionUpdateToken: 'Token update', actionUpload: 'Upload',
@@ -897,6 +898,11 @@ export default {
     keepaliveDesc: 'Automatically create Page-like ads for accounts with no spend for N consecutive days to prevent FB bans. Keepalive ads are never stopped by stop-loss / sentinel.',
     kaOnLabel: 'Enabled (all accounts in this team are auto-included)', kaOffLabel: 'Disabled (only accounts with per-account keepalive enabled take effect)',
     kaBudget: 'Per-ad budget', kaTriggerDays: 'Trigger days', days: 'days', kaAssetPrefix: 'Asset prefix', saving: 'Saving…',
+    // Sentinel countdown (dead-man switch)
+    scdTitle: 'Sentinel Countdown', scdDesc: 'Automatically arm the sentinel when no team member has logged in for a long time (all managed campaigns will be paused), preventing runaway spend while nobody is watching. Any member opening any page resets the countdown.',
+    scdOnLabel: 'Enabled (auto-arm on timeout)', scdOffLabel: 'Disabled (never auto-arms)',
+    scdHours: 'Inactivity threshold', hours: 'hours', scdOn: 'Sentinel countdown enabled',
+    scdNote: 'A warning is sent at 75% of the countdown; auto-arm never auto-disarms — disarm manually in Guard to resume delivery.',
   },
   teams: {
     title: 'Team Management',

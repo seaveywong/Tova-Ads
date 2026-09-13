@@ -10,7 +10,7 @@ import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import text, or_
+from sqlalchemy import text, or_, func
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
@@ -2525,6 +2525,87 @@ def calc_available_balance(spend_cap, amount_spent, currency) -> tuple[float | N
     return ((round(avail_usd, 2) if avail_usd is not None else None), "limited")
 
 
+def _sentinel_auto_arm_check(db, trace_id: str) -> int:
+    """哨兵倒计时（dead-man switch）：按团队检查无交互超时 → arm 全部纳管账户。
+
+    交互 = 任意登录态请求（deps._touch_last_active 节流写 users.last_active_at，
+    5min/用户）。基线 = max(团队最近活动, 功能开启时刻)；都缺 = 无信号不 arm。
+    arm 幂等：只 arm sentinel_auto_armed=False 的账户，arm 后自然不再重复；
+    告警只在实 arm ≥1 账户时发（0 个新 arm = 已触发过/无账户，不重发）。
+    预警在剩 25% 时间发一次（dedup 窗口=配置小时数，覆盖整个倒计时尾段）。
+    解除只手动 disarm（哨兵页/账户操作），本功能不自动解除。"""
+    from ..models.auth import User, TenantMembership, Tenant
+    from ..core.sentinel_config import get_sentinel_config, sentinel_auto_arm_state
+    from ..core.notify_utils import emit_notification, dedup_recent
+    now = datetime.now(timezone.utc)
+    armed_total = 0
+    try:
+        tenants = db.query(Tenant).all()
+    except Exception:
+        return 0
+    for t in tenants:
+        try:
+            cfg = get_sentinel_config(db, t.id)
+            if not cfg.get("auto_arm_enabled"):
+                continue
+            last_active = db.query(func.max(User.last_active_at)).join(
+                TenantMembership, TenantMembership.user_id == User.id).filter(
+                TenantMembership.tenant_id == t.id).scalar()
+            state = sentinel_auto_arm_state(cfg, last_active, now)
+            if state == "warn":
+                hours = max(1, int(cfg.get("auto_arm_hours") or 48))
+                if not dedup_recent(db, t.id, "sentinel_auto_arm_warning", "*", hours * 60):
+                    _loc = tenant_locale(db, t.id)
+                    _elapsed = now - (last_active or now)
+                    _t_w, _b_w = notify_text(_loc, "sentinel_auto_arm_warning",
+                                             hours=hours,
+                                             elapsed=f"{max(0, _elapsed.total_seconds() / 3600):.0f}",
+                                             remaining=f"{max(0, hours - _elapsed.total_seconds() / 3600):.0f}")
+                    emit_notification(db, tenant_id=t.id, level="warning",
+                                      event_type="sentinel_auto_arm_warning", trace_id=trace_id,
+                                      title=_t_w, body=_b_w)
+                    write_log(db, tenant_id=t.id, trace_id=trace_id, actor_type="sentinel",
+                              target_type="team", target_id=str(t.id),
+                              action_type="sentinel_auto_arm_warning", source="watchdog",
+                              result="success",
+                              trigger_detail=f"hours={hours} last_active={last_active}")
+                    db.commit()
+            elif state == "arm":
+                hours = max(1, int(cfg.get("auto_arm_hours") or 48))
+                accounts = db.query(Account).filter(
+                    Account.tenant_id == t.id,
+                    Account.is_managed.is_(True),
+                    Account.sentinel_auto_armed.is_(False) | Account.sentinel_auto_armed.is_(None),
+                ).all()
+                for a in accounts:
+                    a.sentinel_auto_armed = True
+                db.commit()
+                if accounts:
+                    armed_total += len(accounts)
+                    _loc = tenant_locale(db, t.id)
+                    _t_a, _b_a = notify_text(_loc, "sentinel_auto_armed",
+                                             hours=hours, n=len(accounts))
+                    emit_notification(db, tenant_id=t.id, level="critical",
+                                      event_type="sentinel_auto_armed", trace_id=trace_id,
+                                      title=_t_a, body=_b_a)
+                    write_log(db, tenant_id=t.id, trace_id=trace_id, actor_type="sentinel",
+                              target_type="team", target_id=str(t.id),
+                              action_type="sentinel_auto_armed", source="watchdog",
+                              result="success",
+                              trigger_detail=f"hours={hours} armed={len(accounts)} "
+                                             f"last_active={last_active}")
+                    db.commit()
+        except Exception as e:
+            logger.warning(f"[Watchdog] 哨兵倒计时租户 {t.id} 异常: {e}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    if armed_total:
+        logger.info(f"[Watchdog] 哨兵倒计时触发：arm {armed_total} 个账户")
+    return armed_total
+
+
 def run_watchdog():
     """系统级看门狗（06_附录 §四，定时跑）：
     ① inspection_stalled：巡检长时间无成功心跳 → critical（守护挂了=止损失效，最危险）
@@ -2716,6 +2797,15 @@ def run_watchdog():
                         alerts["token_expiring"] += 1
                 except Exception:
                     pass
+
+        # ── ③ 哨兵倒计时（dead-man switch，2026-09-13 用户定稿方案）：团队超过 N 小时无任何
+        # 登录态交互 → 全部纳管账户 sentinel_auto_armed + critical 告警；剩 25% 时间 warning 预警。
+        # 默认关（system_settings per-tenant）；解除只手动 disarm。与巡检/哨兵全兼容（字段已有）。
+        try:
+            alerts["sentinel_auto_armed"] = _sentinel_auto_arm_check(db, trace_id)
+        except Exception as e:
+            logger.warning(f"[Watchdog] 哨兵倒计时检查异常: {e}")
+
         logger.info(f"[Watchdog] 完成: {alerts}")
         return {"trace_id": trace_id, **alerts}
     except Exception as e:

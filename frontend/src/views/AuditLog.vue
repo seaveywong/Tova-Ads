@@ -102,6 +102,7 @@ const ACTION_ZH = {
   manual_paused: 'audit.actionManualPaused', manual_active: 'audit.actionManualActive', group_update: 'audit.actionGroupUpdate',
   ai_analyze: 'audit.actionAiAnalyze', ai_edit: 'audit.actionAiEdit', sentinel_failure_alert: 'audit.actionSentinelFailureAlert',
   sentinel_arm: 'audit.actionSentinelArm', sentinel_disarm: 'audit.actionSentinelDisarm', sentinel_perm_denied: 'audit.actionSentinelPermDenied',
+  sentinel_auto_armed: 'audit.actionSentinelAutoArmed', sentinel_auto_arm_warning: 'audit.actionSentinelAutoArmWarning',
   sentinel_pause_batch_alert: 'audit.actionSentinelBatchAlert', unmanage: 'audit.actionUnmanage', hard_delete: 'audit.actionHardDelete',
   warmup_arm: 'audit.actionWarmupArm', inspection_skipped: 'audit.actionInspectionSkipped', update_token: 'audit.actionUpdateToken',
   upload: 'audit.actionUpload', rename: 'audit.actionRename', sync_stalled: 'audit.actionSyncStalled',

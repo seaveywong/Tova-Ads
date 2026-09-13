@@ -11,6 +11,25 @@ from ..models.auth import User
 
 _bearer = HTTPBearer()
 
+# 活动心跳（哨兵倒计时用）：登录态请求节流更新 users.last_active_at。内存节流每用户
+# 5min 最多写一次（高 QPS 不放大写量；列已存在无迁移）。gunicorn 多 worker 各自持有
+# 节流表 → 最坏 5min×worker 数 的写频率，仍在可忽略量级。
+_last_active_ts: dict[int, float] = {}
+
+
+def _touch_last_active(db: Session, user_id: int) -> None:
+    import time as _time
+    now = _time.monotonic()
+    if now - _last_active_ts.get(user_id, 0.0) < 300:
+        return
+    _last_active_ts[user_id] = now
+    try:
+        db.execute(text("UPDATE users SET last_active_at = now() WHERE id = :uid"),
+                   {"uid": user_id})
+        db.commit()   # 会话级 set_config 不受影响（见下）；此刻 session 无其他待写
+    except Exception:
+        db.rollback()  # 心跳失败不阻断请求
+
 
 def scope_account_query(q, user):
     """数据面统一口径（批AG 权鉴修正）：operator 只看名下账户（owner_user_id==user.id），
@@ -107,6 +126,7 @@ def get_current_user(
             raise HTTPException(401, "角色已变更，请重新登录")
 
     role = payload.get("role")
+    _touch_last_active(db, user.id)   # 全部校验通过才算「交互」（哨兵倒计时刷新）
     return CurrentUser(
         id=user.id, email=user.email, tenant_id=tenant_id,
         role=role, is_superadmin=is_super,
