@@ -6,6 +6,7 @@
 删除在用的不硬阻断，但返 usage_count 让前端警告。
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response
+import re   # _validate_lp_spec（模块级）用；upload_template 内的局部 import re 同名无害
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
