@@ -167,8 +167,30 @@ const OPT_GOALS_BY_OBJECTIVE = {
   OUTCOME_APP_PROMOTION: ['APP_INSTALLS', 'VALUE', 'LINK_CLICKS'],
 }
 const convLocationsForObj = computed(() => CONV_LOCATIONS_BY_OBJECTIVE[form.value.objective] || [])
-const optGoalsForObj = computed(() =>
-  (OPT_GOALS_BY_OBJECTIVE[form.value.objective] || []).map(v => OPT_GOALS.find(o => o.v === v)).filter(Boolean))
+// 优化目标 × 转化位置兼容表（镜像 ad_builder.OPT_GOALS_BY_LOCATION，保存 422 同口径前置）：
+// 组节点选了转化位置后，覆盖下拉只列该位置兼容项（FB Ads Manager 同款实时过滤——曾只按
+// 目标过滤，选了与位置不兼容的目标要到保存才被 422 打回）
+const OPT_GOALS_BY_LOCATION = {
+  website: ['OFFSITE_CONVERSIONS', 'VALUE', 'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'REACH', 'IMPRESSIONS', 'POST_ENGAGEMENT'],
+  on_ad: ['LEAD_GENERATION', 'QUALITY_LEAD', 'CONVERSATIONS'],
+  on_ad_messenger: ['LEAD_GENERATION', 'QUALITY_LEAD', 'CONVERSATIONS'],
+  messenger: ['CONVERSATIONS', 'LEAD_GENERATION', 'QUALITY_LEAD', 'MESSAGING_PURCHASE_CONVERSION', 'LINK_CLICKS'],
+  whatsapp: ['CONVERSATIONS', 'OFFSITE_CONVERSIONS', 'LINK_CLICKS', 'IMPRESSIONS', 'REACH', 'LANDING_PAGE_VIEWS', 'POST_ENGAGEMENT'],
+  instagram_direct: ['CONVERSATIONS', 'LEAD_FROM_IG_DIRECT'],
+  instagram_profile: ['VISIT_INSTAGRAM_PROFILE', 'LINK_CLICKS', 'LANDING_PAGE_VIEWS', 'IMPRESSIONS', 'REACH'],
+  phone_call: ['LINK_CLICKS', 'QUALITY_CALL', 'CONVERSATIONS', 'REACH', 'IMPRESSIONS'],
+  on_page: ['PAGE_LIKES', 'REACH', 'IMPRESSIONS'],
+}
+const optGoalsForNode = (s) =>
+  (OPT_GOALS_BY_OBJECTIVE[form.value.objective] || [])
+    .filter(v => !s?.conv_location || (OPT_GOALS_BY_LOCATION[s.conv_location] || []).includes(v))
+    .map(v => OPT_GOALS.find(o => o.v === v)).filter(Boolean)
+// 位置切换联动：清掉与新位置不兼容的覆盖值（与 objective watcher 同款前置清理）
+const setConvLocation = (s, l) => {
+  s.conv_location = l
+  if (s.optimization_goal && l && !(OPT_GOALS_BY_LOCATION[l] || []).includes(s.optimization_goal))
+    s.optimization_goal = ''
+}
 // 转化目标（按 objective 联动）—— FB custom_event_type 枚举
 const CONV_GOAL_LABELS = {
   Purchase:'launch.conv_purchase', AddToCart:'launch.conv_add_to_cart', InitiateCheckout:'launch.conv_initiate_checkout', AddPaymentInfo:'launch.conv_add_payment_info',
@@ -410,7 +432,7 @@ onMounted(() => {
   }
 })
 const loadTplPages = async () => { try { const r = await GET('/fb/assets'); tplPages.value = r.pages || [] } catch {} }
-onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; pollGen++ })
+onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; pollGen++; _flushDraft() })
 
 // #2 dirty-check：编辑抽屉关闭前确认（含结构模式树 + 模式本身——树编辑不写 form，须一并快照）
 let _formSnapshot = ''
@@ -420,8 +442,48 @@ const isDirty = computed(() => _formSnapshot && _editSnapshot() !== _formSnapsho
 const onEditBeforeClose = (done) => {
   if (isDirty.value) {
     ElMessageBox.confirm(t('launch.confirmDiscardMsg'), t('launch.closeConfirm'), { type: 'warning', confirmButtonText: t('common.discard'), cancelButtonText: t('launch.keepEditing') })
-      .then(() => done()).catch(() => {})
+      .then(() => { try { localStorage.removeItem(_draftKey()) } catch {} ; done() }).catch(() => {})
   } else { done() }
+}
+
+// #3 草稿自动保存（2026-09-14）：编辑中跳去素材库/表单模板等页面，抽屉状态随组件卸载
+// 全丢且无法恢复。编辑器打开期间三态（form/树/模式）debounce 落 localStorage；保存成功/
+// 明确丢弃即清草稿；重开编辑器（同键：新建=new、编辑=模板 id）检测到未恢复草稿 → 顶部
+// 横幅 恢复/丢弃。恢复后不重拍快照——内容保持「未保存」态，关闭仍有 dirty 确保护栏。
+const _draftKey = () => 'launch_tpl_draft:' + (editing.value?.id || 'new')
+const draftAvailable = ref(false)
+let _draftTimer = null
+const _flushDraft = () => {
+  if (!editOpen.value || !isDirty.value) return
+  try { localStorage.setItem(_draftKey(), _editSnapshot()) } catch {}
+}
+watch([form, tree, editMode], () => {
+  if (!editOpen.value) return
+  clearTimeout(_draftTimer); _draftTimer = setTimeout(_flushDraft, 1200)
+}, { deep: true })
+const checkDraft = () => {
+  draftAvailable.value = false
+  try {
+    const raw = localStorage.getItem(_draftKey())
+    if (raw && raw !== _formSnapshot) draftAvailable.value = true
+  } catch {}
+}
+const restoreDraft = () => {
+  try {
+    const d = JSON.parse(localStorage.getItem(_draftKey()) || '{}')
+    if (d.f) form.value = d.f
+    if (d.m) editMode.value = d.m
+    if (d.t) tree.value = d.t
+    expandedTreeKeys.value = new Set(); expandAllTree()
+    if (form.value.lead_form_template_id) { try { selectedFormTpl.value = formTemplates.value.find(x => x.id === form.value.lead_form_template_id) || null } catch {} }
+    if (form.value.message_template_id) { try { selectedMsgTpl.value = msgTemplates.value.find(x => x.id === form.value.message_template_id) || null } catch {} }
+    ElMessage.success(t('launch.draftRestored'))
+  } catch { ElMessage.error(t('common.opFail')) }
+  draftAvailable.value = false
+}
+const discardDraft = () => {
+  try { localStorage.removeItem(_draftKey()) } catch {}
+  draftAvailable.value = false
 }
 
 // #1 保存前校验
@@ -1549,6 +1611,7 @@ const objPickerContinue = async () => {
   objPickName.value = ''
   await nextTick()
   snapshotForm()   // 目标弹窗带入值不标 dirty（objective watcher 默认填充在 nextTick 后落地）
+  checkDraft()
 }
 const openEdit = async (tpl) => {
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：无条件归零（原仅在有配置时恢复，缺失时残留上一模板）
@@ -1648,7 +1711,7 @@ const openEdit = async (tpl) => {
   saveErrKeys.value = new Set()
   // FB 模板一律结构模式（平铺模式已移除；无 structure 的旧模板自动合成 1 组 1 广告视图，保存即升级）
   if (!isTt.value && editMode.value === 'flat') _synthTreeFromFlat()
-  validationErrors.value = []; editOpen.value = true; snapshotForm()
+  validationErrors.value = []; editOpen.value = true; snapshotForm(); checkDraft()
 }
 // 换素材文案跟随：新素材有 AI 文案就立刻填入（标题/正文各自独立判断），没生成过文案的素材
 // 不动手填值；手改过的值会被覆盖——覆盖时返回 true，调用方 toast 告知（可感知，别静默顶掉）。
@@ -1895,6 +1958,7 @@ const saveTpl = async () => {
       ElMessage.success(t('launch.created'))
     }
     editOpen.value = false; snapshotForm()
+    try { localStorage.removeItem(_draftKey()) } catch {}   // 保存成功清草稿
   } catch (e) {
     showError(e, t('launch.saveTplFail'))
     // 后端 422（detail 带组名/可用清单）→ 按节点名定位标红+滚动（api 层已展开 detail 文本）
@@ -2507,6 +2571,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span :class="['plat-ro', isTt ? 'tt' : 'fb']">{{ isTt ? 'TikTok' : 'Facebook' }}</span>
 </div>
       <div v-if="isTt" class="tt-hint">ℹ {{ t('launch.ttSwitchNote') }}</div>
+      <!-- 草稿恢复横幅：跳页丢编辑态后重开时提示恢复 -->
+      <div v-if="draftAvailable" class="draft-banner">
+        <span>📝 {{ t('launch.draftFound') }}</span>
+        <button class="btn sm primary" style="margin-left:auto" @click="restoreDraft">{{ t('launch.draftRestore') }}</button>
+        <button class="btn sm" @click="discardDraft">{{ t('common.discard') }}</button>
+      </div>
       <!-- 顶部：模板完备状态 + 三层 Tab（系列 › 广告组 › 广告——面包屑合进 Tab，带完备度指示） -->
       <div class="fb-top">
         <span :class="['ss-status', editStatus.ready ? 'ready' : 'pending']" :title="editStatus.ready ? '' : editStatus.missing.join('、')">
@@ -2630,8 +2700,8 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <div class="sec-title">{{ t('launch.convSettingsTitle') }}</div>
                 <div class="row"><label>{{ t('launch.convLocation') }}</label>
                   <div v-if="convLocationsForObj.length" class="convloc-opts">
-                    <button type="button" :class="['convloc-opt', { on: !s.conv_location }]" @click="s.conv_location = ''">{{ t('launch.convLocAuto') }}</button>
-                    <button v-for="l in convLocationsForObj" :key="l" type="button" :class="['convloc-opt', { on: s.conv_location === l }]" @click="s.conv_location = l">{{ t('launch.conv_loc_' + l) }}</button>
+                    <button type="button" :class="['convloc-opt', { on: !s.conv_location }]" @click="setConvLocation(s, '')">{{ t('launch.convLocAuto') }}</button>
+                    <button v-for="l in convLocationsForObj" :key="l" type="button" :class="['convloc-opt', { on: s.conv_location === l }]" @click="setConvLocation(s, l)">{{ t('launch.conv_loc_' + l) }}</button>
                   </div>
                   <div v-else class="ro-field">{{ t('launch.convLocNone') }}</div>
                   <span class="hint">{{ t('launch.convLocationHint') }}</span>
@@ -2641,7 +2711,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                 <div class="row"><label>{{ t('launch.treeOptOverride') }}</label>
                   <el-select v-model="s.optimization_goal" style="width:100%" size="small" filterable>
                     <el-option value="" :label="t('launch.optAutoByLoc')" />
-                    <el-option v-for="g in optGoalsForObj" :key="g.v" :value="g.v" :label="t(g.l)" />
+                    <el-option v-for="g in optGoalsForNode(s)" :key="g.v" :value="g.v" :label="t(g.l)" />
                   </el-select>
                   <span class="hint">{{ t('launch.treeFallbackHint') }}</span>
 </div>
@@ -4224,6 +4294,8 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 
 /* FB 创建流：编辑器顶栏（完备状态）+ 三层 Tab（系列/组/广告——面包屑合进 Tab） */
 .fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+/* 草稿恢复横幅（2026-09-14：跳页丢编辑态的兜底） */
+.draft-banner{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;font-size:12px;color:var(--t2);background:color-mix(in srgb, var(--warning) 10%, transparent);border:1px solid color-mix(in srgb, var(--warning) 40%, transparent);border-radius:8px}
 .fb-tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:rgba(0,0,0,.22);box-shadow:inset 0 0 0 1px var(--bd);border-radius:10px}
 .fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:none;border-radius:7px;background:transparent;color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
 .fb-tab:hover{color:var(--t1);border-color:var(--bd2)}
