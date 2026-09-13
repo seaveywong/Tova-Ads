@@ -3618,6 +3618,29 @@ class RetryIn(BaseModel):
     pixel_id: str = ""
 
 
+@router.get("/pages")
+def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ads.create")),
+                 db: Session = Depends(get_db)):
+    """账户写令牌可访问的主页列表（失败重试换主页选择器用；ADVERTISE 权限标注）。
+    与 retry 的 body.page_id → item.page_id 配套——强绑主页账户部署失败（可推广对象
+    不匹配）时换账户实际绑定的主页重试。guard/keepalive/pages 同款逻辑但权限面不同
+    （ads.create vs ads.pause），不共用。"""
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    fb = client_for_account(db, user.tenant_id, act_id, "write")
+    if not fb:
+        raise HTTPException(400, "该账户无可用写令牌——无法拉取主页列表")
+    try:
+        pages = fb.get_pages()
+    except FbApiError as e:
+        raise HTTPException(400, e.friendly)
+    return [{"id": p.get("id", ""), "name": p.get("name", ""),
+             "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
+             "fan_count": p.get("fan_count", 0)} for p in pages]
+
+
 @router.post("/jobs/{job_id}/retry/{item_id}")
 def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
                user: CurrentUser = Depends(require_permission("ads.create")),

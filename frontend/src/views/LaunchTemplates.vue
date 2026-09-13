@@ -2359,17 +2359,36 @@ const pollJob = async (jobId) => {
     if (['completed','partial_failed','failed'].includes(activeJob.value.status)) { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
   } catch {}
 }
-const retryItem = async (it) => {
+const _postRetry = async (it, body) => {
   // partial（批量部分失败）重试确认（复审R2-P1）：批量重试=整个账户全部系列重跑，
   // 上轮已成功的系列会被重建（不走同名幂等）——必须像部署一样先确认
   if (it.error_code === 'partial') {
     try {
       await ElMessageBox.confirm(t('launch.retryPartialConfirm'), t('common.confirm'),
         { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
-    } catch { return }
+    } catch { return false }
   }
-  try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, {}); ElMessage.success(t('launch.retrySubmitted'))
-    if (!pollTimer) startPoll(activeJob.value.id, 0) } catch (e) { showError(e, t('launch.retryFail')) }
+  try { await POST(`/launch-templates/jobs/${activeJob.value.id}/retry/${it.id}`, body); ElMessage.success(t('launch.retrySubmitted'))
+    if (!pollTimer) startPoll(activeJob.value.id, 0); return true } catch (e) { showError(e, t('launch.retryFail')); return false }
+}
+const retryItem = async (it) => { await _postRetry(it, {}) }
+// 换主页重试（2026-09-14）：强绑主页账户部署失败（可推广对象不匹配）时，选账户实际
+// 绑定的主页再试——后端 retry 的 body.page_id → item.page_id 优先于模板主页
+const pagePickOpen = ref(false)
+const pagePickItem = ref(null)
+const pagePickPages = ref([])
+const pagePickLoading = ref(false)
+const pagePickSel = ref('')
+const openPagePick = async (it) => {
+  pagePickItem.value = it; pagePickSel.value = ''
+  pagePickPages.value = []; pagePickLoading.value = true; pagePickOpen.value = true
+  try { pagePickPages.value = await GET('/launch-templates/pages?act_id=' + encodeURIComponent(it.act_id)) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  pagePickLoading.value = false
+}
+const retryWithPage = async () => {
+  if (!pagePickSel.value) return ElMessage.warning(t('launch.pagePickRequired'))
+  if (await _postRetry(pagePickItem.value, { page_id: pagePickSel.value })) pagePickOpen.value = false
 }
 const statusText = (s) => itemStatus(s).label
 const jobText = (s) => jobStatus(s).label
@@ -3608,6 +3627,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               </div>
               <div class="pj-ops">
                 <button v-if="it.status==='fail' || (['pending','creating'].includes(it.status) && !['pending','running'].includes(activeJob.status))" class="op primary sm" :title="it.status!=='fail' ? t('launch.retryStuckTip') : ''" @click="retryItem(it)">{{ t('common.retry') }}</button>
+                <button v-if="it.status==='fail'" class="op sm" :title="t('launch.pagePickTip')" @click="openPagePick(it)">{{ t('launch.pagePickRetry') }}</button>
               </div>
             </div>
           </div>
@@ -3615,6 +3635,23 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-if="!(activeJob.items||[]).length" class="empty-sm">{{ t('launch.noJobItems') }}</div>
       </div>
       <div v-else class="prog-loading">{{ t('launch.loadingJob') }}</div>
+    </el-dialog>
+    <!-- 换主页重试弹窗：强绑主页账户「可推广对象不匹配」失败时选账户实际绑定主页再试 -->
+    <el-dialog v-model="pagePickOpen" :title="t('launch.pagePickTitle')" width="460px" append-to-body>
+      <div class="pp-hint">{{ t('launch.pagePickHint') }}</div>
+      <div v-loading="pagePickLoading" class="pp-list">
+        <label v-for="p in pagePickPages" :key="p.id" :class="['pp-row', { on: pagePickSel === p.id }]">
+          <input type="radio" name="pp-sel" :value="p.id" v-model="pagePickSel" />
+          <span class="pp-name">{{ p.name }}</span>
+          <span :class="['pp-ad', p.can_advertise ? 'ok' : 'warn']">{{ p.can_advertise ? t('launch.pagePickAdOk') : t('launch.pagePickAdNo') }}</span>
+          <span class="pp-fans">{{ p.fan_count || 0 }} {{ t('launch.pagePickFans') }}</span>
+        </label>
+        <div v-if="!pagePickPages.length && !pagePickLoading" class="empty-sm">{{ t('launch.pagePickNone') }}</div>
+      </div>
+      <template #footer>
+        <button class="btn" @click="pagePickOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="!pagePickSel" @click="retryWithPage">{{ t('launch.pagePickConfirm') }}</button>
+      </template>
     </el-dialog>
     <!-- 预检结果（结构化展示） -->
     <el-dialog v-model="preflightVisible" :title="preflightResult?.platform === 'tt' ? t('launch.ttPreflightTitle') : t('launch.preflightTitle')" width="700px" append-to-body>
@@ -4132,6 +4169,17 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .hi-status.pending{color:var(--t2);background:var(--bg2)}
 .hi-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--t3);margin-top:4px;font-variant-numeric:tabular-nums}
 .empty-sm{padding:30px;text-align:center;color:var(--t3);font-size:13px}
+/* 换主页重试弹窗（2026-09-14） */
+.pp-hint{font-size:12px;color:var(--t3);line-height:1.5;margin-bottom:10px}
+.pp-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto}
+.pp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:13px}
+.pp-row:hover{border-color:var(--ac)}
+.pp-row.on{border-color:var(--ac);background:color-mix(in srgb, var(--ac) 8%, transparent)}
+.pp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-ad{font-size:10px;padding:1px 7px;border-radius:9px;flex-shrink:0}
+.pp-ad.ok{color:var(--success);background:rgba(52,199,89,.13)}
+.pp-ad.warn{color:var(--warning);background:rgba(255,159,10,.13)}
+.pp-fans{font-size:11px;color:var(--t3);flex-shrink:0}
 
 /* 部署加载 */
 .config-loading{font-size:12px;color:var(--t3);padding:4px 8px}
