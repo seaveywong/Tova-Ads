@@ -2177,3 +2177,34 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 ### Commits
 - `f0817ec` fix(guard): 保活广告当日快照照写——看板「今日」全天 0 事故
 - `1fb6acb` fix(guard): 回填路径补写 results_fb + obj_map 覆盖近7天 campaign——非购物广告「成效」恒 0
+
+## 批CF：kpi='' 历史行标签修复 + 哨兵倒计时自动开启（2026-09-13 夜，/goal 自主批）
+
+### 概述
+用户睡前 /goal「复审 然后看看有什么优化的」。批CE 复审后发现回填遗留（kpi='' 历史行筛不中转化分类），修复；随后实现 2026-09-12 已定稿并口头批准（"嗯你加吧"）的哨兵倒计时自动开启（dead-man switch），**默认关**部署。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| kpi='' 标签修复 | `guard_engine.py` | 回填循环加 elif：kpi='' 且新解析有字段 → 只补 resolved_kpi/kpi_source/results_fb，终值不动（历史稳定原则）；自限（修完非空不再进） | 生产 09-11 的 9 行 $199 全部修复为 purchase/rule（修复分支不 bump updated_at——用 updated_at 判「没触发」是误判，本次复盘踩坑） |
+| 哨兵倒计时 | `deps.py`+`sentinel_config.py`(新)+`guard_engine.py`+`settings.py`+`i18n.py` | ①登录态请求节流写 users.last_active_at（5min/用户；列 0001 即建「喂自动哨兵」，users 全局表无 RLS）②per-tenant 配置（默认关/48h；开启时刻入倒计时基线）③run_watchdog 挂 _sentinel_auto_arm_check：超时→全纳管账户 sentinel_auto_armed + critical 告警（幂等：只 arm False 的，0 新 arm 不重发）；剩 25% 时间 warning（dedup=配置小时数）④GET/PUT /settings/sentinel-countdown | smoke 18/18（纯函数 9 分支含 tz-naive/hours 异常/基线 max；配置往返 4 断言；接线零误伤——enabled+hours=8760 跑真 check：0 arm/0 通知/终态恢复默认关；节流 3 断言） |
+| 前端 | `Settings.vue`+`AuditLog.vue`+`locales zh/en` | 设置页新分区「哨兵倒计时」（开关+小时，不预填默认值）+ 审计动作映射 ×2 | build ✓；i18n 10 key zh/en 全成对；CF master 已部署 |
+
+### DB 迁移
+- 无（users.last_active_at 0001 已建；system_settings 既有表）。
+
+### 生产环境变更
+- restart ×1（5 后端文件双门 ✓）；前端 CF master；smoke 测试后配置恢复默认关（enabled=false）。
+- **功能默认关**：不开启则除 last_active_at 心跳写（节流 5min/用户）外零行为变化。
+
+### 复审结论（已知限制/风险）
+- **3 个定稿时待确认点按推荐值实现，用户醒来可调**：交互=任意登录态请求（含看板刷新）；剩 25% 时间发 warning；默认时长 48h（保守端，定稿建议 24~48h 区间的上限）。
+- warn/arm 真路径未在 smoke 真触发（会真 arm 22 账户+发 TG，不可在用户睡觉时做）——决策逻辑由纯函数 9 分支覆盖，执行侧与既有 sentinel_arm 同一 ORM 字段/告警通道。
+- 多 worker gunicorn 各持节流表 → 最坏 5min×worker 数写频（可忽略）；进程重启节流表清空=多写一次，无害。
+- 团队全员从未登录过且开启时刻也缺 → 无信号不 arm（宁纵勿枉）。
+- 超管（非团队成员）活动不计入刷新——按定稿「按团队」。
+- 7d 窗口外的历史 kpi='' 行（7/8 月共 ~143 行）不再修复：窗口外 insights 不再返回，属历史数据冻结。
+
+### Commits
+- `7688856` fix(guard): 回填对 kpi='' 历史行只修标签不动终值 + TECH_REVIEW 批CE
+- `ee01b19` feat(哨兵倒计时): 无交互超时自动 arm 哨兵（dead-man switch，默认关）
