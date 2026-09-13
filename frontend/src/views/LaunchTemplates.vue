@@ -4094,7 +4094,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .ps-metric.run b{color:var(--ac)}
 .ps-times{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--t3);padding:0 2px 8px;font-variant-numeric:tabular-nums}
 .pj-wrap{border:1px solid var(--bd);border-radius:var(--rs);overflow-x:auto}
-.pj-grid{display:grid;grid-template-columns:minmax(150px,1.1fr) 96px minmax(200px,1.5fr) minmax(160px,1.7fr) 72px;gap:8px 12px;align-items:center;padding:8px 12px;font-size:12px;min-width:700px}
+.pj-grid{display:grid;grid-template-columns:minmax(150px,1.1fr) 96px minmax(200px,1.5fr) minmax(160px,1.7fr) auto;gap:8px 12px;align-items:center;padding:8px 12px;font-size:12px;min-width:700px}
 /* 已部署清单（抽屉，720px）：5 列=账户/状态/创建物/当前状态/原因 */
 .pj-grid-5{grid-template-columns:minmax(140px,1.15fr) 92px minmax(170px,1.3fr) minmax(88px,.65fr) minmax(150px,1.2fr);min-width:620px}
 .pj-head{background:var(--bg2);color:var(--t3);font-size:11px;font-weight:600;padding:6px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
@@ -4139,7 +4139,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pj-reason-txt{font-size:11px;color:var(--error);line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;word-break:break-all}
 .pj-reason.wrap .pj-reason-txt{-webkit-line-clamp:4}
 .pj-reason.note .pj-reason-txt{color:var(--t2)}
-.pj-ops{display:flex;justify-content:center}
+.pj-ops{display:flex;justify-content:center;gap:4px;flex-wrap:nowrap;white-space:nowrap}
 .prog-loading{padding:40px;text-align:center;color:var(--t3);font-size:13px}
 
 /* 预检结构化 */
