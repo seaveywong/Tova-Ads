@@ -61,7 +61,7 @@ export default {
     objCampaign: '系列', objAdset: '广告组', objAd: '广告', subcodesN: '子码 ×{n}',
     errPartial: '部分失败', errDegrade: '自动降级', errNoId: '缺ID', deployNote: '提示', itemStuck: '卡住',
     progressStale: '长时间无进展，部署进程可能已中断（如服务重启），稍后会自动标记失败可重试', credNameTip: '本次下发实际使用的令牌（成功/失败都归因到它）',
-    loadingJob: '加载任务明细…', accAvailable: '可用额度',
+    loadingJob: '加载任务明细…', accAvailable: '可用额度（花费上限 − 历史总消耗，USD）', accUnlimited: '未设花费上限',
     totalBudgetHint: '· 合计 ≈ ${total}/天（每账户 ${per}/天）',
     deploySelectAll: '全选', deploySelectActive: '只选正常账户', deployClear: '清空',
     // 部署侧主页/像素自动化三件套：随机分配主页 + 主页权限总览 + 像素策略
@@ -315,7 +315,7 @@ export default {
     objCampaign: 'Campaign', objAdset: 'Ad set', objAd: 'Ad', subcodesN: 'Subcodes ×{n}',
     errPartial: 'Partial', errDegrade: 'Auto-adjusted', errNoId: 'No ID', deployNote: 'Note', itemStuck: 'Stuck',
     progressStale: 'No progress for a while — the deploy process may have been interrupted (e.g. service restart); it will be marked failed and retryable shortly', credNameTip: 'Token actually used for this deploy (success/failure attributes to it)',
-    loadingJob: 'Loading job details…', accAvailable: 'Available',
+    loadingJob: 'Loading job details…', accAvailable: 'Available (spend cap − lifetime spend, USD)', accUnlimited: 'No spend cap',
     totalBudgetHint: '· Total ≈ ${total}/day (${per}/day per account)',
     deploySelectAll: 'Select all', deploySelectActive: 'Active only', deployClear: 'Clear',
     // Deploy-side page/pixel automation trio: random page assignment + page permission overview + pixel strategy

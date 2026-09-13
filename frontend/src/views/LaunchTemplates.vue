@@ -3431,7 +3431,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <span class="acc-name">{{ a.name || a.act_id }}</span>
               <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span></span>
             </span>
-            <span v-if="a.available_usd != null || a.balance_usd != null" class="acc-bal tnum" :title="t('launch.accAvailable')">{{ '$' + (a.available_usd != null ? a.available_usd : a.balance_usd) }}</span>
+            <!-- 可用额度（花费上限−历史总消耗，USD）；无上限账户显示 ∞；未知币种算不出则不显示。
+                 曾拿 balance_usd（FB 未结欠款）兜底冒充可用额度——口径错误已移除 -->
+            <span v-if="a.balance_kind !== 'unlimited' && a.balance_kind !== 'very_high_limit' && a.available_usd != null" class="acc-bal tnum" :title="t('launch.accAvailable')">${{ a.available_usd }}</span>
+            <span v-else-if="a.balance_kind === 'unlimited' || a.balance_kind === 'very_high_limit'" class="acc-bal" :title="t('launch.accAvailable') + ' · ' + t('launch.accUnlimited')">∞</span>
             <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
             <span v-if="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
 </label>

@@ -410,7 +410,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
     <div class="tbl" v-loading="loading || accLoading">
       <div class="row head">
         <div><input type="checkbox" :checked="selectedAccs.size === filteredAccounts.length && filteredAccounts.length > 0" @click="selectAllAccs" /></div>
-        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div class="th-grp" :title="t('ads.groupSortTip')" @click="groupSort = !groupSort">{{ t('ads.groupCol') }}<span v-if="groupSort" class="sort-ind">▲</span></div><div>{{ t('ads.balance') }}</div><div>{{ t('ads.availableCredit') }}</div>
+        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div class="th-grp" :title="t('ads.groupSortTip')" @click="groupSort = !groupSort">{{ t('ads.groupCol') }}<span v-if="groupSort" class="sort-ind">▲</span></div><div :title="t('ads.unbilledTip')">{{ t('ads.balance') }}</div><div :title="t('ads.availTip')">{{ t('ads.availableCredit') }}</div>
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
       <template v-for="d in displayRows" :key="d.type === 'grp' ? 'grp-' + d.key : d.a.act_id">

@@ -865,7 +865,7 @@ const deleteToken = async (tk) => {
               <div class="ai-main">
                 <span class="ai-name">{{ a.name }}</span>
                 <span class="ai-id blue" :title="t('tokens.clickToCopy')" @click.stop="copyId(a.account_id)">{{ a.account_id }}</span>
-                <span class="ai-meta" v-if="a.balance_label">{{ t('status.accActive') }} · {{ a.balance_label }}</span>
+                <span class="ai-meta" v-if="a.balance_label" :title="t('tokens.balanceLabelTip')">{{ t('status.accActive') }} · {{ a.balance_label }}</span>
               </div>
               <span class="st-tag" :class="accountStatusMeta(a.account_status).cls">{{ accountStatusMeta(a.account_status).label }}</span>
               <el-dropdown trigger="click" @command="cmd => handleAccountCmd(cmd, a)" @click.stop>
