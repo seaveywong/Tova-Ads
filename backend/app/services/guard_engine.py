@@ -1294,7 +1294,11 @@ def _inspect_account_worker(ctx: dict) -> dict:
         except Exception:
             leads_map = {}
         # 取本账户广告涉及的 campaign objective（KPI 转化提取用，一次巡检缓存）
-        obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads})
+        # obj_map 覆盖今日行 + 近7天历史行的 campaign（回填/快照都按它解析 KPI）。曾只含
+        # 今日在投——历史独有 campaign（已停广告）回填时 obj='' → 非购物类掉进 L5 劣质
+        # 黑名单死路（like/post_engagement 全被跳过）→ kpi=''、转化分类筛不中
+        obj_map = _campaign_objectives(fb, {ad.get("campaign_id") for ad in ads}
+                                       | {r.get("campaign_id") for r in hist_rows_7d})
         adset_og_map = _adset_optgoals(db, tenant_id, acc.act_id, platform) if platform == "fb" else {}
         # objectives 缺口观测（复审R1）：拉不到 objective 时 resolver 落 fallback 转化集聚合，
         # 转化口径可能系统性漂移（多算/少算）——曾完全静默。计数进轮末 KPI 告警（仅 FB：
@@ -1875,6 +1879,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             if _d7 >= _yest7:  # 仅昨日行随轮修正；更早的天历史终值稳定不覆盖
                                 _e7.spend = _sp7u; _e7.spend_native = _sp7
                                 _e7.conversions = _cv7
+                                _e7.results_fb = _kpi7.get("results_fb", 0)  # AdManager「成效」列数据源——曾不写 → 回填行恒 0
                                 _e7.cpa = (_sp7u / _cv7) if _cv7 > 0 else None
                                 _e7.roas = _roas7 if _roas7 > 0 else None
                                 _e7.impressions = int(r7.get("impressions", 0) or 0)
@@ -1887,7 +1892,8 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             tenant_id=tenant_id, act_id=acc.act_id, ad_id=_aid7,
                             platform=platform, snapshot_date=_d7,
                             spend=_sp7u, spend_native=_sp7, currency=acc.currency,
-                            conversions=_cv7, cpa=(_sp7u / _cv7) if _cv7 > 0 else None,
+                            conversions=_cv7, results_fb=_kpi7.get("results_fb", 0),
+                            cpa=(_sp7u / _cv7) if _cv7 > 0 else None,
                             roas=_roas7 if _roas7 > 0 else None,
                             impressions=int(r7.get("impressions", 0) or 0),
                             clicks=int(r7.get("clicks", 0) or 0),
