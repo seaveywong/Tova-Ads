@@ -688,9 +688,9 @@ const deleteToken = async (tk) => {
       <div class="ph-left">
         <h1 class="ph-title">{{ t('tokens.pageTitle') }}</h1>
         <span class="ph-fresh">{{ t('tokens.statusCount', { ok: tokenStatusCount.ok, off: tokenStatusCount.off }) }}</span>
-        <div class="seg">
-          <button class="seg-btn seg-fb" :class="{on:platform==='fb'}" @click="switchPlatform('fb')"><span class="seg-dot fb"></span>Facebook</button>
-          <button class="seg-btn seg-tt" :class="{on:platform==='tt'}" @click="switchPlatform('tt')"><span class="seg-dot tt"></span>TikTok</button>
+        <div class="seg-bar">
+          <button class="seg-btn fb" :class="{on:platform==='fb'}" @click="switchPlatform('fb')"><span class="seg-dot fb"></span>Facebook</button>
+          <button class="seg-btn tt" :class="{on:platform==='tt'}" @click="switchPlatform('tt')"><span class="seg-dot tt"></span>TikTok</button>
         </div>
       </div>
       <div class="ph-actions">
@@ -1101,16 +1101,7 @@ const deleteToken = async (tk) => {
 <style scoped>
 .page{width:100%}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}
-.seg{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:3px}
-.seg-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 16px;border:none;background:transparent;color:var(--t3);font-size:13px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap}
 /* 分区选中态用品牌色（FB=品牌蓝 / TT=青粉），与全局平台上下文条同款语言 */
-.seg-btn.on{font-weight:600}
-.seg-btn.seg-fb.on{background:rgba(24,119,242,.15);color:#5aa2ff}
-.seg-btn.seg-tt.on{background:rgba(254,44,85,.12);color:#ff6f8d}
-.seg-btn:not(.on):hover{color:var(--t1)}
-.seg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--t3)}
-.seg-dot.fb{background:#1877f2}
-.seg-dot.tt{background:linear-gradient(135deg,#25f4ee 45%,#fe2c55 55%)}
 /* FB 表格 / TT 卡片分区切换轻过渡 */
 .plat-pane{animation:pane-in .18s ease}
 @keyframes pane-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}

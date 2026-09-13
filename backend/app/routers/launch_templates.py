@@ -81,6 +81,7 @@ def _tpl_dict(t: LaunchTemplate) -> dict:
         "whatsapp_phone_number": t.whatsapp_phone_number or "",
         "status": t.status, "deploy_count": t.deploy_count or 0,
         "created_at": str(t.created_at) if t.created_at else "",
+        "updated_at": str(t.updated_at) if t.updated_at else "",   # 列表排序（最近编辑）用
     }
 
 

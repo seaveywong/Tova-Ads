@@ -24,6 +24,19 @@ const filteredList = computed(() => {
   return list.value.filter(x => (platFilter.value === 'all' || (x.platform || 'fb') === platFilter.value)
     && (!q || (x.name || '').toLowerCase().includes(q)))
 })
+// 排序（2026-09-14 工具栏）：recent=最近编辑（updated_at 回落 created_at）/ name=名称 /
+// ready=就绪优先（就绪在上，同档按最近编辑）。localStorage 记忆（照 adManagerView 模式）
+const _SORT_KEYS = ['recent', 'name', 'ready']
+const sortKey = ref(_SORT_KEYS.includes(localStorage.getItem('launch_tpl_sort')) ? localStorage.getItem('launch_tpl_sort') : 'recent')
+watch(sortKey, v => localStorage.setItem('launch_tpl_sort', v))
+const _tplTime = (x) => String(x.updated_at || x.created_at || '')
+const sortedList = computed(() => {
+  const arr = [...filteredList.value]
+  if (sortKey.value === 'name') arr.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true }))
+  else if (sortKey.value === 'ready') arr.sort((a, b) => (_tplReady(b) ? 1 : 0) - (_tplReady(a) ? 1 : 0) || _tplTime(b).localeCompare(_tplTime(a)))
+  else arr.sort((a, b) => _tplTime(b).localeCompare(_tplTime(a)))
+  return arr
+})
 const editOpen = ref(false)
 const editing = ref(null)
 const form = ref({})
@@ -2489,12 +2502,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <span class="ph-fresh">{{ t('launch.tplCount', { n: filteredList.length }) }}</span>
 </div>
       <div class="ph-actions">
-        <el-input v-model="searchQ" :placeholder="t('launch.searchPh')" clearable class="head-search" />
-        <div class="seg plat-filter">
-          <button :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
-          <button class="pf-fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="pf-dot fb"></span>Facebook</button>
-          <button class="pf-tt" :class="{on:platFilter==='tt'}" @click="platFilter='tt'"><span class="pf-dot tt"></span>TikTok</button>
-</div>
         <button class="head-btn" @click="openHistory">{{ t('launch.deployHistory') }}</button>
         <el-dropdown trigger="click" @command="p => openNew(p)">
           <button class="head-btn primary">+ {{ t('launch.newTemplate') }} ▾</button>
@@ -2507,10 +2514,24 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dropdown>
 </div>
 </header>
-    <div class="d">{{ t('launch.subtitle') }}</div>
 
-    <div class="grid" v-loading="loading">
-      <div v-for="tpl in filteredList" :key="tpl.id" class="card">
+    <!-- 统一工具栏（2026-09-14 三页重构）：平台筛选 + 排序 左置，搜索右对齐；吸顶让位平台上下文条 -->
+    <div class="list-bar">
+      <div class="seg-bar">
+        <button class="seg-btn" :class="{on:platFilter==='all'}" @click="platFilter='all'">{{ t('common.all') }}</button>
+        <button class="seg-btn fb" :class="{on:platFilter==='fb'}" @click="platFilter='fb'"><span class="seg-dot fb"></span>Facebook</button>
+        <button class="seg-btn tt" :class="{on:platFilter==='tt'}" @click="platFilter='tt'"><span class="seg-dot tt"></span>TikTok</button>
+      </div>
+      <el-select v-model="sortKey" size="small" style="width:150px" :title="t('launch.sortLabel')">
+        <el-option value="recent" :label="t('launch.sortRecent')" />
+        <el-option value="name" :label="t('launch.sortName')" />
+        <el-option value="ready" :label="t('launch.sortReady')" />
+      </el-select>
+      <el-input v-model="searchQ" :placeholder="t('launch.searchPh')" clearable class="bar-search" />
+    </div>
+
+    <div class="grid-cards" v-loading="loading">
+      <div v-for="tpl in sortedList" :key="tpl.id" class="card-base lt-card">
         <!-- 卡头：平台 chip + 名称占满行宽 + 状态小圆点（tooltip 详情）——
              曾徽章「✓ 就绪」挤掉半行名称致「FBUS 45+ 购…」截断 -->
         <div class="card-head">
@@ -2547,13 +2568,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </el-dropdown>
 </div>
 </div>
-      <div v-if="!filteredList.length && !loading" class="empty">
+      <div v-if="!filteredList.length && !loading" class="empty-block">
         <!-- 审查P1：三态区分——搜索无结果（可一键清空）/ 平台筛选空 / 全库空 -->
         <span v-if="searchQ.trim()">{{ t('launch.noSearchMatch') }}「{{ searchQ.trim() }}」</span>
         <span v-else-if="list.length">{{ t('launch.noTemplatesForPlat') }}</span>
         <span v-else>{{ t('launch.emptyHint') }}</span>
-        <button v-if="searchQ.trim()" class="btn empty-cta" @click="searchQ = ''">{{ t('common.clear') }}</button>
-        <button v-else-if="!list.length" class="btn primary empty-cta" @click="openNew('fb')">+ {{ t('launch.newTemplate') }}</button>
+        <button v-if="searchQ.trim()" class="btn" @click="searchQ = ''">{{ t('common.clear') }}</button>
+        <button v-else-if="!list.length" class="btn primary" @click="openNew('fb')">+ {{ t('launch.newTemplate') }}</button>
       </div>
 </div>
 
@@ -3866,9 +3887,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .btn.sm{padding:4px 10px;font-size:12px}
 .btn.ghost{background:transparent;color:var(--t3)}
 .btn:disabled{opacity:.5}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s,transform .15s}
-.card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 /* 状态小圆点（替代原「✓ 就绪」徽章——不再挤名称，hover 看详情） */
@@ -3907,14 +3925,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .sa-meta{font-size:11px;color:var(--t3)}
 .aud-actions-row{display:flex;gap:6px}
 .card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
-.head-search{width:180px;flex:none}
-.op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
-.op.primary{color:var(--ac);border-color:var(--ac)}
+.lt-card{padding:12px 14px;gap:8px}
+.op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:12px;cursor:pointer;padding:4px 10px;border-radius:6px;font-family:inherit;white-space:nowrap;transition:all .15s}
+.op.primary{color:var(--ac);border-color:rgba(10,132,255,.45);background:var(--acg);font-weight:600}
+.op.primary:hover{background:var(--ac);color:#fff}
 .op.primary.sm{padding:2px 8px;font-size:11px}
 .op.danger{color:var(--error)}
-.op.dots{font-size:15px;line-height:1;padding:3px 10px}
-.op:hover{background:var(--bg3)}
-.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:200px}
+.op.dots{font-size:15px;line-height:1}
+.op:hover{color:var(--ac);border-color:var(--ac)}
 
 .form{display:flex;flex-direction:column;gap:12px}
 .row{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
@@ -3979,14 +3997,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .plat-ro{display:inline-flex;align-items:center;gap:4px;padding:4px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid}
 .plat-ro.fb{color:#5aa2ff;border-color:rgba(24,119,242,.35);background:rgba(24,119,242,.08)}
 .plat-ro.tt{color:#ff6f8d;border-color:rgba(254,44,85,.35);background:rgba(254,44,85,.08)}
-.plat-filter button{flex:none}
 /* 平台筛选 chip 品牌样式：与全局平台上下文条同款（FB=品牌蓝 / TT=青粉） */
-.plat-filter button{display:inline-flex;align-items:center;gap:6px}
-.pf-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--t3)}
-.pf-dot.fb{background:#1877f2}
-.pf-dot.tt{background:linear-gradient(135deg,#25f4ee 45%,#fe2c55 55%)}
-.plat-filter .pf-fb.on{background:rgba(24,119,242,.15);border-color:rgba(24,119,242,.55);color:#5aa2ff}
-.plat-filter .pf-tt.on{background:rgba(254,44,85,.12);border-color:rgba(254,44,85,.5);color:#ff6f8d}
 .tt-hint{font-size:11px;color:var(--t3);padding:6px 10px;background:var(--bg3);border-radius:6px;margin-bottom:10px;line-height:1.5}
 .reuse-selected{display:flex;align-items:center;gap:8px}
 .reuse-selected-block{display:flex;flex-direction:column;gap:6px}

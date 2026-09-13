@@ -1086,9 +1086,9 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
     <header class="page-head">
       <div class="ph-left">
         <!-- 主内容双 Tab 融入页头（曾独立成行太稀疏）：数据看板 / 链接数据 -->
-        <div class="main-tabs">
-          <button class="main-tab" :class="{ on: mainTab === 'data' }" @click="mainTab = 'data'">{{ t('dashboard.tabData') }}</button>
-          <button class="main-tab" :class="{ on: mainTab === 'landing' }" @click="mainTab = 'landing'">{{ t('dashboard.tabLanding') }}</button>
+        <div class="seg-bar main-tabs">
+          <button class="seg-btn" :class="{ on: mainTab === 'data' }" @click="mainTab = 'data'">{{ t('dashboard.tabData') }}</button>
+          <button class="seg-btn" :class="{ on: mainTab === 'landing' }" @click="mainTab = 'landing'">{{ t('dashboard.tabLanding') }}</button>
         </div>
         <span v-if="lastUpdated || lastInspectedDisplay" class="ph-fresh" :title="phTimesTitle">
           <template v-if="lastUpdated">{{ t('dashboard.dataUpTo', { ago: fmtAgo(lastUpdated) }) }}</template>
@@ -1653,9 +1653,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
 /* ── 工具栏（sticky 单行）：日期预设 + 转化分类 + 账户多选 ── */
 /* 双 Tab 融入页头（替代静态页标题；曾独立成行太稀疏） */
-.main-tabs { display: inline-flex; gap: 6px; }
-.main-tab { padding: 7px 22px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t2); border-radius: 10px; font-size: 17px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.main-tab.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 /* sticky 基准是 .content 滚动区顶缘（平台上下文条在其外常驻），top:0 即紧贴平台条 */
 .tg-mgr-btn { position: relative; }
 .tg-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-danger, #f56c6c); box-shadow: 0 0 0 2px var(--bg, #fff); }

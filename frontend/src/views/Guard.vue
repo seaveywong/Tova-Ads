@@ -311,9 +311,9 @@ const doInspect = async (force = false) => {
     <header class="page-head">
       <div class="ph-left">
         <h1 class="ph-title">{{ t('guard.pageTitle') }}</h1>
-        <div class="view-tabs">
-          <button class="cat-chip" :class="{ on: viewTab === 'rules' }" @click="viewTab = 'rules'">{{ t('guard.tabRules') }}</button>
-          <button class="cat-chip" :class="{ on: viewTab === 'log' }" @click="viewTab = 'log'; loadPauseLog()">{{ t('guard.tabLog') }}</button>
+        <div class="seg-bar">
+          <button class="seg-btn" :class="{ on: viewTab === 'rules' }" @click="viewTab = 'rules'">{{ t('guard.tabRules') }}</button>
+          <button class="seg-btn" :class="{ on: viewTab === 'log' }" @click="viewTab = 'log'; loadPauseLog()">{{ t('guard.tabLog') }}</button>
         </div>
         <span v-if="viewTab === 'rules'" class="ph-fresh">{{ t('guard.rulesCount', { n: rules.length }) }}</span>
       </div>
@@ -534,7 +534,6 @@ const doInspect = async (force = false) => {
 .plat-chip.fb { background: rgba(24, 119, 242, .16); color: #5aa2ff; }
 .plat-chip.tt { background: rgba(254, 44, 85, .16); color: #ff6f8d; }
 
-.view-tabs { display: flex; gap: 6px; }
 .pl-row { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--bd); border-radius: 10px; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
 /* 批BV：最近全局暂停执行报告卡（/goal① 侧栏只有按钮没有信息——这里是回看处） */
 .emg-report { border: 1px solid var(--bd); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; background: var(--bg2); display: flex; flex-direction: column; gap: 10px; }

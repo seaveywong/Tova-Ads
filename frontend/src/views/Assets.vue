@@ -456,33 +456,31 @@ const countryLabel = (code) => {
         <button class="head-btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
       </div>
     </header>
-    <!-- 工具栏 -->
-    <div class="bar">
-      <div class="bar-l">
-        <div class="type-segs">
-          <button v-for="tc in typeChips" :key="tc.key" :class="['seg', { on: fType === tc.key }]" @click="setType(tc.key)">{{ tc.label }}</button>
-        </div>
-        <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable size="small" style="width:140px" @change="load">
-          <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
-        </el-select>
-        <el-input v-model="fSearch" :placeholder="t('assets.searchNamePh')" clearable size="small" style="width:180px" @keyup.enter="loadNow" />
+    <!-- 统一工具栏（2026-09-14 三页重构）：类型 + 标签左置，搜索右对齐；吸顶让位平台上下文条 -->
+    <div class="list-bar">
+      <div class="seg-bar">
+        <button v-for="tc in typeChips" :key="tc.key" :class="['seg-btn', { on: fType === tc.key }]" @click="setType(tc.key)">{{ tc.label }}</button>
       </div>
+      <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable size="small" style="width:140px" @change="load">
+        <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
+      </el-select>
+      <el-input v-model="fSearch" :placeholder="t('assets.searchNamePh')" clearable size="small" class="bar-search" @keyup.enter="loadNow" />
     </div>
 
     <!-- AI 分析参数（aiOn 时显示，作用于卡片 AI分析 按钮） -->
     <div v-if="aiOn" class="ai-bar">
       <div class="ai-field">
         <span class="ai-field-label">{{ t('assets.depth') }}</span>
-        <div class="seg-grp">
-          <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg2', { on: aiDepth === d.value }]"
+        <div class="seg-bar">
+          <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg-btn', { on: aiDepth === d.value }]"
                   :title="t('assets.depthTitle', { copy: d.copy_count, frames: d.video_frames })"
                   @click="setDepth(d.value)">{{ d.label }}</button>
         </div>
       </div>
       <div class="ai-field">
         <span class="ai-field-label">{{ t('assets.style') }}</span>
-        <div class="seg-grp">
-          <button v-for="s in aiOpts.styles" :key="s.value" :class="['seg2', { on: aiStyle === s.value, warn: s.value === 'aggressive' }]"
+        <div class="seg-bar">
+          <button v-for="s in aiOpts.styles" :key="s.value" :class="['seg-btn', { on: aiStyle === s.value, warn: s.value === 'aggressive' }]"
                   :title="s.hint" @click="setStyle(s.value)">{{ s.label }}</button>
         </div>
       </div>
@@ -499,8 +497,8 @@ const countryLabel = (code) => {
     </div>
 
     <!-- 网格 -->
-    <div class="grid" v-loading="loading">
-      <div v-for="a in assets" :key="a.id" class="card" :class="{ selected: selected.has(a.id) }">
+    <div class="grid-media" v-loading="loading">
+      <div v-for="a in assets" :key="a.id" class="card-base as-card" :class="{ selected: selected.has(a.id) }">
         <!-- 选择 checkbox（左上，hover 或已选时显） -->
         <label class="card-check" :class="{ on: selected.has(a.id) }" @click.stop :title="t('assets.selectItem')">
           <input type="checkbox" :checked="selected.has(a.id)" @change="toggleSel(a.id)" />
@@ -537,7 +535,7 @@ const countryLabel = (code) => {
         </div>
         <div class="card-ops">
           <!-- 审查P2：分析中固定宽度文案（阶段详情 hover 看）——长阶段文案曾致操作行抖动 -->
-          <button v-if="aiOn" class="op primary-op" :disabled="analyzingIds.has(a.id)" :title="analyzingIds.has(a.id) ? analyzeStageText(a) : ''" @click="analyze(a)">
+          <button v-if="aiOn" class="op primary" :disabled="analyzingIds.has(a.id)" :title="analyzingIds.has(a.id) ? analyzeStageText(a) : ''" @click="analyze(a)">
             {{ analyzingIds.has(a.id) ? t('assets.analyzingSimple', { s: analyzeElapsed[a.id] || 0 }) : (a.ai_status === 'done' ? t('assets.reAnalyze') : t('assets.aiAnalyze')) }}
           </button>
           <!-- 批BS：「文案」放出（喂投放的高价值入口）；「详情」撤下——点缩略图即预览，按钮冗余 -->
@@ -555,10 +553,10 @@ const countryLabel = (code) => {
           </el-dropdown>
         </div>
       </div>
-      <div v-if="!assets.length && !loading" class="empty">
+      <div v-if="!assets.length && !loading" class="empty-block">
         <div>{{ hasActiveFilter ? t('assets.emptyFiltered') : t('assets.empty') }}</div>
-        <button v-if="hasActiveFilter" class="btn empty-cta" @click="clearFilters">{{ t('assets.clearFilter') }}</button>
-        <button v-else class="btn primary empty-cta" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
+        <button v-if="hasActiveFilter" class="btn" @click="clearFilters">{{ t('assets.clearFilter') }}</button>
+        <button v-else class="btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
       </div>
     </div>
 
@@ -703,14 +701,9 @@ const countryLabel = (code) => {
 
 /* 工具栏 */
 .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.bar-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bar-r { display: flex; align-items: center; gap: 12px; }
 .ai-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--bg3); border-radius: var(--rs); }
 .ai-toggle-label { font-size: 12px; color: var(--t2); }
-.type-segs { display: flex; gap: 2px; background: var(--bg3); border-radius: 7px; padding: 2px; }
-.seg { padding: 5px 12px; border: none; background: transparent; color: var(--t3); font-size: 12px; border-radius: 5px; cursor: pointer; font-family: inherit; }
-.seg.on { background: var(--bg2); color: var(--t1); }
-.seg:hover { color: var(--t1); }
 
 .btn { padding: 7px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t1); border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; }
 .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
@@ -720,14 +713,14 @@ const countryLabel = (code) => {
 .btn.ghost { background: transparent; color: var(--t3); }
 
 /* 批量栏 */
-.batch-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(10,132,255,.08); border: 1px solid rgba(10,132,255,.3); border-radius: 8px; flex-wrap: wrap; }
+.batch-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(10,132,255,.08); border: 1px solid rgba(10,132,255,.3); border-radius: 10px; flex-wrap: wrap; position: sticky; top: var(--plat-bar-h, 44px); z-index: 91; }
 .batch-count { font-size: 13px; color: var(--ac); font-weight: 600; margin-right: 6px; }
 
-/* 卡片选择 checkbox */
-.card { position: relative; }
-.card.selected { border-color: var(--ac); box-shadow: 0 0 0 2px rgba(10,132,255,.25); }
+/* 卡片选择 checkbox（骨架在全局 .card-base；本页 .as-card=缩略图全出血+选中环） */
+.as-card { position: relative; overflow: hidden; }
+.as-card.selected { border-color: var(--ac); box-shadow: 0 0 0 2px rgba(10,132,255,.25); }
 .card-check { position: absolute; top: 6px; left: 6px; z-index: 2; width: 18px; height: 18px; border-radius: 4px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.3); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s; cursor: pointer; }
-.card:hover .card-check, .card-check.on { opacity: 1; }
+.as-card:hover .card-check, .card-check.on { opacity: 1; }
 @media (pointer: coarse) { .card-check { opacity: 1 } }   /* 触屏无 hover——批量入口常显，否则移动端批量不可用 */
 .card-check.on { background: var(--ac); border-color: var(--ac); }
 .card-check input { appearance: none; width: 12px; height: 12px; margin: 0; cursor: pointer; }
@@ -742,15 +735,11 @@ const countryLabel = (code) => {
 /* 国家 chip（标签行内，非按钮——改国家走详情/编辑弹窗） */
 .country-chip { font-size: 10px; padding: 1px 5px; background: var(--acg); color: var(--ac); border-radius: 4px; font-weight: 600; }
 
-/* AI 参数条 */
+/* AI 参数条（seg 已用全局 .seg-bar/.seg-btn；aggressive 档本页特有橙色 on 态） */
+.seg-btn.warn.on { background: rgba(255,159,10,.18); color: var(--warning); border-color: rgba(255,159,10,.5); }
 .ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; position: sticky; top: var(--plat-bar-h, 44px); z-index: 90; box-shadow: 0 6px 12px -8px rgba(0,0,0,.25); }
 .ai-field { display: flex; align-items: center; gap: 6px; }
 .ai-field-label { font-size: 12px; color: var(--t3); }
-.seg-grp { display: flex; gap: 2px; background: var(--bg3); border-radius: 6px; padding: 2px; }
-.seg2 { padding: 4px 10px; border: none; background: transparent; color: var(--t3); font-size: 12px; border-radius: 4px; cursor: pointer; font-family: inherit; }
-.seg2.on { background: var(--bg2); color: var(--t1); }
-.seg2.warn.on { background: rgba(255,159,10,.18); color: var(--warning); }
-.seg2:hover { color: var(--t1); }
 
 /* 编辑弹窗 variant 行 */
 .variant-row { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; }
@@ -762,7 +751,6 @@ const countryLabel = (code) => {
 .preview-ai-analysis { color: var(--t3); font-size: 12px; font-style: italic; }
 
 /* 网格 */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; min-height: 200px; }
 .card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden; transition: border-color .15s, box-shadow .15s, transform .15s; display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: 320px; }
 .card:hover { border-color: var(--ac); box-shadow: var(--shadow-card); transform: translateY(-1px); }
 .thumb-wrap { position: relative; width: 100%; height: 130px; background: var(--bg3); display: flex; align-items: center; justify-content: center; }
@@ -782,15 +770,9 @@ const countryLabel = (code) => {
 .card-meta { display: flex; gap: 6px; margin-top: 4px; }
 .meta-size, .meta-dim, .meta-id { font-size: 10px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .card-ops { display: flex; gap: 2px; padding: 4px 10px 8px; flex-wrap: wrap; align-items: center; }
-.op { background: none; border: 1px solid var(--bd); color: var(--t2); font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 4px; }   /* 审查P2：与 FormTemplates/LaunchTemplates 卡操作对齐（曾无边框三页割裂） */
-.op:hover { background: var(--bg3); color: var(--t1); }
-.op.danger:hover { color: var(--error); }
-.op.primary-op { color: var(--ac); }
-.op.primary-op:hover { background: rgba(10,132,255,.12); }
-.op.dots { font-size: 15px; line-height: 1; padding: 2px 8px; margin-left: auto; }
+.op.danger:hover { color: var(--error); border-color: rgba(255,90,90,.4); }
+.op.dots { margin-left: auto; }   /* dots 推行尾（全局管形状） */
 .op:disabled { opacity: .5; cursor: wait; }
-.empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--t3); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.empty-cta { align-self: center; }
 
 /* 上传抽屉 */
 .drop-zone { border: 2px dashed var(--bd); border-radius: 10px; padding: 30px; text-align: center; margin-bottom: 14px; transition: border-color .15s; }

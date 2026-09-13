@@ -131,6 +131,60 @@ a { color: var(--ac); text-decoration: none; }
 .meta-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--t2); border: 1px solid var(--bd); border-radius: 5px; padding: 1px 7px; white-space: nowrap; line-height: 1.6; }
 .meta-chip.accent { color: var(--ac); background: var(--acg); border-color: transparent; }
 
+/* ── 列表页统一词汇（2026-09-14 三页重构）：工具栏/分段控件/网格/卡片骨架/空态。
+   类名刻意不与各页 scoped 旧类同名（.card/.empty/.grid/.tabs 等）——页面迁移时改名收编，
+   删各自 scoped 副本，终结 6 套分段控件/圆角漂移/两套主按钮类。 ── */
+
+/* 工具栏行：左筛选右搜索；吸顶让位全局平台上下文条（--plat-bar-h 先例：Assets ai-bar） */
+.list-bar {
+  position: sticky;
+  top: var(--plat-bar-h, 44px);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.list-bar .bar-search { margin-left: auto; width: 200px; flex: none; }
+@media (max-width: 768px) { .list-bar { position: static; } .list-bar .bar-search { margin-left: 0; width: 100%; } }
+
+/* 分段控件（全站唯一实现）：.seg-bar 容器 + .seg-btn；fb/tt 品牌色 on 态 + 品牌点 */
+.seg-bar { display: inline-flex; gap: 4px; background: var(--bg3); border-radius: 8px; padding: 3px; }
+.seg-btn { border: 1px solid transparent; background: transparent; color: var(--t3); font-size: 12px; font-family: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; transition: all .15s; }
+.seg-btn:hover { color: var(--t1) }
+.seg-btn.on { background: var(--bg2); color: var(--t1); border-color: var(--bd); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.seg-btn.fb.on { border-color: rgba(24, 119, 242, .45); color: #5aa2ff; background: rgba(24, 119, 242, .08); }
+.seg-btn.tt.on { border-color: rgba(254, 44, 85, .4); color: #ff6f8d; background: rgba(254, 44, 85, .07); }
+.seg-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.seg-dot.fb { background: #1877f2 }
+.seg-dot.tt { background: linear-gradient(135deg, #25f4ee, #fe2c55); }
+
+/* 卡片网格：文本卡 280 / 媒体卡 200（舒朗档，2026-09-14 用户拍板） */
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.grid-media { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+
+/* 卡片骨架基类 + 操作行（合并 .op.primary / .op.primary-op 两套） */
+.card-base { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; display: flex; flex-direction: column; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.card-base:hover { border-color: var(--bd2); box-shadow: var(--shadow-card); transform: translateY(-1px); }
+.card-ops { margin-top: auto; display: flex; gap: 5px; align-items: center; }
+.op { padding: 4px 10px; border: 1px solid var(--bd); background: transparent; color: var(--t2); border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; transition: all .15s; }
+.op:hover { color: var(--ac); border-color: var(--ac) }
+.op.primary { color: var(--ac); border-color: rgba(10, 132, 255, .45); background: var(--acg); font-weight: 600; }
+.op.primary:hover { background: var(--ac); color: #fff; }
+.op.dots { padding: 4px 8px; }
+
+/* 窄卡纯文本 meta 行（批BS 结论：窄卡 chip 换行参差，用文本行；宽卡仍用 .meta-chip） */
+.meta-line { font-size: 11px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.7; }
+.meta-line b { color: var(--t2); font-weight: 600; }
+
+/* 空态（全宽格位 + CTA） */
+.empty-block { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 44px 20px; color: var(--t3); font-size: 13px; background: var(--bg2); border: 1px dashed var(--bd); border-radius: 10px; }
+
 /* ── 全局平台上下文条（MainLayout：topbar 正下方全宽，滚动时保持可见）──
    左=PlatformSeg(bar) 切换，右=当前范围说明；全站唯一平台切换入口。 */
 .platform-context-bar {

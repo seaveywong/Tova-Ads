@@ -3,6 +3,7 @@ export default {
   zh: {
     pageTitle: '表单模板', discardConfirm: '有未保存的修改，放弃并关闭？', closeConfirm: '关闭编辑器', keepEditing: '继续编辑', countSummary: '{f} 表单 · {m} 消息',
     tabForm: 'Instant Form 即时表单', tabMsg: '消息（Messenger / WhatsApp）', newBtn: '+ 新建{kind}', formUnit: '表单', msgUnit: '消息', deployed: '已部署',
+    searchPh: '搜索名称…',
     newFormFb: '新建 Facebook 表单', newFormTt: '新建 TikTok 表单', pickPlatTitle: '选择表单平台', platform: '平台',
     pickPlatHint: '平台决定表单字段与部署链路，创建后不可更改。',
     noFormsForPlat: '该平台暂无表单模板',
@@ -60,6 +61,7 @@ export default {
   en: {
     pageTitle: 'Form Templates', discardConfirm: 'Discard unsaved changes and close?', closeConfirm: 'Close editor', keepEditing: 'Keep editing', countSummary: '{f} form(s) · {m} message(s)',
     tabForm: 'Instant Form', tabMsg: 'Messages (Messenger / WhatsApp)', newBtn: '+ New {kind}', formUnit: 'Form', msgUnit: 'Message', deployed: 'Deployed',
+    searchPh: 'Search by name…',
     newFormFb: 'New Facebook Form', newFormTt: 'New TikTok Form', pickPlatTitle: 'Choose form platform', platform: 'Platform',
     pickPlatHint: 'The platform determines form fields and the deployment pipeline; it cannot be changed after creation.',
     noFormsForPlat: 'No form templates for this platform yet',

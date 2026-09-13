@@ -24,8 +24,17 @@ const isTtForm = computed(() => fPlat.value === 'tt')
 const formPlatDialog = ref(false)
 // 列表平台筛选（表单 tab；消息模板按 type 区分不过滤平台）
 const formPlatFilter = ref('all')
-const filteredForms = computed(() =>
-  formPlatFilter.value === 'all' ? forms.value : forms.value.filter(f => (f.platform || 'fb') === formPlatFilter.value))
+// 名称搜索（2026-09-14 工具栏统一补齐——曾此页无搜索）：作用于当前 tab
+const searchQ = ref('')
+const filteredForms = computed(() => {
+  const q = searchQ.value.trim().toLowerCase()
+  return (formPlatFilter.value === 'all' ? forms.value : forms.value.filter(f => (f.platform || 'fb') === formPlatFilter.value))
+    .filter(f => !q || (f.name || '').toLowerCase().includes(q))
+})
+const filteredMessages = computed(() => {
+  const q = searchQ.value.trim().toLowerCase()
+  return messages.value.filter(m => !q || (m.name || '').toLowerCase().includes(q))
+})
 // 新增问题的默认题型（编辑器 UI 态；每张问题卡可单独切换）
 const qStyle = ref('choice')
 // 「更多字段」联系字段展开
@@ -325,24 +334,23 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <button v-else class="head-btn primary" @click="openMsgNew()">{{ t('formtpl.newBtn', { kind: t('formtpl.msgUnit') }) }}</button>
       </div>
     </header>
-    <div class="bar">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <div class="tabs">
-          <button :class="['tab',{on:tab==='form'}]" @click="tab='form'">{{ t('formtpl.tabForm') }}</button>
-          <button :class="['tab',{on:tab==='msg'}]" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
-        </div>
-        <!-- 平台子筛选：与主 tab 同胶囊但弱化（审查P2：与上方主 tab 视觉区分） -->
-        <div v-if="tab==='form'" class="tabs sub-tabs">
-          <button :class="['tab',{on:formPlatFilter==='all'}]" @click="formPlatFilter='all'">{{ t('common.all') }}</button>
-          <button :class="['tab',{on:formPlatFilter==='fb'}]" @click="formPlatFilter='fb'">Facebook</button>
-          <button :class="['tab',{on:formPlatFilter==='tt'}]" @click="formPlatFilter='tt'">TikTok</button>
-        </div>
+    <!-- 统一工具栏（2026-09-14 三页重构）：主 tab + 平台筛选左置，搜索右对齐；吸顶让位平台上下文条 -->
+    <div class="list-bar">
+      <div class="seg-bar">
+        <button class="seg-btn" :class="{on:tab==='form'}" @click="tab='form'">{{ t('formtpl.tabForm') }}</button>
+        <button class="seg-btn" :class="{on:tab==='msg'}" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
       </div>
+      <div v-if="tab==='form'" class="seg-bar">
+        <button class="seg-btn" :class="{on:formPlatFilter==='all'}" @click="formPlatFilter='all'">{{ t('common.all') }}</button>
+        <button class="seg-btn fb" :class="{on:formPlatFilter==='fb'}" @click="formPlatFilter='fb'"><span class="seg-dot fb"></span>Facebook</button>
+        <button class="seg-btn tt" :class="{on:formPlatFilter==='tt'}" @click="formPlatFilter='tt'"><span class="seg-dot tt"></span>TikTok</button>
+      </div>
+      <el-input v-model="searchQ" :placeholder="t('formtpl.searchPh')" clearable class="bar-search" />
     </div>
 
     <!-- Instant Form 列表 -->
-    <div v-if="tab==='form'" class="grid" v-loading="loading">
-      <div v-for="item in filteredForms" :key="item.id" class="card">
+    <div v-if="tab==='form'" class="grid-cards" v-loading="loading">
+      <div v-for="item in filteredForms" :key="item.id" class="card-base ft-card">
         <div class="card-head">
           <span class="card-name"><span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>{{ item.name }}</span>
           <span :class="['card-badge', item.fb_form_id ? 'ready' : 'draft']">{{ item.fb_form_id ? '✓ ' + t('formtpl.deployed') : t('formtpl.draft') }}</span>
@@ -366,15 +374,15 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           </el-dropdown>
         </div>
       </div>
-      <div v-if="!filteredForms.length && !loading" class="empty">
+      <div v-if="!filteredForms.length && !loading" class="empty-block">
         <div>{{ formPlatFilter==='all' || !forms.length ? t('formtpl.noForms') : t('formtpl.noFormsForPlat') }}</div>
-        <button v-if="formPlatFilter==='all' || !forms.length" class="btn primary empty-cta" @click="formPlatDialog = true">{{ t('formtpl.emptyCtaForm') }}</button>
+        <button v-if="formPlatFilter==='all' || !forms.length" class="btn primary" @click="formPlatDialog = true">{{ t('formtpl.emptyCtaForm') }}</button>
       </div>
     </div>
 
     <!-- 消息列表（Messenger / WhatsApp） -->
-    <div v-if="tab==='msg'" class="grid" v-loading="loading">
-      <div v-for="item in messages" :key="item.id" class="card">
+    <div v-if="tab==='msg'" class="grid-cards" v-loading="loading">
+      <div v-for="item in filteredMessages" :key="item.id" class="card-base ft-card">
         <div class="card-head">
           <span class="card-name"><span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>{{ item.name }}</span>
         </div>
@@ -394,9 +402,9 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           </el-dropdown>
         </div>
       </div>
-      <div v-if="!messages.length && !loading" class="empty">
+      <div v-if="!messages.length && !loading" class="empty-block">
         <div>{{ t('formtpl.noMessages') }}</div>
-        <button class="btn primary empty-cta" @click="openMsgNew()">{{ t('formtpl.emptyCtaMsg') }}</button>
+        <button class="btn primary" @click="openMsgNew()">{{ t('formtpl.emptyCtaMsg') }}</button>
       </div>
     </div>
 
@@ -674,14 +682,6 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
-.bar{display:flex;justify-content:space-between;align-items:center}
-.tabs{display:flex;gap:3px;background:var(--bg3);padding:3px;border-radius:8px}
-/* 平台子筛选（审查P2）：与主 tab 区分——透明底、小号、细字重 */
-.sub-tabs{background:transparent;padding:0;gap:2px}
-.sub-tabs .tab{padding:5px 12px;font-size:12px;font-weight:400}
-.sub-tabs .tab.on{background:var(--bg3);color:var(--t1)}
-.tab{padding:7px 16px;border:none;background:transparent;color:var(--t3);border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:500}
-.tab.on{background:var(--bg2);color:var(--t1)}
 .btn{padding:7px 14px;border:1px solid var(--bd);background:var(--bg2);color:var(--t1);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
 .btn.primary{background:var(--ac);color:#fff;border-color:var(--ac)}
 .btn.sm{padding:4px 10px;font-size:12px}
@@ -693,9 +693,6 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .plat-ro.tt{background:rgba(254,44,85,.08);color:#ff6f8d;border-color:rgba(254,44,85,.35)}
 .ai-top-btn{width:100%;border-style:dashed;border-color:var(--ac);color:var(--ac);background:rgba(10,132,255,.06)}
 .ai-top-btn:hover{background:rgba(10,132,255,.14)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s,transform .15s}
-.card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card-name{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-copy{font-size:11px;color:var(--t2);line-height:1.5;font-style:italic;max-height:32px;overflow:hidden}
@@ -703,14 +700,14 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.draft{color:var(--t3);background:var(--bg3)}
+.ft-card{padding:12px 14px;gap:8px}
 .card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
-.op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:11px;cursor:pointer;padding:3px 8px;border-radius:4px}
-.op.primary{color:var(--ac);border-color:var(--ac)}
+.op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:12px;cursor:pointer;padding:4px 10px;border-radius:6px;font-family:inherit;white-space:nowrap;transition:all .15s}
+.op.primary{color:var(--ac);border-color:rgba(10,132,255,.45);background:var(--acg);font-weight:600}
+.op.primary:hover{background:var(--ac);color:#fff}
 .op.danger{color:var(--error)}
-.op.dots{font-size:15px;line-height:1;padding:3px 10px}
-.op:hover{background:var(--bg3)}
-.empty{grid-column:1/-1;padding:40px;text-align:center;color:var(--t3);font-size:14px;display:flex;flex-direction:column;align-items:center;gap:14px}
-.empty-cta{align-self:center}
+.op.dots{font-size:15px;line-height:1}
+.op:hover{color:var(--ac);border-color:var(--ac)}
 /* 抽屉 Header：标题 + 平台/类型 chip（与投放模板编辑器头部一致；关闭钮为 EP 默认） */
 .dr-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .dr-title{font-size:15px;font-weight:600;color:var(--t1)}
