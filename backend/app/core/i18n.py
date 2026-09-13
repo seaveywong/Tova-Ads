@@ -378,6 +378,23 @@ DATA = {
         "zh": "{n} 处像素/转化占位符缺少 (_d) 守卫——广告流量会与系统注入脚本双发、数据翻倍，请按最新参考模板的守卫写法修改",
         "en": "{n} pixel/conversion placeholder line(s) lack the (_d) guard — ad traffic will double-fire alongside the injected script and inflate data; follow the guard pattern in the latest reference template",
     },
+    # ── 模板上传 error（2026-09-14 严校验：不符规范拒传——传上来也是废件。文案引用「页面规范」条目）──
+    "landing.tplErrResourceFiles": {
+        "zh": "不符合规范「自包含」：zip 内含 {n} 个非 index.html 资源文件（{files}）。页面必须单文件自包含，CSS/JS/图片全部内联进 index.html（资源文件不会上线）",
+        "en": "Spec violation [Self-contained]: zip contains {n} non-index.html resource file(s) ({files}). The page must be a single self-contained file — inline all CSS/JS/images into index.html (resource files never go live)",
+    },
+    "landing.tplErrHardcodedPixel": {
+        "zh": "不符合规范「像素」：检测到硬编码像素 ID。像素由系统按页配置动态注入，硬编码会把数据发到错误像素——请删除所有 fbq('init','数字') / ttq.load('C…') 写法",
+        "en": "Spec violation [Pixels]: hardcoded pixel ID detected. Pixels are injected dynamically per page config; a hardcoded one sends data to the wrong pixel — remove all fbq('init','<digits>') / ttq.load('C…') calls",
+    },
+    "landing.tplErrHardcodedLink": {
+        "zh": "不符合规范「链接」：检测到 {n} 处写死的外部链接（如 {sample}）。落地页必须自包含，跳转目标一律用 __LP_TARGET_URL__ 占位符，不得出现任何写死的 http(s) 链接",
+        "en": "Spec violation [Links]: {n} hardcoded external link(s) detected (e.g. {sample}). The page must be self-contained — use the __LP_TARGET_URL__ placeholder for the jump target and never hardcode http(s) links",
+    },
+    "landing.tplErrNoGuard": {
+        "zh": "不符合规范「守卫」：{n} 处像素/转化占位符缺少 (_d) 守卫——广告流量会与系统注入脚本双发、数据翻倍。请照页面规范中的守卫代码块修改（(_d)?[]:(…) 不可省略）",
+        "en": "Spec violation [Guard]: {n} pixel/conversion placeholder line(s) lack the (_d) guard — ad traffic double-fires alongside the injected script and inflates data. Follow the guard code block in the page spec; the (_d)?[]:(…) pattern is mandatory",
+    },
 }
 
 

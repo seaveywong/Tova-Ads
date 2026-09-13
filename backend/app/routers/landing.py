@@ -7,6 +7,7 @@ import os
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission, require_owned as _ro
@@ -800,11 +801,16 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
     # 屏蔽 = block（爬虫的 block 在 ingest 已丢弃，这里再滤一道历史残留）
     # 爬虫/审核机器人（ASN 32934 或 bot UA）全部不计——FB 扫描一来否则访问量虚高、通过率失真
     visit_count = click_count = block_count = 0
+    today_visit = today_click = last7d_visit = last7d_click = 0
     if stats is not None:
         ps = (stats.get("page_stats") or {}).get(p.id) or {}
         visit_count = ps.get("visits", 0)
         click_count = ps.get("pass", 0)
         block_count = ps.get("blocked", 0)
+        today_visit = ps.get("today_visits", 0)       # 北京业务日今日（批1-B 页卡双指标）
+        today_click = ps.get("today_pass", 0)
+        last7d_visit = ps.get("last7d_visits", 0)
+        last7d_click = ps.get("last7d_pass", 0)
     elif db is not None:
         try:
             from ..models.landing_event import LandingEvent
@@ -852,7 +858,9 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
             "last_fb_status": p.last_fb_status,          # FB屏蔽探测 pass/fail/warn（fail=被屏，看板红标）
             "last_fb_checked_at": str(p.last_fb_checked_at or ""),
             "visit_count": visit_count, "click_count": click_count,
-            "block_count": block_count, "pass_rate": pass_rate}
+            "block_count": block_count, "pass_rate": pass_rate,
+            "today_visit": today_visit, "today_click": today_click,
+            "last7d_visit": last7d_visit, "last7d_click": last7d_click}
 
 
 @router.get("/pages")
@@ -883,20 +891,36 @@ def list_landing_pages(
         ).group_by(LandingAdLink.page_id).all())
         # 事件三指标一条 GROUP BY 出（口径与 _page_to_dict 单页兜底一致，真人口径剔爬虫）：
         # 访问=visit+redirect，通过=redirect|click 按访客去重，屏蔽=block
+        # 2026-09-14 批1-B：同一条查询附「北京业务日」今日/近7天两窗访问·通过（页卡此前只有
+        # 历史累计，用户看不到当天效果）；窗口=北京日 00:00 转 UTC（与日志/看板口径一致）
         from ..core.landing_source import crawler_filter_cond
         from sqlalchemy import case as _case
-        for _pid, _v, _p, _b in db.query(
+        _bj_now = datetime.now(timezone(timedelta(hours=8)))
+        _bj_today_start = (_bj_now.replace(hour=0, minute=0, second=0, microsecond=0)
+                           - timedelta(hours=8)).replace(tzinfo=None)   # naive UTC，对齐表列
+        _bj_7d_start = ((_bj_now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+                        - timedelta(hours=8)).replace(tzinfo=None)
+        _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
+        _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
+        for _pid, _v, _p, _b, _tv, _tp, _wv, _wp in db.query(
             LandingEvent.page_id,
-            _f.count(_case((LandingEvent.event_type.in_(["visit", "redirect"]), 1))),
-            _f.count(_f.distinct(_case((LandingEvent.event_type.in_(["click", "redirect"]),
-                                        LandingEvent.ip_hash)))),
+            _f.count(_case((_is_visit, 1))),
+            _f.count(_f.distinct(_case((_is_pass, LandingEvent.ip_hash)))),
             _f.count(_case((LandingEvent.event_type == "block", 1))),
+            _f.count(_case((_is_visit & (LandingEvent.created_at >= _bj_today_start), 1))),
+            _f.count(_f.distinct(_case((_is_pass & (LandingEvent.created_at >= _bj_today_start),
+                                           LandingEvent.ip_hash)))),
+            _f.count(_case((_is_visit & (LandingEvent.created_at >= _bj_7d_start), 1))),
+            _f.count(_f.distinct(_case((_is_pass & (LandingEvent.created_at >= _bj_7d_start),
+                                           LandingEvent.ip_hash)))),
         ).filter(
             LandingEvent.page_id.in_(pids),
             LandingEvent.event_type.in_(["visit", "click", "redirect", "block"]),
             ~crawler_filter_cond(LandingEvent),
         ).group_by(LandingEvent.page_id).all():
-            page_stats[_pid] = {"visits": int(_v or 0), "pass": int(_p or 0), "blocked": int(_b or 0)}
+            page_stats[_pid] = {"visits": int(_v or 0), "pass": int(_p or 0), "blocked": int(_b or 0),
+                                "today_visits": int(_tv or 0), "today_pass": int(_tp or 0),
+                                "last7d_visits": int(_wv or 0), "last7d_pass": int(_wp or 0)}
     stats = {"sub_counts": sub_counts, "page_stats": page_stats}
     return [_page_to_dict(p, db, stats) for p in rows]
 

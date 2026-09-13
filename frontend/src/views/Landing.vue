@@ -610,6 +610,33 @@ const uploadLandingTpl = async () => {
 const delLandingTpl = async (tpl) => {
   try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
 }
+// ── 页面规范（对外文档，2026-09-14）：只讲「怎么写」，不讲内部实现。
+// 交付方（外包/开发者）照此写页面 → zip 上传 → 严校验（不符规范拒传，报错引用条目）。
+const SPEC_GUARD_CODE = `var _d=new URLSearchParams(location.search).get('_d');
+var LP_PIXELS=(_d)?[]:(__LP_PIXELS_JSON__||[]);
+var LP_CONV=(_d)?[]:(__LP_CONV_EVENT_JSON__||[]);
+var LP_TT_PIXELS=(_d)?[]:(__LP_TT_PIXELS_JSON__||[]);
+var LP_TT_CONV=(_d)?[]:(__LP_TT_CONV_JSON__||[]);
+var LP_TARGET_URL="__LP_TARGET_URL__";`
+const SPEC_TABLE = computed(() => [
+  { ph: '{{TITLE}}', req: true, desc: t('landing.specPhTitle') },
+  { ph: '__LP_TARGET_URL__', req: true, desc: t('landing.specPhTarget') },
+  { ph: '__LP_PIXELS_JSON__', req: true, desc: t('landing.specPhPixels') },
+  { ph: '{{DESCRIPTION}}', req: false, desc: t('landing.specPhDesc') },
+  { ph: '__LP_CONV_EVENT_JSON__', req: false, desc: t('landing.specPhConv') },
+  { ph: '__LP_TT_PIXELS_JSON__', req: false, desc: t('landing.specPhTtPixels') },
+  { ph: '__LP_TT_CONV_JSON__', req: false, desc: t('landing.specPhTtConv') },
+])
+const SPEC_SECTIONS = computed(() => [
+  { key: 'file', title: t('landing.specSecFile'), lines: [t('landing.specFileL1'), t('landing.specFileL2')] },
+  { key: 'ph', title: t('landing.specSecPh'), table: true },
+  { key: 'guard', title: t('landing.specSecGuard'), lines: [t('landing.specGuardL1'), t('landing.specGuardL2')], code: SPEC_GUARD_CODE },
+  { key: 'pixel', title: t('landing.specSecPixel'), lines: [t('landing.specPixelL1')] },
+  { key: 'link', title: t('landing.specSecLink'), lines: [t('landing.specLinkL1'), t('landing.specLinkL2')] },
+  { key: 'zip', title: t('landing.specSecZip'), lines: [t('landing.specZipL1'), t('landing.specZipL2')] },
+  { key: 'check', title: t('landing.specSecCheck'), lines: [t('landing.specChk1'), t('landing.specChk2'), t('landing.specChk3'), t('landing.specChk4')] },
+])
+const copySpecCode = () => { navigator.clipboard?.writeText(SPEC_GUARD_CODE); ElMessage.success(t('common.copied')) }
 // 下载已上传模板（zip 打包回本地——可改后经上传同名覆盖传回；用户 2026-09-12 要求）
 const downloadLandingTpl = async (tpl) => {
   const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
@@ -712,10 +739,13 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </header>
 
-    <div class="mode-filter">
-      <div :class="['mf-chip', { on: modeFilter === 'all' }]" @click="modeFilter = 'all'">{{ t('landing.tabAll') }} <i>{{ cntAll }}</i></div>
-      <div :class="['mf-chip', { on: modeFilter === 'lp' }]" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
-      <div :class="['mf-chip', { on: modeFilter === 'short' }]" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
+    <!-- 统一工具栏（2026-09-14 对齐全局设计系统）：模式筛选 + 计数 -->
+    <div class="list-bar">
+      <div class="seg-bar">
+        <button class="seg-btn" :class="{ on: modeFilter === 'all' }" @click="modeFilter = 'all'">{{ t('landing.tabAll') }} <i class="seg-cnt">{{ cntAll }}</i></button>
+        <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
+        <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
+      </div>
     </div>
 
     <div class="list" v-loading="loading">
@@ -732,14 +762,26 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </div>
         <div class="lp-body lp-stats">
           <template v-if="p.redirect_mode === 'redirect'">
-            <div class="stat-num" :title="t('landing.stVisitsTip')"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
-            <div class="stat-num" :title="t('landing.stPassTip')"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stPass') }}</span></div>
+            <div class="stat-num" :title="t('landing.stVisitsTip')">
+              <div class="st-main"><b>{{ p.today_visit || 0 }}</b><span>{{ t('landing.stVisits') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 }) }}</em>
+            </div>
+            <div class="stat-num" :title="t('landing.stPassTip')">
+              <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
+            </div>
             <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
           </template>
           <template v-else>
             <div class="stat-num"><b>{{ p.subcode_count || 0 }}</b><span>{{ t('landing.stSubcodes') }}</span></div>
-            <div class="stat-num" :title="t('landing.stVisitsTip')"><b>{{ p.visit_count || 0 }}</b><span>{{ t('landing.stVisits') }}</span></div>
-            <div class="stat-num" :title="t('landing.stPassTip')"><b>{{ p.click_count || 0 }}</b><span>{{ t('landing.stPass') }}</span></div>
+            <div class="stat-num" :title="t('landing.stVisitsTip')">
+              <div class="st-main"><b>{{ p.today_visit || 0 }}</b><span>{{ t('landing.stVisits') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 }) }}</em>
+            </div>
+            <div class="stat-num" :title="t('landing.stPassTip')">
+              <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
+            </div>
             <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
           </template>
           <div v-if="(p.block_count||0) > 0" class="stat-num warn"><b>{{ p.block_count }}</b><span>{{ t('landing.stBlocked') }}</span></div>
@@ -1138,13 +1180,33 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </el-drawer>
 
-    <el-drawer v-model="tplOpen" :title="t('landing.tplDrawerTitle')" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
-      <button class="btn" @click="downloadTplRef" style="margin-bottom:14px">{{ t('landing.downloadRefTpl') }}</button>
+    <el-drawer v-model="tplOpen" :title="t('landing.tplDrawerTitle')" direction="rtl" size="600px" :destroy-on-close="true" append-to-body>
+      <!-- ① 页面规范（对外文档：只讲怎么写；交付方照此交付，上传严校验引用条目号） -->
+      <div class="sec-title">{{ t('landing.specTitle') }}</div>
+      <button class="btn" @click="downloadTplRef" style="margin-bottom:10px">{{ t('landing.downloadRefTpl') }}</button>
+      <div v-for="sec in SPEC_SECTIONS" :key="sec.key" class="spec-sec">
+        <div class="spec-t">{{ sec.title }}</div>
+        <div v-for="(ln, i) in (sec.lines || [])" :key="i" class="spec-ln">{{ ln }}</div>
+        <table v-if="sec.table" class="spec-table">
+          <tr v-for="r in SPEC_TABLE" :key="r.ph">
+            <td><code>{{ r.ph }}</code></td>
+            <td class="spec-req"><span class="tag" :class="r.req ? 'ok' : ''">{{ r.req ? t('landing.specReq') : t('landing.specOpt') }}</span></td>
+            <td class="spec-desc">{{ r.desc }}</td>
+          </tr>
+        </table>
+        <div v-if="sec.code" class="spec-code-wrap">
+          <pre class="spec-code">{{ sec.code }}</pre>
+          <button class="mb" @click="copySpecCode">{{ t('common.copy') }}</button>
+        </div>
+      </div>
+
+      <!-- ② 上传（严校验：不符规范直接拒传，报错会指明违反的条目） -->
       <div class="sec-title">{{ t('landing.uploadNewTpl') }}</div>
       <div class="form-l"><label>{{ t('landing.fTplName') }}</label><input v-model="tplForm.name" class="input" :placeholder="t('landing.fTplNamePh')" /></div>
       <div class="form-l"><label>{{ t('landing.fTplDesc') }}</label><input v-model="tplForm.description" class="input" :placeholder="t('common.optional')" /></div>
       <div class="form-l"><label>{{ t('landing.fZipFile') }}</label><input ref="tplFileInput" type="file" accept=".zip" @change="onTplFile" class="input" /></div>
       <button class="btn primary" :disabled="tplUploading" @click="uploadLandingTpl">{{ tplUploading ? t('landing.uploading') : t('landing.uploadAndCheck') }}</button>
+      <!-- ③ 已传列表 -->
       <div class="sec-title">{{ t('landing.uploadedTpls') }}</div>
       <div class="sub-list">
         <div v-for="tpl in landingTemplates" :key="tpl.id" class="sub-row tpl-row">
@@ -1186,12 +1248,6 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .lp-tab{padding:7px 16px;font-size:13px;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent}
 .lp-tab.on{color:var(--t1);border-bottom-color:var(--ac);font-weight:600}
 .lp-tab:hover{color:var(--t1)}
-/* 链接管理内模式筛选 chips（全部/落地页/短链，带计数） */
-.mode-filter{display:flex;gap:6px;margin-bottom:10px}
-.mf-chip{padding:4px 12px;font-size:12px;color:var(--t3);background:var(--bg3);border:1px solid var(--bd);border-radius:14px;cursor:pointer;transition:all .15s;white-space:nowrap}
-.mf-chip:hover{color:var(--t1)}
-.mf-chip.on{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600}
-.mf-chip i{font-style:normal;margin-left:4px;font-size:10px;opacity:.85}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px}
 .bar-l{font-size:13px;color:var(--t2)}
 .bar-r{display:flex;gap:8px}
@@ -1263,6 +1319,25 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .stat-num b{font-size:16px;font-variant-numeric:tabular-nums;margin-right:4px}
 .stat-num span{font-size:11px;color:var(--t3)}
 .stat-num.warn b,.stat-num.warn span{color:var(--warning)}
+/* 2026-09-14：主数=北京业务日今日，副行=7天/累计 */
+.stat-num .st-main{display:flex;align-items:baseline;gap:4px}
+.stat-num .st-sub{font-style:normal;font-size:10px;color:var(--ac);margin-left:2px}
+.stat-num .st-more{display:block;font-style:normal;font-size:10px;color:var(--t3);margin-top:2px;font-variant-numeric:tabular-nums}
+.seg-cnt{font-style:normal;margin-left:2px;font-size:10px;opacity:.75}
+/* 页面规范文档（模板抽屉） */
+.spec-sec{margin-bottom:12px}
+.spec-t{font-size:12px;font-weight:700;color:var(--t1);margin-bottom:4px}
+.spec-ln{font-size:12px;color:var(--t2);line-height:1.7}
+.spec-table{width:100%;border-collapse:collapse;margin:6px 0}
+.spec-table td{border:1px solid var(--bd);padding:4px 8px;font-size:11px;vertical-align:top}
+.spec-table code{color:var(--ac);font-family:var(--font-mono)}
+.spec-req .tag.ok{color:var(--success);background:rgba(52,199,89,.13)}
+.spec-code-wrap{position:relative;margin:6px 0}
+.spec-code{background:var(--bg3);border:1px solid var(--bd);border-radius:6px;padding:10px;font-size:11px;line-height:1.6;overflow-x:auto;font-family:var(--font-mono);margin:0}
+.spec-code-wrap .mb{position:absolute;top:6px;right:6px}
+/* 页卡 hover（对齐全局 card-base 手感） */
+.lp-card{transition:border-color .15s,box-shadow .15s,transform .15s}
+.lp-card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .pixel-hint{font-size:11px;color:var(--t3);margin:-6px 0 10px 92px;line-height:1.5}
 .pixel-section{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
 .pixel-section-header{font-size:13px;font-weight:600;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}

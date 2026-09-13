@@ -504,6 +504,33 @@ def list_templates(
              "is_builtin": r.is_builtin, "has_resources": bool(r.resources_meta)} for r in rows]
 
 
+def _validate_lp_spec(html: str, resource_names: list, loc: str) -> list[str]:
+    """落地页规范严校验（2026-09-14 用户拍板全部拦死）：返回错误文案列表（空=通过）。
+    规则与前端「页面规范」文档一一对应（报错文案引用条目名）。纯函数可单测。"""
+    errors = []
+    if resource_names:
+        errors.append(L(loc, "landing.tplErrResourceFiles", n=len(resource_names),
+                        files=", ".join(resource_names[:5])))
+    # 硬编码像素：FB 纯数字 ID；TT 是 C 前缀+字母数字混合 ID（真实形态如 CJK4R9BC77U0…，
+    # 纯数字正则永远匹配不到——交叉审核实测抓的漏检）
+    if re.search(r'''fbq\(\s*['"]init['"]\s*,\s*['"]\d{6,}''', html) \
+            or re.search(r'''ttq\.load\(\s*['"][Cc][A-Za-z0-9]{14,}''', html):
+        errors.append(L(loc, "landing.tplErrHardcodedPixel"))
+    # 写死外链（排除带占位符的——那些发布时会被替换，是正确写法）
+    _hard_links = [u for u in re.findall(r'''href\s*=\s*['"]([^'"]+)['"]''', html)
+                   if u.lower().startswith(("http://", "https://"))
+                   and "__LP_" not in u and "{{" not in u]
+    if _hard_links:
+        errors.append(L(loc, "landing.tplErrHardcodedLink", n=len(_hard_links),
+                        sample=_hard_links[0][:60]))
+    # 缺守卫：像素/转化占位符所在行没有 (_d) 守卫 → 广告流量与系统注入脚本双发、数据翻倍
+    _unguarded = [ln for ln in html.splitlines()
+                  if "__LP_" in ln and "_JSON__" in ln and "(_d)" not in ln]
+    if _unguarded:
+        errors.append(L(loc, "landing.tplErrNoGuard", n=len(_unguarded)))
+    return errors
+
+
 @router.post("/templates/upload")
 async def upload_template(
     request: Request,
@@ -524,7 +551,8 @@ async def upload_template(
     html = None
     resources = {}
     index_hits = 0     # 根目录 index.html 命中数（>1 = 入口歧义，拒）
-    resource_files = 0  # 非 index.html 的文件数（warning 用：这些当前不会上线）
+    resource_files = 0  # 非 index.html 的文件数（严校验拒传用：这些不会上线）
+    _resource_names = []
     try:
         zf = zipfile.ZipFile(io.BytesIO(content))
         names = zf.namelist()
@@ -558,6 +586,7 @@ async def upload_template(
                 html = _read.decode("utf-8", errors="ignore")
             else:
                 resource_files += 1
+                _resource_names.append(fname)
                 if ext in (".css", ".js", ".json", ".svg", ".txt"):
                     resources[fname] = _read.decode("utf-8", errors="ignore")
     except zipfile.BadZipFile:
@@ -573,31 +602,18 @@ async def upload_template(
     missing = [p for p in REQUIRED_PLACEHOLDERS if p not in html]
     if missing:
         raise HTTPException(400, f"index.html 缺少系统占位符: {', '.join(missing)}")
-    # —— warning 级检测（不拦截，按请求 locale 中英双语，响应带回给前端）——
+    # —— 严校验（2026-09-14 用户拍板全部拦死）：不符规范的废件直接拒传，报错引用「页面
+    # 规范」条目（规范见前端模板管理抽屉 + 参考模板 README）。曾全为 warning 放行——
+    # 缺守卫=像素双发数据翻倍、硬编码像素=发错像素、写死链接=不跟随目标轮换/子码跳转、
+    # 资源文件=根本不上线（只部署 index.html），传上来就是废的。
     warnings = []
     loc = req_locale(request)
-    if resource_files:
-        warnings.append(L(loc, "landing.tplWarnResourceFiles", n=resource_files))
-    # 硬编码像素：FB 纯数字 ID；TT 是 C 前缀+字母数字混合 ID（真实形态如 CJK4R9BC77U0…，
-    # 纯数字正则永远匹配不到——交叉审核实测抓的漏检）
-    if re.search(r'''fbq\(\s*['"]init['"]\s*,\s*['"]\d{6,}''', html) \
-            or re.search(r'''ttq\.load\(\s*['"][Cc][A-Za-z0-9]{14,}''', html):
-        warnings.append(L(loc, "landing.tplWarnHardcodedPixel"))
-    # 写死外链（排除带占位符的——那些发布时会被替换，是正确写法）
-    _hard_links = [u for u in re.findall(r'''href\s*=\s*['"]([^'"]+)['"]''', html)
-                   if u.lower().startswith(("http://", "https://"))
-                   and "__LP_" not in u and "{{" not in u]
-    if _hard_links:
-        warnings.append(L(loc, "landing.tplWarnHardcodedLink"))
+    errors = _validate_lp_spec(html, _resource_names, loc)
     supports_tt = "__LP_TT_PIXELS_JSON__" in html
     if not supports_tt:
         warnings.append(L(loc, "landing.tplWarnNoTtPixel"))
-    # 缺守卫检测（交叉审核 P2-5）：像素/转化占位符所在行没有 (_d) 守卫 → 广告流量与
-    # 系统注入脚本双发、数据翻倍（现网曾有存量模板中招）。守卫写法见参考模板。
-    _unguarded = [ln.strip()[:60] for ln in html.splitlines()
-                  if "__LP_" in ln and "_JSON__" in ln and "(_d)" not in ln]
-    if _unguarded:
-        warnings.append(L(loc, "landing.tplWarnNoGuard", n=len(_unguarded)))
+    if errors:
+        raise HTTPException(400, "；".join(errors))
     # 同名覆盖：有则 UPDATE，无则 INSERT
     existing_tpl = db.query(LandingTemplate).filter(
         LandingTemplate.tenant_id == user.tenant_id,
