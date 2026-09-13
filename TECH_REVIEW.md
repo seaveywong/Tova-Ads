@@ -2208,3 +2208,30 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 ### Commits
 - `7688856` fix(guard): 回填对 kpi='' 历史行只修标签不动终值 + TECH_REVIEW 批CE
 - `ee01b19` feat(哨兵倒计时): 无交互超时自动 arm 哨兵（dead-man switch，默认关）
+
+## 批CG：运营三页布局重构 + 全站列表控件统一（2026-09-14）
+
+### 概述
+用户提议重构投放模板/表单模板/素材库三页布局（清晰/直观/美观），拍板：专用工具栏行 + 舒朗密度（280px）+ 全局统一（Tokens/Guard/Dashboard 顺手收编）。探查实证 6 套分段控件并存、`.grid/.card/.empty` 各页 scoped 漂移、Assets 批量条不吸顶、FormTemplates 无搜索。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| 全局列表页词汇 | `main.css` | 新增（不动旧类）：`.list-bar`（吸顶工具栏，top=--plat-bar-h 让位平台上下文条；≤768 退静态）、`.seg-bar/.seg-btn`（唯一分段控件，fb/tt 品牌色 on + 品牌点）、`.grid-cards` 280/`.grid-media` 200、`.card-base` 骨架（radius10/hover/.card-ops）+ `.op/.op.primary/.op.dots` 体系（合并 .op.primary-op）、`.meta-line`、`.empty-block` | build ✓ |
+| LaunchTemplates | `LaunchTemplates.vue` + `launch_templates.py` | 页头瘦身（搜索/平台移出）；工具栏=[平台 seg][排序 select][搜索右对齐]；排序 recent/name/ready（localStorage 记忆）；后端 payload 补 `updated_at` | build ✓；三态空态保留 |
+| FormTemplates | `FormTemplates.vue` | sub-tabs 平台筛选合并进主 `.list-bar`；**新增名称搜索**（此前此页无搜索，双 tab 均生效）；卡片 280px | build ✓ |
+| Assets | `Assets.vue` | 工具栏统一（类型 seg+标签+搜索右对齐）；**批量条吸顶**（top=--plat-bar-h）；AI 参数条并入全局 seg（aggressive 橙档保留本页特例 `.seg-btn.warn.on`）；素材卡 200px | build ✓ |
+| 全站 seg 收编 | `Tokens/Guard/Dashboard.vue` | 各自 scoped seg/tab 实现换全局 `.seg-bar/.seg-btn`（保位置只换皮）；Guard 规则筛选 cat-chip 行保留（不同控件类型） | build ✓；三页 scoped 副本已删 |
+| i18n | `launch.js`/`formtpl.js` | 新 key：sort×4、searchPh（zh/en 成对，en 零 CJK） | grep 校验 ✓ |
+
+### DB 迁移
+- 无。
+
+### 生产环境变更
+- 后端 restart ×1（launch_templates.py payload 补 updated_at，双门+health ✓）；前端 CF master。
+
+### 复审结论（已知限制/风险）
+- 三页旧 scoped 类（.grid/.card/.empty/.tabs 等）已删净（grep 0 残留）；编辑器/抽屉内部未动（计划约束）。
+- Dashboard 主 tab 换全局 seg-btn 后体量从 17px 降为默认 12px——若嫌小可加 scoped 尺寸档（待用户过目反馈）。
+- `.list-bar` 吸顶与全局平台上下文条叠加用 `--plat-bar-h` 变量对齐（Assets ai-bar 先例）；z-index 90/91（批量条）低于平台条 160。
+- 排序「最近编辑」依赖 payload updated_at（新部署后拉取即有）；旧客户端缓存首拉无此字段回落 created_at。
