@@ -68,6 +68,10 @@ if settings.app_env != "production":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    # CF Pages 每次部署生成哈希预览子域（如 649ed3fa.tovaads.pages.dev）——曾不在白名单，
+    # 用户从部署贴的预览链接进后台 = 所有 API 被 CORS 拦成 Failed to fetch（2026-09-15 实锤）。
+    # 同项目同主域，放开子域通配。
+    allow_origin_regex=r"^https://[a-z0-9-]+\.tovaads\.pages\.dev$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
