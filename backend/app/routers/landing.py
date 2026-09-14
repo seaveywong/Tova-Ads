@@ -811,6 +811,8 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
         today_click = ps.get("today_pass", 0)
         last7d_visit = ps.get("last7d_visits", 0)
         last7d_click = ps.get("last7d_pass", 0)
+        today_block = ps.get("today_blocked", 0)       # 批2：屏蔽同样今日主显+累计副行
+        last7d_block = ps.get("last7d_blocked", 0)
     elif db is not None:
         try:
             from ..models.landing_event import LandingEvent
@@ -860,7 +862,8 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
             "visit_count": visit_count, "click_count": click_count,
             "block_count": block_count, "pass_rate": pass_rate,
             "today_visit": today_visit, "today_click": today_click,
-            "last7d_visit": last7d_visit, "last7d_click": last7d_click}
+            "last7d_visit": last7d_visit, "last7d_click": last7d_click,
+            "today_block": today_block, "last7d_block": last7d_block}
 
 
 @router.get("/pages")
@@ -902,7 +905,7 @@ def list_landing_pages(
                         - timedelta(hours=8)).replace(tzinfo=None)
         _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
         _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
-        for _pid, _v, _p, _b, _tv, _tp, _wv, _wp in db.query(
+        for _pid, _v, _p, _b, _tv, _tp, _wv, _wp, _b7t, _b7d in db.query(
             LandingEvent.page_id,
             _f.count(_case((_is_visit, 1))),
             _f.count(_f.distinct(_case((_is_pass, LandingEvent.ip_hash)))),
@@ -913,6 +916,9 @@ def list_landing_pages(
             _f.count(_case((_is_visit & (LandingEvent.created_at >= _bj_7d_start), 1))),
             _f.count(_f.distinct(_case((_is_pass & (LandingEvent.created_at >= _bj_7d_start),
                                            LandingEvent.ip_hash)))),
+            _f.count(_case((LandingEvent.event_type == "block", 1))),
+            _f.count(_case((LandingEvent.event_type == "block" & (LandingEvent.created_at >= _bj_today_start), 1))),
+            _f.count(_case((LandingEvent.event_type == "block" & (LandingEvent.created_at >= _bj_7d_start), 1))),
         ).filter(
             LandingEvent.page_id.in_(pids),
             LandingEvent.event_type.in_(["visit", "click", "redirect", "block"]),
@@ -920,7 +926,8 @@ def list_landing_pages(
         ).group_by(LandingEvent.page_id).all():
             page_stats[_pid] = {"visits": int(_v or 0), "pass": int(_p or 0), "blocked": int(_b or 0),
                                 "today_visits": int(_tv or 0), "today_pass": int(_tp or 0),
-                                "last7d_visits": int(_wv or 0), "last7d_pass": int(_wp or 0)}
+                                "last7d_visits": int(_wv or 0), "last7d_pass": int(_wp or 0),
+                                "today_blocked": int(_b7t or 0), "last7d_blocked": int(_b7d or 0)}
     stats = {"sub_counts": sub_counts, "page_stats": page_stats}
     return [_page_to_dict(p, db, stats) for p in rows]
 

@@ -838,13 +838,13 @@ function goNext(ev){if(ev&&ev.preventDefault)ev.preventDefault();trackConversion
   像素数据直接翻倍。index.html 里 LP_PIXELS/LP_CONV/LP_TT_PIXELS/LP_TT_CONV
   四个数组全都带守卫，直接照抄。
 
-三、禁止事项（上传会出 warning，而且实际投放必出问题）
+三、禁止事项（违反任意一条会被拒传，报错指明条目）
   1. 硬编码像素：fbq('init','1234567890') / ttq.load('CXXXXXXXXXX')
      ——系统按页配置动态注入像素，写死会把数据发到错误像素。
-  2. 写死 CTA 链接：href="https://xxx.com"
-     ——CTA 必须用 __LP_TARGET_URL__ 占位符，否则不跟随目标轮换/子码跳转。
-  3. 引用外部 css/js 文件——当前仅部署 index.html，资源文件不会上线，
-     样式/脚本请全部内联进 index.html。
+  2. 写死外链：href="https://xxx.com"（页面必须自包含，含隐私政策）
+     ——跳转目标一律用 __LP_TARGET_URL__ 占位符，否则不跟随目标轮换/子码跳转。
+  3. 引用外部 css/js/图片文件——只部署 index.html，zip 里出现其他文件即拒传，
+     样式/脚本/图片全部内联进 index.html。
 
 四、上传校验规则
   - 只支持 .zip；根目录必须有 index.html（子目录的不算，多个会被拒）
