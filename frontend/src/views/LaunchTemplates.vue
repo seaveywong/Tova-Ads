@@ -2530,28 +2530,23 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <el-input v-model="searchQ" :placeholder="t('launch.searchPh')" clearable class="bar-search" />
     </div>
 
-    <div class="grid-cards" v-loading="loading">
-      <div v-for="tpl in sortedList" :key="tpl.id" class="card-base lt-card">
-        <!-- 卡头：平台 chip + 名称占满行宽 + 状态小圆点（tooltip 详情）——
-             曾徽章「✓ 就绪」挤掉半行名称致「FBUS 45+ 购…」截断 -->
-        <div class="card-head">
-          <span class="card-name" :title="tpl.name"><span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>{{ tpl.name }}</span>
-          <span :class="['card-dot', _tplReady(tpl) ? 'ok' : 'warn']"
-                :title="_tplReady(tpl) ? t('launch.ready') : t('launch.missing') + '：' + _tplMissing(tpl).join('、')"></span>
-        </div>
-        <!-- meta 行：纯文本 · 分隔（chips 在窄卡换行参差）；已部署保持链接样式可点 -->
-        <div class="card-meta">
-          <span class="meta-line">
-            <b class="meta-obj">{{ objLabel(tpl.objective) }}</b>
+    <div class="lt-list" v-loading="loading">
+      <div v-for="tpl in sortedList" :key="tpl.id" class="lt-row">
+        <!-- 行式（2026-09-15 用户拍板弃方框）：状态点+平台+名称+目标·预算+已部署+操作一屏扫读 -->
+        <span :class="['card-dot', _tplReady(tpl) ? 'ok' : 'warn']"
+              :title="_tplReady(tpl) ? t('launch.ready') : t('launch.missing') + '：' + _tplMissing(tpl).join('、')"></span>
+        <span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>
+        <span class="lt-name" :title="tpl.name">{{ tpl.name }}</span>
+        <span class="meta-line lt-meta">
+          <b class="meta-obj">{{ objLabel(tpl.objective) }}</b>
+          <span class="meta-sep">·</span>
+          {{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}
+          <template v-if="tpl.deploy_count">
             <span class="meta-sep">·</span>
-            {{ tpl.budget_type === 'lifetime' ? t('launch.cardLifetime', { v: fmtUsd(tpl.lifetime_budget_usd) }) : fmtUsd(tpl.budget_usd) + '/' + t('launch.perDay') }}
-            <template v-if="tpl.deploy_count">
-              <span class="meta-sep">·</span>
-              <button class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
-            </template>
-          </span>
-        </div>
-        <div v-if="!_tplReady(tpl)" class="card-warn">{{ t('launch.missing') }}：{{ _tplMissing(tpl).join('、') }}</div>
+            <button class="card-dep" @click="openDeployments(tpl)" :title="t('launch.deployedListTitle', { name: tpl.name })">{{ t('launch.deployedList') }} {{ tpl.deploy_count }} ↗</button>
+          </template>
+        </span>
+        <span v-if="!_tplReady(tpl)" class="lt-warn" :title="t('launch.missing') + '：' + _tplMissing(tpl).join('、')">⚠ {{ t('launch.missing') }}</span>
         <div class="card-ops">
           <button class="op primary" @click="openDeploy(tpl)">{{ t('launch.deploy') }}</button>
           <button class="op" @click="onCardCmd('edit', tpl)">{{ t('common.edit') }}</button>
@@ -3925,7 +3920,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .sa-meta{font-size:11px;color:var(--t3)}
 .aud-actions-row{display:flex;gap:6px}
 .card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
-.lt-card{padding:12px 14px;gap:8px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:12px;cursor:pointer;padding:4px 10px;border-radius:6px;font-family:inherit;white-space:nowrap;transition:all .15s}
 .op.primary{color:var(--ac);border-color:rgba(10,132,255,.45);background:var(--acg);font-weight:600}
 .op.primary:hover{background:var(--ac);color:#fff}
@@ -4355,6 +4349,16 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 /* FB 创建流：编辑器顶栏（完备状态）+ 三层 Tab（系列/组/广告——面包屑合进 Tab） */
 .fb-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 /* 草稿恢复横幅（2026-09-14：跳页丢编辑态的兜底） */
+/* 模板行式列表（2026-09-15 弃方框） */
+.lt-list{display:flex;flex-direction:column;gap:8px}
+.lt-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--bd);border-radius:10px;transition:border-color .15s,box-shadow .15s;min-width:0}
+.lt-row:hover{border-color:var(--bd2);box-shadow:var(--shadow-card)}
+.lt-row .card-ops{margin-left:auto;flex-shrink:0}
+.lt-name{font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:120px;max-width:260px;flex:1 1 auto}
+.lt-meta{flex:0 1 auto;min-width:0}
+.lt-warn{font-size:11px;color:var(--warning);white-space:nowrap;flex-shrink:0}
+@media(max-width:820px){.lt-row{flex-wrap:wrap}.lt-row .card-ops{margin-left:0;width:100%;justify-content:flex-end}}
+
 .draft-banner{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;font-size:12px;color:var(--t2);background:color-mix(in srgb, var(--warning) 10%, transparent);border:1px solid color-mix(in srgb, var(--warning) 40%, transparent);border-radius:8px}
 .fb-tabs{display:flex;gap:4px;margin-bottom:14px;padding:4px;background:rgba(0,0,0,.22);box-shadow:inset 0 0 0 1px var(--bd);border-radius:10px}
 .fb-tab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border:none;border-radius:7px;background:transparent;color:var(--t3);font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
