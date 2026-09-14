@@ -2264,3 +2264,23 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 ### Commits
 - `5a38e81` feat(落地页批1): 模板转对外技术规范+上传严校验拦死 + 页卡今日/7天双指标
 - （后续）fix: _validate_lp_spec 模块级 re import
+
+## 批CI：批2地基 + 哨兵倒计时迁守护面板（2026-09-15）
+
+### 概述
+用户 /goal「开始 做完记得复审」批：划掉四项外部等待待办；TikTok 审核材料交付用户提交。
+
+### 变更表
+| 项 | 文件 | 变更 | 验证 |
+|---|---|---|---|
+| 屏蔽数据桶 | `landing.py` | `/landing/pages` 批量聚合加 block today/last7d CASE 桶（前端屏蔽今日主显用，配合批1 visit/click 桶） | 双门+restart+health ✓（前端消费在批2 主体） |
+| README 对齐 | `landing_lib.py` | 参考模板 README 三禁止条目改「拒传」口径（与 2026-09-14 严校验一致，曾遗留旧 warning 文案） | 部署 ✓ |
+| 哨兵倒计时迁移 | `Guard.vue`+`Settings.vue` | 配置卡迁守护页规则视图顶部（开关/小时/保存）；设置页删 sec-sentinel 全套；端点不动（ads.pause）；403 自动隐藏 | build ✓ CF master ✓ |
+
+### 生产环境变更
+- restart ×1（批2 地基）；CF ×1（哨兵迁移）。commits：`9cb486d` `1e90baa`。
+
+### 复审结论
+- Guard 卡复用 settings.scd* i18n key（零新 key，双语已在）；`settings.hours/saving` key 已存在。
+- 投放链接/看板 Failed to fetch：服务端双证清白（外网 1.3s/带认证 0.23s），定性用户侧网络间歇，待用户 F12 net::ERR 反馈。
+- 批2 前端主体（短链行式/屏蔽今日化/域名chips/日志页重构/域名管理/投放模板行式）为下一批，范围锁 landing-batch2-plan 记忆。
