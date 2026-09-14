@@ -905,6 +905,7 @@ def list_landing_pages(
                         - timedelta(hours=8)).replace(tzinfo=None)
         _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
         _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
+        _is_block = LandingEvent.event_type == "block"
         for _pid, _v, _p, _b, _tv, _tp, _wv, _wp, _b7t, _b7d in db.query(
             LandingEvent.page_id,
             _f.count(_case((_is_visit, 1))),
@@ -916,9 +917,8 @@ def list_landing_pages(
             _f.count(_case((_is_visit & (LandingEvent.created_at >= _bj_7d_start), 1))),
             _f.count(_f.distinct(_case((_is_pass & (LandingEvent.created_at >= _bj_7d_start),
                                            LandingEvent.ip_hash)))),
-            _f.count(_case((LandingEvent.event_type == "block", 1))),
-            _f.count(_case((LandingEvent.event_type == "block" & (LandingEvent.created_at >= _bj_today_start), 1))),
-            _f.count(_case((LandingEvent.event_type == "block" & (LandingEvent.created_at >= _bj_7d_start), 1))),
+            _f.count(_case((_is_block & (LandingEvent.created_at >= _bj_today_start), 1))),
+            _f.count(_case((_is_block & (LandingEvent.created_at >= _bj_7d_start), 1))),
         ).filter(
             LandingEvent.page_id.in_(pids),
             LandingEvent.event_type.in_(["visit", "click", "redirect", "block"]),
