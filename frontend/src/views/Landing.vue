@@ -794,9 +794,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
               <em class="st-more">{{ t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) }}</em>
             </div>
           </template>
-          <div v-if="(p.block_count||0) > 0" class="stat-num warn">
+          <div v-if="(p.block_count||0) > 0" class="stat-num warn" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">
               <div class="st-main"><b>{{ p.today_block || 0 }}</b><span>{{ t('landing.stBlocked') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) }}</em>
             </div>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
