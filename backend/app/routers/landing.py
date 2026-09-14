@@ -802,6 +802,7 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
     # 爬虫/审核机器人（ASN 32934 或 bot UA）全部不计——FB 扫描一来否则访问量虚高、通过率失真
     visit_count = click_count = block_count = 0
     today_visit = today_click = last7d_visit = last7d_click = 0
+    today_block = last7d_block = 0   # 批2 屏蔽桶（漏初始化曾致单页路径 UnboundLocalError → 短链编辑 500）
     if stats is not None:
         ps = (stats.get("page_stats") or {}).get(p.id) or {}
         visit_count = ps.get("visits", 0)
