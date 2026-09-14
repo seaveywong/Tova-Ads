@@ -765,68 +765,31 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 
     <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
     <div class="list" v-loading="loading">
-      <div v-for="p in visibleLpPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
-        <div class="lp-head">
-          <span class="mode-chip" :class="p.redirect_mode" :title="p.redirect_mode === 'redirect' ? t('landing.modeHintRedirect') : t('landing.modeHintDisplay')">{{ p.redirect_mode === 'redirect' ? '🔗 ' + t('landing.chipRedirect') : '📄 ' + t('landing.chipDisplay') }}</span>
+      <!-- 落地页行式（2026-09-15 重大重构）：卡退场——行=状态+标题+域名+子码·像素+今日三指标+标记+操作；
+           7天/累计/通过率全部收进 hover，编辑/子码/自检进抽屉 -->
+      <div v-if="visibleLpPages.length" class="short-list">
+        <div v-for="p in visibleLpPages" :key="p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
-          <span class="lp-title">{{ p.title }}</span>
+          <span class="short-title" :title="p.title">{{ p.title }}</span>
+          <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length" :title="p.bound_subdomains.join(' | ')">
+            <button v-for="sub in p.bound_subdomains.slice(0,3)" :key="sub" class="dom-chip"
+                    :title="'https://' + sub" @click.stop="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
+            <span v-if="p.bound_subdomains.length > 3" class="dom-more" @click.stop="openEdit(p)">+{{ p.bound_subdomains.length - 3 }}</span>
+          </div>
+          <span class="short-meta">{{ p.subcode_count || 0 }} {{ t('landing.stSubcodes') }} · {{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
+          <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stPassRateTip') + ' ' + ((p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0)) + '% · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
           <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
-          <span v-if="(p.custom_domains||[]).length" class="tag">{{ (p.custom_domains||[]).length }} {{ t('landing.domainsUnit') }}</span>
-          <span v-if="p.redirect_mode !== 'redirect'" class="tag">{{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
-          <span class="health-dot" v-if="p.last_health_status" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
-        </div>
-        <div class="lp-body lp-stats">
-          <template v-if="p.redirect_mode === 'redirect'">
-            <div class="stat-num" :title="t('landing.stVisitsTip')">
-              <div class="st-main"><b>{{ p.today_visit || 0 }}</b><span>{{ t('landing.stVisits') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 }) }}</em>
-            </div>
-            <div class="stat-num" :title="t('landing.stPassTip')">
-              <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
-            </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip') + ' · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) })">
-              <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-            </div>
-          </template>
-          <template v-else>
-            <div class="stat-num"><b>{{ p.subcode_count || 0 }}</b><span>{{ t('landing.stSubcodes') }}</span></div>
-            <div class="stat-num" :title="t('landing.stVisitsTip')">
-              <div class="st-main"><b>{{ p.today_visit || 0 }}</b><span>{{ t('landing.stVisits') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 }) }}</em>
-            </div>
-            <div class="stat-num" :title="t('landing.stPassTip')">
-              <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
-            </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip') + ' · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) })">
-              <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-            </div>
-          </template>
-          <div v-if="(p.block_count||0) > 0" class="stat-num warn" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">
-              <div class="st-main"><b>{{ p.today_block || 0 }}</b><span>{{ t('landing.stBlocked') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-            </div>
-          <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
-        </div>
-        <!-- 域名紧凑 chip 行：同根域只显前缀，点=复制，hover 全域名，+N 进编辑 -->
-        <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length"
-             :title="p.bound_subdomains.join(' | ')">
-          <button v-for="sub in p.bound_subdomains.slice(0,4)" :key="sub" class="dom-chip"
-                  :title="'https://' + sub" @click="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
-          <span v-if="p.bound_subdomains.length > 4" class="dom-more" @click="openEdit(p)">+{{ p.bound_subdomains.length - 4 }}</span>
-        </div>
-        <div class="lp-url" v-else-if="p.custom_domain">
-          <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
-          <button class="mb" @click="copyText(p.custom_domain, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
-          <a class="mb" :href="p.custom_domain" target="_blank" rel="noopener">{{ t('landing.open') }}↗</a>
-        </div>
-        <div class="lp-foot">
-          <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">{{ t('common.preview') }}</a>
-          <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
-          <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</button>
-          <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
-          <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+          <span v-else-if="p.last_health_status" class="health-dot" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
+          <div class="short-ops">
+            <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">{{ t('common.preview') }}</a>
+            <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
+            <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</button>
+            <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
+            <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+          </div>
         </div>
       </div>
       <div v-if="modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
@@ -1491,6 +1454,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .short-rot{color:var(--t3);font-size:11px;white-space:nowrap}
 .short-stat{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;white-space:nowrap}
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
+.lp-row2{grid-template-columns:70px minmax(130px,1.15fr) minmax(170px,1.1fr) 118px repeat(3,minmax(88px,.7fr)) auto auto}
+.short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
+@media(max-width:900px){.lp-row2{grid-template-columns:1fr 1fr;row-gap:6px}.lp-dom-chips{grid-column:1/-1}}
 .short-ops{display:flex;gap:5px}
 @media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}}
 
