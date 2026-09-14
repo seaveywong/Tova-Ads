@@ -1825,6 +1825,97 @@ def landing_logs(
     return {"total": total, "offset": offset, "limit": limit, "items": items}
 
 
+def _logs_filtered(db, tenant_id, page_id, slug, ad_id, act_id, event_type, decision,
+                   date_from, date_to, q):
+    """批2：/logs/agg 与 /logs/export 共用的筛选构造（与 /landing/logs 同口径：北京业务日
+    边界转 UTC + q 模糊。刻意不抽 /logs 本体——动存量筛选有回归风险，双份口径注释钉死）。"""
+    from ..models.landing_event import LandingEvent
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    BUSINESS_TZ = _tz(_td(hours=8))
+    qb = db.query(LandingEvent).filter(LandingEvent.tenant_id == tenant_id)
+    if page_id:
+        qb = qb.filter(LandingEvent.page_id == page_id)
+    if slug:
+        qb = qb.filter(LandingEvent.slug == slug)
+    if ad_id:
+        qb = qb.filter(LandingEvent.ad_id == ad_id)
+    if act_id:
+        qb = qb.filter(LandingEvent.act_id == act_id)
+    if event_type:
+        qb = qb.filter(LandingEvent.event_type == event_type)
+    if decision:
+        qb = qb.filter(LandingEvent.decision == decision)
+    if date_from:
+        try:
+            start = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ)
+            qb = qb.filter(LandingEvent.created_at >= start.astimezone(_tz.utc))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = _dt.strptime(date_to, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ) + _td(days=1)
+            qb = qb.filter(LandingEvent.created_at < end.astimezone(_tz.utc))
+        except ValueError:
+            pass
+    if q:
+        like = f"%{q}%"
+        qb = qb.filter(LandingEvent.country.ilike(like) | LandingEvent.city.ilike(like)
+                       | LandingEvent.referrer.ilike(like) | LandingEvent.slug.ilike(like)
+                       | LandingEvent.ad_id.ilike(like) | LandingEvent.act_id.ilike(like))
+    return qb
+
+
+@router.get("/logs/agg")
+def landing_logs_agg(
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
+    event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
+    q: str = "", db: Session = Depends(get_db),
+):
+    """日志聚合（批2）：总量 + 事件类型/国家/设备分布 top——筛选条一键看结构，此前只有来源分布。"""
+    from sqlalchemy import func as _fn
+    from ..models.landing_event import LandingEvent as _LE
+    qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
+                        event_type, decision, date_from, date_to, q)
+
+    def _top(col, n=6):
+        rows = qb.with_entities(col, _fn.count()).filter(col.isnot(None), col != "").group_by(col).order_by(_fn.count().desc()).limit(n).all()
+        return [{"k": r[0], "n": int(r[1])} for r in rows]
+
+    return {"total": qb.count(),
+            "by_event": _top(_LE.event_type),
+            "by_country": _top(_LE.country),
+            "by_device": _top(_LE.device_type)}
+
+
+@router.get("/logs/export")
+def landing_logs_export(
+    user: CurrentUser = Depends(require_permission("ads.read")),
+    page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
+    event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
+    q: str = "", db: Session = Depends(get_db),
+):
+    """CSV 导出（批2）：同筛选口径，上限 1 万行（防止拖库式导出拖垮连接）。"""
+    import csv, io as _io
+    from fastapi.responses import Response as _Resp
+    from ..models.landing_event import LandingEvent as _LE
+    qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
+                        event_type, decision, date_from, date_to, q)
+    rows = qb.order_by(_LE.created_at.desc()).limit(10000).all()
+    buf = _io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time", "event_type", "slug", "ad_id", "act_id", "country", "city",
+                "device", "platform", "browser", "asn", "decision", "reason",
+                "referrer", "target_url", "fired_pixels"])
+    for r in rows:
+        w.writerow([r.created_at, r.event_type, r.slug, r.ad_id, r.act_id, r.country, r.city,
+                    r.device_type, r.platform, r.browser, r.asn, r.decision, r.reason,
+                    r.referrer, r.target_url, r.fired_pixel_ids])
+    fname = f"landing_logs_{datetime.now(timezone.utc):%Y%m%d_%H%M}.csv"
+    return _Resp(buf.getvalue().encode("utf-8-sig"), media_type="text/csv",
+                 headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 @router.get("/logs/source-stats")
 def landing_log_source_stats(
     user: CurrentUser = Depends(require_permission("ads.read")),
