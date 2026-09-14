@@ -349,17 +349,13 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </div>
 
     <!-- Instant Form 列表 -->
-    <div v-if="tab==='form'" class="grid-cards" v-loading="loading">
-      <div v-for="item in filteredForms" :key="item.id" class="card-base ft-card">
-        <div class="card-head">
-          <span class="card-name"><span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>{{ item.name }}</span>
-          <span :class="['card-badge', item.fb_form_id ? 'ready' : 'draft']">{{ item.fb_form_id ? '✓ ' + t('formtpl.deployed') : t('formtpl.draft') }}</span>
-        </div>
-        <div class="card-copy">{{ (item.config||{}).form_title || '—' }}</div>
-        <div class="card-meta">
-          <span class="meta-chip">{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }}</span>
-          <span class="meta-chip">{{ item.locale }}</span>
-        </div>
+    <div v-if="tab==='form'" class="ft-list" v-loading="loading">
+      <div v-for="item in filteredForms" :key="item.id" class="ft-row">
+        <span :class="['card-badge', item.fb_form_id ? 'ready' : 'draft']">{{ item.fb_form_id ? '✓ ' + t('formtpl.deployed') : t('formtpl.draft') }}</span>
+        <span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>
+        <span class="ft-name" :title="item.name">{{ item.name }}</span>
+        <span class="ft-desc" :title="(item.config||{}).form_title || ''">{{ (item.config||{}).form_title || '—' }}</span>
+        <span class="ft-meta">{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }} · {{ item.locale }}</span>
         <div class="card-ops">
           <button class="op primary" @click="openFormEdit(item)">{{ t('common.edit') }}</button>
           <button class="op" @click="previewForm(item)">{{ t('common.preview') }}</button>
@@ -381,13 +377,12 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </div>
 
     <!-- 消息列表（Messenger / WhatsApp） -->
-    <div v-if="tab==='msg'" class="grid-cards" v-loading="loading">
-      <div v-for="item in filteredMessages" :key="item.id" class="card-base ft-card">
-        <div class="card-head">
-          <span class="card-name"><span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>{{ item.name }}</span>
-        </div>
-        <div class="card-copy" :title="item.welcome_text || ''">{{ (item.welcome_text||'').slice(0,60) }}{{ (item.welcome_text||'').length>60?'…':'' }}</div>
-        <div class="card-meta"><span class="meta-chip">{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span></div>
+    <div v-if="tab==='msg'" class="ft-list" v-loading="loading">
+      <div v-for="item in filteredMessages" :key="item.id" class="ft-row">
+        <span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>
+        <span class="ft-name" :title="item.name">{{ item.name }}</span>
+        <span class="ft-desc" :title="item.welcome_text || ''">{{ (item.welcome_text||'').slice(0,80) }}{{ (item.welcome_text||'').length>80?'…':'' }}</span>
+        <span class="ft-meta">{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span>
         <div class="card-ops">
           <button class="op primary" @click="openMsgEdit(item)">{{ t('common.edit') }}</button>
           <button class="op" @click="previewMsg(item)">{{ t('common.preview') }}</button>
@@ -700,7 +695,14 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .card-badge{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .card-badge.ready{color:var(--success);background:rgba(52,199,89,.13)}
 .card-badge.draft{color:var(--t3);background:var(--bg3)}
-.ft-card{padding:12px 14px;gap:8px}
+.ft-list{display:flex;flex-direction:column;gap:8px}
+.ft-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--bd);border-radius:10px;transition:border-color .15s,box-shadow .15s;min-width:0}
+.ft-row:hover{border-color:var(--bd2);box-shadow:var(--shadow-card)}
+.ft-row .card-ops{margin-left:auto;flex-shrink:0}
+.ft-name{font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:120px;max-width:260px;flex:1 1 auto}
+.ft-desc{flex:0 1 auto;min-width:0;font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:italic}
+.ft-meta{font-size:11px;color:var(--t3);white-space:nowrap;flex-shrink:0}
+@media(max-width:820px){.ft-row{flex-wrap:wrap}.ft-row .card-ops{margin-left:0;width:100%;justify-content:flex-end}}
 .card-ops{display:flex;gap:5px;margin-top:auto;padding-top:8px}
 .op{background:none;border:1px solid var(--bd);color:var(--t2);font-size:12px;cursor:pointer;padding:4px 10px;border-radius:6px;font-family:inherit;white-space:nowrap;transition:all .15s}
 .op.primary{color:var(--ac);border-color:rgba(10,132,255,.45);background:var(--acg);font-weight:600}
