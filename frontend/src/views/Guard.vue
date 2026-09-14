@@ -345,7 +345,7 @@ const doInspect = async (force = false) => {
     <div v-if="viewTab === 'rules' && scdAllowed" class="scd-card">
       <div class="scd-head">
         <span class="scd-title">⏱ {{ t('settings.scdTitle') }}</span>
-        <el-switch v-model="scd.auto_arm_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+        <el-switch v-model="scd.auto_arm_enabled" size="small" @change="saveScd" />
       </div>
       <div class="scd-body">
         <span class="scd-desc">{{ t('settings.scdDesc') }}</span>
@@ -405,7 +405,7 @@ const doInspect = async (force = false) => {
           <span class="rule-name">{{ r.name }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
-          <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+          <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" />
         </div>
         <div class="rule-body">
           <span class="rule-cond">{{ humanText(r) }} <span class="rule-arrow">→</span> <span :class="['action-tag', actionTagCls(r.action)]">{{ ACTIONS[r.action] || r.action }}</span></span>

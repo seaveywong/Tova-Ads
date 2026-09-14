@@ -586,7 +586,7 @@ const liveStatusColor = (s) => {
 const loadAudiences = async () => { try { savedAudiences.value = await GET('/audiences') } catch {} }
 const loadPixels = async () => {   // 批O-3：像素库（组卡下拉「已识别像素」选项）
   try {
-    const r = await GET('/landing/pixels')
+    const r = await GET('/landing-lib/pixels')
     tplPixels.value = (r.items || r || []).filter(p => (p.platform || 'fb') === 'fb')
   } catch {}
 }

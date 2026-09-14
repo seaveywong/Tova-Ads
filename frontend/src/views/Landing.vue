@@ -117,6 +117,7 @@ const openCreate = () => {
   }
   form.value.block_enabled = true
   drawerOpen.value = true
+  _lpSnap()
 }
 const openEdit = async (p) => {
   editingId.value = p.id
@@ -138,6 +139,7 @@ const openEdit = async (p) => {
       template_id: detail.template_id || null,
     }
     drawerOpen.value = true
+    _lpSnap()
   } catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
 }
 
@@ -202,6 +204,15 @@ const setRule = (k, v) => {
   form.value.protection_rules = r
 }
 
+// 批CK：编辑抽屉 dirty-guard——最长表单（域名/像素/防护）曾无守卫，ESC 一键全丢
+let _lpSnapshot = ''
+const _lpSnap = () => { _lpSnapshot = JSON.stringify(form.value) }
+const onLpBeforeClose = (done) => {
+  if (JSON.stringify(form.value) === _lpSnapshot) return done()
+  ElMessageBox.confirm(t('formtpl.discardConfirm'), t('formtpl.closeConfirm'),
+    { type: 'warning', confirmButtonText: t('common.discard'), cancelButtonText: t('formtpl.keepEditing') })
+    .then(() => done()).catch(() => {})
+}
 const save = async () => {
   if (!form.value.title.trim()) return ElMessage.warning(t('landing.warnTitle'))
   if (!form.value.custom_domains.length) return ElMessage.warning(t('landing.warnDomain'))
@@ -238,6 +249,7 @@ const save = async () => {
       ElMessage.success(t('landing.published'))
     }
     drawerOpen.value = false
+    _lpSnap()
     await loadPages()
     if (resp && resp.self_check) showSelfCheck(resp.self_check, t('landing.scPostPublishTitle'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
@@ -702,7 +714,7 @@ const importZones = async () => {
 const delDomain = async (d) => {
   // 批BW：全页唯一裸删 → 补确认（删的是线上域名：解析与 /a/ 链接即时受影响）
   try {
-    await ElMessageBox.confirm(t('lp.domainDelConfirm', { d: d.domain }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
+    await ElMessageBox.confirm(t('landing.domainDelConfirm', { d: d.domain }), t('common.delConfirm'), { type: 'warning', confirmButtonText: t('common.delConfirm'), confirmButtonClass: 'el-button--danger' })
   } catch { return }
   try { await DELETE(`/landing-lib/domains/${d.id}`); ElMessage.success(t('common.done')); await loadLib(); await openDomains() }
   catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
@@ -841,7 +853,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </div>
 
-    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" v-loading="saving" :element-loading-text="saving ? t('landing.deployingCloud') : ''">
+    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" :before-close="onLpBeforeClose" v-loading="saving" :element-loading-text="saving ? t('landing.deployingCloud') : ''">
       <div class="lp-section">
         <div class="lp-section-title">{{ t('landing.secBasic') }}</div>
         <div class="lp-section-body">
@@ -968,15 +980,15 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div class="lp-section-title">{{ t('landing.secProtection') }}</div>
         <div class="lp-section-body">
 
-      <div class="sec-title">{{ t('landing.dedup') }} <el-switch v-model="form.dedup_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
+      <div class="sec-title">{{ t('landing.dedup') }} <el-switch v-model="form.dedup_enabled" size="small" style="margin-left:8px" /></div>
       <template v-if="form.dedup_enabled">
         <div class="form-l"><label>{{ t('landing.fDedupWindow') }}</label>
           <input v-model.number="form.dedup_window_hours" type="number" min="1" class="input" style="flex:1" />
         </div>
       </template>
-      <div class="sec-title">{{ t('landing.protectionRules') }} <el-switch v-model="form.block_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" style="margin-left:8px" /></div>
+      <div class="sec-title">{{ t('landing.protectionRules') }} <el-switch v-model="form.block_enabled" size="small" style="margin-left:8px" /></div>
       <div class="form-l" v-if="form.block_enabled"><label>{{ t('landing.fPreviewMode') }}</label>
-        <el-switch v-model="form.preview_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+        <el-switch v-model="form.preview_enabled" size="small" />
         <span class="hint" style="margin-left:8px">{{ t('landing.previewModeHint') }}</span>
       </div>
       <div class="lp-url" v-if="form.preview_enabled && form.preview_url">
@@ -1053,7 +1065,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
 
       <template #footer>
-        <button class="btn" @click="drawerOpen=false">{{ t('common.cancel') }}</button>
+        <button class="btn" @click="onLpBeforeClose(() => drawerOpen=false)">{{ t('common.cancel') }}</button>
         <button class="btn primary" :disabled="saving" @click="save">{{ saving ? t('landing.deploying') : (editingId ? t('common.save') : t('landing.publish')) }}</button>
       </template>
     </el-drawer>
@@ -1161,7 +1173,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
       <div class="form-l"><label>{{ t('common.name') }}</label><input v-model="pixelForm.pixel_name" class="input" :placeholder="t('landing.pixelNamePh')" /></div>
       <div class="form-l" v-if="pixelForm.platform === 'fb' && pixelForm.id"><label>{{ t('landing.fbCapiLabel') }}</label>
-        <el-switch v-model="pixelForm.fb_capi_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+        <el-switch v-model="pixelForm.fb_capi_enabled" size="small" />
       </div>
       <div class="pixel-hint" v-if="pixelForm.platform === 'fb' && pixelForm.id" style="margin:0 0 10px">{{ t('landing.fbCapiHint') }}</div>
       <div class="form-l" v-if="pixelForm.platform === 'tt'"><label>{{ t('landing.fTtToken') }}</label><input v-model="pixelForm.tt_access_token" class="input" type="password" :placeholder="t('landing.fTtTokenPh')" /></div>
@@ -1200,7 +1212,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       <div class="sec-title">{{ t('landing.importedDomains') }}</div>
       <div class="sub-list dm-table">
         <div class="dm-row dm-head-row">
-          <span>{{ t('settings.fDomain') || '域名' }}</span><span>DNS</span><span>{{ t('landing.dmUsage') }}</span>
+          <span>{{ t('landing.fDomain') }}</span><span>DNS</span><span>{{ t('landing.dmUsage') }}</span>
           <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span><span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span><span></span>
         </div>
         <div v-for="d in domains" :key="d.id" class="dm-row">

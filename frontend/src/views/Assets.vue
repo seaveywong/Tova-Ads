@@ -451,7 +451,7 @@ const countryLabel = (code) => {
       <div class="ph-actions">
         <div class="ai-toggle" :title="aiOn ? t('assets.aiOnTitle') : t('assets.aiOffTitle')">
           <span class="ai-toggle-label">{{ t('assets.aiRecognition') }}</span>
-          <el-switch :model-value="aiOn" @change="toggleAi" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+          <el-switch :model-value="aiOn" @change="toggleAi" size="small" />
         </div>
         <button class="head-btn primary" @click="openUpload">{{ t('assets.uploadAsset') }}</button>
       </div>

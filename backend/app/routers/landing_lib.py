@@ -101,14 +101,86 @@ def _pixel_usage_map(db: Session, tenant_id: int) -> dict:
     return usage
 
 
+def _page_uses_domain(page, domain: str) -> bool:
+    """页↔域名匹配（批2 修复：曾只比 custom_domain 等值——漏 custom_domains JSON 根域与
+    bound_subdomains 子域名根，用量长期低估）。三种形态：主域等值 / JSON 数组含 / 子域后缀。"""
+    import json as _json
+    d = (domain or "").lower().strip()
+    if not d:
+        return False
+    if (page.custom_domain or "").replace("https://", "").replace("http://", "").lower() == d:
+        return True
+    try:
+        arr = _json.loads(page.custom_domains or "[]")
+        if isinstance(arr, list) and d in [str(x).lower().strip() for x in arr]:
+            return True
+    except Exception:
+        pass
+    try:
+        subs = _json.loads(page.bound_subdomains or "[]")
+        if isinstance(subs, list) and any(str(x).lower().endswith("." + d) for x in subs):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _domain_usage(db: Session, tenant_id: int, domain: str) -> dict:
-    rows = db.query(LandingPage).filter(
+    rows = [r for r in db.query(LandingPage).filter(
         LandingPage.tenant_id == tenant_id,
-        LandingPage.custom_domain == domain,
         LandingPage.status != "archived",
-    ).all()
+    ).all() if _page_uses_domain(r, domain)]
     return {"usage_count": len(rows),
             "used_by": [{"id": r.id, "title": r.title} for r in rows[:10]]}
+
+
+@router.get("/domains/stats")
+def domains_stats(user: CurrentUser = Depends(require_permission("ads.read")),
+                  db: Session = Depends(get_db)):
+    """域名级访问统计（批2）：每域名 今日/近7天/累计 访问·通过（北京业务日，剔爬虫，
+    与页列表同口径）。页→域名映射走 _page_uses_domain 同款三形态匹配。"""
+    from ..models.landing_event import LandingEvent
+    from ..core.landing_source import crawler_filter_cond
+    from sqlalchemy import func as _fn, case as _case
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    import json as _json
+    pages = db.query(LandingPage).filter(
+        LandingPage.tenant_id == user.tenant_id, LandingPage.status != "archived").all()
+    domains = [d.domain for d in db.query(LandingDomain).filter(
+        LandingDomain.tenant_id == user.tenant_id).all()]
+    dom_pids: dict = {d: set() for d in domains}
+    for pg in pages:
+        for d in domains:
+            if _page_uses_domain(pg, d):
+                dom_pids[d].add(pg.id)
+    bj = _dt.now(_tz(_td(hours=8)))
+    t0 = (bj.replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=None)
+    d7 = ((bj - _td(days=6)).replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=None)
+    _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
+    _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
+    page_stats: dict = {}
+    for _pid, _v, _p, _tv, _tp, _wv, _wp in db.query(
+        LandingEvent.page_id,
+        _fn.count(_case((_is_visit, 1))),
+        _fn.count(_fn.distinct(_case((_is_pass, LandingEvent.ip_hash)))),
+        _fn.count(_case((_is_visit & (LandingEvent.created_at >= t0), 1))),
+        _fn.count(_fn.distinct(_case((_is_pass & (LandingEvent.created_at >= t0), LandingEvent.ip_hash)))),
+        _fn.count(_case((_is_visit & (LandingEvent.created_at >= d7), 1))),
+        _fn.count(_fn.distinct(_case((_is_pass & (LandingEvent.created_at >= d7), LandingEvent.ip_hash)))),
+    ).filter(
+        LandingEvent.page_id.in_([p.id for p in pages] or [0]),
+        LandingEvent.event_type.in_(["visit", "click", "redirect", "block"]),
+        ~crawler_filter_cond(LandingEvent),
+    ).group_by(LandingEvent.page_id).all():
+        page_stats[_pid] = (int(_v or 0), int(_p or 0), int(_tv or 0), int(_tp or 0), int(_wv or 0), int(_wp or 0))
+    out = []
+    for d, pids in dom_pids.items():
+        agg = [sum(x[i] for x in (page_stats.get(pid) for pid in pids) if x) for i in range(6)]
+        out.append({"domain": d, "visits": agg[0], "pass": agg[1],
+                    "today_visits": agg[2], "today_pass": agg[3],
+                    "last7d_visits": agg[4], "last7d_pass": agg[5], "pages": len(pids)})
+    out.sort(key=lambda x: -(x["today_visits"] + x["last7d_visits"] * 3 + x["visits"]))
+    return out
 
 
 # ── 像素库 ──

@@ -320,6 +320,10 @@ const toggleWarmup = async (actIds, arm) => {
   accLoading.value = false; await load()
 }
 const batchWarmup = async (arm) => {
+  if (selectedAccs.value.size) {
+    try { await ElMessageBox.confirm(t('ads.batchWarmupConfirm', { n: selectedAccs.value.size, act: arm ? t('ads.kaArmOn') : t('ads.kaArmOff') }), t('common.confirm'), { type: 'warning' }) }
+    catch { return }
+  }
   if (!selectedAccs.value.size) return ElMessage.warning(t('ads.selectAccountsFirst'))
   await toggleWarmup([...selectedAccs.value], arm)
   selectedAccs.value.clear()

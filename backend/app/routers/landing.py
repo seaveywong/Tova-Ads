@@ -1773,6 +1773,8 @@ def landing_logs(
         qb = qb.filter(LandingEvent.slug == slug)
     if ad_id:
         qb = qb.filter(LandingEvent.ad_id == ad_id)
+    if ad_id:
+        qb = qb.filter(LandingEvent.ad_id == ad_id)
     if act_id:
         qb = qb.filter(LandingEvent.act_id == act_id)
     if event_type:
@@ -1921,6 +1923,7 @@ def landing_logs_export(
 def landing_log_source_stats(
     user: CurrentUser = Depends(require_permission("ads.read")),
     page_id: int | None = None,
+    ad_id: str = "",
     slug: str = "",
     act_id: str = "",
     event_type: str = "",

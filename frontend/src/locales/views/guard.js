@@ -64,5 +64,6 @@ export default {
     },
     inspectScaled: 'Scaled {n}',
     ago: { minutes: ' · {n} min ago', hours: ' · {n} h ago', date: ' · {d}' },
-  },
+      emgReport: 'Last Global Pause · Execution Report', emgRunning: 'RUNNING', emgScan: 'Accounts scanned', emgCamps: 'Campaigns paused', emgAds: 'Ads affected', emgVerifyFail: 'Verify failed', emgStillActive: 'Still ACTIVE after final audit', emgErrors: 'Errors',
+},
 }

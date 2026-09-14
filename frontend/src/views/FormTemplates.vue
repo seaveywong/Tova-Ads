@@ -555,7 +555,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
               </div>
               <div class="row"><label>{{ t('formtpl.welcomeMessage') }}</label><textarea v-model="fCfg.welcome_message" class="inp ta" rows="2" :placeholder="t('formtpl.welcomeMessagePh')"></textarea></div>
               <div class="row"><label>{{ t('formtpl.targetCountryOnly') }}</label>
-                <el-switch v-model="fCfg.block_display_for_non_targeted" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+                <el-switch v-model="fCfg.block_display_for_non_targeted" size="small" />
                 <span class="hint">{{ t('formtpl.targetCountryHint') }}</span>
               </div>
             </template>

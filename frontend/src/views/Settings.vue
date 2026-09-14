@@ -775,7 +775,7 @@ const runKeepaliveNow = async () => {
           <code class="em-alias">{{ r.alias_email }}</code>
           <span class="em-arrow">→</span>
           <span class="em-email">{{ r.destination_email }}</span>
-          <el-switch :model-value="r.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" @change="toggleEmRoute(r)" />
+          <el-switch :model-value="r.enabled" size="small" @change="toggleEmRoute(r)" />
           <button class="em-del" @click="delEmRoute(r)">{{ t('common.delete') }}</button>
         </div>
         <div v-if="!(em.routes || []).length" class="em-empty">{{ t('settings.emNoRoutes') }}</div>
@@ -938,7 +938,7 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.keepaliveTitle') }}</div>
       <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
-        <el-switch v-model="ka.enabled" active-color="#0a84ff" inactive-color="#3a3a5c" size="small" />
+        <el-switch v-model="ka.enabled" size="small" />
         <span class="ka-switch-label">{{ ka.enabled ? t('settings.kaOnLabel') : t('settings.kaOffLabel') }}</span>
       </div>
       <div class="ka-grid">
