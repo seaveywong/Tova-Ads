@@ -135,7 +135,7 @@ const loadAccounts = async () => {
   try { accounts.value = await GET('/fb/accounts') } catch (e) {}
 }
 const buildParams = () => {
-  const p = { offset: offset.value, limit }
+  const p = { offset: offset.value, limit: limit.value }
   if (fPage.value) p.page_id = fPage.value
   if (fAct.value) p.act_id = fAct.value
   if (fSlug.value) p.slug = fSlug.value
@@ -240,14 +240,14 @@ const setPreset = (k) => {
   preset.value = k; offset.value = 0; load()
 }
 const onCustomRange = ({ from, to }) => { fFrom.value = from; fTo.value = to; offset.value = 0; load() }
-const prev = () => { if (offset.value > 0) { offset.value = Math.max(0, offset.value - limit); load() } }
-const next = () => { if (offset.value + limit < total.value) { offset.value += limit; load() } }
+const prev = () => { if (offset.value > 0) { offset.value = Math.max(0, offset.value - limit.value); load() } }
+const next = () => { if (offset.value + limit.value < total.value) { offset.value += limit.value; load() } }
 const jumpTo = ref('')
 const goPage = () => {
   const n = parseInt(jumpTo.value, 10)
   if (!n || n < 1) return
-  const maxPage = Math.ceil(total.value / limit)
-  offset.value = Math.min(n, maxPage - 1) * limit
+  const maxPage = Math.ceil(total.value / limit.value)
+  offset.value = Math.min(n, maxPage - 1) * limit.value
   jumpTo.value = ''
   load()
 }
@@ -371,7 +371,6 @@ watch(() => route.query, (q) => {
       <template v-for="e in items" :key="e.id">
       <div class="row" :class="{ open: expanded.has(e.id) }" @click="toggleRow(e.id)">
         <div class="t-time">▸ {{ fmtTime(e.created_at) }}</div>
-        <div class="t-time">{{ fmtTime(e.created_at) }}</div>
         <div><code class="slug" @click="goSlug(e.slug)" :title="t('lplogs.clickFilterSubcode', { slug: e.slug })">/a/{{ e.slug }}</code></div>
         <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? t('lplogs.clickFilterAccount', { name: e.act_name }) : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
         <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\n' + t('lplogs.fbClickId') + ': ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? t('lplogs.clickFilterAd', { adId: e.ad_id }) : ''" @click="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? t('lplogs.redirectSetTitle', { url: redirectMap[e.ad_id] }) : t('lplogs.setRedirect')">{{ t('lplogs.redirectShort') }}</button></div>
