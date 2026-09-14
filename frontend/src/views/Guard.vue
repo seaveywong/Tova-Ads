@@ -151,6 +151,23 @@ const load = async () => {
   loading.value = false
 }
 onMounted(load)
+// 哨兵倒计时（2026-09-15 从设置页迁来，归属安全守护；ads.pause 端点 403 则隐藏卡片）
+const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
+const scdSaving = ref(false)
+const scdAllowed = ref(true)
+const loadScd = async () => {
+  try { scd.value = await GET('/settings/sentinel-countdown') }
+  catch (e) { if (String(e?.message || e).includes('403') || (e?.status === 403)) scdAllowed.value = false }
+}
+const saveScd = async () => {
+  scdSaving.value = true
+  try {
+    scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value })
+    ElMessage.success(scd.value.auto_arm_enabled ? t('settings.scdOn') : t('common.saved'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  scdSaving.value = false
+}
+loadScd()
 
 const currentSchema = computed(() => RULE_TYPES.value[form.value.rule_type] || { params: [] })
 const paramsSummary = (r) => {
@@ -324,6 +341,24 @@ const doInspect = async (force = false) => {
         <button v-if="viewTab === 'log'" class="head-btn" :disabled="pauseLoading" @click="loadPauseLog">{{ t('common.refresh') }}</button>
       </div>
     </header>
+    <!-- 哨兵倒计时（dead-man switch）配置卡：归属安全守护（2026-09-15 自设置页迁入） -->
+    <div v-if="viewTab === 'rules' && scdAllowed" class="scd-card">
+      <div class="scd-head">
+        <span class="scd-title">⏱ {{ t('settings.scdTitle') }}</span>
+        <el-switch v-model="scd.auto_arm_enabled" size="small" active-color="#0a84ff" inactive-color="#3a3a5c" />
+      </div>
+      <div class="scd-body">
+        <span class="scd-desc">{{ t('settings.scdDesc') }}</span>
+        <div class="scd-field">
+          <label>{{ t('settings.scdHours') }}</label>
+          <input v-model.number="scd.auto_arm_hours" type="number" min="1" step="1" class="scd-input" />
+          <span class="scd-unit">{{ t('settings.hours') }}</span>
+        </div>
+        <button class="head-btn primary sm" :disabled="scdSaving" @click="saveScd">{{ scdSaving ? t('settings.saving') : t('common.save') }}</button>
+      </div>
+      <div class="scd-note">{{ t('settings.scdNote') }}</div>
+    </div>
+
     <div v-if="viewTab === 'rules'" class="bar">
       <div class="bar-l cat-chips">
         <button v-for="c in catChips" :key="c.v" class="cat-chip" :class="{ on: catFilter === c.v }" @click="catFilter = c.v">{{ c.label }}<b>{{ c.n }}</b></button>
@@ -560,4 +595,17 @@ const doInspect = async (force = false) => {
 .pl-detail { flex: 1; min-width: 200px; word-break: break-all; }
 .pl-result { flex: none; font-size: 12px; color: var(--success); }
 .pl-result.fail { color: var(--error); }
+
+/* 哨兵倒计时配置卡（2026-09-15 迁入） */
+.scd-card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.scd-head{display:flex;align-items:center;gap:10px}
+.scd-title{font-size:13px;font-weight:600}
+.scd-body{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}
+.scd-desc{flex:1;min-width:200px;font-size:12px;color:var(--t3);line-height:1.5}
+.scd-field{display:flex;align-items:center;gap:6px}
+.scd-field label{font-size:12px;color:var(--t3)}
+.scd-input{width:70px;padding:5px 8px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;text-align:center}
+.scd-unit{font-size:12px;color:var(--t3)}
+.scd-note{margin-top:8px;font-size:11px;color:var(--t3);line-height:1.5}
+.head-btn.sm{padding:5px 12px;font-size:12px}
 </style>
