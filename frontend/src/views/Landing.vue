@@ -774,9 +774,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
               <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
               <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
             </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip')">
+            <div class="stat-num" :title="t('landing.stPassRateTip') + ' · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) })">
               <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) }}</em>
             </div>
           </template>
           <template v-else>
@@ -789,9 +788,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
               <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
               <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
             </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip')">
+            <div class="stat-num" :title="t('landing.stPassRateTip') + ' · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) })">
               <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
-              <em class="st-more">{{ t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) }}</em>
             </div>
           </template>
           <div v-if="(p.block_count||0) > 0" class="stat-num warn" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">
@@ -799,12 +797,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
             </div>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
-        <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
-          <div v-for="(sub,si) in p.bound_subdomains.slice(0,4)" :key="sub" class="lp-sub-row" :title="p.bound_subdomains.join('\n')">
-            <span class="url-text" :title="'https://'+sub">🔗 {{ sub }}</span>
-            <button class="mb" @click="copyText('https://'+sub, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
-          </div>
-          <div v-if="p.bound_subdomains.length > 4" class="lp-sub-more" :title="p.bound_subdomains.join('\n')" @click="openEdit(p)">{{ t('landing.moreDomains', { n: p.bound_subdomains.length - 4 }) }}</div>
+        <!-- 域名紧凑 chip 行：同根域只显前缀，点=复制，hover 全域名，+N 进编辑 -->
+        <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length"
+             :title="p.bound_subdomains.join(' | ')">
+          <button v-for="sub in p.bound_subdomains.slice(0,4)" :key="sub" class="dom-chip"
+                  :title="'https://' + sub" @click="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
+          <span v-if="p.bound_subdomains.length > 4" class="dom-more" @click="openEdit(p)">+{{ p.bound_subdomains.length - 4 }}</span>
         </div>
         <div class="lp-url" v-else-if="p.custom_domain">
           <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
@@ -1308,6 +1306,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .st-tag.warn{background:rgba(255,159,10,.15);color:var(--warning)}
 .lp-body{font-size:12px;color:var(--t3);margin-top:6px}
 .lp-foot{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
+.lp-dom-chips{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:2px 0 6px}
+.dom-chip{font-size:11px;font-family:var(--font-mono);color:var(--ac);background:transparent;border:1px solid var(--bd);border-radius:6px;padding:1px 8px;cursor:pointer;white-space:nowrap}
+.dom-chip:hover{border-color:var(--ac);background:var(--acg)}
+.dom-more{font-size:11px;color:var(--t3);cursor:pointer;padding:1px 4px}
+.dom-more:hover{color:var(--ac)}
 .lp-sub-row{display:flex;align-items:center;gap:4px;margin-bottom:2px}
 .lp-sub-more{font-size:11px;color:var(--ac);cursor:pointer;padding:2px 0}
 .lp-sub-more:hover{text-decoration:underline}
