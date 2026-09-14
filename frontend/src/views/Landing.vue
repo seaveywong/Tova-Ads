@@ -30,22 +30,19 @@ const sortedPages = computed(() => {
   })
 })
 // 模式筛选（链接管理内二级 tab：全部 / 落地页 / 短链）。display 含历史缺省值
-const modeFilter = ref('all')
+const modeFilter = ref('lp')   // tab=类别互斥（用户 2026-09-15：不同 tab 存放不同类别，不做混排「全部」）
 const isLp = (p) => p.redirect_mode !== 'redirect'
 const cntAll = computed(() => pages.value.length)
 const cntLp = computed(() => pages.value.filter(isLp).length)
 const cntShort = computed(() => cntAll.value - cntLp.value)
-const visiblePages = computed(() => {
-  if (modeFilter.value === 'lp') return sortedPages.value.filter(isLp)
-  if (modeFilter.value === 'short') return sortedPages.value.filter(p => !isLp(p))
-  return sortedPages.value
-})
+const visiblePages = computed(() => modeFilter.value === 'short'
+  ? sortedPages.value.filter(p => !isLp(p))
+  : sortedPages.value.filter(isLp))
 // 批2：落地页/短链分流渲染——短链走行式（目标URL为主信息，无像素/自检等无关项）
 const visibleLpPages = computed(() => visiblePages.value.filter(isLp))
 const visibleShortPages = computed(() => visiblePages.value.filter(p => !isLp(p)))
 const rotLabel = (m) => { const o = rotationOptions.value.find(x => x.v === (m || 'first')); return o ? o.l : (m || 'first') }
-const emptyText = computed(() => modeFilter.value === 'lp' ? t('landing.emptyNoLp')
-  : (modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyCreate')))
+const emptyText = computed(() => modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyNoLp'))
 
 const loadPages = async () => {
   loading.value = true
@@ -749,13 +746,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     <!-- 统一工具栏（2026-09-14 对齐全局设计系统）：模式筛选 + 计数 -->
     <div class="list-bar">
       <div class="seg-bar">
-        <button class="seg-btn" :class="{ on: modeFilter === 'all' }" @click="modeFilter = 'all'">{{ t('landing.tabAll') }} <i class="seg-cnt">{{ cntAll }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
       </div>
     </div>
 
-    <div v-if="visibleLpPages.length || modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
+    <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
     <div class="list" v-loading="loading">
       <div v-for="p in visibleLpPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
@@ -824,7 +820,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
         </div>
       </div>
-      <div v-if="visibleShortPages.length || modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
+      <div v-if="modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
     <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
       <div v-if="visibleShortPages.length" class="short-list">
         <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
