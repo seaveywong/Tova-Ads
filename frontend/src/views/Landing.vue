@@ -685,11 +685,14 @@ const downloadTplRef = () => {
 }
 const zoneFilter = ref('')
 const filteredZones = computed(() => { const k = zoneFilter.value.trim().toLowerCase(); return k ? cfZones.value.filter(z => z.name.toLowerCase().includes(k)) : cfZones.value })
+const domainStats = ref({})
 const openDomains = async () => {
   domainOpen.value = true; zonesLoading.value = true; zoneFilter.value = ''
   try { cfZones.value = (await GET('/landing-lib/cf-zones')).map(z => ({ ...z, _checked: false })) }
   catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
   finally { zonesLoading.value = false }
+  try { domainStats.value = {}; for (const r of (await GET('/landing-lib/domains/stats')) || []) domainStats.value[r.domain] = r }
+  catch {}   // 统计是辅助信息，失败不阻断
 }
 const importZones = async () => {
   const toImport = cfZones.value.filter(z => z._checked && !z.imported).map(z => z.name)
@@ -730,13 +733,13 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
       <div class="ph-actions">
         <button class="head-btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
-        <el-dropdown trigger="click" @command="cmd => { if(cmd==='templates')openLandingTemplates(); else if(cmd==='domains')openDomains(); }">
+        <button v-if="isSuper" class="head-btn" @click="openDomains">{{ t('landing.domainMgmt') }}</button>
+        <el-dropdown trigger="click" @command="cmd => { if(cmd==='templates')openLandingTemplates(); }">
           <button class="head-btn">{{ t('landing.tools') }} ▾</button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="templates">{{ t('landing.templates') }}</el-dropdown-item>
-              <el-dropdown-item v-if="isSuper" command="domains">{{ t('landing.domainMgmt') }}</el-dropdown-item>
-            </el-dropdown-menu>
+                          </el-dropdown-menu>
           </template>
         </el-dropdown>
         <button class="head-btn primary" @click="openCreate">+ {{ t('landing.newLink') }}</button>
@@ -1200,10 +1203,17 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
       <button class="btn primary" style="margin-top:12px" @click="importZones">{{ t('landing.importSelected') }}</button>
       <div class="sec-title">{{ t('landing.importedDomains') }}</div>
-      <div class="sub-list">
-        <div v-for="d in domains" :key="d.id" class="sub-row">
+      <div class="sub-list dm-table">
+        <div class="dm-row dm-head-row">
+          <span>{{ t('settings.fDomain') || '域名' }}</span><span>DNS</span><span>{{ t('landing.dmUsage') }}</span>
+          <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span><span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span><span></span>
+        </div>
+        <div v-for="d in domains" :key="d.id" class="dm-row">
           <code>{{ d.domain }}</code>
-          <span class="sub-ad">{{ d.label || d.source }}</span>
+          <span :class="['tag', (d.cf_zone_status === 'active') ? 'ok' : 'warn']" :title="d.cf_zone_status || ''">{{ d.cf_zone_status || '—' }}</span>
+          <span class="sub-ad">{{ d.usage_count || 0 }} {{ t('landing.pagesUnit') }}<i v-if="d.label"> · {{ d.label }}</i></span>
+          <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_visits || 0, a: (domainStats[d.domain] || {}).visits || 0 })">{{ (domainStats[d.domain] || {}).today_visits ?? '—' }}</span>
+          <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_pass || 0, a: (domainStats[d.domain] || {}).pass || 0 })">{{ (domainStats[d.domain] || {}).today_pass ?? '—' }}</span>
           <button class="mb danger" @click="delDomain(d)">{{ t('common.delete') }}</button>
         </div>
         <div v-if="!domains.length" class="empty">{{ t('landing.noDomainsImported') }}</div>
@@ -1468,4 +1478,12 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 .short-ops{display:flex;gap:5px}
 @media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}}
+
+/* 域名管理表格（批2） */
+.dm-table{margin-top:8px}
+.dm-row{display:grid;grid-template-columns:minmax(160px,1.6fr) 76px minmax(120px,1fr) 90px 90px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px}
+.dm-head-row{color:var(--t3);font-size:11px;font-weight:600}
+.dm-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-num{font-variant-numeric:tabular-nums;color:var(--t1);cursor:default}
+.sub-ad i{font-style:normal;color:var(--t3)}
 </style>
