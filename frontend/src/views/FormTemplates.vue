@@ -337,8 +337,8 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     <!-- 统一工具栏（2026-09-14 三页重构）：主 tab + 平台筛选左置，搜索右对齐；吸顶让位平台上下文条 -->
     <div class="list-bar">
       <div class="seg-bar">
-        <button class="seg-btn" :class="{on:tab==='form'}" @click="tab='form'">{{ t('formtpl.tabForm') }}</button>
-        <button class="seg-btn" :class="{on:tab==='msg'}" @click="tab='msg'">{{ t('formtpl.tabMsg') }}</button>
+        <button class="seg-btn" :class="{on:tab==='form'}" @click="tab='form'">{{ t('formtpl.tabForm') }} <i class="seg-cnt">{{ filteredForms.length }}</i></button>
+        <button class="seg-btn" :class="{on:tab==='msg'}" @click="tab='msg'">{{ t('formtpl.tabMsg') }} <i class="seg-cnt">{{ filteredMessages.length }}</i></button>
       </div>
       <div v-if="tab==='form'" class="seg-bar">
         <button class="seg-btn" :class="{on:formPlatFilter==='all'}" @click="formPlatFilter='all'">{{ t('common.all') }}</button>
