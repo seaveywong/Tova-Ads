@@ -755,6 +755,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </div>
 
+    <div v-if="visibleLpPages.length || modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
     <div class="list" v-loading="loading">
       <div v-for="p in visibleLpPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
@@ -823,7 +824,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
         </div>
       </div>
-      <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
+      <div v-if="visibleShortPages.length || modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
+    <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
       <div v-if="visibleShortPages.length" class="short-list">
         <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
@@ -1465,6 +1467,9 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .sub-ops{display:flex;gap:5px;align-items:center;margin-left:auto;flex-shrink:0;flex-wrap:wrap;row-gap:4px}
 .mb.spin{opacity:.5;pointer-events:none}
 
+.lp-sec-label{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--t2);margin:6px 0 8px}
+.lp-sec-label i{font-style:normal;font-size:10px;color:var(--t3);background:var(--bg3);border-radius:9px;padding:1px 8px}
+.list + .lp-sec-label{margin-top:16px}
 /* 短链行式（批2） */
 .short-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
 .short-row{display:grid;grid-template-columns:70px minmax(120px,1.1fr) minmax(180px,1.6fr) 88px repeat(3,minmax(86px,.7fr)) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;font-size:12px;transition:border-color .15s,box-shadow .15s}
