@@ -770,7 +770,10 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
               <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
               <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
             </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassRateTip')">
+              <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) }}</em>
+            </div>
           </template>
           <template v-else>
             <div class="stat-num"><b>{{ p.subcode_count || 0 }}</b><span>{{ t('landing.stSubcodes') }}</span></div>
@@ -782,9 +785,15 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
               <div class="st-main"><b>{{ p.today_click || 0 }}</b><span>{{ t('landing.stPass') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
               <em class="st-more">{{ t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 }) }}</em>
             </div>
-            <div class="stat-num" :title="t('landing.stPassRateTip')"><b>{{ p.pass_rate || 0 }}%</b><span>{{ t('landing.stPassRate') }}</span></div>
+            <div class="stat-num" :title="t('landing.stPassRateTip')">
+              <div class="st-main"><b>{{ p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0 }}%</b><span>{{ t('landing.stPassRate') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) }}</em>
+            </div>
           </template>
-          <div v-if="(p.block_count||0) > 0" class="stat-num warn"><b>{{ p.block_count }}</b><span>{{ t('landing.stBlocked') }}</span></div>
+          <div v-if="(p.block_count||0) > 0" class="stat-num warn">
+              <div class="st-main"><b>{{ p.today_block || 0 }}</b><span>{{ t('landing.stBlocked') }}<i class="st-sub">{{ t('landing.todayShort') }}</i></span></div>
+              <em class="st-more">{{ t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) }}</em>
+            </div>
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
