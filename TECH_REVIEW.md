@@ -2310,3 +2310,28 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 
 ### Commits
 `e24b500` `5be393e` `716228f` `eb2b7bb` `0377d46` `8bdb23e` `2da27a5`（+地基 `9cb486d`、复审 `1fc8a68`、哨兵迁移 `1e90baa` 见批CI 前后）
+
+## 批CK：三路 Agent 全库扫查（UX/UI/BUG）+ 实锤修复 11 项（2026-09-15，/goal）
+
+### 概述
+用户 /goal：3 个并行 Agent 分别按 UX/UI/BUG 扫全库（frontend 16 视图 + 后端 5 文件），主线程复审逐条验真后修复。产出：UX 10 项（修 4）、UI 10 项（修 1 类）、BUG 10 项（修 7），其余列为后续批次。
+
+### 修复清单（commit 865e1d6）
+| 级 | 项 | 说明 |
+|---|---|---|
+| P0 | LandingLogs limit ref 漏 .value ×5 | 用户在报的 422 "unable to parse integer" 直接元凶（limit=[object Object]） |
+| P1 | LaunchTemplates 像素端点错 | /landing/pixels→/landing-lib/pixels（下拉曾恒空静默） |
+| P1 | 删域名确认框 lp. 命名空间错 | 曾渲染裸 key，删域名无警告可读 |
+| P0-UX | Landing 编辑抽屉 dirty-guard | 最长表单（域名/像素/防护）曾 ESC 一键全丢 |
+| P1-UX | Ads 批量保活开关补确认（带计数）；Guard 哨兵 switch 改即存 | |
+| UI-P0 | el-switch 硬编码主题色 props ×9 删除 | 浅色主题曾破功；main.css 底座接管 |
+| P2 | guard.js en 补 8 key / common 补 clear+rename / source-stats 补 ad_id / 域名表头空间错 / 时间列重复格 | |
+验证：build ✓ CF ✓ 后端双门+restart+health ✓ + logs 端点带 ad_id 实跑 ✓ + _audit_endpoints 13/13。
+
+### 未修（后续批次候选，Agent 报告全文见会话记录）
+- UX：Ads 保活 180s 长任务反馈弱、两页 11 列表格无移动端断点、子码串行生成无进度
+- UI：5 套旧 segmented 未收编 seg-bar、6 种本地 .empty、mono 散写、AuditLog/Tailwind 色板、图标方言
+- 遗留债务：AuditLog/AdManager/Dashboard 等旧页的设计系统迁移是独立一批
+
+### Commits
+- `865e1d6` fix(全库扫查批): 三路 Agent(UX/UI/BUG)复审后实锤修复 11 项
