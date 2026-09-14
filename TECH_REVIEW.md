@@ -2284,3 +2284,29 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 - Guard 卡复用 settings.scd* i18n key（零新 key，双语已在）；`settings.hours/saving` key 已存在。
 - 投放链接/看板 Failed to fetch：服务端双证清白（外网 1.3s/带认证 0.23s），定性用户侧网络间歇，待用户 F12 net::ERR 反馈。
 - 批2 前端主体（短链行式/屏蔽今日化/域名chips/日志页重构/域名管理/投放模板行式）为下一批，范围锁 landing-batch2-plan 记忆。
+
+## 批CJ：落地页批2 全量完成（2026-09-15，/goal）
+
+### 概述
+批2 六项全部上线（短链行式/口径统一/域名chips/日志页重构/域名管理重构/投放模板行式），含后端三个新端点与一个匹配漏洞修复。
+
+### 变更表
+| 项 | Commit | 内容 | 验证 |
+|---|---|---|---|
+| 域名 chips | `e24b500` | 页卡域名 2→4 个 +「+N」hover 全列 | build/CF ✓ |
+| 口径统一 | `9cb486d`+`5be393e` | `/landing/pages` 补 block today/7d 桶；屏蔽/通过率今日主显+累计副行 | restart+health ✓ |
+| 短链行式 | `716228f` | redirect 页脱离落地页富卡：行=状态+标题+目标URL(+N)+轮换+今日三指标；无像素/自检无关项 | build/CF ✓ |
+| 日志后端 | `eb2b7bb` | `GET /landing/logs/agg`（事件/国家/设备 top）+ `/logs/export` CSV（1万行上限，utf-8-sig）；`_logs_filtered` 共用筛选 | 双门+health+路由 401 实测 ✓ |
+| 日志前端 | `0377d46` | 筛选分组（更多筛选折叠+隐藏条件提示）/聚合条（事件可点筛选）/CSV 导出按钮/行展开详情（fbclid/像素全集/ASN/UA/referrer）/分页 50/100/200 | build/CF ✓ |
+| 域名管理 | `8bdb23e` | 入口提级（超管页头直按钮）；已导入表格化（DNS状态/用量/今日访问·通过 hover 7天累计）；`GET /landing-lib/domains/stats`；**usage 匹配修复**（三形态：等值/JSON根域/子域后缀——曾只等值长期低估） | 双门+health+stats 路由 401 ✓ |
+| 投放模板行式 | `2da27a5` | 卡片→行：状态点+平台+名+目标·预算+已部署+操作；名称不截断 | build/CF ✓ |
+
+### 复审结论（已知限制）
+- `/logs/agg` 与 `/logs/export` 与 `/logs` 筛选为双份实现（注释钉死口径）——批2 刻意不抽存量 `/logs` 本体避免回归；后续改筛选需三处同步。
+- 行展开的 region/colo/os 落库但 `/logs` 序列化未返回——本批未扩列（详情展示的是已返回字段）。
+- 域名统计的页→域名为 Python 侧三形态匹配（规模小无性能问题）；空域名列表时 `page_id.in_([0])` 防全表扫。
+- 日志导出走浏览器 fetch+blob（带 token）；CSV 超 1 万行截断有提示上限。
+- 素材库维持卡片（视觉型对象，用户确认范围外）。
+
+### Commits
+`e24b500` `5be393e` `716228f` `eb2b7bb` `0377d46` `8bdb23e` `2da27a5`（+地基 `9cb486d`、复审 `1fc8a68`、哨兵迁移 `1e90baa` 见批CI 前后）
