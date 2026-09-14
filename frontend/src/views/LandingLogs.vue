@@ -124,7 +124,7 @@ const accounts = ref([])
 const items = ref([])
 const total = ref(0)
 const offset = ref(0)
-const limit = 50
+const limit = ref(50)   // 批2：分页尺寸可选 50/100/200
 const loading = ref(false)
 const _logGuard = useLatest()
 
@@ -148,6 +148,32 @@ const buildParams = () => {
   if (fQ.value) p.q = fQ.value
   return p
 }
+// 批2：更多筛选折叠（账户/动作结果/子码/广告ID 收纳；主行只留高频筛选）
+const moreOpen = ref(false)
+const hiddenActive = computed(() => !!(fAct.value || fDecision.value || fSlug.value || fAd.value))
+// 批2：结构聚合（事件/国家/设备 top，/landing/logs/agg）
+const agg = ref(null)
+// 批2：CSV 导出（同筛选口径，fetch 带 token 转 blob）
+const exporting = ref(false)
+const exportCsv = async () => {
+  exporting.value = true
+  try {
+    const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
+    const r = await fetch(BASE + '/landing/logs/export?' + new URLSearchParams(buildStatsParams()).toString(),
+      { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') } })
+    if (!r.ok) throw new Error(r.status + '')
+    const blob = await r.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'landing_logs.csv'
+    document.body.appendChild(a); a.click()
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 800)
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  exporting.value = false
+}
+// 批2：行展开详情（fbclid/UA/ASN 全量/像素全集/去向/来源 referrer）
+const expanded = ref(new Set())
+const toggleRow = (id) => { const n = new Set(expanded.value); n.has(id) ? n.delete(id) : n.add(id); expanded.value = n }
 // 来源分布统计（chip 条）：受控/外部/爬虫/占位符/未知 + 机房数。点 chip 即筛选
 const stats = ref(null)
 const statChips = computed(() => [
@@ -162,6 +188,7 @@ const buildStatsParams = () => {
   if (fPage.value) p.page_id = fPage.value
   if (fAct.value) p.act_id = fAct.value
   if (fSlug.value) p.slug = fSlug.value
+  if (fAd.value) p.ad_id = fAd.value
   if (fEvent.value) p.event_type = fEvent.value
   if (fDecision.value) p.decision = fDecision.value
   if (fFrom.value) p.date_from = fFrom.value
@@ -173,12 +200,18 @@ const loadStats = async () => {
   try { stats.value = await GET('/landing/logs/source-stats?' + new URLSearchParams(buildStatsParams()).toString()) }
   catch (e) { /* 静默：分布是辅助信息，失败不阻断 */ }
 }
+const loadAgg = async () => {
+  try { agg.value = await GET('/landing/logs/agg?' + new URLSearchParams(buildStatsParams()).toString()) }
+  catch (e) { /* 聚合是辅助信息，失败不阻断 */ }
+}
+const toggleEvent = (v) => { fEvent.value = (fEvent.value === v ? '' : v); search() }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
 const softRefresh = () => { offset.value = 0; load() }   // 批AL：小刷新——保留全部筛选条件只拉最新数据（F5 会重置）
 const load = async () => {
   const isLatest = _logGuard.next()
   loading.value = true
   loadStats()  // 并行刷新分布（非阻塞）
+  loadAgg()
   try {
     const r = await GET('/landing/logs?' + new URLSearchParams(buildParams()).toString())
     if (!isLatest()) return   // 筛选连点时旧响应后到——丢弃
@@ -287,15 +320,8 @@ watch(() => route.query, (q) => {
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />
         <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
       </el-select>
-      <el-select v-model="fAct" class="fl-sel" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
-        <el-option :value="''" :label="t('lplogs.allAccounts')" />
-        <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" />
-      </el-select>
       <el-select v-model="fEvent" class="fl-sel" @change="search">
         <el-option v-for="o in EVENT_TYPES" :key="o.v" :value="o.v" :label="o.l" />
-      </el-select>
-      <el-select v-model="fDecision" class="fl-sel" @change="search">
-        <el-option v-for="o in DECISIONS" :key="o.v" :value="o.v" :label="o.l" />
       </el-select>
       <el-select v-model="fSource" class="fl-sel" @change="search">
         <el-option :value="''" :label="t('lplogs.allSources')" />
@@ -305,10 +331,21 @@ watch(() => route.query, (q) => {
         <el-option value="placeholder" :label="t('lplogs.srcPlaceholder')" />
         <el-option value="unknown" :label="t('lplogs.directAccess')" />
       </el-select>
-      <input v-model="fSlug" class="txt" :placeholder="t('lplogs.subcode')" @input="debounceSearch" @keyup.enter="search" />
-      <input v-model="fAd" class="txt" :placeholder="t('lplogs.adId')" @input="debounceSearch" @keyup.enter="search" />
       <input v-model="fQ" class="txt q" :placeholder="t('lplogs.searchPlaceholder')" @input="debounceSearch" @keyup.enter="search" />
+      <button class="ctrl-btn" :class="{ on: moreOpen || hiddenActive }" @click="moreOpen = !moreOpen">{{ t('lplogs.moreFilters') }}<i v-if="hiddenActive" class="mf-dot">·</i></button>
+      <button class="ctrl-btn" :disabled="exporting" @click="exportCsv">{{ exporting ? '…' : '⤓ CSV' }}</button>
       <button class="ctrl-btn" @click="reset">{{ t('lplogs.reset') }}</button>
+      <div v-if="moreOpen" class="more-filters">
+        <el-select v-model="fAct" class="fl-sel" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
+          <el-option :value="''" :label="t('lplogs.allAccounts')" />
+          <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" />
+        </el-select>
+        <el-select v-model="fDecision" class="fl-sel" @change="search">
+          <el-option v-for="o in DECISIONS" :key="o.v" :value="o.v" :label="o.l" />
+        </el-select>
+        <input v-model="fSlug" class="txt" :placeholder="t('lplogs.subcode')" @input="debounceSearch" @keyup.enter="search" />
+        <input v-model="fAd" class="txt" :placeholder="t('lplogs.adId')" @input="debounceSearch" @keyup.enter="search" />
+      </div>
     </div>
     <div class="stats-bar" v-if="stats">
       <span class="stats-label">{{ t('lplogs.sourceDistribution') }}<span class="stats-win">{{ stats.window === 'today' ? t('common.today') : t('lplogs.selectedRange') }} · {{ stats.total }}</span></span>
@@ -317,11 +354,23 @@ watch(() => route.query, (q) => {
       </button>
       <span v-if="stats.datacenter" class="stat-chip static src-bad" :title="t('lplogs.datacenterHint')">⚠ {{ t('lplogs.datacenter') }} {{ stats.datacenter }}</span>
     </div>
+    <div class="stats-bar agg-bar" v-if="agg && agg.total">
+      <span class="stats-label">{{ t('lplogs.aggEvents') }}</span>
+      <button v-for="c in agg.by_event" :key="'e'+c.k" class="stat-chip" :class="{ on: fEvent === c.k }" @click="toggleEvent(c.k)">{{ eventLabel(c.k) }} <b>{{ c.n }}</b></button>
+      <span class="agg-sep"></span>
+      <span class="stats-label">{{ t('lplogs.aggCountries') }}</span>
+      <span v-for="c in (agg.by_country||[]).slice(0,5)" :key="'c'+c.k" class="stat-chip static">{{ countryLabel(c.k) || c.k }} <b>{{ c.n }}</b></span>
+      <span class="agg-sep"></span>
+      <span class="stats-label">{{ t('lplogs.aggDevices') }}</span>
+      <span v-for="c in agg.by_device||[]" :key="'d'+c.k" class="stat-chip static">{{ DEVICE[c.k] || c.k }} <b>{{ c.n }}</b></span>
+    </div>
     <div class="tbl" v-loading="loading">
       <div class="row head">
         <div>{{ t('lplogs.colTime') }}</div><div>{{ t('lplogs.subcode') }}</div><div>{{ t('lplogs.colAccount') }}</div><div>{{ t('lplogs.adId') }}</div><div>{{ t('lplogs.colPixel') }}</div><div>{{ t('lplogs.colDevice') }}</div><div>{{ t('lplogs.colRegion') }}</div><div>ASN</div><div>{{ t('lplogs.colAction') }}</div><div>{{ t('lplogs.colReason') }}</div><div>{{ t('lplogs.colSourceDest') }}</div>
       </div>
-      <div v-for="e in items" :key="e.id" class="row">
+      <template v-for="e in items" :key="e.id">
+      <div class="row" :class="{ open: expanded.has(e.id) }" @click="toggleRow(e.id)">
+        <div class="t-time">▸ {{ fmtTime(e.created_at) }}</div>
         <div class="t-time">{{ fmtTime(e.created_at) }}</div>
         <div><code class="slug" @click="goSlug(e.slug)" :title="t('lplogs.clickFilterSubcode', { slug: e.slug })">/a/{{ e.slug }}</code></div>
         <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? t('lplogs.clickFilterAccount', { name: e.act_name }) : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
@@ -340,12 +389,21 @@ watch(() => route.query, (q) => {
         <div class="t-reason" :title="e.reason || ''">{{ reasonLabel(e.reason) || '-' }}</div>
         <div class="t-src">
           <template v-if="hasRedirect(e)">
-            <a v-if="e.target_url" :href="e.target_url" target="_blank" rel="noopener" :title="t('lplogs.redirectTargetTitle', { url: e.target_url })">{{ e.target_url }}</a>
+            <a v-if="e.target_url" :href="e.target_url" target="_blank" rel="noopener" :title="t('lplogs.redirectTargetTitle', { url: e.target_url })" @click.stop>{{ e.target_url }}</a>
             <span v-else class="muted">-</span>
           </template>
           <span v-else :class="srcClass(e)" :title="srcTitle(e)">{{ srcLabel(e) }}</span>
         </div>
       </div>
+      <div v-if="expanded.has(e.id)" class="detail-row">
+        <div class="dt-item"><span>fbclid</span><code>{{ e.fbclid || '—' }}</code></div>
+        <div class="dt-item"><span>{{ t('lplogs.colPixel') }}</span><code>{{ e.fired_pixel_ids || '—' }}</code></div>
+        <div class="dt-item"><span>ASN</span><code>{{ asnTitle(e) }}</code></div>
+        <div class="dt-item"><span>UA</span><code>{{ e.user_agent || '—' }}</code></div>
+        <div class="dt-item"><span>{{ t('lplogs.sourceLabel') }}</span><code>{{ e.referrer || '—' }}</code></div>
+        <div class="dt-item"><span>{{ t('lplogs.redirectTargetTitle', { url: '' }) }}</span><code>{{ e.target_url || '—' }}</code></div>
+      </div>
+      </template>
       <div v-if="!items.length && !loading" class="empty">{{ fSlug ? t('lplogs.emptyWithSubcode', { slug: fSlug }) : t('lplogs.empty') }}</div>
     </div>
     <div v-if="total > limit" class="pager">
@@ -353,6 +411,9 @@ watch(() => route.query, (q) => {
       <span class="pg-info">{{ offset + 1 }}–{{ Math.min(offset + limit, total) }} / {{ t('lplogs.totalUnit', { n: total }) }}</span>
       <button class="ctrl-btn sm" :disabled="offset + limit >= total" @click="next">{{ t('lplogs.nextPage') }}</button>
       <input v-model="jumpTo" class="jump-inp" type="number" min="1" :max="Math.ceil(total/limit)" :placeholder="t('audit.jumpPh')" @keyup.enter="goPage" />
+      <select v-model.number="limit" class="jump-inp" :title="t('lplogs.pageSize')" @change="search">
+        <option :value="50">50</option><option :value="100">100</option><option :value="200">200</option>
+      </select>
       <button class="ctrl-btn sm" @click="goPage">{{ t('audit.jumpGo') }}</button>
     </div>
 
@@ -446,4 +507,16 @@ watch(() => route.query, (q) => {
 .stat-chip.src-ok { color: var(--success) } .stat-chip.src-bad { color: var(--error) }
 .stat-chip.src-warn { color: var(--warning) } .stat-chip.src-bot { color: #a78bfa }
 .stat-chip.on.src-ok, .stat-chip.on.src-bad, .stat-chip.on.src-warn, .stat-chip.on.src-bot { color: #fff }
+
+/* 批2：更多筛选折叠行 / 聚合条 / 行展开详情 / 分页尺寸 */
+.more-filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;padding-top:6px;border-top:1px dashed var(--bd);margin-top:4px}
+.mf-dot{font-style:normal;color:var(--warning);margin-left:2px;font-weight:700}
+.agg-bar{margin-top:-4px}
+.agg-sep{width:1px;align-self:stretch;background:var(--bd);margin:0 4px}
+.row{cursor:pointer}
+.row.open{background:var(--bg3)}
+.detail-row{display:flex;gap:18px;flex-wrap:wrap;padding:8px 12px;background:var(--bg3);border-bottom:1px solid var(--bd);font-size:11px}
+.dt-item{display:flex;gap:6px;align-items:baseline;min-width:0}
+.dt-item span{color:var(--t3);white-space:nowrap}
+.dt-item code{color:var(--t2);word-break:break-all;max-width:340px;font-size:10px}
 </style>
