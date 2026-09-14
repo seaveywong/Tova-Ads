@@ -788,11 +788,11 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <span v-if="p.last_health_status" class="health-text" :class="p.last_health_status">{{ p.last_health_summary }}</span>
         </div>
         <div class="lp-url" v-if="p.bound_subdomains && p.bound_subdomains.length">
-          <div v-for="(sub,si) in p.bound_subdomains.slice(0,2)" :key="sub" class="lp-sub-row">
+          <div v-for="(sub,si) in p.bound_subdomains.slice(0,4)" :key="sub" class="lp-sub-row" :title="p.bound_subdomains.join('\n')">
             <span class="url-text" :title="'https://'+sub">🔗 {{ sub }}</span>
             <button class="mb" @click="copyText('https://'+sub, t('landing.publicUrlCopied'))">{{ t('common.copy') }}</button>
           </div>
-          <div v-if="p.bound_subdomains.length > 2" class="lp-sub-more" @click="openEdit(p)">{{ t('landing.moreDomains', { n: p.bound_subdomains.length - 2 }) }}</div>
+          <div v-if="p.bound_subdomains.length > 4" class="lp-sub-more" :title="p.bound_subdomains.join('\n')" @click="openEdit(p)">{{ t('landing.moreDomains', { n: p.bound_subdomains.length - 4 }) }}</div>
         </div>
         <div class="lp-url" v-else-if="p.custom_domain">
           <span class="url-text" :title="p.custom_domain">🔗 {{ p.custom_domain }}</span>
