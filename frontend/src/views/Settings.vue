@@ -952,9 +952,6 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    
-    </div>
-
     <!-- 保活扫描结果弹窗（每账户 success/skip/fail + 翻译原因） -->
     <el-dialog v-model="kaResultOpen" :title="t('settings.kaResultTitle')" width="560px" append-to-body>
       <div v-if="kaResult" class="ka-result">

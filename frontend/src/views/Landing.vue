@@ -40,6 +40,10 @@ const visiblePages = computed(() => {
   if (modeFilter.value === 'short') return sortedPages.value.filter(p => !isLp(p))
   return sortedPages.value
 })
+// 批2：落地页/短链分流渲染——短链走行式（目标URL为主信息，无像素/自检等无关项）
+const visibleLpPages = computed(() => visiblePages.value.filter(isLp))
+const visibleShortPages = computed(() => visiblePages.value.filter(p => !isLp(p)))
+const rotLabel = (m) => { const o = rotationOptions.value.find(x => x.v === (m || 'first')); return o ? o.l : (m || 'first') }
 const emptyText = computed(() => modeFilter.value === 'lp' ? t('landing.emptyNoLp')
   : (modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyCreate')))
 
@@ -749,7 +753,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
     </div>
 
     <div class="list" v-loading="loading">
-      <div v-for="p in visiblePages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
+      <div v-for="p in visibleLpPages" :key="p.id" :class="['lp-card', p.last_fb_status === 'fail' ? 'alert-fail' : (p.last_fb_status === 'warn' ? 'alert-warn' : '')]">
         <div class="lp-head">
           <span class="mode-chip" :class="p.redirect_mode" :title="p.redirect_mode === 'redirect' ? t('landing.modeHintRedirect') : t('landing.modeHintDisplay')">{{ p.redirect_mode === 'redirect' ? '🔗 ' + t('landing.chipRedirect') : '📄 ' + t('landing.chipDisplay') }}</span>
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
@@ -814,6 +818,23 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</button>
           <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
           <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+        </div>
+      </div>
+      <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
+      <div v-if="visibleShortPages.length" class="short-list">
+        <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
+          <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
+          <span class="short-title" :title="p.title">{{ p.title }}</span>
+          <span class="short-url" :title="(p.target_urls||[]).join(' | ')">🔗 {{ (p.target_urls||[])[0] || '—' }}<i v-if="(p.target_urls||[]).length > 1"> +{{ p.target_urls.length - 1 }}</i></span>
+          <span class="short-rot">{{ rotLabel(p.rotation_mode) }}</span>
+          <span class="short-stat">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          <div class="short-ops">
+            <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
+            <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
+            <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+          </div>
         </div>
       </div>
       <div v-if="!visiblePages.length && !loading" class="empty">
@@ -1433,4 +1454,18 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .fb-badge.warn{color:var(--warning);background:rgba(255,159,10,.1)}
 .sub-ops{display:flex;gap:5px;align-items:center;margin-left:auto;flex-shrink:0;flex-wrap:wrap;row-gap:4px}
 .mb.spin{opacity:.5;pointer-events:none}
+
+/* 短链行式（批2） */
+.short-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.short-row{display:grid;grid-template-columns:70px minmax(120px,1.1fr) minmax(180px,1.6fr) 88px repeat(3,minmax(86px,.7fr)) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;font-size:12px;transition:border-color .15s,box-shadow .15s}
+.short-row:hover{border-color:var(--bd2);box-shadow:var(--shadow-card)}
+.short-row.alert-fail{box-shadow:inset 3px 0 0 var(--error)}
+.short-title{font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.short-url{color:var(--ac);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.short-url i{font-style:normal;color:var(--t3);margin-left:3px}
+.short-rot{color:var(--t3);font-size:11px;white-space:nowrap}
+.short-stat{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;white-space:nowrap}
+.short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
+.short-ops{display:flex;gap:5px}
+@media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}}
 </style>
