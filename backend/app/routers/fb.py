@@ -1450,6 +1450,33 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
         db.close()
 
 
+def _bg_sync_imported_ads(tenant_id: int, act_ids: list[str]):
+    """导入后立即同步新账户的 campaigns/adsets/ads 进 ads_cache（后台跑）。
+    与 15min cron 同一实现（_sync_one），失败静默——cron 会兜底。"""
+    db = SuperSessionLocal()
+    try:
+        from .ads import _sync_one, _acc_platform
+        from ..core.fb_tokens import client_for_account
+        from ..models.fb import Account as _Acc
+        for aid in act_ids[:50]:   # 单批上限 200，广告层拉取较重——50 个封顶防长任务
+            acc = db.query(_Acc).filter(
+                _Acc.tenant_id == tenant_id, _Acc.act_id == aid,
+                _Acc.is_managed == True,  # noqa: E712
+            ).first()
+            if not acc:
+                continue
+            try:
+                client = client_for_account(db, tenant_id, aid, "read")
+                if client is not None:
+                    _sync_one(db, tenant_id, aid, client,
+                              platform=_acc_platform(acc), currency=acc.currency or "USD")
+                    db.commit()
+            except Exception:
+                db.rollback()
+    finally:
+        db.close()
+
+
 @router.post("/import")
 def import_accounts(
     body: ImportAccountsIn,
@@ -1595,6 +1622,9 @@ def import_accounts(
     # 勾选场景「开弹窗（慢一次）→ 导入（缓存命中秒回）」保持成立
     if imported:
         background_tasks.add_task(_bg_complete_imported, user.tenant_id, sorted(touched_creds))
+        # 立即拉新导入账户的广告缓存：广告管理器只读 ads_cache（15min cron 同步），
+        # 导入后最长 15 分钟「隐身」曾让用户以为导入失败（2026-09-16 反馈）。失败静默（cron 兜底）
+        background_tasks.add_task(_bg_sync_imported_ads, user.tenant_id, list(imported))
     not_found = sorted(set(cleaned) - covered)
     return {"imported": imported, "count": len(imported),
             "skipped_existing": skipped_existing,
