@@ -4,7 +4,7 @@ export default {
   zh: {
     pageTitle: '投放链接', headMeta: '{n} 条 · {blocked} 屏蔽',
     chipDisplay: '落地页', chipRedirect: '短链',
-    stSubcodes: '子码', stVisits: '访问', stPass: '通过', stPassRate: '通过率', stVisitsTip: '真人访问量（visit+redirect，已剔除爬虫/审核机器人）', stPassTip: '通过量 = 点击 CTA 或自动跳转到达目标的访客数（爬虫不计）', stPassRateTip: '通过率 = 通过 ÷ 访问（均为真人口径，爬虫不计），访问量低时波动大', stBlocked: '屏蔽',
+    createdBy: '创建人', stSubcodes: '子码', stVisits: '访问', stPass: '通过', stPassRate: '通过率', stVisitsTip: '真人访问量（visit+redirect，已剔除爬虫/审核机器人）', stPassTip: '通过量 = 点击 CTA 或自动跳转到达目标的访客数（爬虫不计）', stPassRateTip: '通过率 = 通过 ÷ 访问（均为真人口径，爬虫不计），访问量低时波动大', stBlocked: '屏蔽',
     tabManage: '链接管理', tabLogs: '访问日志', totalPages: '共 {n} 个链接', viewData: '查看数据',
     tabAll: '全部', tabLpOnly: '落地页', tabShortOnly: '短链',
     emptyNoLp: '暂无落地页链接', emptyNoShort: '暂无短链',

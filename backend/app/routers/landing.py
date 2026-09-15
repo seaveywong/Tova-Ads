@@ -733,6 +733,16 @@ class PageUpdateIn(BaseModel):
     dedup_window_hours: int | None = None
 
 
+def _owner_email(db, p) -> str:
+    """落地页创建人邮箱（owner 看全团队；operator RLS 只看自己，此处不泄露）"""
+    try:
+        from ..models.auth import User as _U
+        u = db.query(_U.email).filter(_U.id == p.owner_user_id).first()
+        return u[0] if u else ""
+    except Exception:
+        return ""
+
+
 def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
     """stats（列表调用方可传）= {"sub_counts": {pid: n}, "page_stats": {pid: {visits, pass, blocked}}}
     —— 批量预取，替代每页 4 条 COUNT（N+1）；单页调用不传则逐项查（原行为）。"""
@@ -860,6 +870,7 @@ def _page_to_dict(p, db: Session = None, stats: dict = None) -> dict:
             "last_health_checked_at": str(p.last_health_checked_at or ""),
             "last_fb_status": p.last_fb_status,          # FB屏蔽探测 pass/fail/warn（fail=被屏，看板红标）
             "last_fb_checked_at": str(p.last_fb_checked_at or ""),
+            "owner_email": _owner_email(db, p),          # 创建人（owner 视角看全团队谁建的）
             "visit_count": visit_count, "click_count": click_count,
             "block_count": block_count, "pass_rate": pass_rate,
             "today_visit": today_visit, "today_click": today_click,
@@ -1534,6 +1545,18 @@ def _emit_health_alert(db, p, res):
     except Exception:
         _affected = 0
     _body = (res.get("summary") or "").strip()
+    # 具体域名（用户要求 2026-09-16：告警要带被封的具体域名，不要只说"被屏蔽"）
+    _domain = (p.custom_domain or "").replace("https://", "").replace("http://", "").split("/")[0]
+    if not _domain and p.bound_subdomains:
+        try:
+            import json as _j
+            _subs = _j.loads(p.bound_subdomains)
+            if _subs:
+                _domain = _subs[0]
+        except Exception:
+            pass
+    if _domain:
+        _body = (f"域名：{_domain}\n" + _body).strip()
     if _affected:
         _body = (f"影响 {_affected} 个已绑广告。" + _body).strip()
     write_log(db, tenant_id=p.tenant_id, trace_id=_tid, actor_type="system",

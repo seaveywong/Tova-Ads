@@ -474,15 +474,35 @@ def pixel_health_check(
 @router.get("/domains")
 def list_domains(user: CurrentUser = Depends(require_permission("ads.read")),
                  db: Session = Depends(get_db)):
-    """租户只看超管分配给自己的域名（V1 唯一来源；手填已禁用，V2 再开购买/默认平台域名）。"""
+    """租户只看超管分配给自己的域名（V1 唯一来源；手填已禁用，V2 再开购买/默认平台域名）。
+    附 blocked 字段：该域名下任一活跃页 FB 屏蔽探测 fail=true → 前端禁止选用。"""
     rows = db.query(LandingDomain).filter(
         LandingDomain.tenant_id == user.tenant_id,
     ).order_by(LandingDomain.id.desc()).all()
+    # 一次查全部被屏页的域名集合（避免逐域名全扫）
+    from ..models.launch import LandingPage as _LP
+    _blocked_domains = set()
+    for p in db.query(_LP).filter(
+        _LP.tenant_id == user.tenant_id, _LP.status != "archived",
+        _LP.last_fb_status == "fail",
+    ).all():
+        if p.custom_domain:
+            _blocked_domains.add(p.custom_domain.replace("https://", "").replace("http://", "").split("/")[0])
+        if p.bound_subdomains:
+            try:
+                import json as _j
+                for sub in _j.loads(p.bound_subdomains):
+                    parts = sub.split(".")
+                    if len(parts) >= 2:
+                        _blocked_domains.add(".".join(parts[-2:]))
+            except Exception:
+                pass
     out = []
     for d in rows:
         u = _domain_usage(db, user.tenant_id, d.domain)
         out.append({"id": d.id, "domain": d.domain, "label": d.label, "source": d.source,
-                    "cf_zone_status": d.cf_zone_status, "note": d.note, "status": d.status, **u})
+                    "cf_zone_status": d.cf_zone_status, "note": d.note, "status": d.status,
+                    "blocked": d.domain in _blocked_domains, **u})
     return out
 
 
