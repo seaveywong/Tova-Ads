@@ -703,6 +703,7 @@ def build_lead_form_payload(
     description: str = "",
     custom_questions: list[dict] | None = None,
     extra_contact_fields: list[str] | None = None,
+    contact_fields: list[str] | None = None,   # FB 对齐（2026-09-15）：显式联系字段全集；None=旧行为
     privacy_link_text: str = "Privacy Policy",
     thank_you_title: str = "",
     thank_you_body: str = "",
@@ -728,18 +729,27 @@ def build_lead_form_payload(
     if not privacy_url:
         raise ValueError("privacy_url 必填（02_附录 §四 不变量3）")
 
-    # ── questions：联系字段（按国家路由）+ 客户自选 + 自定义问题 ──
+    # ── questions：联系字段 + 客户自选 + 自定义问题 ──
     # 批W 实测修正：questions 项不支持 "name" 键（v25 #100 Invalid keys "name"）——
     # 预置联系字段用 type+key，自定义问题用 key+label（下方原样）
-    primary = default_contact_field(target_countries or [])
-    questions: list[dict] = [
-        {"type": "FIRST_NAME", "key": "first_name"},
-        {"type": primary, "key": primary.lower()},
-    ]
-    for f in (extra_contact_fields or []):
-        f_up = f.upper().strip()
-        if f_up in _CONTACT_FIELD_TYPES and f_up not in (primary, "FIRST_NAME"):
-            questions.append({"type": f_up, "key": f_up.lower()})
+    # FB 对齐（2026-09-15）：contact_fields=显式选择全集（姓名可选、邮箱/电话至少其一，
+    # 编辑器保证顺序）；None=旧行为（姓名+按国家自动主联系+extras），存量模板零迁移。
+    if contact_fields is not None:
+        picked = [str(f).upper().strip() for f in (contact_fields or [])]
+        picked = [f for f in picked if f in _CONTACT_FIELD_TYPES]
+        if not any(f in ("EMAIL", "PHONE") for f in picked):
+            raise ValueError("联系方式必须至少勾选邮箱或电话其一（FB 表单硬性要求）")
+        questions: list[dict] = [{"type": f, "key": f.lower()} for f in picked]
+    else:
+        primary = default_contact_field(target_countries or [])
+        questions = [
+            {"type": "FIRST_NAME", "key": "first_name"},
+            {"type": primary, "key": primary.lower()},
+        ]
+        for f in (extra_contact_fields or []):
+            f_up = f.upper().strip()
+            if f_up in _CONTACT_FIELD_TYPES and f_up not in (primary, "FIRST_NAME"):
+                questions.append({"type": f_up, "key": f_up.lower()})
     has_custom_options = False
     for q in (custom_questions or []):
         item = {"type": "CUSTOM"}

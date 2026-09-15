@@ -103,7 +103,7 @@ onMounted(load)
 // ── 表单 ──
 const blankForm = () => ({
   form_title: '', description: '', privacy_url: '', privacy_link_text: 'Privacy Policy',
-  target_countries: [], extra_contact_fields: ['EMAIL'],
+  target_countries: [], contact_fields: ['FIRST_NAME', 'EMAIL'],
   custom_questions: [], thank_you_title: '', thank_you_body: '',
   thank_you_button_type: 'none', thank_you_button_text: '', thank_you_website_url: '',
   whatsapp_number: '', whatsapp_msg_tpl_id: null,
@@ -125,6 +125,13 @@ const openFormEdit = (tpl) => {
   if (!cfg.thank_you_button_type) {
     cfg.thank_you_button_type = (cfg.thank_you_button_text && cfg.thank_you_website_url) ? 'website' : 'none'
   }
+  // 存量模板无 contact_fields（FB 对齐 2026-09-15 前的旧模型）→ 从旧键推导：
+  // 姓名+按国家自动主联系字段+当时勾选的 extras，升级为显式选择（零迁移）
+  if (!Array.isArray(cfg.contact_fields)) {
+    const picked = new Set(['FIRST_NAME', primaryOf(cfg)])
+    for (const f of (cfg.extra_contact_fields || [])) picked.add(String(f).toUpperCase())
+    cfg.contact_fields = [...picked]
+  }
   fCfg.value = cfg; formOpen.value = true
 }
 
@@ -135,20 +142,9 @@ const primaryOf = (cfg) => {
   const cs = cfg.target_countries || []
   return cs.some(c => PHONE_FIRST_COUNTRIES.includes(String(c).toUpperCase())) ? 'PHONE' : 'EMAIL'
 }
-// 联系字段 chip 列：姓名 + 主联系字段 + 勾选字段（去重），顺序同 payload questions
-const contactsOf = (cfg) => {
-  const out = [{ v: 'FIRST_NAME', l: t('formtpl.pmFirstName') }]
-  const seen = new Set(['FIRST_NAME'])
-  const add = (v) => { if (!seen.has(v)) { seen.add(v); out.push({ v, l: contactFieldLabel(v) }) } }
-  add(primaryOf(cfg))
-  for (const f of (cfg.extra_contact_fields || [])) add(String(f).toUpperCase())
-  return out
-}
-// 主联系字段未被显式勾选 → 标「自动」（payload 兜底逻辑）
-const isAutoContact = (cfg, v) => {
-  const picked = (cfg.extra_contact_fields || []).map(x => String(x).toUpperCase())
-  return v === primaryOf(cfg) && !picked.includes(v)
-}
+// 联系字段 chip 列（FB 对齐 2026-09-15）：显式选择即所见（contact_fields 顺序 = payload 顺序）
+const contactsOf = (cfg) => (cfg.contact_fields || []).map(
+  v => ({ v, l: v === 'FIRST_NAME' ? t('formtpl.pmFirstName') : contactFieldLabel(v) }))
 const tyBtnTypeOf = (cfg) => cfg.thank_you_button_type || ((cfg.thank_you_button_text && cfg.thank_you_website_url) ? 'website' : 'none')
 const qIsChoice = (q) => Array.isArray(q.options) && q.options.length > 0
 
@@ -187,9 +183,16 @@ const removeOption = (q, i) => q.options.splice(i, 1)
 
 // ── 联系信息 / 感谢页 ──
 const toggleContact = (v) => {
-  const arr = fCfg.value.extra_contact_fields || []
+  const arr = fCfg.value.contact_fields || (fCfg.value.contact_fields = [])
   const i = arr.indexOf(v)
   if (i >= 0) arr.splice(i, 1); else arr.push(v)
+  // 邮箱/电话至少保一（FB 硬性要求）——最后一个被取消时立即弹回并提示
+  if (v === 'EMAIL' || v === 'PHONE') {
+    if (!arr.includes('EMAIL') && !arr.includes('PHONE')) {
+      arr.push(v)
+      ElMessage.warning(t('formtpl.needOneContact'))
+    }
+  }
 }
 // 感谢页按钮类型切换：清掉另一类型的字段（避免脏数据随 config 入库）
 const onTyBtnType = (v) => {
@@ -208,6 +211,7 @@ const saveForm = async () => {
   if (!fMeta.value.name.trim()) return ElMessage.warning(t('formtpl.needName'))
   if (!fCfg.value.form_title.trim()) return ElMessage.warning(t('formtpl.needFormTitle'))
   if (!fCfg.value.privacy_url.trim()) return ElMessage.warning(t('formtpl.needPrivacyUrl'))
+  if (!(fCfg.value.contact_fields||[]).some(x => x === 'EMAIL' || x === 'PHONE')) return ElMessage.warning(t('formtpl.needOneContact'))
   if (tyBtnTypeOf(fCfg.value) === 'website' && !fCfg.value.thank_you_website_url.trim()) return ElMessage.warning(t('formtpl.needBtnUrl'))
   if (tyBtnTypeOf(fCfg.value) !== 'none' && !fCfg.value.thank_you_button_text.trim()) return ElMessage.warning(t('formtpl.needBtnText'))
   saving.value = true
@@ -422,7 +426,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
               <div v-if="fCfg.description" class="pm-desc">{{ fCfg.description }}</div>
               <div class="pm-contact-head">{{ t('formtpl.pvContact') }}</div>
               <div class="pm-chips">
-                <span v-for="c in contactsOf(fCfg)" :key="c.v" class="pm-chip">{{ c.l }}<em v-if="isAutoContact(fCfg, c.v)" class="pm-auto">{{ t('formtpl.pvAuto') }}</em></span>
+                <span v-for="c in contactsOf(fCfg)" :key="c.v" class="pm-chip">{{ c.l }}</span>
               </div>
               <div v-for="(q,i) in (fCfg.custom_questions||[])" :key="'q'+i" class="pm-qcard">
                 <div class="pm-label" :class="{muted:!q.label}">{{ q.label || t('formtpl.pmQuestion') }}</div>
@@ -469,17 +473,21 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 
             <hr class="sep" />
             <div class="sec-title">{{ t('formtpl.secContactFields') }}</div>
+            <!-- FB 对齐（2026-09-15）：姓名可选开关 + 邮箱/电话至少其一 + 其他字段自由选 -->
+            <div class="row"><label>{{ t('formtpl.collectName') }}</label>
+              <el-switch :model-value="(fCfg.contact_fields||[]).includes('FIRST_NAME')" size="small" @change="toggleContact('FIRST_NAME')" />
+              <span class="hint">{{ t('formtpl.collectNameHint') }}</span>
+            </div>
             <div class="chips">
-              <label class="chip on fixed"><input type="checkbox" checked disabled /> {{ t('formtpl.contactFixedName') }}</label>
-              <label v-for="f in MAIN_CONTACTS" :key="f.v" class="chip" :class="{on:(fCfg.extra_contact_fields||[]).includes(f.v)}">
-                <input type="checkbox" :checked="(fCfg.extra_contact_fields||[]).includes(f.v)" @change="toggleContact(f.v)" /> {{ f.l }}
+              <label v-for="f in MAIN_CONTACTS" :key="f.v" class="chip" :class="{on:(fCfg.contact_fields||[]).includes(f.v)}">
+                <input type="checkbox" :checked="(fCfg.contact_fields||[]).includes(f.v)" @change="toggleContact(f.v)" /> {{ f.l }}
               </label>
             </div>
-            <div class="hint">{{ t('formtpl.contactAutoHint') }}</div>
+            <div class="hint">{{ t('formtpl.contactMethodHint') }}</div>
             <button class="link-btn" @click="showMoreContact=!showMoreContact">{{ showMoreContact ? t('formtpl.contactLess') : t('formtpl.contactMore') }}</button>
             <div v-if="showMoreContact" class="chips sm-mt">
-              <label v-for="f in MORE_CONTACTS" :key="f.v" class="chip" :class="{on:(fCfg.extra_contact_fields||[]).includes(f.v)}">
-                <input type="checkbox" :checked="(fCfg.extra_contact_fields||[]).includes(f.v)" @change="toggleContact(f.v)" /> {{ f.l }}
+              <label v-for="f in MORE_CONTACTS" :key="f.v" class="chip" :class="{on:(fCfg.contact_fields||[]).includes(f.v)}">
+                <input type="checkbox" :checked="(fCfg.contact_fields||[]).includes(f.v)" @change="toggleContact(f.v)" /> {{ f.l }}
               </label>
             </div>
 
@@ -630,7 +638,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           <div v-if="previewData.description" class="pm-desc">{{ previewData.description }}</div>
           <div class="pm-contact-head">{{ t('formtpl.pvContact') }}</div>
           <div class="pm-chips">
-            <span v-for="c in contactsOf(previewData)" :key="c.v" class="pm-chip">{{ c.l }}<em v-if="isAutoContact(previewData, c.v)" class="pm-auto">{{ t('formtpl.pvAuto') }}</em></span>
+            <span v-for="c in contactsOf(previewData)" :key="c.v" class="pm-chip">{{ c.l }}</span>
           </div>
           <div v-for="(q,i) in (previewData.custom_questions||[])" :key="'q'+i" class="pm-qcard">
             <div class="pm-label">{{ q.label || t('formtpl.pmQuestion') }}</div>
