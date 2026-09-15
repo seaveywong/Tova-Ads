@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { GET, POST, setToken } from '../api'
+import { GET, POST, PUT, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
 import { useLocale } from '../composables/useLocale'
 import { setUserTz, fmtTime } from '../composables/useTz'
@@ -115,6 +115,23 @@ const toggleNotifs = async () => {
 // 安全面板
 const guardStatus = ref({ rules_enabled: 0, sentinel_armed_accounts: 0, allowances_today: 0 })
 const sentinelOn = ref(false)
+// 哨兵倒计时（个人制，2026-09-15 归属左下角安全守护面板——用户实指此处）
+const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
+const scdSaving = ref(false)
+const loadScd = async () => {
+  try { scd.value = await GET('/settings/sentinel-countdown') } catch {}
+}
+const toggleScd = async (val) => {
+  scdSaving.value = true
+  try {
+    scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value, auto_arm_enabled: val })
+    ElMessage.success(val ? t('settings.scdOn') : t('common.saved'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  scdSaving.value = false
+}
+const saveScdHours = async () => {
+  try { scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value }) } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
 // 批BV（/goal①）：最近一次全局暂停摘要（面板不只是按钮——能看到上次执行结果，点击进守护页看全报告）
 const lastEmergency = ref(null)
 const emgSummary = computed(() => {
@@ -152,6 +169,7 @@ const toggleSentinel = async (val) => {
     await POST(`/guard/sentinel/${val ? 'arm' : 'disarm'}`, {})
     sentinelOn.value = val
     loadGuard()
+  loadScd()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const emergencyLoading = ref(false)
@@ -294,6 +312,16 @@ watch(() => route.path, () => { sidebarOpen.value = false })
           <span>{{ t('layout.sentinel') }}</span>
           <el-switch :model-value="sentinelOn" @change="toggleSentinel" size="small"
                      active-color="#0a84ff" inactive-color="#3a3a5c" />
+        </div>
+        <div class="guard-row">
+          <span :title="t('settings.scdDesc')">{{ t('layout.scdCountdown') }}</span>
+          <span class="scd-ctl">
+            <input v-model.number="scd.auto_arm_hours" type="number" min="1" class="scd-hrs"
+                   :title="t('settings.scdHours')" @change="saveScdHours" />
+            <span class="scd-h">h</span>
+            <el-switch :model-value="scd.auto_arm_enabled" :disabled="scdSaving" @change="toggleScd" size="small"
+                       active-color="#0a84ff" inactive-color="#3a3a5c" />
+          </span>
         </div>
         <div class="guard-row">
           <span>{{ t('layout.rulesCount', { n: guardStatus.rules_enabled }) }}</span>
@@ -439,6 +467,10 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 /* 安全面板 */
 .guard-panel { padding: 12px 16px; border-top: 1px solid var(--bd); }
 .guard-title { font-size: 11px; color: var(--t3); text-transform: uppercase; margin-bottom: 8px; }
+.scd-ctl{display:flex;align-items:center;gap:4px}
+.scd-hrs{width:44px;padding:2px 4px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;color:var(--t1);font-size:11px;text-align:center}
+.scd-hrs:focus{outline:none;border-color:var(--ac)}
+.scd-h{font-size:10px;color:var(--t3)}
 .guard-row {
   display: flex; justify-content: space-between; align-items: center;
   padding: 4px 0; font-size: 13px; color: var(--t2);

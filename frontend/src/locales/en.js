@@ -236,7 +236,7 @@ export default {
   layout: {
     platformFilter: 'Platform filter (dashboard / ad manager filter by selected platform)', platformKey: 'Platform ',
     platformScopeAll: 'All platforms · data aggregated across platforms', platformScopeFb: 'Facebook · data filtered to this platform', platformScopeTt: 'TikTok · data filtered to this platform',
-    sentinel: 'Sentinel',
+    sentinel: 'Sentinel', scdCountdown: 'Countdown',
     rulesCount: '{n} rules',
     safetyGuard: 'Safety Guard',
     emergencyPause: 'Emergency Pause All', lastEmergency: 'Last pause', emgDone: '{n} campaigns paused · {m} accounts scanned', emgBad: '{n} verify/error issues', emgViewLog: 'Click to view the full execution report (Guard · Pause Log)',

@@ -152,21 +152,6 @@ const load = async () => {
 }
 onMounted(load)
 // 哨兵倒计时（2026-09-15 从设置页迁来，归属安全守护；ads.pause 端点 403 则隐藏卡片）
-const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
-const scdSaving = ref(false)
-const loadScd = async () => {
-  // 加载失败保留默认值照常显示卡片（保存时服务端权限拦截会给出明确报错）
-  try { scd.value = await GET('/settings/sentinel-countdown') } catch {}
-}
-const saveScd = async () => {
-  scdSaving.value = true
-  try {
-    scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value })
-    ElMessage.success(scd.value.auto_arm_enabled ? t('settings.scdOn') : t('common.saved'))
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  scdSaving.value = false
-}
-loadScd()
 
 const currentSchema = computed(() => RULE_TYPES.value[form.value.rule_type] || { params: [] })
 const paramsSummary = (r) => {
@@ -340,24 +325,6 @@ const doInspect = async (force = false) => {
         <button v-if="viewTab === 'log'" class="head-btn" :disabled="pauseLoading" @click="loadPauseLog">{{ t('common.refresh') }}</button>
       </div>
     </header>
-    <!-- 哨兵倒计时（dead-man switch）配置卡：归属安全守护（2026-09-15 自设置页迁入） -->
-    <div v-show="viewTab === 'rules'" class="scd-card">
-      <div class="scd-head">
-        <span class="scd-title">⏱ {{ t('settings.scdTitle') }}</span>
-        <el-switch v-model="scd.auto_arm_enabled" size="small" @change="saveScd" />
-      </div>
-      <div class="scd-body">
-        <span class="scd-desc">{{ t('settings.scdDesc') }}</span>
-        <div class="scd-field">
-          <label>{{ t('settings.scdHours') }}</label>
-          <input v-model.number="scd.auto_arm_hours" type="number" min="1" step="1" class="scd-input" />
-          <span class="scd-unit">{{ t('settings.hours') }}</span>
-        </div>
-        <button class="head-btn primary sm" :disabled="scdSaving" @click="saveScd">{{ scdSaving ? t('settings.saving') : t('common.save') }}</button>
-      </div>
-      <div class="scd-note">{{ t('settings.scdNote') }}</div>
-    </div>
-
     <div v-if="viewTab === 'rules'" class="bar">
       <div class="bar-l cat-chips">
         <button v-for="c in catChips" :key="c.v" class="cat-chip" :class="{ on: catFilter === c.v }" @click="catFilter = c.v">{{ c.label }}<b>{{ c.n }}</b></button>
@@ -595,7 +562,6 @@ const doInspect = async (force = false) => {
 .pl-result { flex: none; font-size: 12px; color: var(--success); }
 .pl-result.fail { color: var(--error); }
 
-/* 哨兵倒计时配置卡（2026-09-15 迁入） */
 .scd-card{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:12px}
 .scd-head{display:flex;align-items:center;gap:10px}
 .scd-title{font-size:13px;font-weight:600}
