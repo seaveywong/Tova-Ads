@@ -233,6 +233,9 @@ def run_account_status_sync():
     lock = acquire_run_lock(110)
     if not lock:
         return {"skipped": "lock_busy"}
+    # 预加载全部模型（FK 解析需要：standalone 跑时 accounts.tt_credential_id 外键
+    # 找不到 tt_credentials 表 → 每账户异常 rollback → 曾致整轮 synced=0 全静默）
+    from ..main import app  # noqa: F401
     db = SuperSessionLocal()
     synced = alerted = recovered = 0
     low_balance_alerts = 0
@@ -260,9 +263,13 @@ def run_account_status_sync():
                 act_id = str(raw.get("account_id", ""))
                 if not act_id:
                     continue
+                # 2026-09-15 修复：只同步绑定此令牌的账户——多令牌可见同一账户时
+                # （cred28/29 都拉到 1429525619059295），不过滤会后者覆盖前者：
+                # 绑定令牌（fb_credential_id）才是权威数据源
                 acc = db.query(Account).filter(
                     Account.act_id == act_id, Account.tenant_id == tenant_id,
                     Account.is_managed.is_(True),  # 跳过已取消纳管的（不刷状态/不发恢复告警）
+                    Account.fb_credential_id == cred.id,  # 只同步绑定此令牌的
                 ).first()
                 if not acc:
                     continue
