@@ -154,10 +154,9 @@ onMounted(load)
 // 哨兵倒计时（2026-09-15 从设置页迁来，归属安全守护；ads.pause 端点 403 则隐藏卡片）
 const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
 const scdSaving = ref(false)
-const scdAllowed = ref(true)
 const loadScd = async () => {
-  try { scd.value = await GET('/settings/sentinel-countdown') }
-  catch (e) { if (String(e?.message || e).includes('403') || (e?.status === 403)) scdAllowed.value = false }
+  // 加载失败保留默认值照常显示卡片（保存时服务端权限拦截会给出明确报错）
+  try { scd.value = await GET('/settings/sentinel-countdown') } catch {}
 }
 const saveScd = async () => {
   scdSaving.value = true
@@ -342,7 +341,7 @@ const doInspect = async (force = false) => {
       </div>
     </header>
     <!-- 哨兵倒计时（dead-man switch）配置卡：归属安全守护（2026-09-15 自设置页迁入） -->
-    <div v-if="viewTab === 'rules' && scdAllowed" class="scd-card">
+    <div v-show="viewTab === 'rules'" class="scd-card">
       <div class="scd-head">
         <span class="scd-title">⏱ {{ t('settings.scdTitle') }}</span>
         <el-switch v-model="scd.auto_arm_enabled" size="small" @change="saveScd" />
