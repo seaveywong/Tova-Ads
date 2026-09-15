@@ -1,6 +1,7 @@
 """Tove Ads API 入口。"""
 import json
 import logging
+logger = logging.getLogger("toveads.main")
 # 可观测性底座：默认 WARNING 会吞掉所有 cron 的 INFO 痕迹（[LeadsPoll]/巡检覆盖/APScheduler
 # 注册），生产排障只能靠猜（2026-09-04 可靠性体检发现）。INFO 起步；高噪第三方库压回 WARNING。
 logging.basicConfig(level=logging.INFO,
@@ -129,6 +130,25 @@ async def _i18n_http_exception_handler(request, exc: _HTTPException):
         status_code=exc.status_code,
         headers=getattr(exc, "headers", None),
         content={"detail": detail},
+    )
+
+
+# ── 未捕获异常全局兜底（稳定性 2026-09-15）：500 返回 JSON + CORS 头（而非裸 HTML 500
+# 无 CORS → 浏览器只报 Failed to fetch / CORS 错，极具误导性——今天三起 P0 全这样）。
+# 响应体带 error_type + trace_id，浏览器 Console 直接可读，不再要去 journal 猜。
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    import traceback as _tb
+    _loc = request.headers.get("x-locale", "zh")
+    _msg = "服务器内部错误" if _loc.startswith("zh") else "Internal server error"
+    _tp = type(exc).__name__
+    logger.error(f"[Unhandled] {request.method} {request.url.path} → {_tp}: {exc}\n"
+                 + "".join(_tb.format_exception(type(exc), exc, exc.__traceback__)[:8]))
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(
+        status_code=500,
+        content={"detail": f"{_msg}（{_tp}）", "error_type": _tp,
+                 "path": request.url.path},
     )
 
 app.include_router(auth_router)

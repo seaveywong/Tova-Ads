@@ -2602,6 +2602,52 @@ def _tenant_locale_of(db, tenant_id: int) -> str:
     from ..core.i18n import tenant_locale
     return tenant_locale(db, tenant_id)
 
+def _endpoint_health_check(db, trace_id: str) -> int:
+    """核心只读端点直调探测（稳定性 2026-09-15）：失败 → critical 告警 + journal。
+    只测不写库的端点（安全）；带认证 CurrentUser 模拟真实请求路径。"""
+    from ..core.deps import CurrentUser
+    from ..core.notify_utils import emit_notification, dedup_recent
+    from ..routers.dashboard import dashboard as _dash
+    from ..routers.landing import list_landing_pages as _lp
+    from ..routers.landing_lib import list_domains as _ld
+    checks = []
+    u = db.query(Account).filter(Account.tenant_id == 1, Account.is_managed.is_(True)).first()
+    _uid = 1
+    try:
+        from ..models.auth import User as _U
+        _u = db.query(_U).filter(_U.tenant_id == 1).first()
+        if _u:
+            _uid = _u.id
+    except Exception:
+        pass
+    user = CurrentUser(id=_uid, email="watchdog@tova", tenant_id=1,
+                       role="owner", is_superadmin=False, permissions=set())
+    checks.append(("dashboard", lambda: _dash(date_preset="today", user=user, db=db, background_tasks=None)))
+    checks.append(("landing_pages", lambda: _lp(user=user, db=db)))
+    checks.append(("landing_domains", lambda: _ld(user=user, db=db)))
+    failed = []
+    for name, fn in checks:
+        try:
+            fn()
+        except Exception as e:
+            failed.append(f"{name}: {type(e).__name__}")
+            logger.error(f"[Watchdog] 端点探测失败 {name}: {e}")
+    if failed:
+        if not dedup_recent(db, 1, "endpoint_health_fail", "*", 30):
+            _loc = tenant_locale(db, 1)
+            _t, _b = notify_text(_loc, "endpoint_health_fail",
+                                 detail="；".join(failed))
+            emit_notification(db, tenant_id=1, level="critical",
+                              event_type="endpoint_health_fail", trace_id=trace_id,
+                              title=_t, body=_b)
+            write_log(db, tenant_id=1, trace_id=trace_id, actor_type="system",
+                      target_type="system", target_id="*",
+                      action_type="endpoint_health_fail", source="watchdog",
+                      result="fail", trigger_detail=";".join(failed))
+            db.commit()
+    return len(failed)
+
+
 def run_watchdog():
     """系统级看门狗（06_附录 §四，定时跑）：
     ① inspection_stalled：巡检长时间无成功心跳 → critical（守护挂了=止损失效，最危险）
@@ -2801,6 +2847,13 @@ def run_watchdog():
             alerts["sentinel_auto_armed"] = _sentinel_auto_arm_check(db, trace_id)
         except Exception as e:
             logger.warning(f"[Watchdog] 哨兵倒计时检查异常: {e}")
+
+        # ── ④ 关键端点健康探测（稳定性 2026-09-15）：直调核心只读端点，任何失败 → critical。
+        # 曾三起 P0 500 全靠用户浏览器报 Failed to fetch 才发现——哨兵自动巡查而非等人来报。
+        try:
+            alerts["endpoint_fail"] = _endpoint_health_check(db, trace_id)
+        except Exception as e:
+            logger.warning(f"[Watchdog] 端点健康探测异常: {e}")
 
         logger.info(f"[Watchdog] 完成: {alerts}")
         return {"trace_id": trace_id, **alerts}

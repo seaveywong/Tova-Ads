@@ -72,6 +72,13 @@ NOTIFY = {
             "en": "Account: <b>{name}</b> (act_{act_id})\nPrepaid balance: <b>${avail:.2f}</b> (threshold ${threshold:.0f})\nAction: top up soon, ads stop once the balance runs out",
         },
     },
+    "endpoint_health_fail": {
+        "title": {"zh": "🔴 核心端点异常", "en": "🔴 Core endpoint failing"},
+        "body": {
+            "zh": "自动探测到核心端点报错：{detail}。看板/落地页可能无法加载。",
+            "en": "Health check detected endpoint errors: {detail}. Pages may fail to load.",
+        },
+    },
     "sync_stalled": {
         "title": {"zh": "数据同步已停 · 无可用令牌", "en": "Data Sync Stalled · No Usable Token"},
         "body": {
