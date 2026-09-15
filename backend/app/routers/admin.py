@@ -325,6 +325,69 @@ class TenantStatusIn(BaseModel):
     status: str  # active / suspended / archived
 
 
+# ── 团队彻底删除（2026-09-15 用户要求：除超管团队和主团队外可彻底删、仅超管）──
+# 保护名单：tenant 1 = 超管团队；有 managed 账户在投或近 7 天有消耗的也拒删
+_PROTECTED_TENANT_IDS = {1}
+
+@router.delete("/tenants/{tid}")
+def hard_delete_tenant(tid: int,
+                       user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
+    """彻底删除团队（级联清空全部数据）。仅超管。保护：超管团队(t=1)+有活跃数据的团队。"""
+    from ..models.auth import Tenant, TenantMembership, User
+    t = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not t:
+        raise HTTPException(404, "团队不存在")
+    if tid in _PROTECTED_TENANT_IDS:
+        raise HTTPException(400, f"团队「{t.name}」是受保护团队，不能删除")
+    # 有 managed 账户 → 拒删（先移除纳管或归档再删）
+    from ..models.fb import Account
+    active_accs = db.query(Account).filter(
+        Account.tenant_id == tid, Account.is_managed.is_(True),
+        Account.account_status == 1).count()
+    if active_accs > 0:
+        raise HTTPException(400, f"团队「{t.name}」有 {active_accs} 个活跃纳管账户——先移除纳管再删除")
+    # 近 7 天有消耗 → 拒删（防误删有历史消耗的团队）
+    from ..models.perf import PerfSnapshot
+    from datetime import datetime, timezone, timedelta
+    recent = db.query(PerfSnapshot).filter(
+        PerfSnapshot.tenant_id == tid,
+        PerfSnapshot.snapshot_date >= (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d"),
+    ).count()
+    if recent > 0:
+        raise HTTPException(400, f"团队「{t.name}」近 7 天有 {recent} 条消耗记录——为防误删有数据的团队，请确认后再操作")
+
+    # 级联删除该租户的全部数据（BYPASSRLS system db session）
+    from sqlalchemy import text as _text
+    _TABLES = [
+        "user_tg_bindings", "tenant_tg_bindings",
+        "notifications", "action_logs",
+        "perf_snapshots", "perf_snapshot_ticks",
+        "ads_cache",
+        "guard_allowances", "guard_rules",
+        "fb_accounts", "fb_credentials",
+        "landing_events", "landing_ad_links", "landing_pages",
+        "landing_pixels", "landing_domains",
+        "landing_templates", "form_templates", "message_templates",
+        "launch_templates", "launch_jobs", "launch_job_items",
+        "assets", "audiences", "leads", "page_posts",
+        "kpi_configs", "role_permissions", "roles",
+        "tenant_memberships", "tenant_settings",
+        "tickets",
+    ]
+    deleted = {}
+    for tbl in _TABLES:
+        try:
+            n = db.execute(_text(f"DELETE FROM {tbl} WHERE tenant_id = :tid"), {"tid": tid}).rowcount
+            if n:
+                deleted[tbl] = n
+        except Exception:
+            pass   # 表不存在（未迁移到）跳过
+    # 删团队本体
+    db.delete(t)
+    db.commit()
+    return {"deleted": True, "tenant_id": tid, "name": t.name, "tables_cleaned": deleted}
+
+
 @router.patch("/tenants/{tid}/status")
 def update_tenant_status(tid: int, body: TenantStatusIn,
                          user=Depends(require_superadmin), db: Session = Depends(get_system_db)):

@@ -920,6 +920,7 @@ export default {
     createTeam: 'Create Team', noTeams: 'No teams',
     teamName: 'Team Name', members: 'Members', adAccounts: 'Ad Accounts', createdAt: 'Created At',
     rename: 'Rename', suspend: 'Suspend', activate: 'Activate', archive: 'Archive', restore: 'Restore',
+    hardDeleteTitle: 'Hard Delete Team', hardDeleteBtn: 'Hard Delete', hardDeleteConfirm: 'Permanently delete team "{name}" and ALL data (unrecoverable). Only for teams with no active accounts and no spend in 7 days. Continue?', hardDeleted: 'Team permanently deleted',
     createDesc: 'Creating a team also generates 3 system roles (owner/operator/finance). You may designate the first owner (a user is auto-created and added).',
     teamNamePlaceholder: 'e.g. Client A Ads Team',
     ownerEmail: 'Owner Email', ownerEmailPlaceholder: 'Optional, leave blank to create an empty team first',

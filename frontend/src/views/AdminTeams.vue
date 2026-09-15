@@ -71,8 +71,22 @@ const setStatus = async (row, status) => {
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const handleOp = (cmd, row) => {
+  if (cmd === 'harddelete') { hardDelete(row); return }
   const map = { suspend: 'suspended', activate: 'active', archive: 'archived', restore: 'active' }
   setStatus(row, map[cmd])
+}
+// 彻底删除（仅超管；保护超管团队+有活跃数据的团队——后端硬校验，前端只做确认）
+const hardDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      t('teams.hardDeleteConfirm', { name: row.name }),
+      t('teams.hardDeleteTitle'),
+      { type: 'error', confirmButtonText: t('teams.hardDeleteBtn'), cancelButtonText: t('common.cancel'),
+        confirmButtonClass: 'el-button--danger' })
+    await DELETE(`/admin/tenants/${row.id}`)
+    ElMessage.success(t('teams.hardDeleted'))
+    load()
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const hasMore = (row) => {
   if (row.id === 1) return false
@@ -191,6 +205,7 @@ const submitMemberAdd = async () => {
                     <el-dropdown-item v-if="row.status === 'suspended'" command="activate">{{ t('teams.activate') }}</el-dropdown-item>
                     <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">{{ t('teams.archive') }}</el-dropdown-item>
                     <el-dropdown-item v-if="row.status === 'archived'" command="restore">{{ t('teams.restore') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.id !== 1" command="harddelete" divided class="danger">{{ t('teams.hardDeleteBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>

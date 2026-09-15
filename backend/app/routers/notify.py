@@ -198,55 +198,57 @@ def set_user_tg_binding(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """用户绑自己的 TG（决策③）。告警按角色推到对应用户的绑定。"""
+    """用户绑自己的 TG（决策③）。告警按角色推到对应用户的绑定。
+    2026-09-15：绑定/解绑同步到该用户所属的全部团队——TG 是人的，不是团队维度的。"""
     from ..models.notify import UserTgBinding
-    # 占位 bot '__use_tenant_bot__' → 解析成租户真 bot（否则发送时 token 无效，绑了也收不到告警）
+    from ..models.auth import TenantMembership
+    # 用户所属全部租户（含当前）
+    all_tids = {m.tenant_id for m in db.query(TenantMembership).filter(
+        TenantMembership.user_id == user.id).all()}
+    all_tids.add(user.tenant_id)
+    # 占位 bot '__use_tenant_bot__' → 解析成租户真 bot
     real_bot = body.bot_token
     if real_bot == '__use_tenant_bot__':
         tb = db.query(TenantTgBinding).filter(
             TenantTgBinding.tenant_id == user.tenant_id).first()
         real_bot = decrypt(tb.bot_token_enc) if tb else body.bot_token
-    # 解绑语义：chat_id 空 = 删行（原只更新空串——行还在=GET 判 bound=true，
-    # 卡片仍显已绑定、告警继续发往空 chat_id 必失败）
+    # 解绑语义：chat_id 空 = 删全部团队的行
     if body.chat_id == "":
-        db.query(UserTgBinding).filter(
-            UserTgBinding.tenant_id == user.tenant_id,
-            UserTgBinding.user_id == user.id,
-        ).delete()
+        for tid in all_tids:
+            db.query(UserTgBinding).filter(
+                UserTgBinding.tenant_id == tid,
+                UserTgBinding.user_id == user.id,
+            ).delete()
         db.commit()
-        return {"status": "deleted", "user_id": user.id}
-    existing = db.query(UserTgBinding).filter(
-        UserTgBinding.tenant_id == user.tenant_id,
-        UserTgBinding.user_id == user.id,
-        UserTgBinding.chat_id == body.chat_id,
-    ).first()
-    # bot_token 留空 = 不换 bot（复用现有/任一绑定的 token——多 TG 场景复用第一个的）
+        return {"status": "deleted", "user_id": user.id, "tenants": len(all_tids)}
+    # 绑定/更新：同步到全部团队
     _tok_to_store = real_bot if real_bot else None
-    if existing:
-        if _tok_to_store:
-            existing.bot_token_enc = encrypt(_tok_to_store)
-        existing.verified_at = None
+    if not _tok_to_store:
+        any_b = db.query(UserTgBinding).filter(
+            UserTgBinding.user_id == user.id).first()   # 不限 tenant——任一团队的都行
+        if not any_b:
+            raise HTTPException(400, "缺少 bot_token")
+        _tok_to_store = decrypt(any_b.bot_token_enc)
+        _inherit_prefs = any_b.prefs
     else:
-        if not _tok_to_store:
-            any_b = db.query(UserTgBinding).filter(
-                UserTgBinding.tenant_id == user.tenant_id,
-                UserTgBinding.user_id == user.id).first()
-            if not any_b:
-                raise HTTPException(400, "缺少 bot_token")
-            _tok_to_store = decrypt(any_b.bot_token_enc)
-            # 新绑定行继承用户已设的通知偏好（复审R1-P2）：prefs 是用户级语义，
-            # 新行 NULL=fail-open 会悄悄恢复被用户关掉的 warning/info 推送
-            _inherit_prefs = any_b.prefs
+        _prev = db.query(UserTgBinding).filter(
+            UserTgBinding.user_id == user.id).first()
+        _inherit_prefs = _prev.prefs if _prev else None
+    for tid in all_tids:
+        existing = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == tid,
+            UserTgBinding.user_id == user.id,
+            UserTgBinding.chat_id == body.chat_id,
+        ).first()
+        if existing:
+            existing.bot_token_enc = encrypt(_tok_to_store)
+            existing.verified_at = None
         else:
-            _prev = db.query(UserTgBinding).filter(
-                UserTgBinding.tenant_id == user.tenant_id,
-                UserTgBinding.user_id == user.id).first()
-            _inherit_prefs = _prev.prefs if _prev else None
-        db.add(UserTgBinding(tenant_id=user.tenant_id, user_id=user.id,
-                             bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id,
-                             prefs=_inherit_prefs))
+            db.add(UserTgBinding(tenant_id=tid, user_id=user.id,
+                                 bot_token_enc=encrypt(_tok_to_store), chat_id=body.chat_id,
+                                 prefs=_inherit_prefs))
     db.commit()
-    return {"status": "saved", "user_id": user.id}
+    return {"status": "saved", "user_id": user.id, "tenants": len(all_tids)}
 
 
 @router.delete("/tg/user-binding")
@@ -255,11 +257,10 @@ def delete_user_tg_binding(
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
-    """解绑单个 TG（按 chat_id；多绑定场景逐条解）。"""
+    """解绑单个 TG（按 chat_id）——同步删全部团队的该 chat_id 行（2026-09-15 全局化）。"""
     from ..models.notify import UserTgBinding
     n = db.query(UserTgBinding).filter(
-        UserTgBinding.tenant_id == user.tenant_id,
-        UserTgBinding.user_id == user.id,
+        UserTgBinding.user_id == user.id,       # 不限 tenant——全局解绑
         UserTgBinding.chat_id == chat_id,
     ).delete()
     db.commit()

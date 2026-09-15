@@ -932,6 +932,7 @@ export default {
     createTeam: '建团队', noTeams: '暂无团队',
     teamName: '团队名', members: '成员', adAccounts: '广告账户', createdAt: '创建时间',
     rename: '改名', suspend: '停用', activate: '激活', archive: '归档', restore: '恢复',
+    hardDeleteTitle: '彻底删除团队', hardDeleteBtn: '彻底删除', hardDeleteConfirm: '将永久删除团队「{name}」及其全部数据（账户/模板/落地页/告警/日志，不可恢复）。仅限无活跃账户且近 7 天无消耗的团队。确定继续？', hardDeleted: '团队已彻底删除',
     createDesc: '建团队同时创建 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。',
     teamNamePlaceholder: '如：客户A 投放团队',
     ownerEmail: '管理员邮箱', ownerEmailPlaceholder: '选填，留空 = 先建空团队',
