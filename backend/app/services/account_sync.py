@@ -268,7 +268,11 @@ def run_account_status_sync():
                     continue
                 old_status = acc.account_status or 1
                 new_status = int(raw.get("account_status", 1))
-                # 更新余额/上限/已花/币种/时区
+                # 更新余额/上限/已花/币种/时区 + 状态/disable_reason 一次写
+                # 2026-09-15 修复：曾把 account_status 写在告警块之后（L334），
+                # 告警/write_log 异常 → 外层 rollback 把状态更新一起回滚 →
+                # "拉回来了但没写进去"（用户实锤 10 户 FB=2 DB=1 长期不同步）。
+                # 现在状态先写先提交，告警/像素等后续操作失败不影响状态落库。
                 acc.balance = str(raw.get("balance", 0))
                 acc.spend_cap = str(raw.get("spend_cap", 0))
                 acc.amount_spent = str(raw.get("amount_spent", 0))
@@ -276,14 +280,12 @@ def run_account_status_sync():
                     acc.currency = raw["currency"]
                 if raw.get("timezone_name"):
                     acc.timezone_name = raw["timezone_name"]
-                # 禁用原因落库（FB 官方数字枚举；显式判 None——0=恢复正常是合法值，
-                # or 兜底会跳过导致旧原因残留，前端副行就永远清不掉）
                 _dr = raw.get("disable_reason")
                 if _dr is not None:
                     acc.disable_reason = int(_dr)
+                acc.account_status = new_status
+                db.commit()   # 状态先落库——后续告警/像素失败不再回滚状态
                 # 状态告警（一次事件只告一次 + 恢复告知）。
-                # 关键：acc.account_status 始终写真值（看板/规则/哨兵看真状态），
-                # 只对"告警通知"去重——停在同一个异常状态不重报，恢复正常或变成另一种异常才再告。
                 if old_status != new_status:
                     if new_status in STATUS_ABNORMAL:
                         # 进入异常：仅在"新状态 ≠ 上次已告状态"时告（横跳 9↔2 / 一直停用不重报）
@@ -331,7 +333,6 @@ def run_account_status_sync():
                                   result="recovered", trigger_detail=f"old={old_status} new=1",
                                   metadata={"status": 1, "old": old_status, "recovered": True})
                         recovered += 1
-                acc.account_status = new_status
                 # 可用额度低告警（仅活跃账户；阈值 balance_alert_threshold，0=关；6h dedup）
                 if threshold_usd > 0 and new_status == 1:
                     try:
