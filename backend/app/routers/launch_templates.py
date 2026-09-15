@@ -2286,8 +2286,12 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                         if not ft.fb_form_id or ft.fb_page_id != act_id:
                             ft.fb_form_id = form_id; ft.fb_page_id = act_id
                         return form_id
-                except Exception:
-                    pass  # 落到手填/AI 兜底
+                except Exception as _fe_tt:
+                    # 降级前留痕（journal 可查）——曾静默吞，用户只见「表单内容不对」无从定位
+                    import logging as _lg
+                    _lg.getLogger("toveads.launch").warning(
+                        f"[LeadForm][TT] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
+                        f"advertiser={act_id}，降级手填/AI：{_fe_tt}")
         # 2. 手填 lead_form_id
         if tpl.lead_form_id:
             return tpl.lead_form_id
@@ -2349,8 +2353,13 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                     if not ft.fb_form_id or ft.fb_page_id != page_id:
                         ft.fb_form_id = form_id; ft.fb_page_id = page_id
                     return form_id
-            except Exception:
-                pass  # 落到手填/AI 兜底
+            except Exception as _fe_fb:
+                # 降级前留痕（journal 可查）——曾静默吞：FB 拒建（缺字段/权限）→ 广告挂上
+                # FB 默认表单 → 用户看到「表单内容/描述和 Tova 设置完全不一样」无从定位
+                import logging as _lg
+                _lg.getLogger("toveads.launch").warning(
+                    f"[LeadForm][FB] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
+                    f"page={page_id}，降级手填/AI：{_fe_fb}")
     # 2. 手填 lead_form_id（不校验 page；仅未选模板时用）
     if tpl.lead_form_id:
         return tpl.lead_form_id

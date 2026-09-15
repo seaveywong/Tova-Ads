@@ -815,9 +815,14 @@ def build_lead_form_payload(
             typ_page["button_type"] = "NONE"
         payload["thank_you_page"] = typ_page
 
-    # ── 跟进链接（安全 URL 才写，02_附录 §四 不变量2）──
-    if _is_safe_external_url(follow_up_url):
-        payload["follow_up_action_url"] = follow_up_url
+    # ── 跟进链接 ──
+    # FB 强制字段（2026-09-16 实测：缺 FollowUpActionURL 整个建表被拒 → 部署静默降级
+    # AI/默认表单，「表单内容和 Tova 配置不一样」的根因）。链：follow_up_url > privacy_url
+    # （privacy 必填保证字段永远在；两者都不安全才省略——FB 会报明确 Missing Fields）。
+    _fu = follow_up_url if _is_safe_external_url(follow_up_url) else (
+        privacy_url if _is_safe_external_url(privacy_url) else "")
+    if _fu:
+        payload["follow_up_action_url"] = _fu
 
     # ── 上下文卡片（仅手动路径传，AI 路径不传 → 02_附录 §四 不变量7）──
     if context_card_title and name_prefix != "AI":
