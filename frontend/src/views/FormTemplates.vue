@@ -307,6 +307,7 @@ const addIB = () => {
 const removeIB = (i) => mCfg.value.ice_breakers.splice(i, 1)
 const saveMsg = async () => {
   if (!mCfg.value.name.trim()) return ElMessage.warning(t('formtpl.needName'))
+  if (!isWaMsg.value && (mCfg.value.welcome_text || '').length > 80) return ElMessage.warning(t('formtpl.welcomeTooLong'))
   if (!mCfg.value.welcome_text.trim()) return ElMessage.warning(t('formtpl.needWelcome'))
   saving.value = true
   try {
@@ -577,13 +578,14 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     </el-drawer>
 
     <!-- 消息编辑抽屉（Messenger / WhatsApp 按类型切换文案；宽度与投放模板资产选择器对齐） -->
-    <el-drawer v-model="msgOpen" direction="rtl" size="min(560px, 100vw)" :destroy-on-close="true" :before-close="onMsgBeforeClose" @open="snapM">
+    <el-drawer v-model="msgOpen" direction="rtl" size="min(920px, 96vw)" :destroy-on-close="true" :before-close="onMsgBeforeClose" @open="snapM">
       <template #header>
         <div class="dr-head">
           <span class="dr-title">{{ editingMsg ? t('formtpl.editMsg') : t('formtpl.newMsg') }}</span>
           <span :class="['type-chip', isWaMsg ? 'wa' : 'ms']">{{ isWaMsg ? 'WhatsApp' : 'Messenger' }}</span>
         </div>
       </template>
+      <div class="msg-editor">
       <div class="form">
         <button class="btn ai-top-btn" :disabled="aiLoading" @click="openAssetPicker('msg')">{{ aiLoading?t('formtpl.aiGenerating'):t('formtpl.aiFromAssetMsg') }}</button>
         <div class="row"><label>{{ t('formtpl.tplName') }}</label><input v-model="mCfg.name" class="inp" /></div>
@@ -597,6 +599,9 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <div class="sec-title">{{ isWaMsg ? t('formtpl.secWelcomeWa') : t('formtpl.secWelcome') }}</div>
         <div class="row"><label>{{ isWaMsg ? t('formtpl.mainTextWa') : t('formtpl.mainText') }}</label>
           <textarea v-model="mCfg.welcome_text" class="inp ta" rows="3" :placeholder="isWaMsg ? t('formtpl.welcomeTextWaPh') : t('formtpl.welcomeTextPh')"></textarea>
+          <div class="char-count" :class="{ over: (mCfg.welcome_text||'').length > (isWaMsg ? 4096 : 80) }">
+            {{ (mCfg.welcome_text||'').length }}/{{ isWaMsg ? 4096 : 80 }} · {{ t('formtpl.charLimitHint') }}
+          </div>
         </div>
         <hr class="sep" />
         <!-- WhatsApp 型：FB 预填消息形态无快捷回复（互斥，build_wa_welcome_message 忽略）——隐藏编辑区 -->
@@ -609,7 +614,28 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
           <textarea v-model="ib.response" class="inp ta sm-mt" rows="2" :placeholder="t('formtpl.ibResponsePh')"></textarea>
         </div>
         <div v-if="!mCfg.ice_breakers.length" class="hint">{{ t('formtpl.ibEmptyHint') }}</div>
+        <button v-if="mCfg.ice_breakers.length && mCfg.ice_breakers.length < 4" class="btn sm ib-add" @click="addIB">+ {{ t('formtpl.addOne') }}</button>
+        <div v-if="mCfg.ice_breakers.length >= 4" class="hint">{{ t('formtpl.ibMaxHint') }}</div>
         </template>
+      </div>
+      <!-- 实时预览（编辑即所见）：Messenger=蓝白聊天壳 / WhatsApp=绿米色壳；欢迎语气泡+快捷回复按钮 -->
+      <div class="msg-preview">
+        <div class="chat-mockup" :class="isWaMsg ? 'wa' : 'ms'">
+          <div class="chat-header">
+            <span class="chat-avatar">{{ isWaMsg ? '💬' : '🤖' }}</span>
+            <span class="chat-title">{{ mCfg.name || t('formtpl.pmMsgTitle') }}</span>
+          </div>
+          <div class="chat-body">
+            <div v-if="mCfg.welcome_text" class="chat-bubble">{{ mCfg.welcome_text }}</div>
+            <div v-else class="chat-bubble ghost">{{ t('formtpl.welcomeTextPh') }}</div>
+            <template v-if="!isWaMsg && mCfg.ice_breakers.length">
+              <div class="chat-quick-label">{{ t('formtpl.pvQuickReplies') }}</div>
+              <div v-for="(ib,i) in mCfg.ice_breakers" :key="i" class="chat-quick">{{ ib.title || t('formtpl.ibButtonTextPh') }}</div>
+            </template>
+          </div>
+        </div>
+        <div class="hint" style="text-align:center">{{ t('formtpl.msgPreviewHint') }}</div>
+      </div>
       </div>
       <template #footer>
         <button class="btn" @click="onMsgBeforeClose(() => { msgOpen = false })">{{ t('common.cancel') }}</button>
@@ -725,6 +751,36 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .type-chip.ms{color:#5aa2ff;background:rgba(24,119,242,.12);border-color:rgba(24,119,242,.35)}
 .type-chip.wa{color:#4ade80;background:rgba(37,211,102,.12);border-color:rgba(37,211,102,.4)}
 /* 消息模板类型 chip（Messenger 蓝 / WhatsApp 绿） */
+/* ── 消息编辑器（2026-09-15 全面优化）：双栏 + 实时聊天预览 ── */
+.msg-editor{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:18px;align-items:start}
+@media(max-width:860px){.msg-editor{grid-template-columns:1fr}}
+.msg-preview{position:sticky;top:0}
+.chat-mockup{border-radius:14px;overflow:hidden;border:1px solid var(--bd);box-shadow:var(--shadow-card);font-size:13px}
+.chat-mockup.ms .chat-header{background:linear-gradient(135deg,#1877f2,#0a5fd0)}
+.chat-mockup.wa .chat-header{background:#075E54}
+.chat-header{display:flex;align-items:center;gap:8px;padding:12px 14px;color:#fff}
+.chat-avatar{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-size:14px}
+.chat-title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-mockup.ms .chat-body{background:#f0f2f5;padding:14px;min-height:220px;display:flex;flex-direction:column;gap:8px}
+.chat-mockup.wa .chat-body{background:#ECE5DD;padding:14px;min-height:220px;display:flex;flex-direction:column;gap:8px}
+.chat-bubble{max-width:86%;padding:9px 12px;border-radius:14px 14px 14px 4px;background:#fff;color:#161823;line-height:1.5;box-shadow:0 1px 1px rgba(0,0,0,.12);white-space:pre-wrap;word-break:break-word;align-self:flex-start}
+.chat-mockup.wa .chat-bubble{background:#DCF8C6}
+.chat-bubble.ghost{color:#9aa0a6;font-style:italic}
+.chat-quick-label{font-size:10px;color:#8a8d91;margin-top:6px;align-self:center}
+.chat-quick{align-self:center;padding:7px 18px;border-radius:16px;font-size:12.5px;font-weight:600;cursor:default;margin-top:6px}
+.chat-mockup.ms .chat-quick{color:#1877f2;border:1px solid rgba(24,119,242,.45);background:#fff}
+.chat-mockup.wa .chat-quick{color:#128C7E;border:1px solid rgba(18,140,126,.45);background:#fff}
+.ib-add{margin-top:6px}
+.char-count.over{color:var(--error);font-weight:600}
+/* ── 表单编辑器视觉升级（CSS 层，不动结构）：分区头带强调条 + 问题/快捷回复卡片化 ── */
+.sec-title{display:flex;align-items:center;gap:6px}
+.sec-title::before{content:'';width:3px;height:12px;border-radius:2px;background:var(--ac)}
+.sec-title-row .sec-title::before{flex:none}
+.sep{margin:12px 0 8px}
+.ib-block,.q-block{background:var(--bg2);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin:8px 0;transition:border-color .15s}
+.ib-block:hover,.q-block:hover{border-color:var(--bd2)}
+.chip{padding:5px 12px;border-radius:16px;transition:all .15s}
+.chip:hover{border-color:var(--ac);color:var(--ac)}
 .msg-chip{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:8px;margin-right:6px;vertical-align:1px}
 .msg-chip.ms{color:#5aa2ff;background:rgba(24,119,242,.12);border:1px solid rgba(24,119,242,.35)}
 .msg-chip.wa{color:#4ade80;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.4)}
