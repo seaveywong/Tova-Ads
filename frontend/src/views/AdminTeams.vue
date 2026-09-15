@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, PATCH, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -101,8 +101,9 @@ const openDomains = async (row) => {
   domainTeamName.value = row.name
   domainOpen.value = true
   domainLoading.value = true
+  zoneFilter.value = ''
   try {
-    const pool = await GET('/admin/domains')
+    const pool = await GET('/admin/domains/discover')
     domainPool.value = (pool || []).map(z => ({
       ...z,
       assigned_names: (z.assigned_to || []).map(a => a.label || `t${a.tenant_id}`).join('、'),
@@ -112,6 +113,17 @@ const openDomains = async (row) => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   domainLoading.value = false
 }
+// 池：搜索 + 排序（未分配在前可勾选 → 本团队 → 其他团队禁用排最后）
+const zoneFilter = ref('')
+const zoneStatusLabel = (s) => s === 'active' ? t('teams.zoneActive') : (s === 'pending' ? t('teams.zonePending') : (s || '—'))
+const filteredDomainPool = computed(() => {
+  const k = zoneFilter.value.trim().toLowerCase()
+  const mine = (z) => z.assigned_to.some(a => a.tenant_id === domainTeamId.value)
+  const rank = (z) => mine(z) ? 1 : (z.assigned_to.length ? 2 : 0)
+  return domainPool.value
+    .filter(z => !k || z.domain.toLowerCase().includes(k))
+    .sort((a, b) => rank(a) - rank(b) || a.domain.localeCompare(b.domain))
+})
 const toggleDomainAssign = async (z) => {
   const already = z.assigned_to.some(a => a.tenant_id === domainTeamId.value)
   if (already) {
@@ -315,18 +327,22 @@ const submitMemberAdd = async () => {
           <div v-if="!domainTeamDomains.length && !domainLoading" class="dm-empty">{{ t('teams.domainNone') }}</div>
         </div>
         <div class="dm-divider"></div>
-        <!-- 平台域名池（CF 发现的全部 zone，勾选分配给该团队） -->
-        <div class="dm-sec-title">{{ t('teams.domainPool') }}（{{ domainPool.length }}）</div>
+        <!-- 平台域名池（全部域名，勾选分配给该团队；已分给其他团队的禁选） -->
+        <div class="dm-sec-title">{{ t('teams.domainPool') }} <i>{{ domainPool.filter(z => !z.assigned_to.length).length }}</i></div>
+        <input v-model="zoneFilter" class="dm-search" :placeholder="t('teams.domainSearch')" />
         <div class="dm-pool">
-          <label v-for="z in domainPool" :key="z.domain" class="dm-pool-row" :class="{ assigned: z.assigned_to.length > 0 }">
+          <label v-for="z in filteredDomainPool" :key="z.domain" class="dm-pool-row"
+                 :class="{ mine: z.assigned_to.some(a => a.tenant_id === domainTeamId), taken: z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId) }">
             <input type="checkbox" :checked="z.assigned_to.some(a => a.tenant_id === domainTeamId)"
                    :disabled="z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId)"
+                   :title="z.assigned_to.length && !z.assigned_to.some(a => a.tenant_id === domainTeamId) ? t('teams.domainOccupied') : ''"
                    @change="toggleDomainAssign(z)" />
             <code>{{ z.domain }}</code>
+            <span class="st-tag" :class="z.cf_status === 'active' ? 'ok' : 'warn'">{{ zoneStatusLabel(z.cf_status) }}</span>
             <span v-if="z.assigned_to.length" class="dm-assigned-to">{{ t('teams.domainAssignedTo') }}: {{ z.assigned_names }}</span>
             <span v-else class="dm-free">{{ t('teams.domainFree') }}</span>
           </label>
-          <div v-if="!domainPool.length && !domainLoading" class="dm-empty">{{ t('teams.domainPoolEmpty') }}</div>
+          <div v-if="!filteredDomainPool.length && !domainLoading" class="dm-empty">{{ t('teams.domainPoolEmpty') }}</div>
         </div>
       </div>
     </el-drawer>
@@ -397,7 +413,13 @@ const submitMemberAdd = async () => {
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}
 .tbl-wrap{overflow-x:auto}
 /* 域名管理抽屉 */
-.dm-sec-title{font-size:12px;font-weight:600;color:var(--t1);margin:14px 0 8px}
+.dm-sec-title{display:flex;align-items:center;font-size:12px;font-weight:600;color:var(--t1);margin:14px 0 8px}
+.dm-sec-title i{font-style:normal;font-size:10px;color:var(--t3);background:var(--bg3);border-radius:9px;padding:1px 8px;margin-left:4px}
+.dm-search{width:100%;box-sizing:border-box;margin-bottom:8px;padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:12px;font-family:inherit}
+.dm-search:focus{outline:none;border-color:var(--ac)}
+.st-tag{font-size:10px;padding:1px 7px;border-radius:9px;flex-shrink:0}
+.st-tag.ok{background:rgba(48,209,88,.15);color:var(--success)}
+.st-tag.warn{background:rgba(255,159,10,.15);color:var(--warning)}
 .dm-list{display:flex;flex-direction:column;gap:4px}
 .dm-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px}
 .dm-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -408,8 +430,8 @@ const submitMemberAdd = async () => {
 .dm-divider{border-top:1px dashed var(--bd);margin:12px 0}
 .dm-pool{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto}
 .dm-pool-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;cursor:pointer}
-.dm-pool-row.assigned{opacity:.6}
-.dm-pool-row.assigned code{flex:1}
+.dm-pool-row.mine{border-color:var(--ac)}
+.dm-pool-row.taken{opacity:.55}
 .dm-pool-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dm-assigned-to{font-size:10px;color:var(--warning);white-space:nowrap}
 .dm-free{font-size:10px;color:var(--t3);white-space:nowrap}

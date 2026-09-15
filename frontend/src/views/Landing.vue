@@ -31,13 +31,33 @@ const sortedPages = computed(() => {
 })
 // 模式筛选（链接管理内二级 tab：全部 / 落地页 / 短链）。display 含历史缺省值
 const modeFilter = ref('lp')   // tab=类别互斥（用户 2026-09-15：不同 tab 存放不同类别，不做混排「全部」）
+// 创建人筛选（2026-09-16 用户要求：owner 看全团队时按人过滤）
+const ownerFilter = ref('')
+const ownerOptions = computed(() => {
+  const seen = new Map()
+  for (const p of pages.value) {
+    if (p.owner_email && !seen.has(p.owner_email)) {
+      seen.set(p.owner_email, {
+        email: p.owner_email,
+        label: p.owner_email.split('@')[0] + ' (' + p.owner_email + ')',
+      })
+    }
+  }
+  return [...seen.values()]
+})
 const isLp = (p) => p.redirect_mode !== 'redirect'
 const cntAll = computed(() => pages.value.length)
 const cntLp = computed(() => pages.value.filter(isLp).length)
 const cntShort = computed(() => cntAll.value - cntLp.value)
-const visiblePages = computed(() => modeFilter.value === 'short'
-  ? sortedPages.value.filter(p => !isLp(p))
-  : sortedPages.value.filter(isLp))
+const visiblePages = computed(() => {
+  let arr = modeFilter.value === 'short'
+    ? sortedPages.value.filter(p => !isLp(p))
+    : sortedPages.value.filter(isLp)
+  if (ownerFilter.value) {
+    arr = arr.filter(p => p.owner_email === ownerFilter.value)
+  }
+  return arr
+})
 // 批2：落地页/短链分流渲染——短链走行式（目标URL为主信息，无像素/自检等无关项）
 const visibleLpPages = computed(() => visiblePages.value.filter(isLp))
 const visibleShortPages = computed(() => visiblePages.value.filter(p => !isLp(p)))
@@ -694,6 +714,11 @@ const downloadTplRef = () => {
 }
 const zoneFilter = ref('')
 const filteredZones = computed(() => { const k = zoneFilter.value.trim().toLowerCase(); return k ? cfZones.value.filter(z => z.name.toLowerCase().includes(k)) : cfZones.value })
+// CF zone 状态术语（active/pending；服务商原始值兜底显示）
+const zoneStatusLabel = (s) => s === 'active' ? t('landing.zoneActive') : (s === 'pending' ? t('landing.zonePending') : (s || '—'))
+// 已导入域名行的 DNS 实况：抽屉里 cfZones 就是同一账户的全量 zone，按名对上即得（库里的 cf_zone_status 旧行没存）
+const dnsLive = (d) => (cfZones.value.find(z => z.name === d.domain) || {}).status || d.cf_zone_status || ''
+const zoneSelCount = computed(() => cfZones.value.filter(z => z._checked && !z.imported).length)
 const domainStats = ref({})
 const openDomains = async () => {
   domainOpen.value = true; zonesLoading.value = true; zoneFilter.value = ''
@@ -755,12 +780,17 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </header>
 
-    <!-- 统一工具栏（2026-09-14 对齐全局设计系统）：模式筛选 + 计数 -->
+    <!-- 统一工具栏：模式筛选 + 创建人筛选（owner 看全团队时按人过滤）+ 计数 -->
     <div class="list-bar">
       <div class="seg-bar">
         <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
       </div>
+      <el-select v-if="ownerOptions.length > 1" v-model="ownerFilter" clearable size="small"
+                 :placeholder="t('landing.filterByOwner')" style="width:160px;margin-left:auto"
+                 :title="t('landing.filterByOwnerTip')">
+        <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
+      </el-select>
     </div>
 
     <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
@@ -771,7 +801,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in visibleLpPages" :key="p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span v-if="p.owner_email" class="owner-chip" :title="t('landing.createdBy') + ': ' + p.owner_email">{{ p.owner_email.split('@')[0] }}</span>
+          <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length" :title="p.bound_subdomains.join(' | ')">
             <button v-for="sub in p.bound_subdomains.slice(0,3)" :key="sub" class="dom-chip"
                     :title="'https://' + sub" @click.stop="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
@@ -799,7 +830,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span v-if="p.owner_email" class="owner-chip" :title="t('landing.createdBy') + ': ' + p.owner_email">{{ p.owner_email.split('@')[0] }}</span>
+          <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           <span class="short-url" :title="(p.target_urls||[]).join(' | ')">🔗 {{ (p.target_urls||[])[0] || '—' }}<i v-if="(p.target_urls||[]).length > 1"> +{{ p.target_urls.length - 1 }}</i></span>
           <span class="short-rot">{{ rotLabel(p.rotation_mode) }}</span>
           <span class="short-stat">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
@@ -1163,27 +1195,30 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
     </el-drawer>
 
-    <el-drawer v-if="isSuper" v-model="domainOpen" :title="t('landing.domainMgmt')" direction="rtl" size="520px" :destroy-on-close="true" append-to-body>
-      <div class="sec-title">{{ t('landing.importableDomains') }}</div>
+    <el-drawer v-if="isSuper" v-model="domainOpen" :title="t('landing.domainMgmt')" direction="rtl" size="560px" :destroy-on-close="true" append-to-body>
+      <div class="dm-sec-title">{{ t('landing.importableDomains') }} <i>{{ filteredZones.filter(z => !z.imported).length }}</i></div>
       <input v-model="zoneFilter" class="input" :placeholder="t('landing.searchDomains')" style="margin-bottom:8px;width:100%;box-sizing:border-box" />
-      <div class="sub-list" v-loading="zonesLoading">
-        <div v-for="z in filteredZones" :key="z.name" class="sub-row">
-          <input type="checkbox" v-model="z._checked" :disabled="z.imported" style="margin-right:6px" />
+      <div class="zone-list" v-loading="zonesLoading">
+        <label v-for="z in filteredZones" :key="z.name" class="zone-row" :class="{ imported: z.imported }">
+          <input type="checkbox" v-model="z._checked" :disabled="z.imported" />
           <code>{{ z.name }}</code>
-          <span class="st-tag" :class="z.imported?'off':'ok'">{{ z.imported ? t('landing.zoneImported') : (z.status === 'available' ? t('landing.zoneAvailable') : (z.status === 'taken' ? t('landing.zoneTaken') : (z.status === 'error' ? t('landing.zoneQueryFail') : '—'))) }}</span>
-        </div>
+          <span class="st-tag" :class="z.imported ? 'off' : (z.status === 'active' ? 'ok' : 'warn')">{{ z.imported ? t('landing.zoneImported') : zoneStatusLabel(z.status) }}</span>
+        </label>
         <div v-if="!cfZones.length && !zonesLoading" class="empty">{{ t('landing.noImportableDomains') }}</div>
       </div>
-      <button class="btn primary" style="margin-top:12px" @click="importZones">{{ t('landing.importSelected') }}</button>
-      <div class="sec-title">{{ t('landing.importedDomains') }}</div>
-      <div class="sub-list dm-table">
+      <div class="zone-import-bar">
+        <span class="zone-sel-hint">{{ t('landing.zonesSelected', { n: zoneSelCount }) }}</span>
+        <button class="btn primary" :disabled="!zoneSelCount" @click="importZones">{{ t('landing.importSelected') }}</button>
+      </div>
+      <div class="dm-sec-title">{{ t('landing.importedDomains') }} <i>{{ domains.length }}</i></div>
+      <div class="dm-table">
         <div class="dm-row dm-head-row">
           <span>{{ t('landing.fDomain') }}</span><span>DNS</span><span>{{ t('landing.dmUsage') }}</span>
           <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span><span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span><span></span>
         </div>
         <div v-for="d in domains" :key="d.id" class="dm-row">
-          <code>{{ d.domain }}</code>
-          <span :class="['tag', (d.cf_zone_status === 'active') ? 'ok' : 'warn']" :title="d.cf_zone_status || ''">{{ d.cf_zone_status || '—' }}</span>
+          <span class="dm-name"><code>{{ d.domain }}</code><span v-if="d.blocked" class="dm-blocked" :title="t('landing.fbBlocked')">⛔</span></span>
+          <span :class="['tag', dnsLive(d) === 'active' ? 'ok' : 'warn']" :title="dnsLive(d)">{{ zoneStatusLabel(dnsLive(d)) }}</span>
           <span class="sub-ad">{{ d.usage_count || 0 }} {{ t('landing.pagesUnit') }}<i v-if="d.label"> · {{ d.label }}</i></span>
           <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_visits || 0, a: (domainStats[d.domain] || {}).visits || 0 })">{{ (domainStats[d.domain] || {}).today_visits ?? '—' }}</span>
           <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_pass || 0, a: (domainStats[d.domain] || {}).pass || 0 })">{{ (domainStats[d.domain] || {}).today_pass ?? '—' }}</span>
@@ -1448,7 +1483,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .list + .lp-sec-label{margin-top:16px}
 /* 短链行式（批2） */
 .short-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
-.short-row{display:grid;grid-template-columns:70px minmax(120px,1.1fr) minmax(180px,1.6fr) 88px repeat(3,minmax(86px,.7fr)) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;font-size:12px;transition:border-color .15s,box-shadow .15s}
+.short-row{display:grid;grid-template-columns:70px minmax(110px,1fr) auto minmax(160px,1.5fr) 80px repeat(3,minmax(80px,.7fr)) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;font-size:12px;transition:border-color .15s,box-shadow .15s}
 .short-row:hover{border-color:var(--bd2);box-shadow:var(--shadow-card)}
 .short-row.alert-fail{box-shadow:inset 3px 0 0 var(--error)}
 .short-title{font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1459,16 +1494,31 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 .lp-row2{grid-template-columns:70px minmax(130px,1.15fr) auto minmax(170px,1.1fr) 118px repeat(3,minmax(88px,.7fr)) auto auto}
 .owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.owner-chip.clickable{cursor:pointer;transition:all .15s}
+.owner-chip.clickable:hover{color:var(--ac);border-color:var(--ac)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
 @media(max-width:900px){.lp-row2{grid-template-columns:1fr 1fr;row-gap:6px}.lp-dom-chips{grid-column:1/-1}}
 .short-ops{display:flex;gap:5px}
 @media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}}
 
 /* 域名管理表格（批2） */
-.dm-table{margin-top:8px}
+.dm-table{margin-top:0}
 .dm-row{display:grid;grid-template-columns:minmax(160px,1.6fr) 76px minmax(120px,1fr) 90px 90px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px}
 .dm-head-row{color:var(--t3);font-size:11px;font-weight:600}
 .dm-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-name{display:flex;align-items:center;gap:5px;min-width:0}
+.dm-blocked{flex-shrink:0;cursor:help}
 .dm-num{font-variant-numeric:tabular-nums;color:var(--t1);cursor:default}
+/* 域名抽屉两段结构：区块标题 + 可导入 zone 行 + 导入操作条 */
+.dm-sec-title{display:flex;align-items:center;font-size:12px;font-weight:600;color:var(--t1);margin:16px 0 8px}
+.dm-sec-title:first-child{margin-top:0}
+.dm-sec-title i{font-style:normal;font-size:10px;color:var(--t3);background:var(--bg3);border-radius:9px;padding:1px 8px;margin-left:4px}
+.zone-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto}
+.zone-row{display:grid;grid-template-columns:20px minmax(0,1fr) 88px;gap:8px;align-items:center;padding:7px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;cursor:pointer}
+.zone-row:hover{border-color:var(--bd2)}
+.zone-row.imported{opacity:.55;cursor:default}
+.zone-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.zone-import-bar{display:flex;align-items:center;justify-content:space-between;margin:10px 0 2px}
+.zone-sel-hint{font-size:11px;color:var(--t3)}
 .sub-ad i{font-style:normal;color:var(--t3)}
 </style>
