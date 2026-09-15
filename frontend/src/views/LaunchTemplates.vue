@@ -6,7 +6,7 @@ import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showError } from '../composables/useError'
 import { fmtTime } from '../composables/useTz'
-import { jobStatus, itemStatus, fbAdStatus, subcodeStatus } from '../composables/useStatus'
+import { jobStatus, itemStatus, fbAdStatus, subcodeStatus, accountStatus } from '../composables/useStatus'
 import { fbErrorText } from '../composables/useFbError'
 import { fmtUsd } from '../composables/useFormat'
 import { COUNTRIES as ALL_COUNTRIES, countryName } from '../composables/useCountries'
@@ -2028,7 +2028,7 @@ const preflight = async (tpl) => {
     const wantPlat = tpl.platform === 'tt' ? 'tt' : 'fb'
     let accs = accounts.value.length ? accounts.value.filter(a => (a.platform || 'fb') === wantPlat) : []
     if (!accs.length) { try { accs = (await GET('/fb/accounts')).filter(a => (a.platform || 'fb') === wantPlat) } catch {} }
-    const target = accs.find(x => x.account_status === 1) || accs[0]
+    const target = accs.find(x => x.account_status === 1)   // 预检只用正常账户（异常的建 广告必失败）
     if (!target) { ElMessage.warning(t('launch.preflightNoAccount')); preflighting.value = false; return }
     const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: target.act_id })
     preflightResult.value = r; preflightVisible.value = true
@@ -2148,8 +2148,9 @@ const toggleAcc = async (id) => {
   const s = new Set(selectedAccs.value); s.has(id) ? s.delete(id) : s.add(id); selectedAccs.value = s
   if (s.has(id)) await ensureAccConfig(id)
 }
-// 批量选择：跟帖模式排除无主页权限账户；并行拉各账户配置
-const _selectableAccs = () => filteredDeployAccounts.value.filter(a => !reuseDeployPage.value || accManagesReusePage(a.act_id))
+// 批量选择：排除异常账户（account_status≠1 建 广告必失败）+ 跟帖模式排除无主页权限账户
+const _selectableAccs = () => filteredDeployAccounts.value.filter(a => a.account_status === 1 && (!reuseDeployPage.value || accManagesReusePage(a.act_id)))
+const accAbnormal = (a) => a.account_status !== 1
 const deploySelectAll = () => {
   const s = new Set(_selectableAccs().map(a => a.act_id))
   selectedAccs.value = s
@@ -3530,9 +3531,9 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         {{ t('launch.reuseAccHint', { n: filteredDeployAccounts.filter(a => accManagesReusePage(a.act_id)).length, m: filteredDeployAccounts.length }) }}
       </div>
       <div class="acc-list" v-loading="accLoading">
-        <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)}]">
+        <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: (deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
-            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" @change="toggleAcc(a.act_id)" />
+            <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="(deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)" @change="toggleAcc(a.act_id)" />
             <span class="acc-main">
               <span class="acc-name">{{ a.name || a.act_id }}</span>
               <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span></span>
@@ -3541,7 +3542,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                  曾拿 balance_usd（FB 未结欠款）兜底冒充可用额度——口径错误已移除 -->
             <span v-if="a.balance_kind !== 'unlimited' && a.balance_kind !== 'very_high_limit' && a.available_usd != null" class="acc-bal tnum" :title="t('launch.accAvailable')">${{ a.available_usd }}</span>
             <span v-else-if="a.balance_kind === 'unlimited' || a.balance_kind === 'very_high_limit'" class="acc-bal" :title="t('launch.accAvailable') + ' · ' + t('launch.accUnlimited')">∞</span>
-            <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal')">{{ a.account_status === 1 ? t('launch.accNormal') : t('launch.accAbnormal') }}</span>
+            <span :class="['acc-status', a.account_status === 1 ? 'ok' : 'warn']" :title="a.account_status === 1 ? t('launch.accNormal') : (accountStatus(a.account_status).label + ' · ' + t('launch.accAbnormalNoDeploy'))">{{ a.account_status === 1 ? t('launch.accNormal') : accountStatus(a.account_status).label }}</span>
             <span v-if="deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)" class="acc-no-perm" :title="t('launch.noPagePermission')"></span>
 </label>
           <div v-if="selectedAccs.has(a.act_id)" class="acc-config">

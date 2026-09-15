@@ -325,53 +325,54 @@ class TenantStatusIn(BaseModel):
     status: str  # active / suspended / archived
 
 
-# ── 团队彻底删除（2026-09-15 用户要求：除超管团队和主团队外可彻底删、仅超管）──
-# 保护名单：tenant 1 = 超管团队；有 managed 账户在投或近 7 天有消耗的也拒删
+# ── 团队彻底删除（2026-09-15 用户要求：除超管团队外可彻底删、仅超管）──
+# 保护名单：tenant 1 = 超管/主团队
 _PROTECTED_TENANT_IDS = {1}
 
 @router.delete("/tenants/{tid}")
 def hard_delete_tenant(tid: int,
                        user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
-    """彻底删除团队（级联清空全部数据）。仅超管。保护：超管团队(t=1)+有活跃数据的团队。"""
+    """彻底删除团队（级联清空全部数据）。仅超管。保护：超管团队(t=1)。
+    2026-09-16 用户拍板：强制删除，不管下面有没有资产/账户/消耗（前端弹窗展示资源统计由超管自行判断）。"""
     from ..models.auth import Tenant, TenantMembership, User
     t = db.query(Tenant).filter(Tenant.id == tid).first()
     if not t:
         raise HTTPException(404, "团队不存在")
     if tid in _PROTECTED_TENANT_IDS:
         raise HTTPException(400, f"团队「{t.name}」是受保护团队，不能删除")
-    # 2026-09-16 用户拍板：强制删除，不管下面有没有资产/账户/消耗
-    # （前端弹窗展示将被删除的资源统计，由超管自行判断）
+    tname = t.name
 
-    # 级联删除该租户的全部数据（BYPASSRLS system db session）
+    # 级联删除该租户的全部数据（BYPASSRLS system db session）。
+    # 表清单动态发现（information_schema）——硬编码清单曾 7 张表名不存在（第一张就把事务
+    # 打崩成 InFailedSqlTransaction 连环 500），又漏 15 张真表（accounts/tt_credentials/fb_apps…）。
+    # 每表独立事务：失败只脏本表（rollback 后继续），多趟循环自动解 FK 删除顺序。
     from sqlalchemy import text as _text
-    _TABLES = [
-        "user_tg_bindings", "tenant_tg_bindings",
-        "notifications", "action_logs",
-        "perf_snapshots", "perf_snapshot_ticks",
-        "ads_cache",
-        "guard_allowances", "guard_rules",
-        "fb_accounts", "fb_credentials",
-        "landing_events", "landing_ad_links", "landing_pages",
-        "landing_pixels", "landing_domains",
-        "landing_templates", "form_templates", "message_templates",
-        "launch_templates", "launch_jobs", "launch_job_items",
-        "assets", "audiences", "leads", "page_posts",
-        "kpi_configs", "role_permissions", "roles",
-        "tenant_memberships", "tenant_settings",
-        "tickets",
-    ]
+    _tbls = [r[0] for r in db.execute(_text(
+        "SELECT table_name FROM information_schema.columns "
+        "WHERE column_name = 'tenant_id' AND table_schema = 'public' "
+        "GROUP BY table_name")).fetchall()]
     deleted = {}
-    for tbl in _TABLES:
-        try:
-            n = db.execute(_text(f"DELETE FROM {tbl} WHERE tenant_id = :tid"), {"tid": tid}).rowcount
-            if n:
-                deleted[tbl] = n
-        except Exception:
-            pass   # 表不存在（未迁移到）跳过
+    remaining = set(_tbls)
+    while remaining:
+        progressed = False
+        for tbl in sorted(remaining):
+            try:
+                n = db.execute(_text(f'DELETE FROM "{tbl}" WHERE tenant_id = :tid'),
+                               {"tid": tid}).rowcount
+                db.commit()
+                if n:
+                    deleted[tbl] = n
+                remaining.discard(tbl)
+                progressed = True
+            except Exception:
+                db.rollback()
+        if not progressed:
+            break   # 剩余表互相约束解不动：记录跳过，不拦团队本体删除
     # 删团队本体
     db.delete(t)
     db.commit()
-    return {"deleted": True, "tenant_id": tid, "name": t.name, "tables_cleaned": deleted}
+    return {"deleted": True, "tenant_id": tid, "name": tname,
+            "tables_cleaned": deleted, "tables_skipped": sorted(remaining)}
 
 
 @router.patch("/tenants/{tid}/status")

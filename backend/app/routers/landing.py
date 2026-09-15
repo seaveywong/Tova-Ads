@@ -505,7 +505,26 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         bad = [_domain_root(r) for r in roots if _domain_root(r) not in allowed]
         if bad:
             raise HTTPException(400, f"域名不在本团队域名库中：{', '.join(sorted(set(bad)))}")
+        # zone 健康门（2026-09-16 marketbriefnow.xyz 事故：zone=moved——域名 NS 被指到别的
+        # CF 账户，新子域名在 CF 侧永远验不过，部署出来必 522）。新绑根域 zone 非 active
+        # 直接拦下报原因；已绑过的根域不拦（编辑场景，老子域名靠 CF 边缘存量继续服务）。
+        _bound_roots = set()
+        try:
+            _bound_roots = {_domain_root(s) for s in _json.loads(existing.bound_subdomains or "[]")}
+        except Exception:
+            pass
+        for r in roots:
+            _r = _domain_root(r)
+            if _r in _bound_roots:
+                continue
+            _zid = cf.get_zone_id(_r)
+            _zst = (cf._get(f"/zones/{_zid}").get("result") or {}).get("status") if _zid else None
+            if not _zid or _zst != "active":
+                raise HTTPException(
+                    400, f"域名 {_r} 解析状态异常（{_zst or '未接入平台'}）：域名 NS 未指向平台，"
+                         f"新子域名无法激活（发布后必然不可访问）。请在域名服务商处把 NS 改为平台分配的 NS，或换用其他域名")
     bound = []
+    bind_errors = []
     sub_prefix = (body.subdomain_prefix or "").strip().lower()
     for root in roots:
         if not root:
@@ -524,8 +543,9 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             if cf.get_zone_id(_domain_root(sub)):
                 cf.bind_custom_domain(body.project_name, sub)
                 bound.append(sub)
-        except Exception:
-            pass
+        except Exception as e:
+            # 绑定失败不静默——响应带回（前端 toast）。「发布成功但域名没绑上」曾无从排查
+            bind_errors.append(f"{sub}: {str(e)[:100]}")
     cd_clean = f"https://{bound[0]}" if bound else None
     # 多域名：合并已有 bound_subdomains + 新绑定的（不删旧的，用户手动管理）
     all_subs = set(bound)
@@ -638,6 +658,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     return {"status": "published", "pages_url": pages_url,
             "custom_domain": cd_clean, "custom_domains": roots, "subdomains": bound,
             "deployment_id": deployment_id, "trace_id": trace_id, "id": page_id,
+            "bind_errors": bind_errors,
             "self_check": publish_self_check}
 
 
@@ -1351,6 +1372,28 @@ def _probe_http(method: str, url: str, attempts: int = 2, **kw):
     raise last
 
 
+def _cf_domain_diag(project_name: str, base_url: str) -> str:
+    """自检域名/Worker 失败时的 CF 归因：根域 zone 非 active（NS 问题）/ Pages 域名验证 pending。
+    best-effort——CF 查询失败返空串，不干扰原检查。"""
+    try:
+        from ..core.cf_client import CfClient
+        host = base_url.replace("https://", "").replace("http://", "").split("/")[0]
+        root = ".".join(host.split(".")[-2:])
+        cf = CfClient(settings.cf_api_token, settings.cf_account_id)
+        zid = cf.get_zone_id(root)
+        zst = (cf._get(f"/zones/{zid}").get("result") or {}).get("status") if zid else None
+        if zst and zst != "active":
+            return f"根域 {root} 平台解析状态={zst}（域名 NS 未指向平台，新子域名无法激活）"
+        doms = cf._get(f"/accounts/{settings.cf_account_id}/pages/projects/{project_name}/domains"
+                       ).get("result") or []
+        st = next((d.get("status") for d in doms if d.get("name") == host), None)
+        if st and st != "active":
+            return f"CF 域名验证 {st}（新绑定通常数分钟完成，稍后重检）"
+    except Exception:
+        pass
+    return ""
+
+
 def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     """落地页全功能自检矩阵。返回 {overall, summary, checks:[{key,label,status,detail}]}。
 
@@ -1390,22 +1433,26 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         try:
             resp = _probe_http("GET", base, timeout=6, follow_redirects=False)
             ok = resp.status_code < 500
+            _diag = "" if ok else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
-                           "detail": f"HTTP {resp.status_code}"})
+                           "detail": f"HTTP {resp.status_code}" + (f" · {_diag}" if _diag else "")})
         except Exception as e:
+            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"), "status": "fail",
-                           "detail": f"不可达: {str(e)[:60]}"})
+                           "detail": f"不可达: {str(e)[:60]}" + (f" · {_diag}" if _diag else "")})
     # 4. Worker 存活（/__health 无条件 200）—— live_probe=False 时跳过（已被发布 smoke 门验过）
     if live_probe:
         try:
             resp = _probe_http("GET", base.rstrip("/") + "/__health", timeout=6, follow_redirects=False)
+            _diag = "" if resp.status_code == 200 else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "worker", "label": L(loc, "landing.scWorker"),
                            "status": "pass" if resp.status_code == 200 else "fail",
-                           "detail": f"HTTP {resp.status_code}"})
+                           "detail": f"HTTP {resp.status_code}" + (f" · {_diag}" if _diag else "")})
         except Exception as e:
+            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "worker", "label": L(loc, "landing.scWorker"), "status": "fail",
-                           "detail": f"无响应: {str(e)[:60]}"})
+                           "detail": f"无响应: {str(e)[:60]}" + (f" · {_diag}" if _diag else "")})
     # 取一个真实绑的广告（测 route_next 全链路像素解析；无则用 __smoke__ 占位）
     sample_slug, sample_ad = "", ""
     try:

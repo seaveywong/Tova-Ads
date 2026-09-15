@@ -271,6 +271,10 @@ const save = async () => {
     drawerOpen.value = false
     _lpSnap()
     await loadPages()
+    // 域名绑定失败不再静默（后端 bind_errors 带回）：逐条 toast，否则「发布成功但域名没绑上」无从排查
+    if (resp && resp.bind_errors && resp.bind_errors.length) {
+      resp.bind_errors.forEach((w) => ElMessage.warning(w))
+    }
     if (resp && resp.self_check) showSelfCheck(resp.self_check, t('landing.scPostPublishTitle'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
   saving.value = false

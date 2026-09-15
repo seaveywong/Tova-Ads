@@ -50,7 +50,7 @@ export default {
     manageFormTpl: '管理表单模板', formTemplate: '表单模板', selectFormTpl: '选表单模板', noFormsForPlat: '暂无 {plat} 表单模板，去「表单模板」页新建', formTplPlatScope: '仅列出 {plat} 平台的表单模板',
     pickFormTpl: '选择表单模板', pickMsgTpl: '选择消息模板', clearTpl: '移除模板', noMsgTpl: '暂无消息模板，去「表单模板」页新建',
     saving: '保存中…', deployTitle: '部署 · {name}', deploySubtitle: '勾选账户。每账户的主页/像素从下拉选（默认填模板值）。',
-    searchAccountPlaceholder: '搜索账户名/ID（模糊）', accountsUnit: '个账户', accNormal: '正常', accAbnormal: '异常',
+    searchAccountPlaceholder: '搜索账户名/ID（模糊）', accountsUnit: '个账户', accNormal: '正常', accAbnormal: '异常', accAbnormalNoDeploy: '账户异常，不可投放（恢复后自动可选）',
     loadingPagePixel: '加载主页/像素…', page: '主页', pixel: '像素', none: '无', defaultVal: '默认({v})',
     selectedCount: '已选 {n}', submitting: '提交中…', startDeploy: '开始部署', deployProgress: '部署进度', fbAds: 'FB广告',
     // 部署进度/已部署清单 表格化重做（部署 UI 精细化批）
@@ -310,7 +310,7 @@ export default {
     manageFormTpl: 'Manage form templates', formTemplate: 'Form template', selectFormTpl: 'Select a form template', noFormsForPlat: 'No {plat} form templates yet — create one on the Form Templates page', formTplPlatScope: 'Only {plat} form templates are listed',
     pickFormTpl: 'Select a form template', pickMsgTpl: 'Select a message template', clearTpl: 'Remove template', noMsgTpl: 'No message templates yet — create one on the Form Templates page',
     saving: 'Saving…', deployTitle: 'Deploy · {name}', deploySubtitle: 'Check accounts. Each account\'s page/pixel is chosen from the dropdown (defaults filled from the template).',
-    searchAccountPlaceholder: 'Search account name/ID (fuzzy)', accountsUnit: 'accounts', accNormal: 'Normal', accAbnormal: 'Abnormal',
+    searchAccountPlaceholder: 'Search account name/ID (fuzzy)', accountsUnit: 'accounts', accNormal: 'Normal', accAbnormal: 'Abnormal', accAbnormalNoDeploy: 'Abnormal account, not deployable (auto-selectable after recovery)',
     loadingPagePixel: 'Loading page/pixel…', page: 'Page', pixel: 'Pixel', none: 'None', defaultVal: 'Default ({v})',
     selectedCount: '{n} selected', submitting: 'Submitting…', startDeploy: 'Start Deploy', deployProgress: 'Deploy Progress', fbAds: 'FB Ads',
     // Deploy progress / deployments table rework (deploy UI polish batch)

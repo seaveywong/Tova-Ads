@@ -2643,8 +2643,10 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id,
                                               _stable_landing_url(tpl.landing_url or "", tpl.name or ""),
                                               post_content=post_content)
-        except Exception:
-            pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
+        except Exception as _lfe:
+            # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错），但必须让进度可见——
+            # 曾静默吞掉（App 缺 pages_manage_ads 权限建表被拒）→ 用户以为「表单模板不同步」
+            _item_note(sdb, item, f"表单创建失败（广告将无 Instant Form）：{str(_lfe)[:120]}")
     # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
     message_template = tpl.message_template or ""
     if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
@@ -3124,8 +3126,9 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                                 fb, sdb, vtpl, asset, _ad_page,
                                 _stable_landing_url(vtpl.landing_url or "", tpl.name or ""),
                                 post_content=post_content)
-                        except Exception:
-                            pass  # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错）
+                        except Exception as _lfe:
+                            # 同 _deploy_series_fb：不阻断，但进度可见（静默吞=「表单模板不同步」错觉）
+                            _item_note(sdb, item, f"表单创建失败（广告将无 Instant Form）：{str(_lfe)[:120]}")
                     # 消息模板：节点选的 MessageTemplate > 模板级 raw JSON > AI 从素材文案生成
                     message_template = ""
                     _mt_type = "messenger"   # MessageTemplate.type（批次I 消费位：whatsapp 分流）
@@ -3415,6 +3418,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     fb = client_for_account_page(sdb, tenant_id, item.act_id, _page_for_token, "write")
                     if not fb:
                         raise FbApiError("no_id", f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
+                    _fb_list = [fb]   # 跟帖分支也要给 _fb_list 赋值——下方结构树重试循环引用它，跟帖+结构组合曾 UnboundLocalError
                 else:
                     _fb_list, _fb_list_creds = _write_fb_with_fallback(sdb, tenant_id, item.act_id)
                     if not _fb_list:
