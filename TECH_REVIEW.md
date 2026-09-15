@@ -2359,3 +2359,24 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 
 ### Commits
 - `2a44012` fix(P0): LandingLogs limit 真正落盘
+
+## 批CM：表单/消息编辑器 FB 对齐批复审（2026-09-15，/goal）
+
+### 复审范围与结果
+| 检查 | 结果 |
+|---|---|
+| journal Traceback（近 3h） | **0 条**——当前代码零活跃异常 |
+| `_audit_endpoints.py` 13 端点 | **13/13 PASS** |
+| payload 补充用例 | 显式优先 extras ✓ / None 旧路径不受残留影响 ✓ / 空数组拦截 ✓ |
+| 本批新 i18n key（9 个） | zh/en 全成对（×2） |
+| 本批 commit | `b10ec7d`（contact_fields 显式选择+smoke 4/4）· `cb70274`（消息编辑器双栏预览+表单视觉） |
+
+### 本批变更摘要
+1. **表单联系字段 FB 对齐**：`contact_fields` 显式全集（姓名可选开关、邮箱/电话至少其一——前端弹回+保存拦截+后端 ValueError 三重保险）；None=旧路径存量零迁移；form_templates/launch_templates 两条部署链透传。访问方式（开放/受限）确认已有无需改。
+2. **消息编辑器全面优化**：双栏+实时聊天预览（Messenger 蓝白壳/WA 绿米壳，气泡+快捷回复实时所见）；欢迎语计数 Messenger 80/WA 4096（超限红显+保存拦截）；快捷回复 4 条上限提示+尾加按钮+卡片化。
+3. **表单编辑器视觉**：CSS 层分区强调条/问题卡卡片化/chip 胶囊化（零逻辑改动）。
+
+### 复审结论（已知限制）
+- Messenger 欢迎语 80 字符上限来自 FB greeting 官方限制；WA 4096 为消息文本通用上限——若 FB 政策调整需同步（已在 hint 标注"FB 官方限制"）。
+- launch.py 的 typed-body 调用点未加 contact_fields（该端点为旧手动建表单路径，无模板 config；编辑器已全覆盖主路径）。
+- 消息预览为静态形态模拟（非真实发送链路），与列表「预览」弹窗同口径。
