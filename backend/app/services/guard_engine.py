@@ -2526,77 +2526,69 @@ def calc_available_balance(spend_cap, amount_spent, currency) -> tuple[float | N
 
 
 def _sentinel_auto_arm_check(db, trace_id: str) -> int:
-    """哨兵倒计时（dead-man switch）：按团队检查无交互超时 → arm 全部纳管账户。
+    """哨兵倒计时（dead-man switch）——个人制（2026-09-15 用户拍板：不针对团队）。
 
-    交互 = 任意登录态请求（deps._touch_last_active 节流写 users.last_active_at，
-    5min/用户）。基线 = max(团队最近活动, 功能开启时刻)；都缺 = 无信号不 arm。
-    arm 幂等：只 arm sentinel_auto_armed=False 的账户，arm 后自然不再重复；
-    告警只在实 arm ≥1 账户时发（0 个新 arm = 已触发过/无账户，不重发）。
-    预警在剩 25% 时间发一次（dedup 窗口=配置小时数，覆盖整个倒计时尾段）。
-    解除只手动 disarm（哨兵页/账户操作），本功能不自动解除。"""
-    from ..models.auth import User, TenantMembership, Tenant
-    from ..core.sentinel_config import get_sentinel_config, sentinel_auto_arm_state
+    每个用户自己的开关/小时数（sentinel_scd:{tid}:{uid}），无交互按**本人**的
+    last_active_at 判断；到期 arm 其所属租户的全部纳管账户（停广告动作天然账户级）。
+    预警/触发文案个性化（本人邮箱），路径指向 安全守护。解除只手动 disarm。"""
+    from ..models.auth import User, TenantMembership
+    from ..core.sentinel_config import list_enabled_user_configs, sentinel_auto_arm_state
     from ..core.notify_utils import emit_notification, dedup_recent
     now = datetime.now(timezone.utc)
     armed_total = 0
-    try:
-        tenants = db.query(Tenant).all()
-    except Exception:
-        return 0
-    for t in tenants:
+    armed_tenants: set = set()   # 同轮多用户到期 → 租户只 arm/告警一次
+    for tid, uid, cfg in list_enabled_user_configs(db):
         try:
-            cfg = get_sentinel_config(db, t.id)
-            if not cfg.get("auto_arm_enabled"):
+            u = db.get(User, uid)
+            if not u:
                 continue
-            last_active = db.query(func.max(User.last_active_at)).join(
-                TenantMembership, TenantMembership.user_id == User.id).filter(
-                TenantMembership.tenant_id == t.id).scalar()
-            state = sentinel_auto_arm_state(cfg, last_active, now)
+            hours = max(1, int(cfg.get("auto_arm_hours") or 48))
+            state = sentinel_auto_arm_state(cfg, u.last_active_at, now)
+            _who = u.email or f"#{uid}"
             if state == "warn":
-                hours = max(1, int(cfg.get("auto_arm_hours") or 48))
-                if not dedup_recent(db, t.id, "sentinel_auto_arm_warning", "*", hours * 60):
-                    _loc = tenant_locale(db, t.id)
-                    _elapsed = now - (last_active or now)
+                if not dedup_recent(db, tid, "sentinel_auto_arm_warning", str(uid), hours * 60):
+                    _loc = _tenant_locale_of(db, tid)
+                    _elapsed = now - (u.last_active_at or now)
                     _t_w, _b_w = notify_text(_loc, "sentinel_auto_arm_warning",
-                                             hours=hours,
+                                             hours=hours, who=_who,
                                              elapsed=f"{max(0, _elapsed.total_seconds() / 3600):.0f}",
                                              remaining=f"{max(0, hours - _elapsed.total_seconds() / 3600):.0f}")
-                    emit_notification(db, tenant_id=t.id, level="warning",
+                    emit_notification(db, tenant_id=tid, level="warning",
                                       event_type="sentinel_auto_arm_warning", trace_id=trace_id,
                                       title=_t_w, body=_b_w)
-                    write_log(db, tenant_id=t.id, trace_id=trace_id, actor_type="sentinel",
-                              target_type="team", target_id=str(t.id),
+                    write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="sentinel",
+                              target_type="user", target_id=str(uid),
                               action_type="sentinel_auto_arm_warning", source="watchdog",
                               result="success",
-                              trigger_detail=f"hours={hours} last_active={last_active}")
+                              trigger_detail=f"hours={hours} who={_who} last_active={u.last_active_at}")
                     db.commit()
-            elif state == "arm":
-                hours = max(1, int(cfg.get("auto_arm_hours") or 48))
+            elif state == "arm" and tid not in armed_tenants:
                 accounts = db.query(Account).filter(
-                    Account.tenant_id == t.id,
+                    Account.tenant_id == tid,
                     Account.is_managed.is_(True),
                     Account.sentinel_auto_armed.is_(False) | Account.sentinel_auto_armed.is_(None),
                 ).all()
                 for a in accounts:
                     a.sentinel_auto_armed = True
                 db.commit()
+                armed_tenants.add(tid)
                 if accounts:
                     armed_total += len(accounts)
-                    _loc = tenant_locale(db, t.id)
+                    _loc = _tenant_locale_of(db, tid)
                     _t_a, _b_a = notify_text(_loc, "sentinel_auto_armed",
-                                             hours=hours, n=len(accounts))
-                    emit_notification(db, tenant_id=t.id, level="critical",
+                                             hours=hours, who=_who, n=len(accounts))
+                    emit_notification(db, tenant_id=tid, level="critical",
                                       event_type="sentinel_auto_armed", trace_id=trace_id,
                                       title=_t_a, body=_b_a)
-                    write_log(db, tenant_id=t.id, trace_id=trace_id, actor_type="sentinel",
-                              target_type="team", target_id=str(t.id),
+                    write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="sentinel",
+                              target_type="user", target_id=str(uid),
                               action_type="sentinel_auto_armed", source="watchdog",
                               result="success",
-                              trigger_detail=f"hours={hours} armed={len(accounts)} "
-                                             f"last_active={last_active}")
+                              trigger_detail=f"hours={hours} who={_who} armed={len(accounts)} "
+                                             f"last_active={u.last_active_at}")
                     db.commit()
         except Exception as e:
-            logger.warning(f"[Watchdog] 哨兵倒计时租户 {t.id} 异常: {e}")
+            logger.warning(f"[Watchdog] 哨兵倒计时用户 {uid}@{tid} 异常: {e}")
             try:
                 db.rollback()
             except Exception:
@@ -2605,6 +2597,10 @@ def _sentinel_auto_arm_check(db, trace_id: str) -> int:
         logger.info(f"[Watchdog] 哨兵倒计时触发：arm {armed_total} 个账户")
     return armed_total
 
+
+def _tenant_locale_of(db, tenant_id: int) -> str:
+    from ..core.i18n import tenant_locale
+    return tenant_locale(db, tenant_id)
 
 def run_watchdog():
     """系统级看门狗（06_附录 §四，定时跑）：

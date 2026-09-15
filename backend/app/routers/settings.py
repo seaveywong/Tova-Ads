@@ -406,14 +406,14 @@ def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ad
 def get_sentinel_countdown(user: CurrentUser = Depends(require_permission("ads.pause")),
                            db: Session = Depends(get_db)):
     from ..core.sentinel_config import get_sentinel_config
-    return get_sentinel_config(db, user.tenant_id)
+    return get_sentinel_config(db, user.tenant_id, user.id)
 
 
 @router.put("/sentinel-countdown")
 def set_sentinel_countdown(body: dict, user: CurrentUser = Depends(require_permission("ads.pause")),
                            db: Session = Depends(get_db)):
     from ..core.sentinel_config import save_sentinel_config
-    return save_sentinel_config(db, user.tenant_id, body)
+    return save_sentinel_config(db, user.tenant_id, user.id, body)
 
 
 # ── 账户导入行为（超管，system_settings）──
