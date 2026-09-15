@@ -3490,7 +3490,13 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
                     for c in (camps.get("data") or [])
                 )
                 if has_keepalive:
-                    acc.keepalive_state = "active_ad"; acc.keepalive_note = None
+                    # note 记系列名+ID（不清空）——徽标 tooltip/保活卡直接看到「保活中」对应哪条，
+                    # 不再「日志里建成功了 UI 无从对账」（2026-09-16 用户反馈）
+                    _kc = next((c for c in (camps.get("data") or [])
+                                if prefix in (c.get("name") or "")), None)
+                    acc.keepalive_state = "active_ad"
+                    acc.keepalive_note = (f"保活系列 {_kc.get('name')} #{_kc.get('id')}"
+                                          if _kc else (acc.keepalive_note or ""))
                     db.commit()
                     skipped += 1; results.append(_ka_res(acc, "skip", "has_keepalive", "已有保活广告"))
                     continue
@@ -3605,7 +3611,9 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
                         })
                         ad_id = ad.get("id") or ""
                         created += 1
-                        acc.keepalive_state = "active_ad"; acc.keepalive_note = None
+                        acc.keepalive_state = "active_ad"
+                        # 创建物写进 note：徽标 tooltip/保活卡可见「保活中」= 哪条广告（不清空）
+                        acc.keepalive_note = f"保活广告 #{ad_id}（{prefix} Page Like）"
                         results.append(_ka_res(acc, "success", "ok"))
                         write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                                   actor_type="system", target_type="ad", target_id=str(ad_id),
