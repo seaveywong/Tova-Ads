@@ -140,10 +140,29 @@ def set_tg_binding(
     user: CurrentUser = Depends(require_permission("members.manage")),
     db: Session = Depends(get_db),
 ):
-    """绑/换 TG bot（加密存 bot_token）。Owner 专用。"""
+    """绑/换 TG bot（加密存 bot_token）。Owner 专用。
+    2026-09-15：Bot 全局化——配置后自动同步到所有还没 Bot 的团队（一个 Bot 服务全平台）。"""
     existing = db.query(TenantTgBinding).filter(
         TenantTgBinding.tenant_id == user.tenant_id,
     ).first()
+    # 全局同步：配置了 Bot → 所有没有 Bot 的团队也自动获得（新团队不用再配）
+    from ..core.database import SuperSessionLocal as _SS
+    from ..models.auth import Tenant as _T
+    _sdb = _SS()
+    try:
+        _all_tids = [t.id for t in _sdb.query(_T).all()]
+        for _tid in _all_tids:
+            _has = _sdb.query(TenantTgBinding).filter(
+                TenantTgBinding.tenant_id == _tid).first()
+            if not _has:
+                _sdb.add(TenantTgBinding(tenant_id=_tid,
+                                          bot_token_enc=encrypt(body.bot_token),
+                                          chat_id=body.chat_id))
+        _sdb.commit()
+    except Exception:
+        _sdb.rollback()
+    finally:
+        _sdb.close()
     if existing:
         existing.bot_token_enc = encrypt(body.bot_token)
         existing.chat_id = body.chat_id
@@ -207,10 +226,19 @@ def set_user_tg_binding(
         TenantMembership.user_id == user.id).all()}
     all_tids.add(user.tenant_id)
     # 占位 bot '__use_tenant_bot__' → 解析成租户真 bot
+    # 2026-09-15 全局化：本团队没配 → 跨团队找（Bot 是平台的，不是团队维度的）
     real_bot = body.bot_token
     if real_bot == '__use_tenant_bot__':
         tb = db.query(TenantTgBinding).filter(
             TenantTgBinding.tenant_id == user.tenant_id).first()
+        if not tb:
+            from ..core.database import SuperSessionLocal as _SS
+            _sdb = _SS()
+            try:
+                tb = _sdb.query(TenantTgBinding).order_by(
+                    TenantTgBinding.tenant_id).first()   # 任一团队的 Bot
+            finally:
+                _sdb.close()
         real_bot = decrypt(tb.bot_token_enc) if tb else body.bot_token
     # 解绑语义：chat_id 空 = 删全部团队的行
     if body.chat_id == "":
