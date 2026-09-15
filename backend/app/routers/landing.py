@@ -1442,7 +1442,9 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     if live_probe:
         try:
             resp = _probe_http("GET", base, timeout=6, follow_redirects=False)
-            ok = resp.status_code < 500 and not _is_cf_error_page(resp)
+            # worker 只会回 200(display)/302(redirect/屏蔽跳转)——4xx/5xx 一律是坏（CF 边缘
+            # 错误页还会包成 409 空体/error code:1001，曾 <500 误判 pass）
+            ok = resp.status_code < 400 and not _is_cf_error_page(resp)
             _diag = "" if ok else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
