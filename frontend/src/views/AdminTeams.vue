@@ -88,6 +88,49 @@ const hardDelete = async (row) => {
     load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
+
+// ── 域名管理（超管给团队分配/收回）──
+const domainOpen = ref(false)
+const domainLoading = ref(false)
+const domainTeamId = ref(0)
+const domainTeamName = ref('')
+const domainPool = ref([])
+const domainTeamDomains = ref([])
+const openDomains = async (row) => {
+  domainTeamId.value = row.id
+  domainTeamName.value = row.name
+  domainOpen.value = true
+  domainLoading.value = true
+  try {
+    const pool = await GET('/admin/domains')
+    domainPool.value = (pool || []).map(z => ({
+      ...z,
+      assigned_names: (z.assigned_to || []).map(a => a.label || `t${a.tenant_id}`).join('、'),
+    }))
+    domainTeamDomains.value = domainPool.value
+      .flatMap(z => z.assigned_to.filter(a => a.tenant_id === row.id).map(a => ({ ...a, domain: z.domain })))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  domainLoading.value = false
+}
+const toggleDomainAssign = async (z) => {
+  const already = z.assigned_to.some(a => a.tenant_id === domainTeamId.value)
+  if (already) {
+    // 取消分配
+    const a = z.assigned_to.find(a => a.tenant_id === domainTeamId.value)
+    try { await DELETE(`/admin/domains/${a.domain_row_id}`) } catch (e) { ElMessage.error(e.message) }
+  } else {
+    // 分配
+    try { await POST('/admin/domains/assign', { domain: z.domain, tenant_id: domainTeamId.value }) }
+    catch (e) { ElMessage.error(e.message) }
+  }
+  openDomains({ id: domainTeamId.value, name: domainTeamName.value })
+  load()
+}
+const unassignDomain = async (d) => {
+  try { await DELETE(`/admin/domains/${d.domain_row_id}`) } catch (e) { ElMessage.error(e.message) }
+  openDomains({ id: domainTeamId.value, name: domainTeamName.value })
+  load()
+}
 const hasMore = (row) => {
   if (row.id === 1) return false
   if (row.status === 'active') return true
@@ -196,6 +239,7 @@ const submitMemberAdd = async () => {
           <template #default="{ row }">
             <div class="ops">
               <button class="op primary" @click="openMembers(row)">{{ t('teams.members') }}</button>
+              <button class="op" @click="openDomains(row)">{{ t('teams.domains') }}</button>
               <button class="op" @click="rename(row)">{{ t('teams.rename') }}</button>
               <el-dropdown v-if="hasMore(row)" trigger="click" @command="c => handleOp(c, row)">
                 <button class="op more" :title="t('common.more')">⋯</button>
@@ -256,6 +300,36 @@ const submitMemberAdd = async () => {
         <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? t('teams.adding') : t('teams.addMember') }}</button>
       </div>
     </el-dialog>
+
+    <!-- 域名管理抽屉（超管给团队分配/收回域名） -->
+    <el-drawer v-model="domainOpen" :title="t('teams.domainTitle', { name: domainTeamName })" direction="rtl" size="520px" append-to-body>
+      <div v-loading="domainLoading">
+        <!-- 该团队已有域名 -->
+        <div class="dm-sec-title">{{ t('teams.domainAssigned') }}（{{ domainTeamDomains.length }}）</div>
+        <div class="dm-list">
+          <div v-for="d in domainTeamDomains" :key="d.domain_row_id" class="dm-row">
+            <code>{{ d.domain }}</code>
+            <span v-if="d.label" class="dm-label">{{ d.label }}</span>
+            <button class="dm-rm" @click="unassignDomain(d)"> {{ t('teams.domainRevoke') }}</button>
+          </div>
+          <div v-if="!domainTeamDomains.length && !domainLoading" class="dm-empty">{{ t('teams.domainNone') }}</div>
+        </div>
+        <div class="dm-divider"></div>
+        <!-- 平台域名池（CF 发现的全部 zone，勾选分配给该团队） -->
+        <div class="dm-sec-title">{{ t('teams.domainPool') }}（{{ domainPool.length }}）</div>
+        <div class="dm-pool">
+          <label v-for="z in domainPool" :key="z.domain" class="dm-pool-row" :class="{ assigned: z.assigned_to.length > 0 }">
+            <input type="checkbox" :checked="z.assigned_to.some(a => a.tenant_id === domainTeamId)"
+                   :disabled="z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId)"
+                   @change="toggleDomainAssign(z)" />
+            <code>{{ z.domain }}</code>
+            <span v-if="z.assigned_to.length" class="dm-assigned-to">{{ t('teams.domainAssignedTo') }}: {{ z.assigned_names }}</span>
+            <span v-else class="dm-free">{{ t('teams.domainFree') }}</span>
+          </label>
+          <div v-if="!domainPool.length && !domainLoading" class="dm-empty">{{ t('teams.domainPoolEmpty') }}</div>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -322,4 +396,21 @@ const submitMemberAdd = async () => {
 :deep(.el-table th.el-table__cell){background:var(--bg3);color:var(--t2);font-weight:600;font-size:12px}
 :deep(.el-table tr:hover > td){background:var(--bg3) !important}
 .tbl-wrap{overflow-x:auto}
+/* 域名管理抽屉 */
+.dm-sec-title{font-size:12px;font-weight:600;color:var(--t1);margin:14px 0 8px}
+.dm-list{display:flex;flex-direction:column;gap:4px}
+.dm-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px}
+.dm-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-label{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 6px;border-radius:8px}
+.dm-rm{font-size:11px;color:var(--error);border:1px solid rgba(239,68,68,.4);background:transparent;padding:2px 8px;border-radius:4px;cursor:pointer;white-space:nowrap}
+.dm-rm:hover{background:var(--error);color:#fff}
+.dm-empty{padding:16px;text-align:center;color:var(--t3);font-size:12px}
+.dm-divider{border-top:1px dashed var(--bd);margin:12px 0}
+.dm-pool{display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto}
+.dm-pool-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px;cursor:pointer}
+.dm-pool-row.assigned{opacity:.6}
+.dm-pool-row.assigned code{flex:1}
+.dm-pool-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dm-assigned-to{font-size:10px;color:var(--warning);white-space:nowrap}
+.dm-free{font-size:10px;color:var(--t3);white-space:nowrap}
 </style>
