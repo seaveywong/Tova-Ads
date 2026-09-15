@@ -339,22 +339,8 @@ def hard_delete_tenant(tid: int,
         raise HTTPException(404, "团队不存在")
     if tid in _PROTECTED_TENANT_IDS:
         raise HTTPException(400, f"团队「{t.name}」是受保护团队，不能删除")
-    # 有 managed 账户 → 拒删（先移除纳管或归档再删）
-    from ..models.fb import Account
-    active_accs = db.query(Account).filter(
-        Account.tenant_id == tid, Account.is_managed.is_(True),
-        Account.account_status == 1).count()
-    if active_accs > 0:
-        raise HTTPException(400, f"团队「{t.name}」有 {active_accs} 个活跃纳管账户——先移除纳管再删除")
-    # 近 7 天有消耗 → 拒删（防误删有历史消耗的团队）
-    from ..models.perf import PerfSnapshot
-    from datetime import datetime, timezone, timedelta
-    recent = db.query(PerfSnapshot).filter(
-        PerfSnapshot.tenant_id == tid,
-        PerfSnapshot.snapshot_date >= (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d"),
-    ).count()
-    if recent > 0:
-        raise HTTPException(400, f"团队「{t.name}」近 7 天有 {recent} 条消耗记录——为防误删有数据的团队，请确认后再操作")
+    # 2026-09-16 用户拍板：强制删除，不管下面有没有资产/账户/消耗
+    # （前端弹窗展示将被删除的资源统计，由超管自行判断）
 
     # 级联删除该租户的全部数据（BYPASSRLS system db session）
     from sqlalchemy import text as _text

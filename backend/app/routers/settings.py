@@ -388,8 +388,11 @@ def run_fx_now(user: CurrentUser = Depends(require_superadmin)):
     return run_fx_sync()
 
 
+# 2026-09-16 用户拍板：保活（防休眠）是花钱功能，仅超管可配——团队 owner 不该能动
 @router.get("/keepalive")
 def get_keepalive(user: CurrentUser = Depends(require_permission("ads.pause")), db: Session = Depends(get_db)):
+    if not user.is_superadmin:
+        raise HTTPException(403, "保活配置仅平台超管可管理")
     from ..core.keepalive_config import get_keepalive_config
     return get_keepalive_config(db, user.tenant_id)
 
@@ -397,6 +400,8 @@ def get_keepalive(user: CurrentUser = Depends(require_permission("ads.pause")), 
 @router.put("/keepalive")
 def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ads.pause")),
                   db: Session = Depends(get_db)):
+    if not user.is_superadmin:
+        raise HTTPException(403, "保活配置仅平台超管可管理")
     from ..core.keepalive_config import save_keepalive_config
     return save_keepalive_config(db, user.tenant_id, body)
 

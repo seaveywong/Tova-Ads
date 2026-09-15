@@ -935,7 +935,7 @@ export default {
     domains: '域名', domainTitle: '域名管理 · {name}', domainAssigned: '已分配域名', domainNone: '暂无域名（从下方平台池勾选分配）',
     domainPool: '平台域名池（CF 全部 zone）', domainPoolEmpty: 'CF 账户下无可用域名', domainAssignedTo: '已分给', domainFree: '未分配',
     domainRevoke: '收回',
-    hardDeleteTitle: '彻底删除团队', hardDeleteBtn: '彻底删除', hardDeleteConfirm: '将永久删除团队「{name}」及其全部数据（账户/模板/落地页/告警/日志，不可恢复）。仅限无活跃账户且近 7 天无消耗的团队。确定继续？', hardDeleted: '团队已彻底删除',
+    hardDeleteTitle: '彻底删除团队', hardDeleteBtn: '彻底删除', hardDeleteConfirm: '将永久删除团队「{name}」及其全部数据（账户/模板/落地页/告警/日志，不可恢复）。确定继续？', hardDeleted: '团队已彻底删除',
     createDesc: '建团队同时创建 3 个系统角色（管理员/操作员/财务）。可选指定首任管理员（自动建用户并加入）。',
     teamNamePlaceholder: '如：客户A 投放团队',
     ownerEmail: '管理员邮箱', ownerEmailPlaceholder: '选填，留空 = 先建空团队',

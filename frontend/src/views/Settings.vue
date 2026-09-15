@@ -70,8 +70,8 @@ const loadSched = async () => {
       try { sched.value = await GET('/settings/schedule') }
       catch { sched.value = null }
     }
-    // 保活配置：有 ads.pause 权限就能看（团队 owner/operator）
-    if ((myPerms.value || []).includes('ads.pause') || isSuper.value) {
+    // 保活配置：仅超管可看（2026-09-16 用户拍板——花钱功能不给 owner 配）
+    if (isSuper.value) {
       try { ka.value = await GET('/settings/keepalive') }
       catch { ka.value = { enabled: false, budget_usd: 5, idle_days: 3, asset_prefix: 'YR' } }
     }
@@ -559,7 +559,8 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
   }
   secs.push({ id: 'sec-tg', label: t('settings.tgTitle') })
-  if (isSuper.value || (myPerms.value || []).includes('ads.pause')) {
+  // 2026-09-16：保活配置仅超管可见（花钱功能，owner 不该能动）
+  if (isSuper.value) {
     secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
   }
   return secs
@@ -934,7 +935,7 @@ const runKeepaliveNow = async () => {
       </div>
     </div>
 
-    <div v-if="(isSuper || (myPerms || []).includes('ads.pause')) && activeSection==='sec-keepalive'" id="sec-keepalive" class="card">
+    <div v-if="isSuper && activeSection==='sec-keepalive'" id="sec-keepalive" class="card">
       <div class="t">{{ t('settings.keepaliveTitle') }}</div>
       <div class="d">{{ t('settings.keepaliveDesc') }}</div>
       <div class="ka-switch-row">
