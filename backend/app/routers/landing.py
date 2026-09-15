@@ -1372,6 +1372,16 @@ def _probe_http(method: str, url: str, attempts: int = 2, **kw):
     raise last
 
 
+def _is_cf_error_page(resp) -> bool:
+    """CF 边缘错误页（1001 DNS 解析/522 连接超时/530 等）——状态码可能是 4xx（曾抓到
+    409+`error code: 1001`：灰云 CNAME 指向 pages.dev 但域名未激活），<500 判 pass 会误绿。
+    正文特征 `error code:` 是可靠标记（worker 从不返回这种正文）。"""
+    try:
+        return "error code:" in resp.text[:200]
+    except Exception:
+        return False
+
+
 def _cf_domain_diag(project_name: str, base_url: str) -> str:
     """自检域名/Worker 失败时的 CF 归因：根域 zone 非 active（NS 问题）/ Pages 域名验证 pending。
     best-effort——CF 查询失败返空串，不干扰原检查。"""
@@ -1432,7 +1442,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     if live_probe:
         try:
             resp = _probe_http("GET", base, timeout=6, follow_redirects=False)
-            ok = resp.status_code < 500
+            ok = resp.status_code < 500 and not _is_cf_error_page(resp)
             _diag = "" if ok else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
