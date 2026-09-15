@@ -517,9 +517,14 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             _r = _domain_root(r)
             if _r in _bound_roots:
                 continue
-            _zid = cf.get_zone_id(_r)
-            _zst = (cf._get(f"/zones/{_zid}").get("result") or {}).get("status") if _zid else None
-            if not _zid or _zst != "active":
+            # 查询成功才判状态；CF 查询失败（success=False）跳过本门——部署环节本身还要
+            # 调 CF，真故障会在那里自然报错，不应在门口用「未接入平台」误导（曾的坑）
+            _zd = cf._get("/zones", params={"name": _r})
+            if _zd.get("success") is not True:
+                continue
+            _zrows = _zd.get("result") or []
+            _zst = (_zrows[0] or {}).get("status") if _zrows else None
+            if not _zrows or _zst != "active":
                 raise HTTPException(
                     400, f"域名 {_r} 解析状态异常（{_zst or '未接入平台'}）：域名 NS 未指向平台，"
                          f"新子域名无法激活（发布后必然不可访问）。请在域名服务商处把 NS 改为平台分配的 NS，或换用其他域名")
