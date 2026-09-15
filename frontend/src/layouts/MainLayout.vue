@@ -308,29 +308,39 @@ watch(() => route.path, () => { sidebarOpen.value = false })
       </nav>
       <div v-if="myPerms.includes('ads.pause') || isSuperadmin" class="guard-panel">
         <div class="guard-title">{{ t('layout.safetyGuard') }}</div>
-        <div class="guard-row">
-          <span>{{ t('layout.sentinel') }}</span>
+        <!-- 状态总览行：哨兵/倒计时/规则三个状态灯一排，点行进各自操作 -->
+        <div class="gp-status-row" @click="router.push({ name: 'guard' })" :title="t('layout.gpGoGuard')">
+          <span class="gp-item" :class="{ on: sentinelOn }">
+            <i class="gp-dot"></i>{{ t('layout.sentinel') }}
+          </span>
+          <span class="gp-item" :class="{ on: scd.auto_arm_enabled }">
+            <i class="gp-dot"></i>{{ t('layout.scdCountdown') }}<em v-if="scd.auto_arm_enabled" class="gp-hrs">{{ scd.auto_arm_hours }}h</em>
+          </span>
+          <span class="gp-item" :class="{ on: guardStatus.rules_enabled > 0 }">
+            <i class="gp-dot"></i>{{ guardStatus.rules_enabled }}
+          </span>
+        </div>
+        <!-- 开关区：两行对齐（名称+开关），倒计时开启时小时输入显现 -->
+        <div class="gp-ctl-row">
+          <span class="gp-ctl-label" :title="t('layout.sentinelTip')">{{ t('layout.sentinel') }}</span>
           <el-switch :model-value="sentinelOn" @change="toggleSentinel" size="small"
                      active-color="#0a84ff" inactive-color="#3a3a5c" />
         </div>
-        <div class="guard-row">
-          <span :title="t('settings.scdDesc')">{{ t('layout.scdCountdown') }}</span>
+        <div class="gp-ctl-row">
+          <span class="gp-ctl-label" :title="t('settings.scdDesc')">{{ t('layout.scdCountdown') }}</span>
           <span class="scd-ctl">
-            <input v-model.number="scd.auto_arm_hours" type="number" min="1" class="scd-hrs"
+            <input v-if="scd.auto_arm_enabled" v-model.number="scd.auto_arm_hours" type="number" min="1" class="scd-hrs"
                    :title="t('settings.scdHours')" @change="saveScdHours" />
-            <span class="scd-h">h</span>
+            <span v-if="scd.auto_arm_enabled" class="scd-h">h</span>
             <el-switch :model-value="scd.auto_arm_enabled" :disabled="scdSaving" @change="toggleScd" size="small"
                        active-color="#0a84ff" inactive-color="#3a3a5c" />
           </span>
         </div>
-        <div class="guard-row">
-          <span>{{ t('layout.rulesCount', { n: guardStatus.rules_enabled }) }}</span>
-          <span class="guard-dot" :class="{ on: guardStatus.rules_enabled > 0 }"></span>
-        </div>
-        <div v-if="emgSummary" class="guard-row emg-last" @click="router.push({ name: 'guard', query: { tab: 'log' } })"
+        <!-- 上次紧急暂停（点击看完整报告） -->
+        <div v-if="emgSummary" class="gp-emg" @click="router.push({ name: 'guard', query: { tab: 'log' } })"
              :title="emgTitle">
-          <span>{{ t('layout.lastEmergency') }}</span>
-          <span class="emg-last-v">{{ emgSummary }} →</span>
+          <span class="gp-emg-label">{{ t('layout.lastEmergency') }}</span>
+          <span class="gp-emg-val">{{ emgSummary }} →</span>
         </div>
         <button class="emergency-btn" :disabled="emergencyLoading" @click="emergencyPause">{{ emergencyLoading ? t('layout.pausing') : t('layout.emergencyPause') }}</button>
       </div>
@@ -465,21 +475,28 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .nav-item .el-icon { font-size: 18px; }
 
 /* 安全面板 */
-.guard-panel { padding: 12px 16px; border-top: 1px solid var(--bd); }
-.guard-title { font-size: 11px; color: var(--t3); text-transform: uppercase; margin-bottom: 8px; }
+.guard-panel { padding: 12px 14px 14px; border-top: 1px solid var(--bd); }
+.guard-title { font-size: 11px; color: var(--t3); text-transform: uppercase; margin-bottom: 8px; letter-spacing: .04em; }
+/* 状态总览行：哨兵/倒计时/规则 三状态灯一排（点进守护页） */
+.gp-status-row { display: flex; gap: 4px; margin-bottom: 8px; cursor: pointer; }
+.gp-item { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: var(--bg3); font-size: 11px; color: var(--t3); transition: all .15s; }
+.gp-item:hover { color: var(--t1) }
+.gp-item.on { background: rgba(48, 209, 88, .1); color: var(--success); }
+.gp-item.on .gp-dot { background: var(--success); box-shadow: 0 0 5px var(--success); }
+.gp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--t3); flex: none; }
+.gp-hrs { font-style: normal; font-size: 10px; opacity: .8; margin-left: 1px }
+/* 开关区两行对齐 */
+.gp-ctl-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
+.gp-ctl-label { font-size: 12px; color: var(--t2); }
+/* 上次紧急暂停 */
+.gp-emg { padding: 6px 8px; margin: 6px -4px 0; border-radius: 6px; background: var(--bg3); cursor: pointer; transition: background .15s; }
+.gp-emg:hover { background: var(--bg2); }
+.gp-emg-label { display: block; font-size: 10px; color: var(--t3); }
+.gp-emg-val { display: block; font-size: 11px; color: var(--t2); white-space: normal; line-height: 1.5; margin-top: 1px }
 .scd-ctl{display:flex;align-items:center;gap:4px}
 .scd-hrs{width:44px;padding:2px 4px;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;color:var(--t1);font-size:11px;text-align:center}
 .scd-hrs:focus{outline:none;border-color:var(--ac)}
 .scd-h{font-size:10px;color:var(--t3)}
-.guard-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 4px 0; font-size: 13px; color: var(--t2);
-}
-/* 批BV：最近全局暂停摘要行（点击进守护页暂停记录看全报告） */
-.guard-row.emg-last { cursor: pointer; border-radius: 6px; padding: 4px 6px; margin: 0 -6px; flex-wrap: wrap; }
-.guard-row.emg-last:hover { background: var(--bg3); }
-/* 摘要信息量增大（日期+时间+扫描/停用数）——换行到标签下方独占一行，不挤压「上次暂停」标签 */
-.emg-last-v { flex-basis: 100%; font-size: 11px; color: var(--t3); white-space: normal; text-align: left; padding-left: 2px; }
 .guard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--t3); }
 .guard-dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .emergency-btn {

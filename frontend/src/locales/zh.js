@@ -248,7 +248,7 @@ export default {
   layout: {
     platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）', platformKey: '平台 ',
     platformScopeAll: '全部平台 · 数据跨平台汇总', platformScopeFb: 'Facebook · 数据按此平台过滤', platformScopeTt: 'TikTok · 数据按此平台过滤',
-    sentinel: '哨兵', scdCountdown: '倒计时',
+    sentinel: '哨兵', scdCountdown: '倒计时', sentinelTip: '紧急自动停投：arm 后 ACTIVE 系列直接全停', gpGoGuard: '进入守护页',
     rulesCount: '规则 {n} 条',
     safetyGuard: '安全守护',
     emergencyPause: '全局紧急暂停', lastEmergency: '上次暂停', emgDone: '停{n}系列 · 扫{m}账户', emgBad: '核验未过/报错 {n} 条', emgViewLog: '点击查看完整执行报告（守护页 · 暂停记录）',
