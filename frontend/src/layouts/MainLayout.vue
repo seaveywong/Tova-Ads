@@ -118,10 +118,26 @@ const sentinelOn = ref(false)
 // 哨兵倒计时（个人制，2026-09-15 归属左下角安全守护面板——用户实指此处）
 const scd = ref({ auto_arm_enabled: false, auto_arm_hours: 48 })
 const scdSaving = ref(false)
+// 剩余时间显示：GET 返回 server_now + enabled_at → 前端算剩余（服务端时间准）
+const scdRemaining = computed(() => {
+  if (!scd.value.auto_arm_enabled) return ''
+  const now = scd.value.server_now ? new Date(scd.value.server_now) : new Date()
+  const base = scd.value.last_active || scd.value.auto_arm_enabled_at || now
+  const elapsedH = (now - new Date(base)) / 36e5
+  const remainH = scd.value.auto_arm_hours - elapsedH
+  if (remainH <= 0) return t('layout.scdSoon')
+  if (remainH < 1) return t('layout.scdMin', { n: Math.max(1, Math.round(remainH * 60)) })
+  return t('layout.scdHr', { n: Math.round(remainH) })
+})
 const loadScd = async () => {
   try { scd.value = await GET('/settings/sentinel-countdown') } catch {}
 }
 const toggleScd = async (val) => {
+  // 哨兵 armed 时开倒计时 → 语义冲突（哨兵已经在停广告了，倒计时到期再 arm 无意义）
+  if (val && sentinelOn.value) {
+    ElMessage.warning(t('layout.scdConflict'))
+    return
+  }
   scdSaving.value = true
   try {
     scd.value = await PUT('/settings/sentinel-countdown', { ...scd.value, auto_arm_enabled: val })
@@ -314,7 +330,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
             <i class="gp-dot"></i>{{ t('layout.sentinel') }}
           </span>
           <span class="gp-item" :class="{ on: scd.auto_arm_enabled }">
-            <i class="gp-dot"></i>{{ t('layout.scdCountdown') }}<em v-if="scd.auto_arm_enabled" class="gp-hrs">{{ scd.auto_arm_hours }}h</em>
+            <i class="gp-dot"></i>{{ t('layout.scdCountdown') }}<em v-if="scd.auto_arm_enabled" class="gp-hrs">{{ scdRemaining || scd.auto_arm_hours + 'h' }}</em>
           </span>
           <span class="gp-item" :class="{ on: guardStatus.rules_enabled > 0 }">
             <i class="gp-dot"></i>{{ guardStatus.rules_enabled }}

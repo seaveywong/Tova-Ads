@@ -405,8 +405,15 @@ def set_keepalive(body: dict, user: CurrentUser = Depends(require_permission("ad
 @router.get("/sentinel-countdown")
 def get_sentinel_countdown(user: CurrentUser = Depends(require_permission("ads.pause")),
                            db: Session = Depends(get_db)):
+    """个人倒计时配置 + 本人最近活动时刻 + 服务端时间（前端算剩余显示）。"""
     from ..core.sentinel_config import get_sentinel_config
-    return get_sentinel_config(db, user.tenant_id, user.id)
+    from ..models.auth import User
+    from datetime import datetime, timezone
+    cfg = get_sentinel_config(db, user.tenant_id, user.id)
+    u = db.get(User, user.id)
+    cfg["last_active"] = u.last_active_at.isoformat() if (u and u.last_active_at) else None
+    cfg["server_now"] = datetime.now(timezone.utc).isoformat()
+    return cfg
 
 
 @router.put("/sentinel-countdown")

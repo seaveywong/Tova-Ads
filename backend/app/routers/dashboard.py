@@ -320,8 +320,8 @@ def dashboard(
             "frequency": round(float(r.avg_frequency), 2) if r.avg_frequency else 0.0,
             "ctr": round(float(r.avg_ctr), 2) if r.avg_ctr else 0.0,
             "cpc": round(float(r.avg_cpc), 2) if r.avg_cpc else 0.0,
-            "balance": avail_map[r.act_id][0],  # 可用额度 USD（None=无上限/超高）
-            "balance_kind": avail_map[r.act_id][1],  # limited / unlimited / very_high_limit
+            "balance": (avail_map.get(r.act_id) or (None, "unlimited"))[0],  # 非 managed 有历史消耗 → 无额度数据不炸（2026-09-15 修 KeyError）
+            "balance_kind": (avail_map.get(r.act_id) or (None, "unlimited"))[1],
             "spend_cap": _money_native(acc.spend_cap, acc.currency or "USD"),
             "amount_spent": _money_native(acc.amount_spent, acc.currency or "USD"),
             "spend_cap_usd": _money_usd(acc.spend_cap, acc.currency or "USD"),
