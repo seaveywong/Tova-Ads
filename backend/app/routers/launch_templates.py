@@ -2353,6 +2353,27 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                     if not ft.fb_form_id or ft.fb_page_id != page_id:
                         ft.fb_form_id = form_id; ft.fb_page_id = page_id
                     return form_id
+            except FbApiError as _fe_fb:
+                # 表单名每主页唯一（subcode 1892019）：缓存被清后重部署/多入口建过同名表单会撞名。
+                # 撞名 ≠ 要新建：按名找回现成表单复用（列表要 page token，创建用户令牌即可）。
+                _raw = json.dumps(getattr(_fe_fb, "raw", {}) or "", default=str)
+                if "1892019" in _raw or "Form Name exists" in str(_fe_fb):
+                    try:
+                        _pt = fb.get_page_access_token(page_id)
+                        if _pt:
+                            from ..core.fb_client import FbClient as _FbC
+                            for _f in _FbC(_pt).get_paged(
+                                    f"{page_id}/leadgen_forms", {"fields": "id,name", "limit": 100}):
+                                if (_f.get("name") or "") == payload.get("name"):
+                                    if not ft.fb_form_id or ft.fb_page_id != page_id:
+                                        ft.fb_form_id = _f.get("id"); ft.fb_page_id = page_id
+                                    return _f.get("id")
+                    except Exception:
+                        pass
+                import logging as _lg
+                _lg.getLogger("toveads.launch").warning(
+                    f"[LeadForm][FB] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
+                    f"page={page_id}，降级手填/AI：{_fe_fb}")
             except Exception as _fe_fb:
                 # 降级前留痕（journal 可查）——曾静默吞：FB 拒建（缺字段/权限）→ 广告挂上
                 # FB 默认表单 → 用户看到「表单内容/描述和 Tova 设置完全不一样」无从定位

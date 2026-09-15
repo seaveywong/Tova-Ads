@@ -760,8 +760,10 @@ def build_lead_form_payload(
         opts = q.get("options")
         if opts:
             has_custom_options = True
-            item["options"] = [{"key": o.get("key", f"opt_{i}"),
-                                "value": o.get("value", str(o))} for i, o in enumerate(opts)]
+            # option key 必须非空（2026-09-16 实测：编辑器存过 key:""，.get(default) 拿到空串
+            # 原样发 FB → code 1 unknown error → 部署静默降级 AI 表单）。or 兜底保证恒非空。
+            item["options"] = [{"key": (o.get("key") or f"opt_{i}"),
+                                "value": (o.get("value") or str(o))} for i, o in enumerate(opts)]
         questions.append(item)
 
     payload: dict[str, Any] = {
