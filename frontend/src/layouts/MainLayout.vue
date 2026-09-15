@@ -10,6 +10,7 @@ const fmtShort = (iso) => { try { return fmtTime(iso).split(' ')[0]?.slice(5) ||
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 import PlatformSeg from '../components/PlatformSeg.vue'
+import CommandPalette from '../components/CommandPalette.vue'
 import { usePlatform } from '../composables/usePlatform'
 
 // 登录后的主壳挂载时预取全部路由 chunk（未登录不拉，见 App.vue）
@@ -453,6 +454,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
       </main>
     </div>
   </div>
+  <CommandPalette />
 </template>
 
 <style scoped>

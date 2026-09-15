@@ -292,6 +292,7 @@ const runKeepaliveNow = async () => {
 }
 const onCmd = async (cmd, a) => {
   if (cmd === 'manager') router.push({ name: 'ad-manager', query: { act: a.act_id } })
+  else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', act_id: a.act_id } })
   else if (cmd === 'group') openGroupEdit(a)
   else if (cmd === 'sync') {
     if (!a.fb_credential_id) return ElMessage.warning(t('ads.noBoundToken'))
@@ -452,6 +453,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
+                <el-dropdown-item command="logs">{{ t('ads.viewLandingLogs') }}</el-dropdown-item>
                 <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
                 <el-dropdown-item command="group">{{ t('ads.groupEditTitle') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>

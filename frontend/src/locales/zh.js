@@ -245,6 +245,11 @@ export default {
     tokenThrottled: '限流',
     tokenPending: '待认证',
   },
+  cmdk: {
+    placeholder: '搜索账户 / 模板 / 落地页 / 页面…',
+    noResults: '无匹配结果',
+    hint: '↑↓ 选择 · Enter 跳转 · ESC 关闭',
+  },
   layout: {
     platformFilter: '平台筛选（数据看板/广告管理器按所选平台过滤）', platformKey: '平台 ',
     platformScopeAll: '全部平台 · 数据跨平台汇总', platformScopeFb: 'Facebook · 数据按此平台过滤', platformScopeTt: 'TikTok · 数据按此平台过滤',
@@ -332,7 +337,7 @@ export default {
     tokenAbnormal: '异常',
     rotatingToken: '轮换令牌：{aliases}',
     poolTooltip: '候选池 {n} 个令牌',
-    viewInManager: '在广告管理器查看',
+    viewInManager: '在广告管理器中查看', viewLandingLogs: '查落地页访问日志',
     syncStatusBalance: '同步状态/余额',
     removeManaged: '移除纳管',
     emptyTitle: '还没有纳管的广告账户',

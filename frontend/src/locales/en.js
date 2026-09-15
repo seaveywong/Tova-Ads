@@ -233,6 +233,11 @@ export default {
     tokenThrottled: 'Throttled',
     tokenPending: 'Pending Auth',
   },
+  cmdk: {
+    placeholder: 'Search accounts / templates / pages…',
+    noResults: 'No results',
+    hint: '↑↓ navigate · Enter go · ESC close',
+  },
   layout: {
     platformFilter: 'Platform filter (dashboard / ad manager filter by selected platform)', platformKey: 'Platform ',
     platformScopeAll: 'All platforms · data aggregated across platforms', platformScopeFb: 'Facebook · data filtered to this platform', platformScopeTt: 'TikTok · data filtered to this platform',
@@ -320,7 +325,7 @@ export default {
     tokenAbnormal: 'Abnormal',
     rotatingToken: 'Rotating tokens: {aliases}',
     poolTooltip: 'Pool of {n} tokens',
-    viewInManager: 'View in Ad Manager',
+    viewInManager: 'View in Ad Manager', viewLandingLogs: 'View landing page logs',
     syncStatusBalance: 'Sync status/balance',
     removeManaged: 'Remove from management',
     emptyTitle: 'No ad accounts managed yet',

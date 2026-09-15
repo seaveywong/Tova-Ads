@@ -480,6 +480,27 @@ const kpiMode = ref(null)  // pause / allowance / coverage
 const coverageText = computed(() => { const m = (data.value.accounts || []).filter(a => a.is_managed !== false); return `${m.filter(a => !a.error || a.error === 'cross_tz').length}/${m.length}` })
 const accStatusActive = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status === 1).length)
 const accStatusBad = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status !== 1).length)
+// ── 今日晨报（便捷性批 2026-09-15）：打开看板第一眼知全局 ──
+const todayBriefing = computed(() => {
+  const accs = data.value.accounts || []
+  const abnormal = accs.filter(a => !a.removed && a.account_status && a.account_status !== 1)
+  const unreads = (recentNotifs.value || []).filter(n => !n.read)
+  const criticals = unreads.filter(n => n.level === 'critical').length
+  const warnings = unreads.filter(n => n.level === 'warning').length
+  const lowBal = accs.filter(a => !a.removed && a.balance_kind === 'limited' && (a.balance || 0) <= 100)
+  return {
+    spend: kpiSpendDisplay.value,
+    conversions: fmt(data.value.total_conversions),
+    abnormalN: abnormal.length,
+    abnormalNames: abnormal.slice(0, 3).map(a => a.name || a.act_id).join('、'),
+    alertsN: unreads.length,
+    criticals, warnings,
+    lowBalN: lowBal.length,
+    pausedN: data.value.pause_count || 0,
+    ok: abnormal.length === 0 && criticals === 0 && lowBal.length === 0,
+  }
+})
+
 const guardCells = computed(() => [
   { mode: 'accstatus', label: t('dashboard.kpiAccStatus'), value: `${accStatusActive.value}/${accStatusActive.value + accStatusBad.value}`, danger: accStatusBad.value > 0 },
   { mode: 'pause', label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), danger: data.value.pause_count > 0 },
@@ -1162,6 +1183,19 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
     <!-- KPI 层：8 张统一规格卡（2 行 × 4 列；核心卡带迷你趋势线，全部同视觉语言，点击=账户明细表切到该指标视角）-->
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
+      <!-- 今日晨报：打开看板第一眼（消耗/异动/告警 一句话） -->
+      <div v-if="datePreset === 'today'" :class="['briefing', todayBriefing.ok ? 'ok' : 'warn']">
+        <span class="bf-icon">{{ todayBriefing.ok ? '✅' : '⚠️' }}</span>
+        <span class="bf-main">
+          <b>{{ todayBriefing.spend }}</b> {{ t('dashboard.bfSpend') }} ·
+          <b>{{ todayBriefing.conversions }}</b> {{ t('dashboard.bfConv') }}
+          <template v-if="todayBriefing.abnormalN > 0"> · <span class="bf-bad">{{ todayBriefing.abnormalN }} {{ t('dashboard.bfAbnormal') }}<em v-if="todayBriefing.abnormalNames">（{{ todayBriefing.abnormalNames }}）</em></span></template>
+          <template v-if="todayBriefing.alertsN > 0"> · <span :class="todayBriefing.criticals > 0 ? 'bf-bad' : 'bf-warn'">{{ todayBriefing.alertsN }} {{ t('dashboard.bfAlerts') }}<em v-if="todayBriefing.criticals > 0"> ({{ todayBriefing.criticals }} critical)</em></span></template>
+          <template v-if="todayBriefing.lowBalN > 0"> · <span class="bf-warn">{{ todayBriefing.lowBalN }} {{ t('dashboard.bfLowBal') }}</span></template>
+          <template v-if="todayBriefing.pausedN > 0"> · <span class="bf-warn">{{ todayBriefing.pausedN }} {{ t('dashboard.bfPaused') }}</span></template>
+          <template v-if="todayBriefing.ok"> · {{ t('dashboard.bfAllGood') }}</template>
+        </span>
+      </div>
       <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
@@ -1731,6 +1765,15 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
 /* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
+.briefing { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; cursor: default; }
+.briefing.ok { background: rgba(48,209,88,.08); border: 1px solid rgba(48,209,88,.25) }
+.briefing.warn { background: rgba(255,159,10,.08); border: 1px solid rgba(255,159,10,.3) }
+.bf-icon { font-size: 16px; flex: none }
+.bf-main { color: var(--t2); line-height: 1.6 }
+.bf-main b { color: var(--t1); font-size: 15px; font-variant-numeric: tabular-nums }
+.bf-bad { color: var(--error); font-weight: 600 }
+.bf-warn { color: var(--warning); font-weight: 500 }
+.bf-main em { font-style: normal; font-size: 11px; opacity: .8 }
 .kpi-zone { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 @media (min-width: 1400px) { .kpi-zone { grid-template-columns: repeat(5, 1fr); gap: 10px; } }
 .kpi-core-grid { display: contents; }
