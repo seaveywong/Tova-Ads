@@ -513,13 +513,18 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             _bound_roots = {_domain_root(s) for s in _json.loads(existing.bound_subdomains or "[]")}
         except Exception:
             pass
+        if existing and existing.custom_domain:   # 迁移0061 前的存量页 bound_subdomains=NULL
+            _bound_roots.add(_domain_root(existing.custom_domain.replace("https://", "").replace("http://", "")))
         for r in roots:
             _r = _domain_root(r)
             if _r in _bound_roots:
                 continue
-            # 查询成功才判状态；CF 查询失败（success=False）跳过本门——部署环节本身还要
-            # 调 CF，真故障会在那里自然报错，不应在门口用「未接入平台」误导（曾的坑）
-            _zd = cf._get("/zones", params={"name": _r})
+            # 查询成功才判状态；CF 查询失败（success=False / httpx 异常）跳过本门——部署环节
+            # 本身还要调 CF，真故障会在那里自然报错，不应在门口用「未接入平台」误导（曾的坑）
+            try:
+                _zd = cf._get("/zones", params={"name": _r})
+            except Exception:
+                continue
             if _zd.get("success") is not True:
                 continue
             _zrows = _zd.get("result") or []
@@ -548,6 +553,10 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             if cf.get_zone_id(_domain_root(sub)):
                 cf.bind_custom_domain(body.project_name, sub)
                 bound.append(sub)
+            else:
+                # zone 查不到（get_zone_id 返 None 不是异常）也要留痕——否则存量页 zone 恶化
+                # 后编辑发布：200 + bind_errors 空 + 域名没绑上，无声复现本次事故（复审P2）
+                bind_errors.append(f"{sub}: CF zone 未找到（域名 NS 可能已移出平台）")
         except Exception as e:
             # 绑定失败不静默——响应带回（前端 toast）。「发布成功但域名没绑上」曾无从排查
             bind_errors.append(f"{sub}: {str(e)[:100]}")
@@ -1379,10 +1388,11 @@ def _probe_http(method: str, url: str, attempts: int = 2, **kw):
 
 def _is_cf_error_page(resp) -> bool:
     """CF 边缘错误页（1001 DNS 解析/522 连接超时/530 等）——状态码可能是 4xx（曾抓到
-    409+`error code: 1001`：灰云 CNAME 指向 pages.dev 但域名未激活），<500 判 pass 会误绿。
-    正文特征 `error code:` 是可靠标记（worker 从不返回这种正文）。"""
+    409+`error code: 1001`：灰云 CNAME 指向 pages.dev 但域名未激活）。
+    只在 status>=400 时嗅探全文 `error code:`——用户上传的落地页正文前 200 字节完全
+    可能合法包含这串字面量（200 不能误判，复审P2）。"""
     try:
-        return "error code:" in resp.text[:200]
+        return resp.status_code >= 400 and "error code:" in resp.text
     except Exception:
         return False
 

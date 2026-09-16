@@ -3491,9 +3491,13 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
                 )
                 if has_keepalive:
                     # note 记系列名+ID（不清空）——徽标 tooltip/保活卡直接看到「保活中」对应哪条，
-                    # 不再「日志里建成功了 UI 无从对账」（2026-09-16 用户反馈）
+                    # 不再「日志里建成功了 UI 无从对账」（2026-09-16 用户反馈）。
+                    # 复审P2：_kc 与 has_keepalive 同状态过滤——否则排前面的 ARCHIVED 旧保活
+                    # 系列会把死系列名写进 note（对账口径错）
+                    _ka_ok = ("ACTIVE", "PAUSED", "PENDING_REVIEW", "IN_PROCESS", "WITH_ISSUES")
                     _kc = next((c for c in (camps.get("data") or [])
-                                if prefix in (c.get("name") or "")), None)
+                                if prefix in (c.get("name") or "")
+                                and c.get("effective_status") in _ka_ok), None)
                     acc.keepalive_state = "active_ad"
                     acc.keepalive_note = (f"保活系列 {_kc.get('name')} #{_kc.get('id')}"
                                           if _kc else (acc.keepalive_note or ""))

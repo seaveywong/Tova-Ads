@@ -62,7 +62,9 @@ const visiblePages = computed(() => {
 const visibleLpPages = computed(() => visiblePages.value.filter(isLp))
 const visibleShortPages = computed(() => visiblePages.value.filter(p => !isLp(p)))
 const rotLabel = (m) => { const o = rotationOptions.value.find(x => x.v === (m || 'first')); return o ? o.l : (m || 'first') }
-const emptyText = computed(() => modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyNoLp'))
+const emptyText = computed(() => ownerFilter.value
+  ? t('landing.emptyOwnerFiltered', { owner: ownerFilter.value.split('@')[0] })
+  : (modeFilter.value === 'short' ? t('landing.emptyNoShort') : t('landing.emptyNoLp')))
 
 const loadPages = async () => {
   loading.value = true
@@ -805,8 +807,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in visibleLpPages" :key="p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
-                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
+          <span class="owner-cell"><span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span></span>
           <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length" :title="p.bound_subdomains.join(' | ')">
             <button v-for="sub in p.bound_subdomains.slice(0,3)" :key="sub" class="dom-chip"
                     :title="'https://' + sub" @click.stop="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
@@ -834,8 +836,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
-                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
+          <span class="owner-cell"><span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span></span>
           <span class="short-url" :title="(p.target_urls||[]).join(' | ')">🔗 {{ (p.target_urls||[])[0] || '—' }}<i v-if="(p.target_urls||[]).length > 1"> +{{ p.target_urls.length - 1 }}</i></span>
           <span class="short-rot">{{ rotLabel(p.rotation_mode) }}</span>
           <span class="short-stat">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
@@ -850,7 +852,8 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </div>
       <div v-if="!visiblePages.length && !loading" class="empty">
         <div>{{ emptyText }}</div>
-        <button class="btn primary empty-cta-btn" @click="openCreate">+ {{ t('landing.newLink') }}</button>
+        <button v-if="ownerFilter" class="btn" @click="ownerFilter = ''">{{ t('landing.clearOwnerFilter') }}</button>
+        <button v-else class="btn primary empty-cta-btn" @click="openCreate">+ {{ t('landing.newLink') }}</button>
       </div>
     </div>
 
@@ -1497,9 +1500,10 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .short-stat{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;white-space:nowrap}
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 .lp-row2{grid-template-columns:70px minmax(130px,1.15fr) auto minmax(170px,1.1fr) 118px repeat(3,minmax(88px,.7fr)) auto auto}
+.owner-cell{min-width:0}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右） */
 .owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
-.owner-chip.clickable:hover{color:var(--ac);border-color:var(--ac)}
+.owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
 @media(max-width:900px){.lp-row2{grid-template-columns:1fr 1fr;row-gap:6px}.lp-dom-chips{grid-column:1/-1}}
 .short-ops{display:flex;gap:5px}

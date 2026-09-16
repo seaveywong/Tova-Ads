@@ -521,12 +521,14 @@ def list_importable_zones(
     if not cf_token:
         raise HTTPException(500, "域名服务未配置")
     cf = CfClient(cf_token, cf_account)
-    resp = cf._get("/zones", params={"per_page": 50})
+    # 复审P1：自动翻页（cf.list_zones）——裸 _get 只拉 50 个，>50 zone 的账户后面全漏
+    # （超管域名抽屉/分配池两个视图口径还会不一致）
+    zones = cf.list_zones()
     imported = {d.domain for d in db.query(LandingDomain).filter(
         LandingDomain.tenant_id == user.tenant_id).all()}
     return [{"name": z.get("name"), "status": z.get("status"),
              "imported": z.get("name") in imported}
-            for z in (resp.get("result") or [])]
+            for z in zones]
 
 
 class DomainImportIn(BaseModel):

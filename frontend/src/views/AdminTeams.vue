@@ -96,12 +96,12 @@ const domainTeamId = ref(0)
 const domainTeamName = ref('')
 const domainPool = ref([])
 const domainTeamDomains = ref([])
-const openDomains = async (row) => {
+const openDomains = async (row, keepFilter = false) => {
   domainTeamId.value = row.id
   domainTeamName.value = row.name
   domainOpen.value = true
   domainLoading.value = true
-  zoneFilter.value = ''
+  if (!keepFilter) zoneFilter.value = ''   // 只在真开抽屉时清搜索（复审P2：逐个分配刷新不清）
   try {
     const pool = await GET('/admin/domains/discover')
     domainPool.value = (pool || []).map(z => ({
@@ -135,12 +135,12 @@ const toggleDomainAssign = async (z) => {
     try { await POST('/admin/domains/assign', { domain: z.domain, tenant_id: domainTeamId.value }) }
     catch (e) { ElMessage.error(e.message) }
   }
-  openDomains({ id: domainTeamId.value, name: domainTeamName.value })
+  openDomains({ id: domainTeamId.value, name: domainTeamName.value }, true)
   load()
 }
 const unassignDomain = async (d) => {
   try { await DELETE(`/admin/domains/${d.domain_row_id}`) } catch (e) { ElMessage.error(e.message) }
-  openDomains({ id: domainTeamId.value, name: domainTeamName.value })
+  openDomains({ id: domainTeamId.value, name: domainTeamName.value }, true)
   load()
 }
 const hasMore = (row) => {
@@ -328,7 +328,7 @@ const submitMemberAdd = async () => {
         </div>
         <div class="dm-divider"></div>
         <!-- 平台域名池（全部域名，勾选分配给该团队；已分给其他团队的禁选） -->
-        <div class="dm-sec-title">{{ t('teams.domainPool') }} <i>{{ domainPool.filter(z => !z.assigned_to.length).length }}</i></div>
+        <div class="dm-sec-title">{{ t('teams.domainPool') }} <i>{{ filteredDomainPool.filter(z => !z.assigned_to.length).length }}</i></div>
         <input v-model="zoneFilter" class="dm-search" :placeholder="t('teams.domainSearch')" />
         <div class="dm-pool">
           <label v-for="z in filteredDomainPool" :key="z.domain" class="dm-pool-row"

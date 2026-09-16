@@ -1452,12 +1452,18 @@ def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
 
 def _bg_sync_imported_ads(tenant_id: int, act_ids: list[str]):
     """导入后立即同步新账户的 campaigns/adsets/ads 进 ads_cache（后台跑）。
-    与 15min cron 同一实现（_sync_one），失败静默——cron 会兜底。"""
+    与 15min cron 同一实现（_sync_one），失败静默——cron 会兜底（但记日志，复审P2）。"""
+    import logging
+    log = logging.getLogger("toveads.import")
     db = SuperSessionLocal()
+    ok = fail = 0
     try:
         from .ads import _sync_one, _acc_platform
         from ..core.fb_tokens import client_for_account
         from ..models.fb import Account as _Acc
+        if len(act_ids) > 50:
+            log.warning(f"[ImportAdsSync] tenant={tenant_id} {len(act_ids)} 个账户超 50 上限，"
+                        f"本次只同步前 50，其余等 15min cron 兜底")
         for aid in act_ids[:50]:   # 单批上限 200，广告层拉取较重——50 个封顶防长任务
             acc = db.query(_Acc).filter(
                 _Acc.tenant_id == tenant_id, _Acc.act_id == aid,
@@ -1471,8 +1477,14 @@ def _bg_sync_imported_ads(tenant_id: int, act_ids: list[str]):
                     _sync_one(db, tenant_id, aid, client,
                               platform=_acc_platform(acc), currency=acc.currency or "USD")
                     db.commit()
-            except Exception:
+                    ok += 1
+                else:
+                    fail += 1
+            except Exception as e:
                 db.rollback()
+                fail += 1
+                log.warning(f"[ImportAdsSync] {aid} 失败（等 cron 兜底）: {e}")
+        log.info(f"[ImportAdsSync] tenant={tenant_id} 完成：{ok} 成功 / {fail} 失败")
     finally:
         db.close()
 

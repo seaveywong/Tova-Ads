@@ -2237,7 +2237,8 @@ def _strip_adv_bid(adv: dict | None, bid_fb) -> dict | None:
 
 
 def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str, landing_url: str,
-                       post_content: dict = None, tt=None, act_id: str = "") -> str:
+                       post_content: dict = None, tt=None, act_id: str = "",
+                       _diag: dict | None = None) -> str:
     """部署时解析 Instant Form ID（page/advertiser-aware）。优先级：
     1. tpl.lead_form_template_id（选了表单模板）→ 同载体有 form_id 复用；否则按 config 建到「目标载体」
     2. tpl.lead_form_id（手填的已建 form_id）→ 直接用（用户自负；可能跨载体失效）
@@ -2287,7 +2288,9 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                             ft.fb_form_id = form_id; ft.fb_page_id = act_id
                         return form_id
                 except Exception as _fe_tt:
-                    # 降级前留痕（journal 可查）——曾静默吞，用户只见「表单内容不对」无从定位
+                    # 降级前留痕（journal + 调用方 item 可见）——曾静默吞，用户只见「表单内容不对」无从定位
+                    if _diag is not None:
+                        _diag.setdefault("degraded", []).append(f"TT: {str(_fe_tt)[:120]}")
                     import logging as _lg
                     _lg.getLogger("toveads.launch").warning(
                         f"[LeadForm][TT] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
@@ -2362,8 +2365,10 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                         _pt = fb.get_page_access_token(page_id)
                         if _pt:
                             from ..core.fb_client import FbClient as _FbC
+                            # limit 走 kwarg：get_paged 的断页判断比函数形参 limit（默认200），
+                            # 塞 params 里恰好 100 个时会被误判「无下一页」提前断页
                             for _f in _FbC(_pt).get_paged(
-                                    f"{page_id}/leadgen_forms", {"fields": "id,name", "limit": 100}):
+                                    f"{page_id}/leadgen_forms", {"fields": "id,name"}, limit=100):
                                 if (_f.get("name") or "") == payload.get("name"):
                                     if not ft.fb_form_id or ft.fb_page_id != page_id:
                                         ft.fb_form_id = _f.get("id"); ft.fb_page_id = page_id
@@ -2374,6 +2379,8 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 _lg.getLogger("toveads.launch").warning(
                     f"[LeadForm][FB] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
                     f"page={page_id}，降级手填/AI：{_fe_fb}")
+                if _diag is not None:
+                    _diag.setdefault("degraded", []).append(str(_fe_fb)[:120])
             except Exception as _fe_fb:
                 # 降级前留痕（journal 可查）——曾静默吞：FB 拒建（缺字段/权限）→ 广告挂上
                 # FB 默认表单 → 用户看到「表单内容/描述和 Tova 设置完全不一样」无从定位
@@ -2381,6 +2388,8 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 _lg.getLogger("toveads.launch").warning(
                     f"[LeadForm][FB] 表单模板创建失败 tpl={tpl.lead_form_template_id} "
                     f"page={page_id}，降级手填/AI：{_fe_fb}")
+                if _diag is not None:
+                    _diag.setdefault("degraded", []).append(str(_fe_fb)[:120])
     # 2. 手填 lead_form_id（不校验 page；仅未选模板时用）
     if tpl.lead_form_id:
         return tpl.lead_form_id
@@ -2668,14 +2677,16 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
                        else _resolve_budget_fb(sdb, item.act_id, tpl, tenant_id))
     # 解析 Instant Form ID：表单模板 > 已建 form_id > AI 自动生成（LEADS 目标）
     lead_form_id = ""
+    _fdiag = {}
     if tpl.objective == "OUTCOME_LEADS" and page_id:
         try:
             lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, page_id,
                                               _stable_landing_url(tpl.landing_url or "", tpl.name or ""),
-                                              post_content=post_content)
+                                              post_content=post_content, _diag=_fdiag)
         except Exception as _lfe:
             # 表单解析/创建失败不阻断主流程（FB 会用默认表单或报错），但必须让进度可见——
             # 曾静默吞掉（App 缺 pages_manage_ads 权限建表被拒）→ 用户以为「表单模板不同步」
+            _fdiag.setdefault("degraded", []).append(str(_lfe)[:120])
             _item_note(sdb, item, f"表单创建失败（广告将无 Instant Form）：{str(_lfe)[:120]}")
     # 没选消息模板 → AI 从素材文案生成欢迎语（ENGAGEMENT+消息目标）；跟帖无素材→用帖内容
     message_template = tpl.message_template or ""
@@ -2766,6 +2777,12 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
     )
     if _a_warn:
         r["auto_subcode_warn"] = _a_warn   # 调用方在 item 上留痕（success 也会带 error）
+    if _fdiag.get("degraded"):
+        # 表单降级走 auto_subcode_warn 通道（单模板调用方 3495 落 item.error）：
+        # progress 会被批量收尾「完成：成功X/Y」覆盖，error 才是终态可见位
+        _fw = f"[表单] Instant Form 创建失败（该广告已降级默认/AI 表单）：{_fdiag['degraded'][0][:110]}"
+        r["auto_subcode_warn"] = (f"{r['auto_subcode_warn']}；{_fw}"
+                                  if r.get("auto_subcode_warn") else _fw)
     if r.get("pixel_swapped"):
         # 平铺/批量像素自愈留痕（批AZ 统一）：模板像素令牌无权 → 已换账户可用像素；
         # 落地页同步回写新像素（worker fire 页自身像素，只换 adset=FB 零转化）
@@ -2790,6 +2807,7 @@ def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
     不 touch 会被判孤儿标 failed → 用户重试 = 已建系列再建一份（双份预算）。"""
     from sqlalchemy import text as _t
     ok, fails, last = 0, [], None
+    _w_warns: list[str] = []   # 逐系列降级提示（表单/自动建链）——收尾汇总落 item.error
     for i, a in enumerate(assets):
         name = _series_name(tpl, a, i)
         # 心跳+进度注记（批BQ）：视频上传可能>10min，不提交的话 reap 在别的事务里看不到未提交心跳
@@ -2798,6 +2816,8 @@ def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
             r = _deploy_series_fb(sdb, fb, item, tpl, a, tenant_id, link,
                                   targeting, advanced, post_content, series_name=name)
             ok += 1; last = r
+            if r.get("auto_subcode_warn"):
+                _w_warns.append(f"{name}: {r['auto_subcode_warn'][:110]}")
             write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                       target_type="ad", target_id=str(r.get("ad_id", "")),
                       action_type="deploy", source="launch", result="success",
@@ -2816,6 +2836,10 @@ def _deploy_item_fb_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, as
                       result="fail", friendly_error=str(e)[:200],
                       metadata={"act_id": item.act_id, "template_id": tpl.id, "series_name": name})
     _apply_batch_result(job, item, len(assets), ok, fails, last, is_retry=is_retry)
+    if _w_warns and item.status == "success":
+        # 降级不静默（progress 会被收尾覆盖，error 是终态位；同树路径 auto_warns 模式）
+        item.error = f"部署提示 {len(_w_warns)} 条：{'；'.join(_w_warns[:2])}"[:300]
+        item.error_code = "auto_subcode_degraded"
 
 
 def _tree_expanded_count(adsets: list) -> int:
@@ -3150,15 +3174,21 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     # 批O-2：广告身份用节点级主页（无=基础链：抽屉/模板/账户自动识别）
                     _ad_page = str(anode.get("page_id") or "") or _page_id
                     lead_form_id = ""
+                    _fdiag_t = {}
                     if tpl.objective == "OUTCOME_LEADS" and _ad_page:
                         try:
                             lead_form_id = _resolve_lead_form(
                                 fb, sdb, vtpl, asset, _ad_page,
                                 _stable_landing_url(vtpl.landing_url or "", tpl.name or ""),
-                                post_content=post_content)
+                                post_content=post_content, _diag=_fdiag_t)
                         except Exception as _lfe:
                             # 同 _deploy_series_fb：不阻断，但进度可见（静默吞=「表单模板不同步」错觉）
+                            _fdiag_t.setdefault("degraded", []).append(str(_lfe)[:120])
                             _item_note(sdb, item, f"表单创建失败（广告将无 Instant Form）：{str(_lfe)[:120]}")
+                    if _fdiag_t.get("degraded"):
+                        # 收 auto_warns（收尾落 item.error 终态可见）——progress 会被「广告 i/N」盖掉
+                        auto_warns.append(f"[表单] {ad_name}: Instant Form 创建失败"
+                                          f"（已降级默认/AI 表单）：{_fdiag_t['degraded'][0][:90]}")
                     # 消息模板：节点选的 MessageTemplate > 模板级 raw JSON > AI 从素材文案生成
                     message_template = ""
                     _mt_type = "messenger"   # MessageTemplate.type（批次I 消费位：whatsapp 分流）
@@ -3441,6 +3471,12 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 ).first()
                 if not _acc3:
                     raise FbApiError("no_id", "该账户已移除纳管，跳过（移除后建广告无止损覆盖）")
+                # 后端闸（复审P1：前端禁选只是提示性，API 直调/快照过期仍可提交）：
+                # 明确坏状态（2=停用 7=封禁）直接拒建；None/未知不拦（从未同步过的存量不冤杀）
+                if _acc3.account_status == 2:
+                    raise FbApiError("no_id", "账户已停用（FB 拒绝创建/编辑广告），跳过——恢复后重试")
+                if _acc3.account_status == 7:
+                    raise FbApiError("no_id", "账户已被封禁，跳过——请在账户页查看详情")
                 # 跟帖(reuse)：选能管该帖主页的写令牌（多令牌场景扫候选池，不只 priority 最高）
                 is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
                 _page_for_token = (item.page_id or tpl.page_id or "") if is_reuse else ""

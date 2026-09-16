@@ -342,34 +342,60 @@ def hard_delete_tenant(tid: int,
         raise HTTPException(400, f"团队「{t.name}」是受保护团队，不能删除")
     tname = t.name
 
+    # 先停用（复审P1：多趟删除跑数分钟，期间巡检/同步 cron 仍会往该租户表插行——
+    # suspended=暂停巡检，最廉价地收敛并发插入窗口；终删 FK 撞上还有兜底重跑）
+    t.status = "suspended"
+    db.commit()
+
     # 级联删除该租户的全部数据（BYPASSRLS system db session）。
     # 表清单动态发现（information_schema）——硬编码清单曾 7 张表名不存在（第一张就把事务
     # 打崩成 InFailedSqlTransaction 连环 500），又漏 15 张真表（accounts/tt_credentials/fb_apps…）。
     # 每表独立事务：失败只脏本表（rollback 后继续），多趟循环自动解 FK 删除顺序。
     from sqlalchemy import text as _text
-    _tbls = [r[0] for r in db.execute(_text(
-        "SELECT table_name FROM information_schema.columns "
-        "WHERE column_name = 'tenant_id' AND table_schema = 'public' "
-        "GROUP BY table_name")).fetchall()]
-    deleted = {}
-    remaining = set(_tbls)
-    while remaining:
-        progressed = False
-        for tbl in sorted(remaining):
-            try:
-                n = db.execute(_text(f'DELETE FROM "{tbl}" WHERE tenant_id = :tid'),
-                               {"tid": tid}).rowcount
-                db.commit()
-                if n:
-                    deleted[tbl] = n
-                remaining.discard(tbl)
-                progressed = True
-            except Exception:
-                db.rollback()
-        if not progressed:
-            break   # 剩余表互相约束解不动：记录跳过，不拦团队本体删除
-    # 删团队本体
-    db.delete(t)
+    def _sweep() -> tuple[dict, set]:
+        _tbls = [r[0] for r in db.execute(_text(
+            "SELECT table_name FROM information_schema.columns "
+            "WHERE column_name = 'tenant_id' AND table_schema = 'public' "
+            "GROUP BY table_name")).fetchall()]
+        deleted: dict = {}
+        remaining = set(_tbls)
+        while remaining:
+            progressed = False
+            for tbl in sorted(remaining):
+                try:
+                    n = db.execute(_text(f'DELETE FROM "{tbl}" WHERE tenant_id = :tid'),
+                                   {"tid": tid}).rowcount
+                    db.commit()
+                    if n:
+                        deleted[tbl] = n
+                    remaining.discard(tbl)
+                    progressed = True
+                except Exception:
+                    db.rollback()
+            if not progressed:
+                break   # 剩余表互相约束解不动：记录跳过，不拦团队本体删除
+        return deleted, remaining
+    deleted, remaining = _sweep()
+    # 删团队本体（复审P1：删除窗口内 cron 重新插入的行会顶住 tenants FK——撞上先重扫一轮再删）
+    from sqlalchemy.exc import IntegrityError as _IE
+    try:
+        db.delete(t)
+        db.commit()
+    except _IE:
+        db.rollback()
+        deleted2, remaining = _sweep()
+        for k, v in deleted2.items():
+            deleted[k] = deleted.get(k, 0) + v
+        db.delete(t)
+        db.commit()
+    # 平台级审计（复审P2：该租户的 action_logs 已随删清空，删除动作本身必须留痕——
+    # 记在超管自己的租户名下，行不会被本次删除波及）
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(),
+              actor_type="user", actor_user_id=user.id,
+              target_type="tenant", target_id=str(tid),
+              action_type="hard_delete", source="admin", result="success",
+              metadata={"name": tname, "tables_cleaned": deleted,
+                        "tables_skipped": sorted(remaining)})
     db.commit()
     return {"deleted": True, "tenant_id": tid, "name": tname,
             "tables_cleaned": deleted, "tables_skipped": sorted(remaining)}

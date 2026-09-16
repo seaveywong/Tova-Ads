@@ -2029,7 +2029,7 @@ const preflight = async (tpl) => {
     let accs = accounts.value.length ? accounts.value.filter(a => (a.platform || 'fb') === wantPlat) : []
     if (!accs.length) { try { accs = (await GET('/fb/accounts')).filter(a => (a.platform || 'fb') === wantPlat) } catch {} }
     const target = accs.find(x => x.account_status === 1)   // 预检只用正常账户（异常的建 广告必失败）
-    if (!target) { ElMessage.warning(t('launch.preflightNoAccount')); preflighting.value = false; return }
+    if (!target) { ElMessage.warning(accs.length ? t('launch.preflightAllAbnormal') : t('launch.preflightNoAccount')); preflighting.value = false; return }
     const r = await POST('/launch-templates/' + tpl.id + '/preflight', { act_id: target.act_id })
     preflightResult.value = r; preflightVisible.value = true
   } catch (e) { showError(e, t('launch.preflightFail')) }
@@ -2152,14 +2152,11 @@ const toggleAcc = async (id) => {
 const _selectableAccs = () => filteredDeployAccounts.value.filter(a => a.account_status === 1 && (!reuseDeployPage.value || accManagesReusePage(a.act_id)))
 const accAbnormal = (a) => a.account_status !== 1
 const deploySelectAll = () => {
+  // 全选=只选可选集（正常账户；异常账户 checkbox 本就禁用——「只选正常账户」按钮曾与其
+  // 语义重复，复审P2 已删）
   const s = new Set(_selectableAccs().map(a => a.act_id))
   selectedAccs.value = s
   _selectableAccs().forEach(a => ensureAccConfig(a.act_id))
-}
-const deploySelectActive = () => {
-  const s = new Set(_selectableAccs().filter(a => a.account_status === 1).map(a => a.act_id))
-  selectedAccs.value = s
-  _selectableAccs().filter(a => s.has(a.act_id)).forEach(a => ensureAccConfig(a.act_id))
 }
 const deployClearSel = () => { selectedAccs.value = new Set() }
 // 账户显示名（toast 明细用；名字缺失退回 act_id）
@@ -2293,7 +2290,7 @@ const batchPreflight = async () => {
   // 预检目标账户：优先已选且正常的 → 已选 → 未选但正常 → 第一个（payload 结构与账户无关，只影响币种/汇率展示）
   const target = accs.find(a => sel.includes(a.act_id) && a.account_status === 1)
     || accs.find(a => sel.includes(a.act_id)) || accs.find(a => a.account_status === 1) || accs[0]
-  if (!target) return ElMessage.warning(t('launch.preflightNoAccount'))
+  if (!target) return ElMessage.warning(accs.length ? t('launch.preflightAllAbnormal') : t('launch.preflightNoAccount'))
   batchPreflighting.value = true
   try {
     const r = await POST('/launch-templates/' + deployTpl.value.id + '/preflight',
@@ -3511,7 +3508,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
       <div class="acc-batch-row">
         <button class="op sm" @click="deploySelectAll">{{ t('launch.deploySelectAll') }}</button>
-        <button class="op sm" @click="deploySelectActive">{{ t('launch.deploySelectActive') }}</button>
         <button class="op sm" @click="deployClearSel">{{ t('launch.deployClear') }}</button>
         <button v-if="deployTpl?.platform !== 'tt' && deployTpl?.post_source !== 'reuse'" class="op sm" :disabled="!selectedAccs.size" @click="randomAssignPages">{{ t('launch.randAssignPages') }}</button>
 </div>
