@@ -36,9 +36,12 @@ def upgrade():
         sa.UniqueConstraint("asset_id", name="uq_asset_scores_asset"),
     )
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON asset_ad_links TO toveads_app")
-    op.execute("GRANT SELECT ON asset_ad_links TO toveads_super")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON asset_ad_links TO toveads_super")
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON asset_scores TO toveads_app")
-    op.execute("GRANT SELECT ON asset_scores TO toveads_super")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON asset_scores TO toveads_super")
+
+
+    op.execute("GRANT USAGE, SELECT ON SEQUENCE asset_ad_links_id_seq, asset_scores_id_seq TO toveads_app, toveads_super")
 
 
 def downgrade():
