@@ -266,7 +266,7 @@ onMounted(async () => {
     myPerms.value = me.permissions || []
     setUserPerms(me.permissions || [])
   } catch {}
-  if (myPerms.value.includes('ads.pause') || isSuperadmin.value) loadGuard()
+  if (myPerms.value.includes('ads.pause') || isSuperadmin.value) { loadGuard(); loadScd() }   // loadScd 缺失=刷新后倒计时永远显示关闭（2026-09-17 实证）
   poll = async () => {
     if (document.hidden) return
     try {
@@ -274,6 +274,8 @@ onMounted(async () => {
       const items = Array.isArray(all) ? all : (all?.items || [])
       unreadCount.value = items.filter(n => !ALERT_EVENT_TYPES.includes(n.event_type)).length
     } catch {}
+    // 倒计时剩余随基线（本人 last_active）每分钟刷新——不随 poll 重拉会一直显示打开页面那一刻的冻结值
+    if (myPerms.value.includes('ads.pause') || isSuperadmin.value) loadScd()
   }
   poll(); pollTimer = setInterval(poll, 60000)   // 60s（visibilitychange 回前台即时补偿；纯角标数不必 30s 高频）
   document.addEventListener('visibilitychange', poll)

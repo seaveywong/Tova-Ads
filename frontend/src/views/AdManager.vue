@@ -908,7 +908,8 @@ const unsubscribeLeads = async () => {
         <span v-if="currentAccountName" class="ph-fresh">{{ currentAccountName }}</span>
       </div>
       <div class="ph-actions">
-        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('common.refresh') }}</button>
+        <button v-if="tab !== 'lead'" class="head-btn" :disabled="loading" :title="t('adm.refreshCacheTip')" @click="load()">{{ loading ? t('common.loading') + '…' : t('common.refresh') }}</button>
+        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('adm.refetch') }}</button>
       </div>
     </header>
     <!-- 警示条归组：账户状态横幅 + 死令牌横幅相邻（都在工具条上方，间距统一） -->
@@ -1008,7 +1009,7 @@ const unsubscribeLeads = async () => {
               <td><div class="ad-nm">
                 <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
-                  <div class="sid">{{ a.account_name }} · {{ a.id }}</div>
+                  <div class="sid">{{ a.account_name }} · {{ a.act_id }}</div>
                   <div v-if="tab !== 'campaign'" class="sid">{{ contextOf(a).campaign?.name }}<template v-if="tab === 'ad' && contextOf(a).adset"> › {{ contextOf(a).adset.name }}</template></div>
                   <div v-if="snapshotStale(a) || accDead(a)" class="sid" :class="{ 'stale-snapshot': snapshotStale(a) }" :title="a.snapshot_at ? t('adm.metricsAt', { time: fmtTime(a.snapshot_at) }) : ''">{{ snapshotText(a) }}</div>
                   <span v-if="tab === 'ad' && redirectMap[a.id]" class="rd-mark" @click="openRedirect(a)">{{ t('adm.redirectShort') }}</span>

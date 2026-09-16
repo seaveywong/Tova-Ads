@@ -1545,6 +1545,25 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         else:
             checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "warn",
                            "detail": "display 未解析到像素（页面不会 fire 转化；有意不带像素可忽略）"})
+    # 5.5 转化事件（像素已配但转化事件空 → CTA 点击零转化上报；2026-09-17 $1k 0 转化事故根因）
+    try:
+        _pconf_px = _j.loads(p.pixel_ids) if p.pixel_ids else []
+    except Exception:
+        _pconf_px = []
+    _eff_px = _pconf_px if (p.redirect_mode or "display") == "redirect" else (((rd or {}).get("pixel_ids")) or _pconf_px)
+    try:
+        _ce = _j.loads(p.conversion_events) if p.conversion_events else ([p.conversion_event] if p.conversion_event else [])
+    except Exception:
+        _ce = []
+    if not _eff_px:
+        checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "pass",
+                       "detail": "无像素（无需转化事件）"})
+    elif _ce:
+        checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "pass",
+                       "detail": "CTA 点击 fire：" + "、".join(str(e) for e in _ce[:4])})
+    else:
+        checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "warn",
+                       "detail": "已配像素但转化事件为空：CTA 点击不会向 FB 上报转化（优化 Purchase 的系列将计 0 转化）"})
     # 6. 跳转目标（route_next 返回 + 可达性 HEAD）
     tgt = ((rd or {}).get("target_url")) or ""
     if not tgt:

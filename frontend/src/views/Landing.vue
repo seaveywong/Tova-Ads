@@ -1027,6 +1027,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
               <el-option v-for="o in convEventOptions" :key="o.v" :value="o.v" :label="o.l" />
             </el-select>
           </div>
+          <div v-if="form.pixel_ids.length && !form.conversion_events.length" class="conv-empty-warn">{{ t('landing.convEmptyWarn') }}</div>
         </div>
         <!-- TikTok 像素区块 -->
         <div class="pixel-section tt-section">
@@ -1467,6 +1468,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-card:hover{border-color:var(--bd2);box-shadow:var(--shadow-card);transform:translateY(-1px)}
 .pixel-hint{font-size:11px;color:var(--t3);margin:-6px 0 10px 92px;line-height:1.5}
 .pixel-section{border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.conv-empty-warn{font-size:12px;color:var(--warn,#e6a23c);margin:-2px 0 8px;line-height:1.5}
 .pixel-section-header{font-size:13px;font-weight:600;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
 .fb-section{border-color:rgba(24,119,242,.3);background:rgba(24,119,242,.03)}
 .fb-section .pixel-section-header{color:#1877f2}

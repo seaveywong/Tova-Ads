@@ -352,6 +352,7 @@ DATA = {
     "landing.scDomain": {"zh": "域名+SSL", "en": "Domain + SSL"},
     "landing.scWorker": {"zh": "Worker存活", "en": "Worker alive"},
     "landing.scPixel": {"zh": "像素配置", "en": "Pixel config"},
+    "landing.scConvEvents": {"zh": "转化事件", "en": "Conversion events"},
     "landing.scTarget": {"zh": "跳转目标", "en": "Redirect target"},
     "landing.scProtection": {"zh": "防护规则", "en": "Protection rules"},
     "landing.scFbBan": {"zh": "FB域名封禁", "en": "FB domain ban"},
