@@ -197,7 +197,6 @@ def set_page_category(
         FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id).first()
     if not cred:
         raise HTTPException(404, "令牌不存在")
-    _cred_scope_or_404(db, user, cred_id)
     cat = body.category.strip()
     if not cat or len(cat) > 120:
         raise HTTPException(400, "类别需 1-120 字符")
@@ -450,6 +449,7 @@ def delete_credential(
     db: Session = Depends(get_db),
 ):
     """删除令牌（解绑关联账户 + 删凭证行）。"""
+    _cred_scope_or_404(db, user, cred_id)
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
