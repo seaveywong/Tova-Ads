@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { isSuperadminSync } from '../router'
 import { fmtTime } from '../composables/useTz'
 const isSuper = isSuperadminSync()
-const isOwnerOrSuper = isSuper || localStorage.getItem('tova_role') === 'owner'   // 作用域选择仅 owner/超管可见（operator 恒为名下）
+const isOwnerOrSuper = ref(false)   // 作用域选择仅 owner/超管可见（onMounted 从 /auth/me 拉取）
 
 const { t } = useI18n()
 const route = useRoute()
@@ -143,15 +143,15 @@ const editing = ref(null)
 const form = ref({})
 const inspecting = ref(false)
 const accountsList = ref([])
-const myUid = Number(localStorage.getItem('tova_uid') || 0)
+const myUid = ref(0)   // 复审P0：localStorage 无写入者曾致恒 0——限定账户下拉全员空
 // 限定账户下拉与作用域联动（2026-09-17 用户拍板）：仅名下 → 只列自己导入的账户；
 // 全团队 → 团队全部账户。切换到名下时清洗掉非名下的已选项（否则存进无效选择）。
 const scopeAwareAccounts = computed(() =>
   form.value.rule_scope === 'user'
-    ? accountsList.value.filter(a => a.owner_user_id === myUid)
+    ? accountsList.value.filter(a => a.owner_user_id === myUid.value)
     : accountsList.value)
 watch(() => form.value.rule_scope, (nv) => {
-  if (nv === 'user') {
+  if (nv === 'user' && accountsList.value.length) {
     const mine = new Set(scopeAwareAccounts.value.map(a => a.act_id))
     form.value.scope_act_ids = (form.value.scope_act_ids || []).filter(id => mine.has(id))
   }
@@ -178,7 +178,14 @@ const load = async () => {
   } catch (e) { ElMessage.error(e.message || t('guard.loadFail')) }
   loading.value = false
 }
-onMounted(load)
+onMounted(async () => {
+  try {
+    const me = await GET('/auth/me')
+    myUid.value = me.id
+    isOwnerOrSuper.value = isSuper || me.role === 'owner'
+  } catch {}
+  await load()
+})
 // 哨兵倒计时（2026-09-15 从设置页迁来，归属安全守护；ads.pause 端点 403 则隐藏卡片）
 
 const currentSchema = computed(() => RULE_TYPES.value[form.value.rule_type] || { params: [] })
@@ -266,7 +273,7 @@ const openEdit = (r) => {
     landing_metric: landingMetric, kpi_scope: kpiScope,
     action: r.action,
     scope_act_ids: r.scope_act_id ? r.scope_act_id.split(',').map(s => s.trim()).filter(Boolean) : [],
-    rule_scope: r.rule_scope || 'user',
+    rule_scope: (r.rule_scope === 'team' || !r.created_by) ? 'team' : 'user',  // 与引擎同口径：无创建人=团队全域
   }
   snapForm()
   editOpen.value = true

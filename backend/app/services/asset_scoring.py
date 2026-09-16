@@ -61,8 +61,13 @@ def sync_asset_ad_links(db, tenant_id: int) -> int:
             for kind, val in cands:
                 asset_id = key_map.get((act, kind, val))
                 if asset_id:
-                    db.add(AssetAdLink(tenant_id=tenant_id, asset_id=asset_id,
-                                       ad_id=ad_id, act_id=act, platform=cache.platform or "fb"))
+                    # ON CONFLICT 幂等（复审P1：撞唯一约束曾致整租户评分永久瘫痪）
+                    from sqlalchemy.dialects.postgresql import insert as _pg_insert
+                    _stmt = _pg_insert(AssetAdLink).values(
+                        tenant_id=tenant_id, asset_id=asset_id,
+                        ad_id=ad_id, act_id=act, platform=cache.platform or "fb"
+                    ).on_conflict_do_nothing(constraint="uq_asset_ad_links_ad")
+                    db.execute(_stmt)
                     existing.add((ad_id, cache.platform or "fb"))
                     added += 1
                     break
@@ -166,14 +171,21 @@ def compute_asset_scores(db, tenant_id: int) -> int:
 
 
 def maybe_recompute(db, tenant_id: int, max_age_h: int = 6):
-    """列表前惰性重算（过期才跑；量小同步执行）。"""
+    """列表前惰性重算（过期才跑）。advisory lock 防并发双跑（复审P1：两用户同开
+    素材页曾会撞 uq_asset_scores 整体回滚）；拿不到锁=别人在算，直接跳过本请求。"""
     from ..models.scoring import AssetScore
     latest = db.query(AssetScore.computed_at).filter(
         AssetScore.tenant_id == tenant_id).order_by(AssetScore.computed_at.desc()).first()
     if not latest or not latest[0] or datetime.now(timezone.utc) - latest[0] > timedelta(hours=max_age_h):
+        from ..core.database import acquire_run_lock, release_run_lock
+        lock = acquire_run_lock(db, 120)   # try 模式：拿不到立即返回 None
+        if not lock:
+            return
         try:
             n = compute_asset_scores(db, tenant_id)
             log.info(f"[AssetScore] tenant={tenant_id} recomputed, scored={n}")
         except Exception as e:
             db.rollback()
             log.warning(f"[AssetScore] tenant={tenant_id} 重算失败（列表不带新分）: {e}")
+        finally:
+            release_run_lock(db, 120)

@@ -189,6 +189,7 @@ def oauth_callback(request: Request):
         ).first()
         if existing:
             existing.access_token_enc = encrypt(long_tok)
+            existing.created_by = state.get("uid")   # 复审P2：OAuth 路径曾不写录入人（审计断链）
             existing.status = "active"
             existing.token_source = "oauth"
             existing.permission_snapshot = perm_snapshot or existing.permission_snapshot
@@ -206,7 +207,8 @@ def oauth_callback(request: Request):
             except Exception:
                 _cap = None
             db.add(FbCredential(
-                tenant_id=tenant_id, type="user_token", alias=me.get("name"),
+                tenant_id=tenant_id, created_by=state.get("uid"),   # 复审P2：录入人
+                type="user_token", alias=me.get("name"),
                 access_token_enc=encrypt(long_tok), fb_user_id=me.get("id"),
                 fb_user_name=me.get("name"), status="active", token_type="operate",
                 token_source="oauth", permission_snapshot=perm_snapshot,

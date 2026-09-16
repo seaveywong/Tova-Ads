@@ -37,7 +37,7 @@ export default {
     ago: { minutes: ' · {n}分钟前', hours: ' · {n}小时前', date: ' · {d}' },
   },
   en: {
-    ruleScopeLabel: 'Scope', ruleScopeUser: 'Own accounts only', ruleScopeUserDesc: 'Applies only to your own accounts; other members unaffected', ruleScopeTeamOpt: 'Whole team', ruleScopeTeamDesc: 'Applies to all team accounts (including operators',
+    ruleScopeLabel: 'Scope', ruleScopeUser: 'Own accounts only', ruleScopeUserDesc: 'Applies only to your own accounts; other members unaffected', ruleScopeTeamOpt: 'Whole team', ruleScopeTeamDesc: 'Applies to all team accounts (including operators)',
     ruleScopeMine: 'Own accounts', ruleOwnerTip: 'This rule only applies to accounts owned by its creator ({name}) — other members are unaffected', ruleScopeTeam: 'Whole team', ruleScopeTeamTip: 'No creator (legacy/system default) — applies to all team accounts',
     pageTitle: 'Rule Engine', rulesCount: '{n} rules',
     loadFail: 'Failed to load', nameRequired: 'Enter a rule name', created: 'Created', deleted: 'Deleted', toggleFail: 'Toggle failed', inspectFail: 'Inspection failed',
@@ -53,7 +53,7 @@ export default {
     tabRules: 'Rules', tabLog: 'Pause Log',
     plCampaign: 'Campaign', plAd: 'Ad', plAdset: 'Ad Set', plTenant: 'Global', plSentinel: 'Sentinel', plEmergency: 'Emergency', plRule: 'Rule', plEmpty: 'No pause records yet (sentinel / emergency / rule actions will be listed here)',
     editTitle: 'Edit rule', createTitle: 'New rule', ruleName: 'Rule name', ruleNamePh: 'e.g. VND account stop-loss', type: 'Type', threshold: 'Threshold', actionLabel: 'Action',
-    convLabelOpt: 'Conversion source', landingMetricOpt: 'Landing metric', scopeAccountsLabel: 'Scope accounts', scopeAccountsPh: 'Empty = all accounts; select specific accounts',
+    convLabelOpt: 'Conversion source', landingMetricOpt: 'Landing metric', scopeAccountsLabel: 'Scope accounts', scopeAccountsPh: 'Empty = all accounts; select specific accounts', scopeOwnOnlyHint: 'Only your {n} accounts are listed (scope = own)', scopeNoOwnAccounts: 'You have no accounts yet',
     cat: { bleed: 'Bleed stop-loss', cost: 'Cost overrun', decline: 'Performance decline', scale: 'Smart scale-up' },
     rt: { bleed_abs: 'Bleed stop-loss (spend with no conversion)', cpa_exceed: 'CPA over target', consecutive_bad: 'Consecutive decline', click_no_conv: 'Clicks without conversion', reach_no_conv: 'Reach without conversion', low_ctr_no_conv: 'Low CTR without conversion', budget_burn_fast: 'Budget burn check (delta)', slow_scale: 'Slow scale-up (good CPA → raise budget)', roas_scale: 'ROAS scale-up (ROAS met → raise budget)', fast_scale: 'Fast scale-up (excellent → raise quickly)', cpm_high: 'High CPM (expensive traffic)', cpc_high: 'High CPC (expensive clicks)', click_fraud: 'Click fraud suspect (low unique ratio)' },
     param: { spend_gte: 'Spend ≥', cpa_target: 'Target CPA', ratio: 'Over-target ratio', days: 'Consecutive days', clicks_gte: 'Clicks ≥', reach_gte: 'Reach ≥', ctr_lte: 'CTR ≤', delta_gte: 'Delta ≥', conv_gte: 'Conversions ≥', cpa_good: 'Efficiency ratio', roas_gte: 'ROAS ≥', step_pct: 'Raise by', cap_usd: 'Daily budget cap', cpm_lte: 'CPM>', cpc_lte: 'CPC>', unique_ratio_lte: 'Unique ratio≤' },

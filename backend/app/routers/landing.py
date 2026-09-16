@@ -413,8 +413,10 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     for _mk, _why in _assert_markers:
         if _mk not in files["index.html"]:
             raise HTTPException(500, f"发布产物断言失败：{_why}（marker={_mk}）——已拦截部署，请回滚 landing.py 改动")
-    import re as _re2
-    _leftover = _re2.findall(r'__[A-Z_]+__', files['index.html']) or _re2.findall(r'\{\{[A-Z_]+\}\}', files['index.html'])
+    # 复审P2：全大写正则曾会误拦正文里的 PROMO__SALE__ 类字面量——改精确清单
+    _KNOWN_PH = ["__LP_PIXELS_JSON__", "__LP_TT_PIXELS_JSON__", "__LP_CONV_EVENT_JSON__",
+                 "__LP_TT_CONV_JSON__", "__LP_TARGET_URL__", "{{TITLE}}", "{{DESCRIPTION}}"]
+    _leftover = [ph for ph in _KNOWN_PH if ph in files["index.html"]]
     if _leftover:
         raise HTTPException(500, f"发布产物断言失败：占位符未替换 {sorted(set(_leftover))[:4]}——已拦截部署")
 
@@ -2011,6 +2013,13 @@ def landing_logs_agg(
     q: str = "", source_type: str = "", db: Session = Depends(get_db),
 ):
     """日志聚合（批2）：总量 + 事件类型/国家/设备分布 top——筛选条一键看结构，此前只有来源分布。"""
+    if page_id:   # 复审P1：归属校验漏了 agg/export（曾只加在 /logs）——operator 枚举 page_id 可聚合他人页
+        from ..models.launch import LandingPage as _LPx
+        from ..core.deps import require_owned as _rox
+        _px = db.query(_LPx).filter(_LPx.id == page_id, _LPx.tenant_id == user.tenant_id).first()
+        if not _px:
+            raise HTTPException(404, "落地页不存在")
+        _rox(user, _px, attr="owner_user_id")
     from sqlalchemy import func as _fn
     from ..models.landing_event import LandingEvent as _LE
     qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
@@ -2034,6 +2043,13 @@ def landing_logs_export(
     q: str = "", source_type: str = "", db: Session = Depends(get_db),
 ):
     """CSV 导出（批2）：同筛选口径，上限 1 万行（防止拖库式导出拖垮连接）。"""
+    if page_id:   # 复审P1：同 agg——导出的是原始事件行，更必须校验
+        from ..models.launch import LandingPage as _LPx
+        from ..core.deps import require_owned as _rox
+        _px = db.query(_LPx).filter(_LPx.id == page_id, _LPx.tenant_id == user.tenant_id).first()
+        if not _px:
+            raise HTTPException(404, "落地页不存在")
+        _rox(user, _px, attr="owner_user_id")
     import csv, io as _io
     from fastapi.responses import Response as _Resp
     from ..models.landing_event import LandingEvent as _LE

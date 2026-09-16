@@ -130,6 +130,7 @@ def store_credential(
     ).first()
 
     if existing:
+        _cred_scope_or_404(db, user, existing.id)   # 复审P2：operator 重绑不可见的团队令牌曾可静默覆写
         existing.access_token_enc = encrypt(stored_token)
         existing.created_by = user.id   # 重绑=新值由当前人键入，归属指向最新录入者
         existing.alias = body.alias or existing.alias

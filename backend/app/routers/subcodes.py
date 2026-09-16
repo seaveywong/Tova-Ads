@@ -374,5 +374,10 @@ def fb_check_batch(
     results = [{"slug": link.slug, "status": st, "detail": det, "url": u}
                for link, (st, det), u in zip(links, probe_res, urls)]
     blocked = [r for r in results if r["status"] == "fail"]
-    return {"total": len(results), "blocked": len(blocked), "capped": len(links) >= 50,
+    _total_active = db.query(LandingAdLink).filter(
+        LandingAdLink.page_id == body.page_id,
+        LandingAdLink.tenant_id == user.tenant_id,
+        LandingAdLink.status == "active",
+    ).count()
+    return {"total": len(results), "blocked": len(blocked), "capped": _total_active > 50,
             "results": results}

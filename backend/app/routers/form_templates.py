@@ -251,7 +251,7 @@ def deploy_form(fid: int, body: dict,
         privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
         thank_you_title=cfg.get("thank_you_title", ""),
         thank_you_body=cfg.get("thank_you_body", ""),
-        ty_btn_type=_ty_btn_type or ("website" if _btn_website else "none"),
+        ty_btn_type=_ty_btn_type or "none",   # 复审P2：与部署链同口径（空=none），曾为 website 两路径不一致
         thank_you_button_text=cfg.get("thank_you_button_text", "") if (_btn_website or _ty_btn_type == "whatsapp") else "",
         thank_you_website_url=cfg.get("thank_you_website_url", "") if _btn_website else "",
         follow_up_url=cfg.get("follow_up_url", ""),

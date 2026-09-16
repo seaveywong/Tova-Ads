@@ -57,7 +57,7 @@ def list_notifications(
         utc_start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc)
         utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc) + timedelta(days=1)
         query = query.filter(Notification.created_at >= utc_start, Notification.created_at < utc_end)
-    query = _visible_scope(user, db)  # 三端同口径（列表/未读/已读）
+    query = query.filter(_visible_cond(user))  # 谓词叠加——不丢 platform/日期过滤（P0 修正）
     if level:
         query = query.filter(Notification.level == level)
     if unread_only:
@@ -76,27 +76,30 @@ def list_notifications(
     }
 
 
-def _visible_scope(user, db):
-    """该用户可见通知的过滤条件（列表/未读数/已读三端同口径）。
-    归属路由（2026-09-17）：user_id 非空=定向给某人的账户级告警——只有本人可见；
-    广播行（user_id 空）走角色订阅。曾漏改此处：列表过滤了未读数没过滤 → owner 红点
-    永远清不掉 operator 的定向告警。"""
+def _visible_cond(user):
+    """可见性谓词（P0 修正：返回条件而非 query——列表侧曾整体重赋 query 丢掉
+    platform/日期过滤）。归属路由：user_id 非空=定向告警只有本人可见；广播行走角色订阅。"""
     from sqlalchemy import or_, func, and_
     role = (user.role or "owner").lower()
     padded = func.concat(",", func.coalesce(Notification.roles, ""), ",")
-    return db.query(Notification).filter(
-        Notification.tenant_id == user.tenant_id,
-        or_(
-            Notification.user_id == user.id,
-            and_(
-                Notification.user_id.is_(None),
-                or_(
-                    Notification.roles.is_(None),
-                    Notification.roles == "",
-                    padded.like(f"%,{role},%"),
-                ),
+    return or_(
+        Notification.user_id == user.id,
+        and_(
+            Notification.user_id.is_(None),
+            or_(
+                Notification.roles.is_(None),
+                Notification.roles == "",
+                padded.like(f"%,{role},%"),
             ),
         ),
+    )
+
+
+def _visible_scope(user, db):
+    """该用户可见通知的完整 query（未读数/已读用）。"""
+    return db.query(Notification).filter(
+        Notification.tenant_id == user.tenant_id,
+        _visible_cond(user),
     )
 
 

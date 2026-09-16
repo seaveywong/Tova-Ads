@@ -301,7 +301,15 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
     # 用户级：critical → 全租户在职成员中已绑用户；其余 → role∈roles 的用户。
     # 在职判定 join TenantMembership（复审B P1）：remove_member 只删 membership 不删 TG 绑定，
     # 不过滤则离职成员的残留绑定会持续收到含账户名/金额的 critical 告警。
-    if level == "critical":
+    if only_user_id and level == "critical":
+        # 归属路由对 critical 同样生效（复审P2-1）：账户级 critical 只发归属人——
+        # 否则 owner 手机能收到、站内列表却看不到（user_id 定向）= 幽灵告警
+        active_uids = [only_user_id]
+        ubindings = db.query(UserTgBinding).filter(
+            UserTgBinding.tenant_id == tenant_id,
+            UserTgBinding.user_id.in_(active_uids),
+        ).all()
+    elif level == "critical":
         active_uids = [m.user_id for m in db.query(TenantMembership).filter(
             TenantMembership.tenant_id == tenant_id,
         ).all()]
@@ -314,7 +322,8 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
             TenantMembership.tenant_id == tenant_id,
             TenantMembership.role.in_(roles),
         ).all()] if roles else []
-        # 归属路由：账户级告警（only_user_id）只发归属人——不再按角色广播
+        # 归属路由：账户级告警（only_user_id）只发归属人——不再按角色广播；
+        # critical 分支同样受限（复审P2：曾只限非 critical → owner 手机能收到列表里看不到的告警）
         if only_user_id:
             user_ids = [only_user_id]
         ubindings = db.query(UserTgBinding).filter(
@@ -333,8 +342,10 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
                          text, reply_markup)
         sent_keys.add(key)
 
-    # fallback：租户内无任何用户级绑定 → 用租户级绑定（不断现网）
-    if not ubindings:
+    # fallback：租户内无任何用户级绑定 → 用租户级绑定（不断现网）。
+    # 归属路由例外（复审P2-1）：定向告警归属人没绑 TG 时不回落租户绑定——那会把
+    # operator 的账户告警发到 owner 的租户级 chat，违背「owner 不收他们的消息」。
+    if not ubindings and not only_user_id:
         tb = db.query(TenantTgBinding).filter(
             TenantTgBinding.tenant_id == tenant_id,
         ).first()
