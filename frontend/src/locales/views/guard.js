@@ -20,7 +20,7 @@ export default {
     plCampaign: '系列', plAd: '广告', plAdset: '广告组', plTenant: '全局', plSentinel: '哨兵', plEmergency: '紧急暂停', plRule: '规则止损', plEmpty: '暂无暂停记录（哨兵/紧急暂停/规则止损的动作会在这里留痕）',
     emgReport: '最近一次全局暂停 · 执行报告', emgRunning: '执行中…', emgScan: '扫描账户', emgCamps: '停用系列', emgAds: '覆盖广告', emgVerifyFail: '核验失败', emgStillActive: '停后仍投放', emgErrors: '报错明细',
     editTitle: '编辑规则', createTitle: '新建规则', ruleName: '规则名', ruleNamePh: '如：VND 账户止血', type: '类型', threshold: '阈值', actionLabel: '动作',
-    convLabelOpt: '转化口径', landingMetricOpt: '落地页指标', scopeAccountsLabel: '作用账户', scopeAccountsPh: '留空=作用域内全部账户；可多选限定',
+    convLabelOpt: '转化口径', landingMetricOpt: '落地页指标', scopeAccountsLabel: '作用账户', scopeAccountsPh: '留空=作用域内全部账户；可多选限定', scopeOwnOnlyHint: '仅列出你名下的 {n} 个账户（作用域=仅名下）', scopeNoOwnAccounts: '你名下暂无账户',
     cat: { bleed: '空耗止损', cost: '成本超标', decline: '效果下滑', scale: '智能扩量' },
     rt: { bleed_abs: '空耗止损（消耗无转化）', cpa_exceed: 'CPA 超标', consecutive_bad: '连续恶化', click_no_conv: '点击无转化', reach_no_conv: '覆盖无转化', low_ctr_no_conv: '低 CTR 无转化', budget_burn_fast: '瞬烧制止（增量）', slow_scale: '缓慢扩量（转化优→加预算）', roas_scale: 'ROAS 扩量（ROAS 达标→加预算）', fast_scale: '激进扩量（表现极好→快速加预算）', cpm_high: 'CPM 过高（流量贵）', cpc_high: 'CPC 过高（点价贵）', click_fraud: '刷量嫌疑（去重点击占比低）' },
     param: { spend_gte: '消耗≥', cpa_target: '目标CPA', ratio: '超标倍数', days: '连续天数', clicks_gte: '点击≥', reach_gte: '覆盖≥', ctr_lte: 'CTR≤', delta_gte: '增量≥', conv_gte: '转化≥', cpa_good: '优秀倍数', roas_gte: 'ROAS≥', step_pct: '每次加', cap_usd: '日预算上限', cpm_lte: 'CPM>', cpc_lte: 'CPC>', unique_ratio_lte: '去重点击占比≤' },

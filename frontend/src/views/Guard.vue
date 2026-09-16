@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
@@ -143,6 +143,19 @@ const editing = ref(null)
 const form = ref({})
 const inspecting = ref(false)
 const accountsList = ref([])
+const myUid = Number(localStorage.getItem('tova_uid') || 0)
+// 限定账户下拉与作用域联动（2026-09-17 用户拍板）：仅名下 → 只列自己导入的账户；
+// 全团队 → 团队全部账户。切换到名下时清洗掉非名下的已选项（否则存进无效选择）。
+const scopeAwareAccounts = computed(() =>
+  form.value.rule_scope === 'user'
+    ? accountsList.value.filter(a => a.owner_user_id === myUid)
+    : accountsList.value)
+watch(() => form.value.rule_scope, (nv) => {
+  if (nv === 'user') {
+    const mine = new Set(scopeAwareAccounts.value.map(a => a.act_id))
+    form.value.scope_act_ids = (form.value.scope_act_ids || []).filter(id => mine.has(id))
+  }
+})
 // 分类筛选 chip（规则卡片已有 category 数据）：全部 + 有规则的分类，带计数
 const catFilter = ref('all')
 const catChips = computed(() => {
@@ -480,13 +493,22 @@ const doInspect = async (force = false) => {
           </div>
         </div>
         <div class="form-l"><label>{{ t('guard.scopeAccountsLabel') }}</label>
-          <el-select v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip :teleported="false"
+          <el-select v-if="form.rule_scope === 'team'" v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip :teleported="false"
             :placeholder="t('guard.scopeAccountsPh')" style="width:100%">
             <el-option v-for="a in accountsList" :key="a.act_id" :value="a.act_id"
               :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + `${a.name}（${a.act_id}）`">
               <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}（{{ a.act_id }}）
             </el-option>
           </el-select>
+          <el-select v-else v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip :teleported="false"
+            :placeholder="t('guard.scopeAccountsPh')" style="width:100%">
+            <el-option v-for="a in scopeAwareAccounts" :key="a.act_id" :value="a.act_id"
+              :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + `${a.name}（${a.act_id}）`">
+              <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>{{ a.name }}（{{ a.act_id }}）
+            </el-option>
+            <template #empty><div class="sel-empty">{{ t('guard.scopeNoOwnAccounts') }}</div></template>
+          </el-select>
+          <div v-if="form.rule_scope === 'user' && scopeAwareAccounts.length" class="scope-hint">{{ t('guard.scopeOwnOnlyHint', { n: scopeAwareAccounts.length }) }}</div>
         </div>
         <div class="m-foot"><button class="btn" @click="confirmDiscard">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
       </div>
@@ -610,4 +632,6 @@ const doInspect = async (force = false) => {
 .sp-opt.on{border-color:var(--ac);background:color-mix(in srgb, var(--ac) 7%, transparent)}
 .sp-t{font-size:13px;font-weight:600;margin-bottom:2px}
 .sp-d{font-size:11px;color:var(--t3);line-height:1.4}
+.scope-hint{width:100%;font-size:11px;color:var(--t3);margin-top:4px}
+.sel-empty{padding:12px;text-align:center;color:var(--t3);font-size:12px}
 </style>
