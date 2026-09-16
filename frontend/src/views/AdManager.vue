@@ -1139,7 +1139,7 @@ const unsubscribeLeads = async () => {
         <div class="sf-group">
           <button v-for="d in BREAKDOWN_DIMS" :key="d.id" class="ctrl-btn sm" :class="{ on: breakdownDim === d.id }" @click="breakdownDim = d.id">{{ d.label }}</button>
         </div>
-        <button class="ctrl-btn sm" :disabled="breakdownLoading" @click="loadBreakdown(true)">⟳ {{ t('common.refresh') }}</button>
+        <button class="ctrl-btn sm" :disabled="breakdownLoading" @click="loadBreakdown(true)">⟳ {{ t('adm.refetch') }}</button>
       </div>
       <div class="tbl" v-loading="breakdownLoading">
         <table class="manager-table bd-table">
