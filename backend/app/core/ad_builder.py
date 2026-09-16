@@ -713,6 +713,8 @@ def build_lead_form_payload(
     follow_up_url: str = "",
     context_card_title: str = "",
     name_prefix: str = "AI",
+    name_suffix: str = "",            # 配置哈希（同配置=同名可复用；配置变=新名强制重建——
+                                      # API 建的表单不可删，靠换名作废旧表单，曾修好的配置被旧名复用锁死）
     is_optimized_for_quality: bool = False,
     welcome_message: str = "",
     only_visible_to_target_countries: bool = False,
@@ -767,7 +769,7 @@ def build_lead_form_payload(
         questions.append(item)
 
     payload: dict[str, Any] = {
-        "name": f"[{name_prefix}] {form_title}",
+        "name": f"[{name_prefix}] {form_title}" + (f" ·{name_suffix}" if name_suffix else ""),
         "questions": questions,
         "privacy_policy": {"url": privacy_url, "link_text": privacy_link_text or "Privacy Policy"},
         "locale": locale,

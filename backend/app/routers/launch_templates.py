@@ -4,6 +4,7 @@
 部署 = 选模板 + 选 N 账户 → BackgroundTasks 异步逐账户建广告（Campaign→AdSet→Ad），per-item 状态。
 """
 import json
+import hashlib
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -2323,6 +2324,9 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
             # button_type=NONE），用户配的 website/WhatsApp 按钮全变成「完成/Done」，零转化出口
             # （2026-09-16 用户实测抓到）。website 的 URL 兜底 landing_url；whatsapp 只需按钮文字。
             _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()
+            # 与 form_templates._config_hash 同规范化（sha256[:6]，key 排序）——两路径同配置同名可互相复用
+            _name_suffix = hashlib.sha256(
+                json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:6]
             payload = build_lead_form_payload(
                 form_title=cfg.get("form_title", ft.name),
                 privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
@@ -2341,7 +2345,7 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                                        if _ty_btn_type == "website" else ""),
                 follow_up_url=cfg.get("follow_up_url", landing_url),
                 context_card_title=cfg.get("context_card_title", ""),
-                name_prefix="Tova",
+                name_prefix="Tova", name_suffix=_name_suffix,
                 is_optimized_for_quality=bool(cfg.get("is_optimized_for_quality", False)),
                 welcome_message=cfg.get("welcome_message", ""),
                 only_visible_to_target_countries=bool(cfg.get("only_visible_to_target_countries", False)),
