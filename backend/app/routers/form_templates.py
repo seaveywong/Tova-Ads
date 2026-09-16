@@ -199,7 +199,7 @@ def deploy_form(fid: int, body: dict,
         try:
             payload = build_tt_lead_form_payload(
                 form_title=cfg.get("form_title", t.name),
-                privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                privacy_url=cfg.get("privacy_url", "https://example.com/privacy"),
                 target_countries=cfg.get("target_countries", []),
                 description=cfg.get("description", ""),
                 custom_questions=cfg.get("custom_questions", []),

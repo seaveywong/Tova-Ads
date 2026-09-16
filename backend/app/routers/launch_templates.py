@@ -2276,7 +2276,7 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 try:
                     payload = build_tt_lead_form_payload(
                         form_title=cfg.get("form_title", ft.name),
-                        privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                        privacy_url=cfg.get("privacy_url", "https://example.com/privacy"),
                         target_countries=cfg.get("target_countries", []),
                         description=cfg.get("description", ""),
                         custom_questions=cfg.get("custom_questions", []),
@@ -2333,7 +2333,7 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:6]
             payload = build_lead_form_payload(
                 form_title=cfg.get("form_title", ft.name),
-                privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
+                privacy_url=cfg.get("privacy_url", "https://example.com/privacy"),
                 locale=cfg.get("locale", ft.locale or "en_US"),
                 target_countries=cfg.get("target_countries", []),
                 description=cfg.get("description", ""),
@@ -2449,7 +2449,7 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, 
         try:
             payload = build_tt_lead_form_payload(
                 form_title=data.get("form_title", (asset.name if asset else None) or (post_content or {}).get("headline") or "Lead Form"),
-                privacy_url="https://tovaads.com/privacy",
+                privacy_url="https://example.com/privacy",
                 target_countries=[], description=data.get("description", ""),
                 custom_questions=data.get("custom_questions", []),
                 extra_contact_fields=data.get("extra_contact_fields", ["EMAIL"]),
@@ -2463,7 +2463,7 @@ def _ai_auto_create_form(fb, sdb, asset: Asset, page_id: str, landing_url: str, 
             return ""
     payload = build_lead_form_payload(
         form_title=data.get("form_title", (asset.name if asset else None) or (post_content or {}).get("headline") or "Lead Form"),
-        privacy_url="https://tovaads.com/privacy",
+        privacy_url="https://example.com/privacy",
         locale="en_US", target_countries=[], description=data.get("description", ""),
         custom_questions=data.get("custom_questions", []),
         extra_contact_fields=data.get("extra_contact_fields", ["EMAIL"]),
