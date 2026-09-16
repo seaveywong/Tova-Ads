@@ -2447,3 +2447,32 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 - TT sandbox 未实测（等用户提供 app_id）
 - 商业化计费未实施（规划书已落盘 Mira_2.0_docs/14）
 - lc 名下账户零规则保护（用户拍板的语义）
+
+## 批CO：像素转化事件事故修复 + UX 三件套（2026-09-17，commit 28c566b）
+
+### 概述
+账户 BSCH-TD-O349 系列 M-SALE-US20217 烧 $1,049.98 / 3,092 点击 / **0 转化**的完整定案与防复发，外加三件 UX 修复。根因链（代码+数据+FB官方文档三重定案）：落地页 `conversion_events=[]`（空）→ worker `_d` 参数 `c` 为空串 → `_d_decode` 点击处理器 `_conv.forEach` 空数组 = **CTA 点击 fire 零转化事件**（`landing.py:368`）→ 系列优化 Purchase 拿不到信号 → FB 计 0 转化。PageView 一直在正常发（`fired_pixel_ids` 实证），像素本身无辜；TT 脚本空列表有 ClickButton 兜底而 FB 没有（不对称）。全库 9 月后建的页（16/56/57/62）转化事件全空，仅 7 月手建页 6 有值——建页配置层系统性漏填，页 56 第一个真金白银跑 OUTCOME_SALES 才暴露。
+
+### 变更表
+| 文件 | 变更 |
+|---|---|
+| backend landing.py | 自检矩阵新增 `conv_events` 项：像素已配但转化事件空 → warn（display 用 route_next 解析像素，redirect 用页面配置；legacy 单事件字段兼容） |
+| backend i18n.py | `landing.scConvEvents` zh/en |
+| frontend Landing.vue | 表单内 FB 像素已填但转化事件空 → 橙色警告行（`.conv-empty-warn`）+ zh/en 文案 |
+| frontend AdManager.vue | 行账户后缀 `a.id`→`a.act_id`（系列 tab 曾把系列 ID 6988277670281 显示成账户号）；页头按钮拆分：**刷新**=读缓存 / **重新获取**=触发 FB 全量同步（lead tab 保持单按钮） |
+| frontend MainLayout.vue | `loadScd()` 补挂载调用 + 60s 轮询随基线刷新——此前**从不加载**（唯一调用点在 toggleSentinel 内），刷新后倒计时永远显示关闭，且开关切换会用默认 48h 覆盖真实配置（数据安全隐患）；实时核验 tooltip 同步改「重新获取」 |
+| locales zh/en | `adm.refreshCacheTip`/`adm.refetch`/`landing.convEmptyWarn` 成对；liveVerifyTip 引用同步 |
+
+### 生产变更
+- 后端：landing.py + i18n.py 上传（备份 `_bak_*_0916_2231.py`），双门通过，restart，health v1.3.5 ok
+- 前端：CF Pages master 部署（56 files）
+- **数据**：页 56/62 转化事件由**用户手工补齐**（["Purchase","Contact"]），非代码改动——建库即生效（`_d` 每请求实时构建，无需重发布）
+
+### 验证（数据断言 smoke，全过）
+- 合成页（像素配+conv 空）→ `conv_events: warn`「已配像素但转化事件为空…」
+- 真实页 56/62/6（用户已补）→ `pass` + fire 事件清单
+- 合成页（无像素）→ `pass`「无像素（无需转化事件）」
+- 哨兵倒计时：prod 实证 cfg 完好（enabled:true/hours:1，从未被关）——"刷新后关闭"纯前端显示 bug；action_logs 仅 09-15 一条 warning（uid1），用户 6 观察期间 last_active 持续刷新（打开页面的 API 心跳即算活跃）→ 1h 到期不可能在"盯着看"时触发，属设计内行为
+
+### 结论
+像素链路本身健康；事故根因在配置层无守卫。守卫补齐后同类问题会在建页表单（即时警告）和自检矩阵（warn 项+overall 变黄）两处暴露。`6988277670281` 确认为系列 ID（显示 bug 已修）。
