@@ -433,7 +433,7 @@ export default {
     prevBound: 'was bound to {name}',
     unboundToken: 'No token bound',
     unbound: 'Unbound',
-    fbUser: 'FB User', createdBy: 'Added by',
+    fbUser: 'FB User', createdBy: 'Owner',
     colAccounts: 'Accounts',
     colPages: 'Pages',
     type: 'Type',

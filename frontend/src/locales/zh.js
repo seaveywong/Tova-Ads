@@ -445,7 +445,7 @@ export default {
     prevBound: '原绑 {name}',
     unboundToken: '未绑定令牌',
     unbound: '未绑定',
-    fbUser: 'FB 用户', createdBy: '录入人',
+    fbUser: 'FB 用户', createdBy: '所有者',
     colAccounts: '账户',
     colPages: '主页',
     type: '类型',
