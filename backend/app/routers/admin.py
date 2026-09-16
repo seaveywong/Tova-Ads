@@ -42,9 +42,17 @@ def discover_domains(user=Depends(require_superadmin), db: Session = Depends(get
     for a in assigned:
         by_domain.setdefault(a.domain, []).append(
             {"domain_row_id": a.id, "tenant_id": a.tenant_id, "label": a.label, "source": a.source})
-    return [{"domain": z.get("name"), "cf_zone_id": z.get("id"), "cf_status": z.get("status"),
-             "assigned_to": by_domain.get(z.get("name"), [])}
-            for z in zones if z.get("name")]
+    _tnames = {t.id: t.name for t in db.query(Tenant).all()}
+    out = []
+    for z in zones:
+        if not z.get("name"):
+            continue
+        for a in by_domain.get(z.get("name"), []):
+            if not a.get("label"):   # 存量行 label 空——回落团队名（曾显示 t1 无人能懂）
+                a["label"] = _tnames.get(a["tenant_id"], f"t{a['tenant_id']}")
+        out.append({"domain": z.get("name"), "cf_zone_id": z.get("id"), "cf_status": z.get("status"),
+                    "assigned_to": by_domain.get(z.get("name"), [])})
+    return out
 
 
 class AssignIn(BaseModel):
@@ -71,7 +79,7 @@ def assign_domain(body: AssignIn, user=Depends(require_superadmin), db: Session 
     if not zone_id:
         raise HTTPException(400, f"{domain} 不在 CF 账户下（无法分配）")
     row = LandingDomain(tenant_id=body.tenant_id, created_by=user.id, domain=domain,
-                        label=body.label or None, source="discovered", cf_zone_status="active")
+                        label=body.label or t.name, source="discovered", cf_zone_status="active")
     db.add(row)
     db.flush()
     tid = new_trace_id()

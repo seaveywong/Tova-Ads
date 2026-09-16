@@ -71,6 +71,8 @@ const setStatus = async (row, status) => {
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const handleOp = (cmd, row) => {
+  if (cmd === 'members') return openManage(row, 'members')
+  if (cmd === 'domains') return openManage(row, 'domains')
   if (cmd === 'harddelete') { hardDelete(row); return }
   const map = { suspend: 'suspended', activate: 'active', archive: 'archived', restore: 'active' }
   setStatus(row, map[cmd])
@@ -90,12 +92,32 @@ const hardDelete = async (row) => {
 }
 
 // ── 域名管理（超管给团队分配/收回）──
-const domainOpen = ref(false)
 const domainLoading = ref(false)
 const domainTeamId = ref(0)
 const domainTeamName = ref('')
 const domainPool = ref([])
 const domainTeamDomains = ref([])
+// ── 统一团队管理抽屉（2026-09-17 收纳：成员/域名 → 一个抽屉两个 tab）──
+const manageOpen = ref(false)
+const manageTab = ref('members')
+const teamMgrTitle = computed(() => domainTeamName.value
+  ? t('teams.manageTitle', { name: domainTeamName.value })
+  : t('teams.title'))
+const openManage = async (row, tab = 'members') => {
+  manageTab.value = tab
+  manageOpen.value = true
+  openMembers(row)      // 复用现有加载（不弹独立 dialog——memberOpen 已并入抽屉）
+  openDomains(row, true)
+}
+const memberOpen = computed({   // 兼容旧引用：成员弹窗开关即抽屉开关+members tab
+  get: () => manageOpen.value && manageTab.value === 'members',
+  set: (v) => { if (!v) manageOpen.value = false },
+})
+const domainOpen = computed({   // 域名抽屉开关并入
+  get: () => manageOpen.value && manageTab.value === 'domains',
+  set: (v) => { if (!v) manageOpen.value = false },
+})
+
 const openDomains = async (row, keepFilter = false) => {
   domainTeamId.value = row.id
   domainTeamName.value = row.name
@@ -149,7 +171,6 @@ const hasMore = (row) => {
 }
 
 // 成员管理（列表/改角色/移除/加成员，超管跨租户）
-const memberOpen = ref(false)
 const membersTid = ref(0)
 const membersName = ref('')
 const memberList = ref([])
@@ -233,12 +254,12 @@ const submitMemberAdd = async () => {
         </el-table-column>
         <el-table-column :label="t('teams.members')" width="68" align="center">
           <template #default="{ row }">
-            <button :class="['num', 'num-btn', { zero: row.members === 0 }]" :title="t('teams.memberManageTitle', { name: row.name })" @click="openMembers(row)">{{ row.members }}</button>
+            <button :class="['num', 'num-btn', { zero: row.members === 0 }]" :title="t('teams.memberManageTitle', { name: row.name })" @click="openManage(row, 'members')">{{ row.members }}</button>
           </template>
         </el-table-column>
         <el-table-column :label="t('teams.domains')" width="72" align="center">
           <template #default="{ row }">
-            <button :class="['num', 'num-btn', { zero: row.domains === 0 }]" :title="t('teams.domainTitle', { name: row.name })" @click="openDomains(row)">{{ row.domains || 0 }}</button>
+            <button :class="['num', 'num-btn', { zero: row.domains === 0 }]" :title="t('teams.domainTitle', { name: row.name })" @click="openManage(row, 'domains')">{{ row.domains || 0 }}</button>
           </template>
         </el-table-column>
         <el-table-column :label="t('teams.adAccounts')" width="88" align="center">
@@ -252,8 +273,7 @@ const submitMemberAdd = async () => {
         <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
             <div class="ops">
-              <button class="op primary" @click="openMembers(row)">{{ t('teams.members') }}</button>
-              <button class="op" @click="openDomains(row)">{{ t('teams.domains') }}</button>
+              <button class="op primary" @click="openManage(row)">{{ t('teams.manage') }}</button>
               <button class="op" @click="rename(row)">{{ t('teams.rename') }}</button>
               <!-- 状态流转行内可见（2026-09-16 用户反馈：曾收进 ⋯ 里等于没有）——
                    active→停用 / suspended→激活 / archived→恢复；主团队(id=1)不可停用 -->
@@ -264,7 +284,9 @@ const submitMemberAdd = async () => {
                 <button class="op more" :title="t('common.more')">⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" class="danger">{{ t('teams.archive') }}</el-dropdown-item>
+                    <el-dropdown-item command="members">{{ t('teams.members') }}</el-dropdown-item>
+                    <el-dropdown-item command="domains">{{ t('teams.domains') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">{{ t('teams.archive') }}</el-dropdown-item>
                     <el-dropdown-item command="harddelete" divided class="danger">{{ t('teams.hardDeleteBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -287,9 +309,11 @@ const submitMemberAdd = async () => {
       </template>
     </el-dialog>
 
-    <!-- 成员管理弹窗 -->
-    <el-dialog v-model="memberOpen" :title="t('teams.memberManageTitle', { name: membersName })" width="560px">
-      <div v-loading="memberLoading">
+    <!-- 统一团队管理抽屉：成员/域名 两 tab（2026-09-17 收纳，替代两个独立弹窗） -->
+    <el-drawer v-model="manageOpen" :title="teamMgrTitle" direction="rtl" size="640px" append-to-body>
+      <el-tabs v-model="manageTab">
+        <el-tab-pane :label="t('teams.members') + ' (' + memberList.length + ')'" name="members">
+        <div v-loading="memberLoading">
         <div class="mem-section-title">{{ t('teams.currentMembers', { n: memberList.length }) }}</div>
         <div class="mem-list">
           <div v-for="m in memberList" :key="m.membership_id" class="mem-row">
@@ -315,10 +339,8 @@ const submitMemberAdd = async () => {
         <div class="form-l"><label>{{ t('teams.password') }}</label><input v-model="memberAdd.password" class="input" type="password" autocomplete="new-password" :placeholder="t('teams.memberPasswordPlaceholder')" /></div>
         <button class="btn primary mem-add-btn" :disabled="memberAddSaving" @click="submitMemberAdd">{{ memberAddSaving ? t('teams.adding') : t('teams.addMember') }}</button>
       </div>
-    </el-dialog>
-
-    <!-- 域名管理抽屉（超管给团队分配/收回域名） -->
-    <el-drawer v-model="domainOpen" :title="t('teams.domainTitle', { name: domainTeamName })" direction="rtl" size="520px" append-to-body>
+        </el-tab-pane>
+        <el-tab-pane :label="t('teams.domains') + ' (' + domainTeamDomains.length + ')'" name="domains">
       <div v-loading="domainLoading">
         <!-- 该团队已有域名 -->
         <div class="dm-sec-title">{{ t('teams.domainAssigned') }}（{{ domainTeamDomains.length }}）</div>
@@ -349,6 +371,8 @@ const submitMemberAdd = async () => {
           <div v-if="!filteredDomainPool.length && !domainLoading" class="dm-empty">{{ t('teams.domainPoolEmpty') }}</div>
         </div>
       </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-drawer>
   </div>
 </template>

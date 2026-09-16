@@ -919,7 +919,7 @@ export default {
     desc: 'All teams (tenants) on the platform. Creating a team automatically generates 3 system roles and lets you designate the first owner. Archived teams are hidden but their data is retained.',
     createTeam: 'Create Team', noTeams: 'No teams',
     teamName: 'Team Name', members: 'Members', adAccounts: 'Ad Accounts', createdAt: 'Created At',
-    rename: 'Rename', suspend: 'Suspend', activate: 'Activate', archive: 'Archive', restore: 'Restore',
+    manage: 'Manage', manageTitle: 'Team Management · {name}', rename: 'Rename', suspend: 'Suspend', activate: 'Activate', archive: 'Archive', restore: 'Restore',
     domains: 'Domains', domainTitle: 'Domains · {name}', domainAssigned: 'Assigned domains', domainNone: 'No domains (assign from platform pool below)',
     domainPool: 'Platform domain pool (all domains)', domainPoolEmpty: 'No domains in the platform pool', domainAssignedTo: 'Assigned to', domainFree: 'Free',
     domainSearch: 'Search domains', zoneActive: 'DNS active', zonePending: 'DNS pending', domainOccupied: 'Assigned to another team',
