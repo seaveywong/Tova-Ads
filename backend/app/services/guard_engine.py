@@ -1319,9 +1319,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                      and (getattr(r, "rule_scope", None) == "team"
                           or (getattr(r, "created_by", None) is None
                               or getattr(acc, "owner_user_id", None) == r.created_by))]
-        # 规则兜底：该账户无任何规则覆盖（如用户只配了别的账户级规则）→ 注入保底止血
-        if not acc_rules:
-            acc_rules = [ctx["default_rule"]]
+        # 兜底已拆除（2026-09-17 用户拍板）：零覆盖=零干预，不再注入默认止血线
 
         # 趋势 tick 累计：本账户本次巡检所有 ACTIVE 广告的 spend/conv 总和（ad 循环后写一条聚合 tick）
         acc_tick_spend = 0.0
@@ -2007,9 +2005,9 @@ def run_inspection(force: bool = False):
                 GuardRule.tenant_id == tenant_id,
                 GuardRule.enabled == True,
             ).all()
-            if not all_rules:
-                # 规则兜底：租户无规则时注入默认空耗止血线（保底防裸奔，用户可建规则覆盖）
-                all_rules = [_DEFAULT_BLEED_ABS_RULE]
+            # 兜底已拆除（2026-09-17 用户拍板「用户没设置就什么都不要管」）：
+            # 曾在此注入 _DEFAULT_BLEED_ABS_RULE（$20 空耗止血）+ 账户零覆盖时再注入一次——
+            # 零规则=零干预，账户保护完全由各归属人自建规则负责
             # 本租户无可用 FB 凭证且无 managed TT 账户 → 没有 token 可读，跳过（worker 内还会按账户再选 token）
             cred_n = db.query(FbCredential).filter(
                 FbCredential.tenant_id == tenant_id,
