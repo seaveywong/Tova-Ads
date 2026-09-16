@@ -369,6 +369,8 @@ const doInspect = async (force = false) => {
       <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
+          <span v-if="r.created_by_name" class="owner-chip" :title="t('guard.ruleOwnerTip', { name: r.created_by_name })">{{ t('guard.ruleScopeMine') }} · {{ r.created_by_name.split('@')[0] }}</span>
+          <span v-else class="owner-chip team" :title="t('guard.ruleScopeTeamTip')">{{ t('guard.ruleScopeTeam') }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" />
@@ -573,4 +575,6 @@ const doInspect = async (force = false) => {
 .scd-unit{font-size:12px;color:var(--t3)}
 .scd-note{margin-top:8px;font-size:11px;color:var(--t3);line-height:1.5}
 .head-btn.sm{padding:5px 12px;font-size:12px}
+.owner-chip{font-size:10px;color:var(--ac);background:var(--acg);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.owner-chip.team{color:var(--t3);background:var(--bg3)}
 </style>

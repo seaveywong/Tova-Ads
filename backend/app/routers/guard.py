@@ -53,7 +53,7 @@ class SentinelArmIn(BaseModel):
 @router.get("/rules")
 def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db: Session = Depends(get_db)):
     _q = db.query(GuardRule).filter(GuardRule.tenant_id == user.tenant_id)
-    if user.role == "operator":   # 批AG：operator 只看自己创建的（引擎仍评估全部规则——团队安全网）
+    if user.role == "operator":   # 批AG：operator 只看自己创建的（引擎也已按创建人隔离：规则只作用于创建人名下账户）
         _q = _q.filter(GuardRule.created_by == user.id)
     rules = _q.all()
     # 每条规则的命中统计（action_logs: pause/increase_budget by rule_engine, 按 trigger_type 聚合；
@@ -68,7 +68,11 @@ def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db
         ActionLog.source == "rule_engine",
     ).group_by(ActionLog.trigger_type).all()
     hit_map = {r[0]: {"count": int(r[1] or 0), "last_at": r[2].isoformat() if r[2] else None} for r in hit_rows}
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [r.created_by for r in rules if r.created_by] or [0])).all()}
     return [{"id": r.id, "name": r.name, "category": r.category, "rule_type": r.rule_type,
+             "created_by": r.created_by, "created_by_name": umap.get(r.created_by, ""),
              "params": json.loads(r.params) if r.params else {}, "conversion_source": r.conversion_source,
              "action": r.action, "scope_act_id": r.scope_act_id, "enabled": r.enabled,
              "hits": hit_map.get(r.rule_type, {"count": 0, "last_at": None})} for r in rules]
