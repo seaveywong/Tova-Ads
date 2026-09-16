@@ -2319,10 +2319,10 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 try: cfg = json.loads(ft.config_json)
                 except: cfg = {}
             from ..core.ad_builder import build_lead_form_payload, lead_form_safe_payload
-            # 感谢页按钮：显式选了 website 才带；whatsapp/none 是本地配置不进 FB payload
-            # （否则 landing_url 兜底会把 whatsapp 选择变成 FB VIEW_WEBSITE 按钮）。见 0090 批。
+            # 感谢页按钮：ty_btn_type 必须显式传——曾漏传（builder 默认空串→else 分支恒置
+            # button_type=NONE），用户配的 website/WhatsApp 按钮全变成「完成/Done」，零转化出口
+            # （2026-09-16 用户实测抓到）。website 的 URL 兜底 landing_url；whatsapp 只需按钮文字。
             _ty_btn_type = str(cfg.get("thank_you_button_type", "") or "").strip()
-            _btn_website = (_ty_btn_type == "website") if _ty_btn_type else True
             payload = build_lead_form_payload(
                 form_title=cfg.get("form_title", ft.name),
                 privacy_url=cfg.get("privacy_url", "https://tovaads.com/privacy"),
@@ -2335,8 +2335,10 @@ def _resolve_lead_form(fb, sdb, tpl: LaunchTemplate, asset: Asset, page_id: str,
                 privacy_link_text=cfg.get("privacy_link_text", "Privacy Policy"),
                 thank_you_title=cfg.get("thank_you_title", ""),
                 thank_you_body=cfg.get("thank_you_body", ""),
-                thank_you_button_text=cfg.get("thank_you_button_text", "") if _btn_website else "",
-                thank_you_website_url=cfg.get("thank_you_website_url", landing_url) if _btn_website else "",
+                ty_btn_type=(_ty_btn_type or "none"),
+                thank_you_button_text=cfg.get("thank_you_button_text", ""),
+                thank_you_website_url=(cfg.get("thank_you_website_url") or landing_url
+                                       if _ty_btn_type == "website" else ""),
                 follow_up_url=cfg.get("follow_up_url", landing_url),
                 context_card_title=cfg.get("context_card_title", ""),
                 name_prefix="Tova",
