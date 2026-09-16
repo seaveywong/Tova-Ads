@@ -403,6 +403,21 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         "_worker.js": "const LP_CONFIG = " + _json.dumps(_lp_config, ensure_ascii=False) + ";\n" + WORKER_SOURCE,
     }
 
+    # 2.4 发布产物断言门（2026-09-16）：改坏注入脚本/漏替换占位符直接拦下——曾出「点击上报
+    #     不带 pixel_ids」静默统计黑洞（fire 在发生但日志永远空），此后此类回归过不了这道门
+    _assert_markers = [
+        ("pixel_ids:_pids", "点击上报缺像素字段（统计黑洞回归）"),
+        ("window.__tt_pids", "TT 像素跨脚本暴露缺失"),
+        ("__events/ingest", "事件上报端点缺失"),
+    ]
+    for _mk, _why in _assert_markers:
+        if _mk not in files["index.html"]:
+            raise HTTPException(500, f"发布产物断言失败：{_why}（marker={_mk}）——已拦截部署，请回滚 landing.py 改动")
+    import re as _re2
+    _leftover = _re2.findall(r'__[A-Z_]+__', files['index.html']) or _re2.findall(r'\{\{[A-Z_]+\}\}', files['index.html'])
+    if _leftover:
+        raise HTTPException(500, f"发布产物断言失败：占位符未替换 {sorted(set(_leftover))[:4]}——已拦截部署")
+
     # 2.5 发布前 worker 校验门（语法 + 运行时 dry-run）——坏 worker 绝不上线
     #     防 $4000/referer 类事故：改坏 WORKER_SOURCE → 这里拦下，不部署。
     _worker_js = files["_worker.js"]
