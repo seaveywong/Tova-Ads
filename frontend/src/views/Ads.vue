@@ -429,7 +429,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
     <div class="tbl" v-loading="loading || accLoading">
       <div class="row head">
         <div><input type="checkbox" :checked="selectedAccs.size === filteredAccounts.length && filteredAccounts.length > 0" @click="selectAllAccs" /></div>
-        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div class="th-grp" :title="t('ads.groupSortTip')" @click="groupSort = !groupSort">{{ t('ads.groupCol') }}<span v-if="groupSort" class="sort-ind">▲</span></div><div :title="t('ads.unbilledTip')">{{ t('ads.balance') }}</div><div :title="t('ads.availTip')">{{ t('ads.availableCredit') }}</div>
+        <div>{{ t('common.status') }}</div><div>{{ t('ads.account') }}</div><div>{{ t('tokens.createdBy') }}</div><div class="th-grp" :title="t('ads.groupSortTip')" @click="groupSort = !groupSort">{{ t('ads.groupCol') }}<span v-if="groupSort" class="sort-ind">▲</span></div><div :title="t('ads.unbilledTip')">{{ t('ads.balance') }}</div><div :title="t('ads.availTip')">{{ t('ads.availableCredit') }}</div>
         <div>{{ t('ads.spend') }} <span class="rng">{{ rangeLabel }}</span></div><div>{{ t('ads.conversions') }}</div><div>CPA</div><div>{{ t('ads.activeToken') }}</div><div></div>
       </div>
       <template v-for="d in displayRows" :key="d.type === 'grp' ? 'grp-' + d.key : d.a.act_id">
@@ -443,10 +443,9 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         </div>
         <div class="acc">
           <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: d.a.act_id } })"><span v-if="platChip(d.a)" :class="['plat-chip', platChip(d.a)]">{{ platChip(d.a).toUpperCase() }}</span>{{ (d.a.name && d.a.name !== d.a.act_id) ? d.a.name : t('ads.unnamedAccount') }}</div>
-          <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}
-            <span class="owner-chip" :class="{ none: !d.a.owner_email }" :title="d.a.owner_email ? t('ads.ownerChipTip', { email: d.a.owner_email }) : t('ads.noOwnerTip')">{{ d.a.owner_email ? d.a.owner_email.split('@')[0] : '—' }}</span>
-          </div>
+          <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}</div>
         </div>
+        <div><span class="owner-chip" :class="{ none: !d.a.owner_email }" :title="d.a.owner_email ? t('ads.ownerChipTip', { email: d.a.owner_email }) : t('ads.noOwnerTip')">{{ d.a.owner_email ? d.a.owner_email.split('@')[0] : '—' }}</span></div>
         <div class="grp-cell"><span v-if="d.a.group_label" class="tag grp" :title="d.a.group_label">{{ d.a.group_label }}</span><span v-else class="grp-none">—</span></div>
         <div>{{ fmtMoney(d.a.balance, d.a.currency) }}<span v-if="d.a.balance_usd != null && d.a.currency !== 'USD'" class="sub"> ≈${{ d.a.balance_usd }}</span></div>
         <div>
@@ -630,7 +629,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .acc-search:focus { outline: none; border-color: var(--ac) }
 .acc-search::placeholder { color: var(--t3) }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 30px 0.9fr 1.7fr 0.8fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1180px; font-variant-numeric: tabular-nums }
+.row { display: grid; grid-template-columns: 30px 0.9fr 1.7fr 0.7fr 0.8fr 1fr 0.8fr 1fr 0.5fr 0.7fr 1fr 44px; gap: 6px; padding: 8px 12px; align-items: center; font-size: 13px; border-bottom: 1px solid var(--bd); min-width: 1250px; font-variant-numeric: tabular-nums }
 .row.head { background: var(--bg2); color: var(--t3); font-size: 12px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .row:not(.head):hover { background: var(--bg2) }
@@ -642,7 +641,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .grp-dot.fb { background: #1877f2 }
 .grp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%) }
 .acc-name { font-weight: 600; color: var(--t1) }
-.owner-chip { font-size: 10px; color: var(--ac); background: var(--acg); padding: 1px 7px; border-radius: 8px; margin-left: 8px; white-space: nowrap; display: inline-block }
+.owner-chip { font-size: 10px; color: var(--ac); background: var(--acg); padding: 1px 7px; border-radius: 8px; white-space: nowrap; display: inline-block }
 .owner-chip.none { color: var(--t3); background: var(--bg3) }
 .acc-name.clk { cursor: pointer }
 .acc-name.clk:hover { color: var(--ac); text-decoration: underline }
