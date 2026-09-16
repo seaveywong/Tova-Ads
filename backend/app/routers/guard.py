@@ -799,7 +799,7 @@ def keepalive_retry_one(body: KeepalivePageIn,
         raise HTTPException(404, "账户不存在")
     if user.role == "operator" and acc.owner_user_id != user.id:
         raise HTTPException(403, "只能保活自己名下的账户")
-    r = run_keepalive(reset_burnt=True, only_act_id=act)
+    r = run_keepalive(reset_burnt=True, only_act_id=act, tenant_scope=user.tenant_id)  # 复审P2：限定本租户（act_id 跨租户可重复）
     if r.get("skipped") == "lock_busy":
         raise HTTPException(409, "保活扫描正在运行中（另一进程持有锁），请稍后重试")
     res = (r.get("results") or [None])[0] if r.get("results") else None

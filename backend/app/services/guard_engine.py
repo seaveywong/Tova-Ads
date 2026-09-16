@@ -3381,7 +3381,7 @@ def _ka_budget_minor(usd: float, currency: str) -> int:
     return max(1, int(round(amt * (1 if (currency or "USD").upper() in _ZD else 100))))
 
 
-def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
+def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope: int | None = None):
     """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $1/天 Page Like（详见各分支注释）。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。
 
@@ -3424,7 +3424,8 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = ""):
         if only_act_id:
             # 单账户重试：不套 warming/租户开关过滤（指定主页后的「保存并重试」直达，
             # 目标账户可能既非 warming 也非 enabled 租户——重试意图本身就是权威）
-            warming_q = warming_q.filter(Account.act_id == only_act_id, Account.tenant_id == tenant_id)
+            warming_q = warming_q.filter(Account.act_id == only_act_id,
+                     *([Account.tenant_id == tenant_scope] if tenant_scope else []))  # 复审P2：曾引用不存在的 tenant_id → NameError
         elif enabled_tenants:
             warming_q = warming_q.filter(or_(
                 Account.warmup_state == "warming",
