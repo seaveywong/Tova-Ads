@@ -2505,3 +2505,20 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 ### 遗留语义说明
 - owner_user_id 为 NULL 的无主账户：任何人的倒计时/紧急暂停/批量哨兵都不再覆盖（原全租户口径覆盖）——当前无此类账户（分布 uid6/13/14 全有主）；将来出现无主账户需显式指派归属
 - 多人各自的倒计时互不影响（同轮各自 arm 名下、各自告警）
+
+## 批CQ：广告管理器「复制消耗账户」（2026-09-17，commit 本次）
+
+### 概述
+用户需求：把看板的「复制消耗账户」搬进广告管理器并升级——按当前筛选（日期段/账户多选/平台）出**行级**数据（日期/归属人/账户名/账户ID/消耗金额），且必须包含已移除账户：在管的实时打一次 FB API，已移除的用库内最后记录。
+
+### 变更
+| 端 | 内容 |
+|---|---|
+| backend ads.py | 新端点 `GET /ads/spend-report`：可见口径=scope_account_query（operator 名下/owner 全租户）；**含 is_managed=false**；在管 FB→4 并发账户级 insights（client 主线程解析防跨线程 session，线程纯 HTTP）；已移除或 API 失败→perf_snapshots（段内合计优先，否则最后一天，日期如实）；to_usd 换算，未知币种保库内值不写错数；spend 降序 |
+| frontend AdManager | 工具栏「复制消耗账户」按钮→预览弹窗（7 列含来源/在管状态色标）→复制 5 列 TSV（用户要的恰好 5 列，来源等辅助信息只在弹窗展示）；90s 超时；i18n zh/en |
+
+### 验证（生产数据断言）
+53 账户全出：16 在管全部 live ✓；37 已移除=5 段内 db + 14 db_last（日期=实际最后日如 2026-09-11）+ 18 无记录（消耗 '-'）✓；降序/act_ids 过滤/platform 过滤/managed 行全带归属人 ✓；journal 零 Traceback；线上 chunk 含 spend-report ✓。
+
+### 附：无主账户定论
+用户质疑正确——导入链路（用户→授权令牌→/fb/import）建账户时强制 `owner_user_id=user.id`（fb.py:1662），全库 owner 为空=0。批CP 的"无主账户无人覆盖"提醒纯理论兜底，现网不存在此情形。
