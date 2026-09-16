@@ -789,7 +789,7 @@ const deleteToken = async (tk) => {
 
     <div v-if="platform==='fb'" class="tbl" v-loading="loading">
       <div class="row head">
-        <span>{{ t('common.status') }}</span><span>{{ t('common.name') }}</span><span>{{ t('tokens.fbUser') }}</span>
+        <span>{{ t('common.status') }}</span><span>{{ t('common.name') }}</span><span>{{ t('tokens.fbUser') }}</span><span>{{ t('tokens.createdBy') }}</span>
         <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>
         <span>{{ t('tokens.type') }}</span><span></span>
       </div>
@@ -803,6 +803,7 @@ const deleteToken = async (tk) => {
           <span class="fbn">{{ tk.fb_user_name || '—' }}</span>
           <span class="fbi" :title="tk.fb_user_id">{{ tk.fb_user_id?.slice(-10) || '—' }}</span>
         </span>
+        <span class="c-by" :title="tk.created_by_name || ''">{{ (tk.created_by_name || '—').split('@')[0] }}</span>
         <span class="c-num clickable" :class="{err:summaryError(tk)}" :title="summaryError(tk)||t('tokens.accountsCountTip')" @click.stop="openDrawer(tk, 'accounts')">{{ summaryError(tk) ? '!' : countOf(tk,'accounts') }}</span>
         <span class="c-num clickable" @click.stop="openDrawer(tk, 'pages')">{{ countOf(tk,'pages') }}</span>
         <span class="c-num clickable" @click.stop="openDrawer(tk, 'businesses')">{{ countOf(tk,'businesses') }}</span>
@@ -1125,7 +1126,7 @@ const deleteToken = async (tk) => {
 
 /* 9 列：状态|名称|FB用户|账户|主页|BM|类型|操作|› */
 .tbl{border:1px solid var(--bd);border-radius:8px;overflow-x:auto}
-.row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) 52px 52px 52px 64px 36px 12px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
+.row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) minmax(70px,110px) 52px 52px 52px 64px 36px 12px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
 .row.head{color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg2);cursor:default;padding:8px 14px}
 .row:not(.head):hover{background:var(--bg3)}
 .row.err{opacity:.65}
@@ -1165,6 +1166,7 @@ const deleteToken = async (tk) => {
 .info-sec{background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-bottom:14px}
 .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}
 .info-cell{display:flex;flex-direction:column;gap:2px}
+.c-by{font-size:12px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .info-cell label{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.03em}
 .info-cell span{font-size:12px;color:var(--t1)}
 .info-cell span.warn{color:var(--warning)}

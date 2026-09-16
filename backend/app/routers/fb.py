@@ -44,8 +44,14 @@ def _cred_to_dict(c: FbCredential, db: Session = None) -> dict:
             perm = json.loads(c.permission_snapshot)
         except Exception:
             perm = None
+    created_by_name = None
+    if getattr(c, "created_by", None) and db:
+        from ..models.auth import User as _U
+        u = db.query(_U.email).filter(_U.id == c.created_by).first()
+        created_by_name = u[0] if u else None
     return {
         "id": c.id,
+        "created_by_name": created_by_name,
         "alias": c.alias,
         "status": c.status,
         "fb_user_name": c.fb_user_name,
@@ -125,6 +131,7 @@ def store_credential(
 
     if existing:
         existing.access_token_enc = encrypt(stored_token)
+        existing.created_by = user.id   # 重绑=新值由当前人键入，归属指向最新录入者
         existing.alias = body.alias or existing.alias
         existing.status = "active"
         # 审计#4（2026-09-12）：换新令牌必须清旧冷却——否则新令牌被旧 cooldown_until
@@ -143,6 +150,7 @@ def store_credential(
     else:
         cred = FbCredential(
             tenant_id=user.tenant_id,
+            created_by=user.id,   # 录入人（2026-09-16：令牌归属对账——曾无任何「谁键入」痕迹）
             type=body.type,
             alias=body.alias or None,
             access_token_enc=encrypt(stored_token),

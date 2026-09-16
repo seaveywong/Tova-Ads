@@ -7,6 +7,7 @@ class FbCredential(Base):
     __tablename__ = "fb_credentials"
     id = Column(BigInteger, primary_key=True)
     tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
+    created_by = Column(BigInteger, ForeignKey("users.id"), nullable=True)   # 录入人（重绑更新为最新键入者）
     type = Column(Text, nullable=False, default="user_token")
     alias = Column(Text)  # 命名（1111/2222...），多 token fallback 基础
     access_token_enc = Column(Text, nullable=False)
