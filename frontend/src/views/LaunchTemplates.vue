@@ -3142,8 +3142,12 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
           <div v-for="(h,i) in (editingAsset.ai_copy?.headlines||[])" :key="'h'+i" class="ai-pick" @click="form.headline=h"><span class="ai-tag">{{ t('launch.headlineN', { n: i+1 }) }}</span> {{ h }}</div>
           <div v-for="(b,i) in (editingAsset.ai_copy?.bodies||[])" :key="'b'+i" class="ai-pick" @click="form.body=b"><span class="ai-tag">{{ t('launch.bodyN', { n: i+1 }) }}</span> {{ b }}</div>
 </div>
-        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" :disabled="form.post_source==='reuse'" /></div>
-        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3" :disabled="form.post_source==='reuse'"></textarea></div>
+        <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="form.headline" class="inp" :disabled="form.post_source==='reuse'" />
+          <span v-if="(form.headline||'').length > 40" class="len-hint warn" :title="t('launch.lenHintHeadlineTip')">{{ (form.headline||'').length }}/40</span>
+          <span v-else class="len-hint">{{ (form.headline||'').length }}</span></div>
+        <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="form.body" class="inp ta" rows="3" :disabled="form.post_source==='reuse'"></textarea>
+          <span v-if="(form.body||'').length > 125" class="len-hint warn" :title="t('launch.lenHintBodyTip')">{{ (form.body||'').length }}/125</span>
+          <span v-else class="len-hint">{{ (form.body||'').length }}</span></div>
         <div class="row"><label>{{ t('launch.descLabel') }}</label>
           <input v-model="form.link_description" class="inp" :disabled="form.post_source==='reuse'" :placeholder="t('launch.descPh')" />
           <span class="hint">{{ t('launch.descHint') }}</span>
@@ -3301,8 +3305,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
                 <div v-if="(a.asset_ids||[]).length >= 2" class="hint">{{ t('launch.treeAssetGroupHint', { n: a.asset_ids.length }) }} · {{ t('launch.treeAssetCopyHint') }}</div>
-                <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="a.headline" class="inp" /></div>
-                <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="a.body" class="inp ta" rows="3"></textarea></div>
+                <div class="row"><label>{{ t('launch.headlineLabel') }}</label><input v-model="a.headline" class="inp" />
+                  <span v-if="(a.headline||'').length > 40" class="len-hint warn" :title="t('launch.lenHintHeadlineTip')">{{ (a.headline||'').length }}/40</span></div>
+                <div class="row"><label>{{ t('launch.bodyLabel') }}</label><textarea v-model="a.body" class="inp ta" rows="3"></textarea>
+                  <span v-if="(a.body||'').length > 125" class="len-hint warn" :title="t('launch.lenHintBodyTip')">{{ (a.body||'').length }}/125</span></div>
                 <!-- 动态引擎（按组卡 conv_location）：描述仅网站位；CTA 网站/消息/电话位出（表单/主页位 FB 固定按钮） -->
                 <div v-show="nodeAdShow(s).desc" class="row"><label>{{ t('launch.descLabel') }}</label>
                   <input v-model="a.link_description" class="inp" :placeholder="t('launch.descPh')" />
@@ -4470,4 +4476,8 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
   .tsc-ops .op{min-height:32px}
   .tpl-sel-empty{min-height:44px}
 }
+
+/* 文案长度计数/预警（2026-09-16）：FB 展示层折叠阈值——正文>125 折叠进 See more、标题>40 截断 */
+.len-hint{font-size:10px;color:var(--t3);align-self:flex-end;margin-left:6px;font-variant-numeric:tabular-nums;flex:none}
+.len-hint.warn{color:var(--warning);cursor:help;font-weight:600}
 </style>
