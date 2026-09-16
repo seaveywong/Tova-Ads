@@ -750,6 +750,105 @@ _BREAKDOWN_CACHE: dict = {}
 _BREAKDOWN_CACHE_TTL = 60
 
 
+@router.get("/spend-report")
+def ads_spend_report(date_from: str = "", date_to: str = "", act_ids: str = "", platform: str = "",
+                     user: CurrentUser = Depends(require_permission("ads.read")),
+                     db: Session = Depends(get_db)):
+    """复制消耗账户（2026-09-17 用户需求）：按广告管理器当前筛选（日期段/账户多选/平台）
+    出行级数据——日期/归属人/账户名/账户ID/消耗金额(USD)。
+    口径：在管 FB 账户逐个打一次账户级 insights 拉最新；已移除（或 API 失败）用
+    perf_snapshots 库内记录（range 有数据→段内合计；无→最后一次记录，日期如实展示）。
+    TT 账户无同步账户级报表助手——一律走库内口径。"""
+    from ..core.deps import scope_account_query
+    from ..services.guard_engine import to_usd
+    from ..models.auth import User
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not date_from or not date_to:
+        raise HTTPException(400, "date_from/date_to required")
+    rng_label = f"{date_from}~{date_to}"
+    q = scope_account_query(db.query(Account).filter(Account.tenant_id == user.tenant_id), user)
+    # 含已移除（is_managed=false 软删，历史保留）——用户明确要求移除的也给最后数据
+    _ids = [a.strip() for a in act_ids.split(",") if a.strip()]
+    if _ids:
+        q = q.filter(Account.act_id.in_(_ids))
+    if platform in ("fb", "tt"):
+        q = q.filter(func.coalesce(Account.platform, "fb") == platform)
+    accs = q.order_by(Account.name).all()
+    # 归属人映射（一次查询）
+    _owner_ids = {a.owner_user_id for a in accs if a.owner_user_id}
+    _owner_map = {}
+    if _owner_ids:
+        for u in db.query(User).filter(User.id.in_(_owner_ids)).all():
+            _owner_map[u.id] = u.email or f"#{u.id}"
+
+    def _db_row(act_id: str, plat: str):
+        """库内口径：range 有→段内合计（日期=range）；无→最后一次记录（日期=那天）。"""
+        base = [PerfSnapshot.tenant_id == user.tenant_id, PerfSnapshot.act_id == act_id,
+                PerfSnapshot.platform == plat]
+        r = db.query(func.sum(PerfSnapshot.spend)).filter(
+            *base, PerfSnapshot.snapshot_date >= date_from,
+            PerfSnapshot.snapshot_date <= date_to).first()
+        if r and (r[0] or 0) != 0:
+            return round(r[0], 2), rng_label, "db"
+        last = db.query(PerfSnapshot.snapshot_date, func.sum(PerfSnapshot.spend)).filter(
+            *base).group_by(PerfSnapshot.snapshot_date).order_by(
+            PerfSnapshot.snapshot_date.desc()).first()
+        if last and (last[1] or 0) != 0:
+            return round(last[1], 2), last[0], "db_last"
+        return None, "", "none"
+
+    rows = []
+    _live_targets = []   # (act_id) 在管+FB 才打实时
+    for acc in accs:
+        plat = acc.platform or "fb"
+        spend_usd, date_label, source = _db_row(acc.act_id, plat)
+        rows.append({
+            "date": date_label, "owner": _owner_map.get(acc.owner_user_id, "") if acc.owner_user_id else "",
+            "account_name": acc.name or "", "act_id": acc.act_id, "platform": plat,
+            "spend_usd": spend_usd, "currency": acc.currency or "USD",
+            "managed": bool(acc.is_managed), "source": source,
+        })
+        if acc.is_managed and plat == "fb":
+            _live_targets.append(acc.act_id)
+
+    def _fetch_live(t):
+        aid, cli = t
+        try:
+            ins = cli.get_insights(aid, date_from=date_from, date_to=date_to)
+            return aid, float(ins.get("spend") or 0)
+        except Exception:
+            return aid, None
+
+    # 有界并行打实时（串行 16 账户≈15s+；4 并发≈3-5s）。client 在主线程解析完
+    # （db session 线程不安全，不进工作线程）；线程里只走纯 HTTP。
+    _live = {}
+    _live_clis = []
+    for aid in _live_targets:
+        try:
+            cli = client_for_account(db, user.tenant_id, aid, "read")
+            if cli:
+                _live_clis.append((aid, cli))
+        except Exception:
+            pass
+    if _live_clis:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for aid, sp in ex.map(_fetch_live, _live_clis):
+                if sp is not None:
+                    _live[aid] = sp
+    for r in rows:
+        if r["act_id"] in _live and r["managed"]:
+            native = _live[r["act_id"]]
+            usd = to_usd(native, r["currency"])
+            if usd is not None:   # 未知币种汇率缺失→保库内值（不写错数）
+                r["spend_usd"] = round(usd, 2)
+                r["source"] = "live"
+                r["date"] = rng_label
+    rows.sort(key=lambda r: (r["spend_usd"] is None, -(r["spend_usd"] or 0), r["account_name"]))
+    return {"range": rng_label, "rows": rows,
+            "live_count": sum(1 for r in rows if r["source"] == "live")}
+
+
 @router.get("/insights/breakdown")
 def ads_insights_breakdown(
     act_id: str = "",

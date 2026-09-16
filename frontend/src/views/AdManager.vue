@@ -357,6 +357,32 @@ const breakdownLoading = ref(false)
 const breakdownRows = ref([])
 const breakdownDim = ref('age')
 const breakdownTarget = ref(null)
+// 复制消耗账户（2026-09-17）：按当前筛选（日期段/账户多选/平台）出行级数据；
+// 在管=实时拉 FB 账户级 insights，已移除/API 失败=库内最后记录（来源列如实标注）
+const spendRepOpen = ref(false)
+const spendRepLoading = ref(false)
+const spendRep = ref(null)
+const openSpendReport = async () => {
+  spendRepLoading.value = true
+  try {
+    const p = new URLSearchParams(curRange.value)
+    if (selectedActs.value.length) p.set('act_ids', selectedActs.value.join(','))
+    if (platform.value !== 'all') p.set('platform', platform.value)
+    spendRep.value = await GET('/ads/spend-report?' + p.toString(), 90000)
+    spendRepOpen.value = true
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  spendRepLoading.value = false
+}
+const srSourceLabel = (s) => ({ live: t('adm.srLive'), db: t('adm.srDb'), db_last: t('adm.srDbLast'), none: t('adm.srNone') }[s] || s)
+const copySpendReport = () => {
+  const rows = (spendRep.value?.rows) || []
+  if (!rows.length) { ElMessage.info(t('adm.srEmpty')); return }
+  const head = [t('adm.srDate'), t('adm.srOwner'), t('adm.srAccName'), t('adm.srAccId'), t('adm.srSpend')].join('\t')
+  const body = rows.map(r => [r.date, r.owner, r.account_name, r.act_id, r.spend_usd == null ? '' : r.spend_usd].join('\t')).join('\n')
+  navigator.clipboard?.writeText(head + '\n' + body)
+    .then(() => ElMessage.success(t('adm.srCopied', { n: rows.length })))
+    .catch(() => {})
+}
 const BREAKDOWN_DIMS = computed(() => [
   { id: 'age', label: t('adm.breakdownAge') },
   { id: 'gender', label: t('adm.breakdownGender') },
@@ -938,6 +964,7 @@ const unsubscribeLeads = async () => {
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
+      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="spendRepLoading" :title="t('adm.srBtnTip')" @click="openSpendReport">{{ spendRepLoading ? t('adm.srLoading') : t('adm.srBtn') }}</button>
       <!-- 工具收纳（2026-09-17 精简）：列/核验/跳转链接 进 ⋯，工具条只留高频项 -->
       <el-dropdown v-if="tab !== 'lead'" trigger="click" placement="bottom-end" @command="toolCmd">
         <button class="ctrl-btn">⋯<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
@@ -954,6 +981,36 @@ const unsubscribeLeads = async () => {
           <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
         </el-checkbox-group>
         <template #footer><button class="ctrl-btn" @click="columnsPop = false">{{ t('common.done') }}</button></template>
+      </el-dialog>
+      <el-dialog v-model="spendRepOpen" :title="t('adm.srTitle', { range: spendRep?.range || '' })" width="760px" append-to-body>
+        <div class="sr-meta">
+          {{ t('adm.srMeta', { live: (spendRep?.rows || []).filter(r => r.source === 'live').length, db: (spendRep?.rows || []).filter(r => r.source !== 'live').length }) }}
+        </div>
+        <div class="tbl" style="max-height:420px;overflow:auto">
+          <table class="manager-table">
+            <thead><tr>
+              <th>{{ t('adm.srDate') }}</th><th>{{ t('adm.srOwner') }}</th><th>{{ t('adm.srAccName') }}</th>
+              <th>{{ t('adm.srAccId') }}</th><th style="text-align:right">{{ t('adm.srSpend') }}</th>
+              <th>{{ t('adm.srSource') }}</th><th>{{ t('adm.srStatus') }}</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="r in (spendRep?.rows || [])" :key="r.act_id">
+                <td>{{ r.date || '-' }}</td>
+                <td>{{ r.owner || '-' }}</td>
+                <td>{{ r.account_name }}</td>
+                <td>{{ r.act_id }}</td>
+                <td style="text-align:right">{{ r.spend_usd == null ? '-' : Number(r.spend_usd).toFixed(2) }}</td>
+                <td><span :class="['sr-src', r.source]">{{ srSourceLabel(r.source) }}</span></td>
+                <td>{{ r.managed ? t('adm.srManaged') : t('adm.srRemoved') }}</td>
+              </tr>
+              <tr v-if="!(spendRep?.rows || []).length"><td colspan="7" style="text-align:center;color:var(--t3)">{{ t('adm.srEmpty') }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <template #footer>
+          <button class="ctrl-btn" @click="spendRepOpen = false">{{ t('common.close') }}</button>
+          <button class="ctrl-btn primary" :disabled="!(spendRep?.rows || []).length" @click="copySpendReport">{{ t('adm.srCopy') }}</button>
+        </template>
       </el-dialog>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok" :title="t('adm.liveVerifyTip')">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheAdsStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
@@ -1335,6 +1392,12 @@ const unsubscribeLeads = async () => {
 .rf-flag { color: var(--error); cursor: pointer; font-size: 11px; margin-left: 2px }
 .rf-flag:hover { opacity: .8 }
 .cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
+.sr-meta { font-size: 12px; color: var(--t3); margin-bottom: 8px }
+.sr-src { font-size: 10px; padding: 1px 6px; border-radius: 4px; white-space: nowrap }
+.sr-src.live { color: #30d158; background: rgba(48,209,88,.12) }
+.sr-src.db { color: var(--t3); background: rgba(128,128,140,.14) }
+.sr-src.db_last { color: #ff9f0a; background: rgba(255,159,10,.12) }
+.sr-src.none { color: #ff453a; background: rgba(255,69,58,.12) }
 .cache-at.stale { color: var(--warning) }
 /* 脱管/被禁账户视觉体系：行内标签 + 顶部警示条 */
 .acc-state-tag { font-size: 10px; border-radius: 3px; padding: 0 5px; margin-left: 4px; line-height: 1.5; cursor: help; font-weight: 500; white-space: nowrap }
