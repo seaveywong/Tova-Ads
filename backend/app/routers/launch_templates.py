@@ -940,7 +940,11 @@ def list_templates(user: CurrentUser = Depends(require_permission("ads.create"))
     if user.role == "operator":   # 批AG：operator 只看自己创建的（与账户/数据口径一致）
         _q = _q.filter(LaunchTemplate.created_by == user.id)
     rows = _q.order_by(LaunchTemplate.id.desc()).all()
-    return [_tpl_dict(t) for t in rows]
+    # 归属人（团队逻辑：owner 看全团队模板需知是谁建的）
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [t.created_by for t in rows if t.created_by] or [0])).all()}
+    return [{**_tpl_dict(t), "created_by_name": umap.get(t.created_by, "")} for t in rows]
 
 
 @router.post("")

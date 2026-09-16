@@ -97,7 +97,10 @@ def list_forms(platform: str = "", user: CurrentUser = Depends(require_permissio
     if p in ("fb", "tt"):
         q = q.filter(LeadFormTemplate.platform == p)
     rows = q.order_by(LeadFormTemplate.id.desc()).all()
-    return [_form_dict(t) for t in rows]
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [t.created_by for t in rows if t.created_by] or [0])).all()}
+    return [{**_form_dict(t), "created_by_name": umap.get(t.created_by, "")} for t in rows]
 
 
 @router.post("/forms")
@@ -312,7 +315,10 @@ def list_messages(user: CurrentUser = Depends(require_permission("ads.create")),
     if user.role == "operator":   # 批AG：operator 只看自己创建的
         _q = _q.filter(MessageTemplate.created_by == user.id)
     rows = _q.order_by(MessageTemplate.id.desc()).all()
-    return [_msg_dict(t) for t in rows]
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [t.created_by for t in rows if t.created_by] or [0])).all()}
+    return [{**_msg_dict(t), "created_by_name": umap.get(t.created_by, "")} for t in rows]
 
 
 @router.post("/messages")

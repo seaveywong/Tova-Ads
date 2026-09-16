@@ -596,8 +596,12 @@ def list_templates(
     rows = db.query(LandingTemplate).filter(
         LandingTemplate.tenant_id == user.tenant_id, LandingTemplate.status == "active"
     ).order_by(LandingTemplate.id.desc()).all()
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [r.created_by for r in rows if r.created_by] or [0])).all()}
     return [{"id": r.id, "name": r.name, "description": r.description,
-             "is_builtin": r.is_builtin, "has_resources": bool(r.resources_meta)} for r in rows]
+             "is_builtin": r.is_builtin, "has_resources": bool(r.resources_meta),
+             "created_by_name": umap.get(r.created_by, "")} for r in rows]
 
 
 def _validate_lp_spec(html: str, resource_names: list, loc: str) -> list[str]:

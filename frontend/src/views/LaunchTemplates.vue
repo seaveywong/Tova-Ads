@@ -2535,6 +2535,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               :title="_tplReady(tpl) ? t('launch.ready') : t('launch.missing') + '：' + _tplMissing(tpl).join('、')"></span>
         <span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>
         <span class="lt-name" :title="tpl.name">{{ tpl.name }}</span>
+        <span v-if="tpl.created_by_name" class="owner-chip" :title="tpl.created_by_name">{{ tpl.created_by_name.split('@')[0] }}</span>
         <span class="meta-line lt-meta">
           <b class="meta-obj">{{ objLabel(tpl.objective) }}</b>
           <span class="meta-sep">·</span>
@@ -3751,6 +3752,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
           <div class="hi-main">
             <span class="hi-name">{{ j.template_name }}</span>
+            <span v-if="j.created_by_name" class="owner-chip" :title="t('launch.initiator') + ': ' + j.created_by_name">{{ j.created_by_name.split('@')[0] }}</span>
             <span class="hi-jobid mono tnum" :title="t('launch.jobIdTip')">#{{ j.id }}</span>
             <span :class="['hi-status', j.status]">{{ jobText(j.status) }}</span>
 </div>
@@ -4480,4 +4482,5 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 /* 文案长度计数/预警（2026-09-16）：FB 展示层折叠阈值——正文>125 折叠进 See more、标题>40 截断 */
 .len-hint{font-size:10px;color:var(--t3);align-self:flex-end;margin-left:6px;font-variant-numeric:tabular-nums;flex:none}
 .len-hint.warn{color:var(--warning);cursor:help;font-weight:600}
+.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
 </style>

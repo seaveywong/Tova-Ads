@@ -76,7 +76,10 @@ def list_audiences(user: CurrentUser = Depends(require_permission("ads.read")),
     if user.role == "operator":   # 批AG：operator 只看自己创建的
         _q = _q.filter(SavedAudience.created_by == user.id)
     rows = _q.order_by(SavedAudience.id.desc()).all()
-    return [_row_dict(a) for a in rows]
+    from ..models.auth import User as _U
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(
+        [a.created_by for a in rows if a.created_by] or [0])).all()}
+    return [{**_row_dict(a), "created_by_name": umap.get(a.created_by, "")} for a in rows]
 
 
 @router.post("")

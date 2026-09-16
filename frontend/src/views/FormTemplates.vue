@@ -359,6 +359,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
         <span :class="['card-badge', item.fb_form_id ? 'ready' : 'draft']">{{ item.fb_form_id ? '✓ ' + t('formtpl.deployed') : t('formtpl.draft') }}</span>
         <span :class="['plat-chip', item.platform==='tt'?'tt':'fb']">{{ (item.platform||'fb').toUpperCase() }}</span>
         <span class="ft-name" :title="item.name">{{ item.name }}</span>
+        <span v-if="item.created_by_name" class="owner-chip" :title="item.created_by_name">{{ item.created_by_name.split('@')[0] }}</span>
         <span class="ft-desc" :title="(item.config||{}).form_title || ''">{{ (item.config||{}).form_title || '—' }}</span>
         <span class="ft-meta">{{ t('formtpl.questionsCount', { n: ((item.config||{}).custom_questions||[]).length }) }} · {{ item.locale }}</span>
         <div class="card-ops">
@@ -386,6 +387,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
       <div v-for="item in filteredMessages" :key="item.id" class="ft-row">
         <span :class="['msg-chip', (item.type||'messenger')==='whatsapp'?'wa':'ms']">{{ (item.type||'messenger')==='whatsapp'?'WhatsApp':'Messenger' }}</span>
         <span class="ft-name" :title="item.name">{{ item.name }}</span>
+        <span v-if="item.created_by_name" class="owner-chip" :title="item.created_by_name">{{ item.created_by_name.split('@')[0] }}</span>
         <span class="ft-desc" :title="item.welcome_text || ''">{{ (item.welcome_text||'').slice(0,80) }}{{ (item.welcome_text||'').length>80?'…':'' }}</span>
         <span class="ft-meta">{{ t('formtpl.quickRepliesCount', { n: (item.ice_breakers||[]).length }) }}</span>
         <div class="card-ops">
@@ -858,6 +860,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .mm-qr{font-size:12px;padding:5px 12px;background:var(--bg2);border:1px solid var(--ac);color:var(--ac);border-radius:16px}
 .messenger-mockup.wa .mm-bubble{background:#005c4b}
 .messenger-mockup.wa .mm-qr{border-color:#25d366;color:#4ade80}
+.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
 </style>
 
 <style scoped>

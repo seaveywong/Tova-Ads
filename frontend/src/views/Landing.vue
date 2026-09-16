@@ -1338,6 +1338,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <template v-if="tplRenameId !== tpl.id">
             <div class="tpl-info">
               <code :title="tpl.name">{{ tpl.name }}</code>
+              <span v-if="tpl.created_by_name" class="owner-chip" :title="tpl.created_by_name">{{ tpl.created_by_name.split('@')[0] }}</span>
               <span v-if="tpl.is_builtin" class="tag">{{ t('landing.tplBuiltin') }}</span>
               <span v-if="tpl.has_resources" class="tag" :title="t('landing.multiFileTip')">{{ t('landing.multiFile') }}</span>
               <span v-if="tpl.description" class="tpl-desc" :title="tpl.description">{{ tpl.description }}</span>
