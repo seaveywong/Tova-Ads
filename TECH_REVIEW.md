@@ -2476,3 +2476,32 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 
 ### 结论
 像素链路本身健康；事故根因在配置层无守卫。守卫补齐后同类问题会在建页表单（即时警告）和自检矩阵（warn 项+overall 变黄）两处暴露。`6988277670281` 确认为系列 ID（显示 bug 已修）。
+
+## 批CP：守护动作个人化——哨兵/紧急暂停/倒计时只作用本人名下（2026-09-17，commit 6efde50）
+
+### 概述
+用户拍板（超管原话"我只希望管理我自己的账户"）：三个守护动作从租户级改为**个人名下**口径，所有角色一致（含超管/owner）。原状：手动哨兵 arm 只有 operator 限名下、紧急暂停全租户、倒计时到期 arm 全租户、面板 armed 计数全租户——口径互相打架。
+
+### 变更表
+| 文件 | 变更 |
+|---|---|
+| guard.py `sentinel_arm` | 批量（无 act_ids）一律 `owner_user_id==user.id`；显式点名 act_ids 不受限（保持） |
+| guard.py `sentinel_disarm` | 同上口径（原 operator 限定→全员） |
+| guard.py `guard_status` | armed 计数加 owner 过滤——面板开关只反映本人名下，与 arm/disarm 行为一致 |
+| guard.py 紧急暂停 | 账户过滤+终验扫描均加 owner；状态键 `emergency_state_{tid}`→`{tid}_{uid}`（per-user，进度页各看各的）；完成通知 `user_id=` 定向本人；write_log 带 actor_user_id |
+| guard_engine.py `_sentinel_auto_arm_check` | 到期只 arm 本人名下；同轮去重键 tid→(tid,uid)（原租户键会吞掉同租户第二个到期用户） |
+| i18n.py | emergency_done 标题/正文改「名下」口径；倒计时预警/触发文案改「你名下」 |
+| locales zh/en | 「全局紧急暂停」→「紧急暂停」；emergencyConfirm/sentinelTip/sentinelDisarmConfirm/scdDesc 全部个人化措辞 |
+
+### 不变量（复核确认）
+- 显式 act_ids 点名路径不动（用户点名要 arm 的不受限）
+- 哨兵巡逻引擎不改（arm 标志本来就在账户上，标志范围=效果范围）
+- RLS 不受影响（纯列过滤叠加）
+- 旧租户级状态键 `emergency_state_1` 残留 DB 无害（新代码不读）
+
+### 生产变更
+后端 3 文件（备份 `_bak_*_0916_2308.py`）双门 restart health ok；前端 CF master。smoke：seavey 名下 9 / 全租户 16（uid13=5, uid14=2），紧急暂停范围=9、他人 7 账户不在范围内；journal 零 Traceback。
+
+### 遗留语义说明
+- owner_user_id 为 NULL 的无主账户：任何人的倒计时/紧急暂停/批量哨兵都不再覆盖（原全租户口径覆盖）——当前无此类账户（分布 uid6/13/14 全有主）；将来出现无主账户需显式指派归属
+- 多人各自的倒计时互不影响（同轮各自 arm 名下、各自告警）
