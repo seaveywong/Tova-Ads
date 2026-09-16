@@ -309,7 +309,7 @@ export default {
     warmupShort: 'Keepalive',
     kaActiveAd: 'Keepalive on', kaHasSpend: 'Has spend·no keepalive', kaBurnt: 'Keepalive halted', kaFailed: 'Keepalive failed',
     kaBadgeClickTip: 'Keepalive halted/failed — click to designate a keepalive page and retry',
-    kaPageMenu: 'Keepalive page', kaPageTitle: 'Designate Keepalive Page',
+    kaPageMenu: 'Keepalive page', kaNowMenu: 'Keep alive now', kaPageTitle: 'Designate Keepalive Page',
     kaPageAuto: 'Auto-pick (default)', kaPageAutoHint: 'Try pages with ad permission under the write token in order',
     kaPageAdvOk: '✓ Can advertise', kaPageAdvNo: '⚠ No ad permission (FB will reject)', kaPageFans: 'fans',
     kaPageNone: 'The write token cannot access any page for this account', kaPageHint: 'The designated page must match the page the ad account was created with, otherwise FB still rejects (#1815645). For page-bound accounts, confirm the bound page with your vendor.',

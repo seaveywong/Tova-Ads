@@ -321,7 +321,7 @@ export default {
     warmupShort: '保活',
     kaActiveAd: '保活中', kaHasSpend: '有消耗·免保活', kaBurnt: '保活熔断', kaFailed: '保活失败',
     kaBadgeClickTip: '保活已熔断/失败——点击指定保活主页并重试',
-    kaPageMenu: '保活主页', kaPageTitle: '指定保活主页',
+    kaPageMenu: '保活主页', kaNowMenu: '立即保活', kaPageTitle: '指定保活主页',
     kaPageAuto: '自动挑选（默认）', kaPageAutoHint: '从写令牌有广告权限的主页里依次尝试',
     kaPageAdvOk: '✓ 可投广告', kaPageAdvNo: '⚠ 无广告权限（选它会被 FB 拒）', kaPageFans: '粉丝',
     kaPageNone: '该账户的写令牌访问不到任何主页', kaPageHint: '指定主页须与账户创建时绑定的主页一致，否则仍会被 FB 拒（#1815645）。强绑户请向号商确认绑定的主页。',

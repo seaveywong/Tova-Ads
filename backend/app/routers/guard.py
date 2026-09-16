@@ -766,13 +766,22 @@ def set_keepalive_page(body: KeepalivePageIn,
 
 @router.post("/keepalive/retry")
 def keepalive_retry_one(body: KeepalivePageIn,
-                        user: CurrentUser = Depends(require_superadmin)):
-    """单账户保活重试（花钱操作同 /keepalive/run 口径——超管）。指定主页后「保存并重试」用；
-    只扫该账户，秒回单条结果。"""
+                        user: CurrentUser = Depends(require_permission("ads.create")),
+                        db: Session = Depends(get_db)):
+    """单账户保活重试（2026-09-16 下放：owner 可保活团队任意账户，operator 只能自己名下——
+    花钱口径与部署广告一致（ads.create），不再超管专属；全量 /keepalive/run 与保活配置仍超管）。
+    指定主页后「保存并重试」/ 行菜单「立即保活」共用；只扫该账户，秒回单条结果。"""
     from ..services.guard_engine import run_keepalive
-    if not (body.act_id or "").strip():
+    act = (body.act_id or "").strip()
+    if not act:
         raise HTTPException(400, "act_id 必填")
-    r = run_keepalive(reset_burnt=True, only_act_id=body.act_id.strip())
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    if user.role == "operator" and acc.owner_user_id != user.id:
+        raise HTTPException(403, "只能保活自己名下的账户")
+    r = run_keepalive(reset_burnt=True, only_act_id=act)
     if r.get("skipped") == "lock_busy":
         raise HTTPException(409, "保活扫描正在运行中（另一进程持有锁），请稍后重试")
     res = (r.get("results") or [None])[0] if r.get("results") else None

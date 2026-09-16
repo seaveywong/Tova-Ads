@@ -256,8 +256,7 @@ const saveKaPage = async (andRetry) => {
     }
   } catch (e) { ElMessage.error(e.message || t('common.opFail')); kaPageSaving.value = false; return }
   kaPageSaving.value = false
-  // 保存并重试（超管；单账户秒回）
-  if (!isSuper.value) return ElMessage.warning(t('ads.kaRetrySuperOnly'))
+  // 保存并重试（2026-09-16 下放：owner 任意账户 / operator 名下账户——后端归属校验，单账户秒回）
   kaPageRetrying.value = true; kaPageRetryRes.value = null
   try {
     const r = await POST('/guard/keepalive/retry', { act_id: a.act_id }, 120000)
@@ -293,6 +292,21 @@ const runKeepaliveNow = async () => {
 const onCmd = async (cmd, a) => {
   if (cmd === 'manager') router.push({ name: 'ad-manager', query: { act: a.act_id } })
   else if (cmd === 'logs') router.push({ name: 'landing', query: { tab: 'logs', act_id: a.act_id } })
+  else if (cmd === 'kakeep') {
+    // 立即保活（单账户秒回；2026-09-16 下放 owner/operator——后端校验名下归属）
+    ElMessage.info(t('settings.kaRunHint'))
+    try {
+      const r = await POST('/guard/keepalive/retry', { act_id: a.act_id }, 120000)
+      const res = r.result || {}
+      const meta = kaResMeta(res.result)
+      if (['success', 'skip'].includes(res.result)) {
+        ElMessage.success(`${meta.label}${res.reason ? ' · ' + res.reason : ''}`)
+        await load()
+      } else {
+        ElMessage.error(`${(meta && meta.label) || res.result}${res.reason ? ' · ' + res.reason : ''}`)
+      }
+    } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  }
   else if (cmd === 'group') openGroupEdit(a)
   else if (cmd === 'sync') {
     if (!a.fb_credential_id) return ElMessage.warning(t('ads.noBoundToken'))
@@ -458,6 +472,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
                 <el-dropdown-item command="group">{{ t('ads.groupEditTitle') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
                 <el-dropdown-item command="kapage">{{ t('ads.kaPageMenu') }}<span v-if="d.a.keepalive_page_id" class="ka-set-mark">✓</span></el-dropdown-item>
+                <el-dropdown-item command="kakeep">{{ t('ads.kaNowMenu') }}</el-dropdown-item>
                 <el-dropdown-item command="remove" class="danger">{{ t('ads.removeManaged') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
