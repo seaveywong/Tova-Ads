@@ -1,5 +1,6 @@
 export default {
   zh: {
+    pauseAction: '暂停',
     ownerFilterPh: '按所有者', ownerFilterTip: '按账户归属运营过滤其名下账户的广告',
     columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化（访问）',
     costPerResult: '单次成效费用', combinedCpa: '综合 CPA', ctrLabel: 'CTR',
@@ -21,6 +22,7 @@ export default {
     createAd: '创建',
   },
   en: {
+    pauseAction: 'Pause',
     ownerFilterPh: 'Owner', ownerFilterTip: 'Show ads under accounts owned by the selected member',
     columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined (visits)',
     costPerResult: 'Cost per result', combinedCpa: 'Combined CPA', ctrLabel: 'CTR',

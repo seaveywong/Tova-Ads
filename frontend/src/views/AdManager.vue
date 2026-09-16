@@ -933,7 +933,7 @@ const unsubscribeLeads = async () => {
       <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'" :title="t('adm.filterAbnormalTip')">{{ t('adm.filterAbnormal') }}</button></div>
       <el-select v-if="tab !== 'lead' && ownerOptions.length > 1" v-model="ownerFilter" clearable filterable
-                 :placeholder="t('adm.ownerFilterPh')" class="ctrl-btn owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
+                 :placeholder="t('adm.ownerFilterPh')" class="act-filter owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
@@ -948,12 +948,12 @@ const unsubscribeLeads = async () => {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-popover :visible="columnsPop" width="250" placement="bottom-end">
-        <template #reference><span></span></template>
+      <el-dialog v-model="columnsPop" :title="t('adm.columns')" width="260px" append-to-body>
         <el-checkbox-group v-model="viewPrefs[tab].columns" class="column-options">
           <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
         </el-checkbox-group>
-      </el-popover>
+        <template #footer><button class="ctrl-btn" @click="columnsPop = false">{{ t('common.done') }}</button></template>
+      </el-dialog>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok" :title="t('adm.liveVerifyTip')">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheAdsStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
     </div>
@@ -1020,7 +1020,7 @@ const unsubscribeLeads = async () => {
                 <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : ''">{{ metricText(a, col.id) }}</span>
               </td>
               <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
-                <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.paused') : t('adm.activate') }}</el-dropdown-item>
+                <el-dropdown-item command="toggle" :disabled="!!accStateTag(a)">{{ a.effective_status === 'ACTIVE' ? t('adm.pauseAction') : t('adm.activate') }}</el-dropdown-item>
                 <el-dropdown-item command="rename" :disabled="!!accStateTag(a)">{{ t('adm.rename') }}</el-dropdown-item>
                 <el-dropdown-item v-if="hasBudget(a)" command="budget" :disabled="!!accStateTag(a)">{{ t('adm.editBudget') }}</el-dropdown-item>
                 <template v-if="tab === 'ad'"><el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item><el-dropdown-item command="logs">{{ t('adm.viewLandingLogs') }}</el-dropdown-item><el-dropdown-item command="diagnose">{{ t('adm.adDiagnose') }}</el-dropdown-item><el-dropdown-item v-if="a.platform !== 'tt'" command="breakdown">{{ t('adm.breakdown') }}</el-dropdown-item><el-dropdown-item v-if="a.object_story_id" command="reuse">{{ t('adm.reuseThisPost') }}</el-dropdown-item></template>

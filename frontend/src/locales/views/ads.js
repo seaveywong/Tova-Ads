@@ -5,6 +5,7 @@
 // 新键与内联键无重名，先注册先被内联键覆盖也不会冲突（取并集）。
 export default {
   zh: {
+    noOwnerTip: '无归属（历史导入未指定归属人）',
     ownerChipTip: '归属运营：{email}',
     groupCol: '分组',
     groupAll: '全部分组',
@@ -24,6 +25,7 @@ export default {
     noTokenTip: '令牌已移除/未绑定：巡检与部署不可用。请到令牌页绑定，或移除纳管。',
   },
   en: {
+    noOwnerTip: 'No owner (legacy import)',
     ownerChipTip: 'Owner: {email}',
     groupCol: 'Group',
     groupAll: 'All groups',
