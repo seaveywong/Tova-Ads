@@ -551,6 +551,23 @@ def _evaluate_scale_rule(rt: str, p: dict, ad_insights: dict, conversions: float
     return True, " / ".join(parts)
 
 
+def _rule_ctx(r) -> SimpleNamespace:
+    """ORM 规则 → 线程安全纯数据上下文（SimpleNamespace；跨线程只读，不挂任何 session）。
+    （2026-09-17 事故恢复：删兜底死代码时本函数被整块连带误删 → 巡检 NameError 停滞 15min——
+    批量删块必须 grep 验证块内没有活函数，二次踩坑，教训升级。）"""
+    return SimpleNamespace(
+        id=getattr(r, "id", None),
+        name=(getattr(r, "name", "") or ""),
+        rule_type=r.rule_type,
+        params=(r.params or "{}"),
+        conversion_source=(getattr(r, "conversion_source", None) or "either"),
+        action=(getattr(r, "action", None) or "default"),
+        scope_act_id=getattr(r, "scope_act_id", None),
+        created_by=getattr(r, "created_by", None),
+        rule_scope=getattr(r, "rule_scope", None) or "user",
+    )
+
+
 # 兜底规则已整体移除（2026-09-17 用户拍板 + 治理复审：代码级隐形规则连平台超管都不可见，
 # 曾以写死 conversion_source="fb" 的口径误停有落地通过量的广告——任何会动真金白银的系统
 # 行为必须在 UI 可见可管，硬编码注入从此不再允许
