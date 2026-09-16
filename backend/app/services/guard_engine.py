@@ -551,38 +551,9 @@ def _evaluate_scale_rule(rt: str, p: dict, ad_insights: dict, conversions: float
     return True, " / ".join(parts)
 
 
-class _DefaultBleedRule:
-    """规则兜底：账户/租户无任何规则时注入的默认空耗止血线（保底防裸奔）。
-    用户配了任何规则 → acc_rules 非空 → 不注入（用户优先）。
-    阈值 $20 固定；用户想改 → 建自己的 bleed_abs 规则覆盖（acc_rules 非空即接管）。"""
-    rule_type = "bleed_abs"
-    params = json.dumps({"spend_threshold": 20})
-    conversion_source = "fb"
-    action = "pause"
-    name = "默认空耗止血（兜底$20）"
-    scope_act_id = None
-
-
-_DEFAULT_BLEED_ABS_RULE = _DefaultBleedRule()
-
-
-def _rule_ctx(r) -> SimpleNamespace:
-    """ORM 规则 → 线程安全纯数据上下文（SimpleNamespace；跨线程只读，不挂任何 session）。"""
-    return SimpleNamespace(
-        id=getattr(r, "id", None),
-        name=(getattr(r, "name", "") or ""),
-        rule_type=r.rule_type,
-        params=(r.params or "{}"),
-        conversion_source=(getattr(r, "conversion_source", None) or "either"),
-        action=(getattr(r, "action", None) or "default"),
-        scope_act_id=getattr(r, "scope_act_id", None),
-        created_by=getattr(r, "created_by", None),
-        rule_scope=getattr(r, "rule_scope", None) or "user",
-    )
-
-
-_DEFAULT_BLEED_RULE_CTX = _rule_ctx(_DEFAULT_BLEED_ABS_RULE)
-
+# 兜底规则已整体移除（2026-09-17 用户拍板 + 治理复审：代码级隐形规则连平台超管都不可见，
+# 曾以写死 conversion_source="fb" 的口径误停有落地通过量的广告——任何会动真金白银的系统
+# 行为必须在 UI 可见可管，硬编码注入从此不再允许
 
 def _max_workers(db, count: int) -> int:
     """巡检并发度：system_settings.guard_concurrency（1-8，默认 4；1.0 同款钳制），不超过任务数。"""
@@ -2038,7 +2009,7 @@ def run_inspection(force: bool = False):
                 tasks.append({
                     "tenant_id": tenant_id, "trace_id": trace_id, "force": force,
                     "learning_hours": learning_hours, "hist_days": hist_days,
-                    "all_rules": rule_ctxs, "default_rule": _DEFAULT_BLEED_RULE_CTX,
+                    "all_rules": rule_ctxs,
                     "armed": bool(acc.sentinel_armed or acc.sentinel_auto_armed),
                     "acc": SimpleNamespace(act_id=acc.act_id, name=acc.name,
                                            currency=acc.currency, timezone_name=acc.timezone_name,
