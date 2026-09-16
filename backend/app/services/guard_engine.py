@@ -2525,14 +2525,14 @@ def _sentinel_auto_arm_check(db, trace_id: str) -> int:
     """哨兵倒计时（dead-man switch）——个人制（2026-09-15 用户拍板：不针对团队）。
 
     每个用户自己的开关/小时数（sentinel_scd:{tid}:{uid}），无交互按**本人**的
-    last_active_at 判断；到期 arm 其所属租户的全部纳管账户（停广告动作天然账户级）。
+    last_active_at 判断；到期 arm **本人名下**纳管账户（2026-09-17 拍板：原全租户改个人名下）。
     预警/触发文案个性化（本人邮箱），路径指向 安全守护。解除只手动 disarm。"""
     from ..models.auth import User, TenantMembership
     from ..core.sentinel_config import list_enabled_user_configs, sentinel_auto_arm_state
     from ..core.notify_utils import emit_notification, dedup_recent
     now = datetime.now(timezone.utc)
     armed_total = 0
-    armed_tenants: set = set()   # 同轮多用户到期 → 租户只 arm/告警一次
+    armed_keys: set = set()   # 同轮去重键=(tid,uid)：名下账户互不相交，各自 arm 各自告警
     for tid, uid, cfg in list_enabled_user_configs(db):
         try:
             u = db.get(User, uid)
@@ -2558,16 +2558,18 @@ def _sentinel_auto_arm_check(db, trace_id: str) -> int:
                               result="success",
                               trigger_detail=f"hours={hours} who={_who} last_active={u.last_active_at}")
                     db.commit()
-            elif state == "arm" and tid not in armed_tenants:
+            elif state == "arm" and (tid, uid) not in armed_keys:
+                # 2026-09-17 用户拍板：到期只 arm 本人名下账户（原全租户——超管也只想管自己的）
                 accounts = db.query(Account).filter(
                     Account.tenant_id == tid,
                     Account.is_managed.is_(True),
+                    Account.owner_user_id == uid,
                     Account.sentinel_auto_armed.is_(False) | Account.sentinel_auto_armed.is_(None),
                 ).all()
                 for a in accounts:
                     a.sentinel_auto_armed = True
                 db.commit()
-                armed_tenants.add(tid)
+                armed_keys.add((tid, uid))
                 if accounts:
                     armed_total += len(accounts)
                     _loc = _tenant_locale_of(db, tid)

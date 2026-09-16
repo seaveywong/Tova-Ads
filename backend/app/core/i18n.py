@@ -200,10 +200,10 @@ NOTIFY = {
         },
     },
     "emergency_done": {
-        "title": {"zh": "全局紧急暂停完成", "en": "Global Emergency Pause Done"},
+        "title": {"zh": "紧急暂停完成（名下账户）", "en": "Emergency Pause Done (your accounts)"},
         "body": {
-            "zh": "覆盖 {total} 个账户\n已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）\n【终验】全量扫描后仍有 <b>{final_active}</b> 个系列在投放\n核验失败：{failed}\n{errs}",
-            "en": "Covered {total} accounts\nPaused <b>{camps}</b> campaigns ({ads} ads under them)\n[FINAL AUDIT] {final_active} campaigns STILL ACTIVE after full scan\nVerify failed: {failed}\n{errs}",
+            "zh": "覆盖你名下 {total} 个账户\n已停 <b>{camps}</b> 个系列（含其下 {ads} 条广告）\n【终验】全量扫描后仍有 <b>{final_active}</b> 个系列在投放\n核验失败：{failed}\n{errs}",
+            "en": "Covered {total} of your accounts\nPaused <b>{camps}</b> campaigns ({ads} ads under them)\n[FINAL AUDIT] {final_active} campaigns STILL ACTIVE after full scan\nVerify failed: {failed}\n{errs}",
         },
     },
     "sentinel_pause_batch": {
@@ -240,15 +240,15 @@ NOTIFY = {
     "sentinel_auto_arm_warning": {
         "title": {"zh": "🟡 哨兵倒计时预警：{who} 已 {elapsed} 小时未登录", "en": "🟡 Sentinel Countdown: {who} inactive for {elapsed}h"},
         "body": {
-            "zh": "你（{who}）已 {elapsed} 小时未登录，超过 {hours} 小时将<b>自动开启哨兵</b>——纳管账户的投放系列会被停止。\n如属正常（休息/假期），登录任意页面即刷新倒计时，或在 安全守护 → 哨兵倒计时 调长/关闭。",
-            "en": "You ({who}) have been inactive for {elapsed}h. After {hours}h the sentinel will be <b>armed automatically</b> — managed campaigns will be paused.\nIf this is expected, open any page to reset, or adjust/disable it in Guard → Sentinel Countdown.",
+            "zh": "你（{who}）已 {elapsed} 小时未登录，超过 {hours} 小时将<b>自动开启哨兵</b>——你名下纳管账户的投放系列会被停止。\n如属正常（休息/假期），登录任意页面即刷新倒计时，或在 安全守护 → 哨兵倒计时 调长/关闭。",
+            "en": "You ({who}) have been inactive for {elapsed}h. After {hours}h the sentinel will be <b>armed automatically</b> — campaigns on your managed accounts will be paused.\nIf this is expected, open any page to reset, or adjust/disable it in Guard → Sentinel Countdown.",
         },
     },
     "sentinel_auto_armed": {
         "title": {"zh": "🔴 哨兵已自动开启（{who} {hours} 小时未登录）", "en": "🔴 Sentinel Auto-Armed ({who}, {hours}h inactive)"},
         "body": {
-            "zh": "你（{who}）超过 {hours} 小时未登录，已自动开启哨兵：<b>{n}</b> 个纳管账户的投放系列将被停止。\n自动开启不会自动解除；确认无异常后到 安全守护 手动关闭哨兵恢复投放。",
-            "en": "You ({who}) were inactive for over {hours}h. Sentinel armed automatically: campaigns on <b>{n}</b> managed accounts will be paused.\nAuto-arm never auto-disarms; disarm manually in Guard to resume.",
+            "zh": "你（{who}）超过 {hours} 小时未登录，已自动开启哨兵：你名下 <b>{n}</b> 个纳管账户的投放系列将被停止。\n自动开启不会自动解除；确认无异常后到 安全守护 手动关闭哨兵恢复投放。",
+            "en": "You ({who}) were inactive for over {hours}h. Sentinel armed automatically: campaigns on <b>{n}</b> of your managed accounts will be paused.\nAuto-arm never auto-disarms; disarm manually in Guard to resume.",
         },
     },
     "rule_scale": {

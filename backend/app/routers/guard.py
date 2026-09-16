@@ -257,11 +257,10 @@ def sentinel_arm(body: SentinelArmIn, user: CurrentUser = Depends(require_permis
     if body.act_ids:
         query = query.filter(Account.act_id.in_(body.act_ids))
     else:
-        # 全租户/全名下批量 arm 只碰在管账户：软删账户（is_managed=false）被 arm 后，
-        # 重新导入即被哨兵全停（意外 kill）。显式指定 act_ids 不受限（用户点名要 arm）
-        query = query.filter(Account.is_managed.is_(True))
-        if user.role == "operator":
-            query = query.filter(Account.owner_user_id == user.id)
+        # 2026-09-17 用户拍板：哨兵只作用于自己名下账户（所有角色一致，含超管/owner）。
+        # 软删账户（is_managed=false）不碰：被 arm 后重新导入即被哨兵全停（意外 kill）。
+        # 显式指定 act_ids 不受限（用户点名要 arm）
+        query = query.filter(Account.is_managed.is_(True), Account.owner_user_id == user.id)
     count = query.update({Account.sentinel_armed: True}, synchronize_session="fetch")
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, action_type="sentinel_arm", source="user",
@@ -277,7 +276,8 @@ def sentinel_disarm(body: SentinelArmIn, user: CurrentUser = Depends(require_per
     query = db.query(Account).filter(Account.tenant_id == user.tenant_id)
     if body.act_ids:
         query = query.filter(Account.act_id.in_(body.act_ids))
-    elif user.role == "operator":
+    else:
+        # 与 arm 同口径（2026-09-17）：批量只碰自己名下账户，含超管/owner
         query = query.filter(Account.owner_user_id == user.id)
     count = query.update({Account.sentinel_armed: False, Account.sentinel_auto_armed: False},
                          synchronize_session="fetch")
@@ -307,6 +307,7 @@ def guard_status(user: CurrentUser = Depends(require_permission("ads.pause")),
     armed = db.query(Account).filter(
         Account.tenant_id == user.tenant_id,
         Account.is_managed.is_(True),  # 与 arm 口径一致：软删账户不计入 armed 数
+        Account.owner_user_id == user.id,   # 2026-09-17：面板开关只反映本人名下（与 arm/disarm 同口径）
         (Account.sentinel_armed == True) | (Account.sentinel_auto_armed == True)).count()
     return {"rules_enabled": rules_count, "allowances_today": allowances, "sentinel_armed_accounts": armed}
 
@@ -327,16 +328,17 @@ def manual_sentinel_patrol(user: CurrentUser = Depends(require_superadmin)):
 
 
 # 紧急暂停后台执行状态（gunicorn 多 worker 各自一份，可接受——同 ads.py _REFRESH_STATE 模式）
-# {tenant_id: {"running": bool, "started_at": ts, "paused": n, "verify_failed": n, "total_accounts": n, "errors": []}}
+# {(tenant_id, user_id): {...}}——2026-09-17 起按用户隔离（紧急暂停只停本人名下账户，
+# 状态/进度页也各看各的，不互相覆盖展示）
 _EMERGENCY_STATE: dict = {}
 
 
-def _emergency_state_write(db, tenant_id: int, st: dict):
+def _emergency_state_write(db, tenant_id: int, user_id: int, st: dict):
     """状态落 DB system_settings（gunicorn 4 worker——进程内 dict 另一 worker 读不到，
     轮询会第一拍就假报'已暂停 0 条'。DB 是跨 worker 真相源）。"""
     import json as _json
     from ..models.system import SystemSetting
-    key = f'emergency_state_{tenant_id}'
+    key = f'emergency_state_{tenant_id}_{user_id}'
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     val = _json.dumps(st)
     if row:
@@ -346,8 +348,9 @@ def _emergency_state_write(db, tenant_id: int, st: dict):
     db.commit()
 
 
-def _bg_emergency_pause(tenant_id: int, user_email: str):
-    """后台执行全局紧急暂停：同步 ads_cache → 逐个 PAUSE → 回读核验（advisory lock 113 单实例互斥）。"""
+def _bg_emergency_pause(tenant_id: int, user_id: int, user_email: str):
+    """后台执行紧急暂停：同步 ads_cache → 逐个 PAUSE → 回读核验（advisory lock 113 单实例互斥）。
+    2026-09-17 用户拍板：只停触发者名下账户（所有角色一致，含超管），不再全租户。"""
     from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
     from sqlalchemy import or_ as _or   # P0-5：仅排除死状态账户，NULL 状态视为可管
     from ..core.fb_tokens import cred_for_account_op
@@ -358,30 +361,33 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
     from ..routers.ads import _sync_one
     import json as _json, time as _time
 
-    st = _EMERGENCY_STATE.get(tenant_id)
+    _ek = (tenant_id, user_id)
+    st = _EMERGENCY_STATE.get(_ek)
     if st and st.get("running"):
         return
     lock = None
     db = None
-    _EMERGENCY_STATE[tenant_id] = {"running": True, "started_at": datetime.now(timezone.utc).isoformat(),
-                                   "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
+    _EMERGENCY_STATE[_ek] = {"running": True, "started_at": datetime.now(timezone.utc).isoformat(),
+                             "paused": 0, "verify_failed": 0, "total_accounts": 0, "errors": []}
     try:
         lock = acquire_run_lock(113)
         if not lock:
             # 别的 worker 正在执行紧急暂停（pg_try 拿不到=已有人持有）——不重复跑
-            _EMERGENCY_STATE[tenant_id] = {"running": False, "started_at": "", "paused": 0,
-                                           "verify_failed": 0, "total_accounts": 0, "errors": []}
+            _EMERGENCY_STATE[_ek] = {"running": False, "started_at": "", "paused": 0,
+                                     "verify_failed": 0, "total_accounts": 0, "errors": []}
             return
         db = SuperSessionLocal()
-        _st = _EMERGENCY_STATE[tenant_id]
-        _emergency_state_write(db, tenant_id, dict(_st))
+        _st = _EMERGENCY_STATE[_ek]
+        _emergency_state_write(db, tenant_id, user_id, dict(_st))
         # 按平台分组：FB 组走原 set_status 链（零改动）；TT 组走 TtClient 批量 DISABLE（下方 TT 段）。
         # 不再整段排除 TT（P0-2）——紧急暂停覆盖全平台。
         # 账户过滤（P0-5）：仅排除死状态（DISABLED=2/CLOSED=8）——未结清3/受限7/宽限期9 的账户
         # 仍可能投放花钱，紧急暂停必须覆盖（曾 ==1 全排除：受限账户漏停继续烧钱）。
+        # 2026-09-17：+owner_user_id——只停触发者名下（用户拍板，含超管）。
         accounts = db.query(Account).filter(
             Account.tenant_id == tenant_id,
             Account.is_managed.is_(True),
+            Account.owner_user_id == user_id,
             _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
         ).all()
         fb_accounts = [a for a in accounts if (a.platform or "fb") != "tt"]
@@ -463,7 +469,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                 pass  # 核验查询失败不阻断（信任 set_status 的成功返回）
             # 每账户拍一次进度到 DB（前端轮询跨 worker 可见；紧急暂停低频，写代价可忽略）
             try:
-                _emergency_state_write(db, tenant_id, dict(_st))
+                _emergency_state_write(db, tenant_id, user_id, dict(_st))
             except Exception:
                 pass
 
@@ -516,13 +522,13 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                 except Exception:
                     pass  # 核验查询失败不阻断（信任 update_status 的成功返回）
                 try:
-                    _emergency_state_write(db, tenant_id, dict(_st))
+                    _emergency_state_write(db, tenant_id, user_id, dict(_st))
                 except Exception:
                     pass
 
         _st["errors"] = _st["errors"][:10]
         try:
-            _emergency_state_write(db, tenant_id, dict(_st))   # 终态落 DB（跨 worker）
+            _emergency_state_write(db, tenant_id, user_id, dict(_st))   # 终态落 DB（跨 worker）
         except Exception:
             pass
         # ── 终验报告：全量扫纳管账户 ACTIVE campaign（地面真相，不靠逐条 pause 的即时返回）──
@@ -533,6 +539,7 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
             _fin_accs = db.query(Account).filter(
                 Account.tenant_id == tenant_id,
                 Account.is_managed.is_(True),
+                Account.owner_user_id == user_id,   # 终验同主过滤口径（2026-09-17 只验本人名下）
                 _or(Account.account_status.is_(None), Account.account_status.notin_([2, 8, 100, 101])),
             ).all()
             for _fa in _fin_accs:
@@ -572,31 +579,32 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
                                        errs="；".join((_st.get("errors") or [])[:5]))
             emit_notification(db, tenant_id=tenant_id, level="critical",
                               event_type="emergency_pause_done", trace_id=new_trace_id(),
-                              title=_t_ep, body=_b_ep)
+                              title=_t_ep, body=_b_ep, user_id=user_id)   # 个人动作个人收（2026-09-17 名下口径）
             write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="user",
+                      actor_user_id=user_id,
                       target_type="tenant", target_id=str(tenant_id),
                       action_type="emergency_pause", source="emergency_pause",
                       result="success" if not _st.get("verify_failed") else "partial",
-                      trigger_detail=f"全局紧急暂停完成({user_email}): {_st.get('total_accounts',0)} 账户 / "
+                      trigger_detail=f"紧急暂停完成({user_email}, 名下账户): {_st.get('total_accounts',0)} 账户 / "
                                      f"{_n_camp} 系列(覆盖 {_n_ads} 条广告) / 核验失败 {_st.get('verify_failed',0)}")
             db.commit()
         except Exception:
             pass
     except Exception as e:
-        if _EMERGENCY_STATE.get(tenant_id):
-            _errs = _EMERGENCY_STATE[tenant_id].get("errors") or []
-            _EMERGENCY_STATE[tenant_id]["errors"] = (_errs[:9] + [f"emergency_pause: {str(e)[:80]}"])[:10]
+        if _EMERGENCY_STATE.get(_ek):
+            _errs = _EMERGENCY_STATE[_ek].get("errors") or []
+            _EMERGENCY_STATE[_ek]["errors"] = (_errs[:9] + [f"emergency_pause: {str(e)[:80]}"])[:10]
     finally:
         if db:
             db.close()
         if lock:
             release_run_lock(lock, 113)
-        if _EMERGENCY_STATE.get(tenant_id):
-            _EMERGENCY_STATE[tenant_id]["running"] = False
+        if _EMERGENCY_STATE.get(_ek):
+            _EMERGENCY_STATE[_ek]["running"] = False
             try:
                 _sdb = SuperSessionLocal()
                 try:
-                    _emergency_state_write(_sdb, tenant_id, dict(_EMERGENCY_STATE[tenant_id]))
+                    _emergency_state_write(_sdb, tenant_id, user_id, dict(_EMERGENCY_STATE[_ek]))
                 finally:
                     _sdb.close()
             except Exception:
@@ -606,12 +614,13 @@ def _bg_emergency_pause(tenant_id: int, user_email: str):
 @router.post("/emergency-pause")
 def emergency_pause(background_tasks: BackgroundTasks,
                     user: CurrentUser = Depends(require_permission("ads.pause"))):
-    """全局紧急暂停（后台异步）：同步 ads_cache → 逐个 PAUSE → 回读核验。
+    """紧急暂停（后台异步，只停本人名下账户——2026-09-17 用户拍板）：同步 ads_cache → 逐个 PAUSE → 回读核验。
     立即返回，进度/结果查 GET /guard/emergency-status（前端轮询）。"""
-    st = _EMERGENCY_STATE.get(user.tenant_id)
+    _ek = (user.tenant_id, user.id)
+    st = _EMERGENCY_STATE.get(_ek)
     if st and st.get("running"):
         return {"started": False, "running": True}
-    background_tasks.add_task(_bg_emergency_pause, user.tenant_id, user.email)
+    background_tasks.add_task(_bg_emergency_pause, user.tenant_id, user.id, user.email)
     return {"started": True, "running": True}
 
 
@@ -623,7 +632,7 @@ def emergency_status(user: CurrentUser = Depends(require_permission("ads.pause")
     from ..models.system import SystemSetting
     _sdb = SuperSessionLocal()
     try:
-        row = _sdb.query(SystemSetting).filter(SystemSetting.key == f'emergency_state_{user.tenant_id}').first()
+        row = _sdb.query(SystemSetting).filter(SystemSetting.key == f'emergency_state_{user.tenant_id}_{user.id}').first()
         if row:
             try:
                 return _json.loads(row.value)
