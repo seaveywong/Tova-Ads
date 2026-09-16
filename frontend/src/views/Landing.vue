@@ -493,6 +493,7 @@ const _copyRaw = async (txt) => {
   if (!ok) ElMessage.error(t('landing.copyFail'))
   return ok
 }
+const openPreview = (url) => { if (url) window.open(url, '_blank', 'noopener') }
 const copyText = async (txt, msg) => {
   const ok = await _copyRaw(txt)
   if (ok) ElMessage.success(msg || t('common.copied'))
@@ -821,54 +822,100 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       </el-select>
     </div>
 
-    <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ visibleLpPages.length }}</i></div>
+    <!-- 表头（2026-09-16 重设计：列表升为表格语义——列有名、列对齐、密度受控；
+         域名从「按钮堆」降为文本属性（主域+N），操作收敛为 2 常驻 + ⋯ 菜单 -->
+    <div v-if="visibleLpPages.length" class="lp-thead">
+      <span>{{ t('landing.lpColStatus') }}</span>
+      <span>{{ t('landing.lpColLink') }}</span>
+      <span>{{ t('landing.fDomain') }}</span>
+      <span>{{ t('landing.stSubcodes') }}</span>
+      <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span>
+      <span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span>
+      <span>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</span>
+      <span>FB</span>
+      <span></span>
+    </div>
     <div class="list" v-loading="loading">
       <!-- 落地页行式（2026-09-15 重大重构）：卡退场——行=状态+标题+域名+子码·像素+今日三指标+标记+操作；
            7天/累计/通过率全部收进 hover，编辑/子码/自检进抽屉 -->
       <div v-if="visibleLpPages.length" class="short-list">
         <div v-for="p in visibleLpPages" :key="p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
-          <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span class="owner-cell"><span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
-                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span></span>
-          <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length" :title="p.bound_subdomains.join(' | ')">
-            <button v-for="sub in p.bound_subdomains.slice(0,2)" :key="sub" class="dom-chip"
-                    :title="'https://' + sub" @click.stop="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
-            <span v-if="p.bound_subdomains.length > 2" class="dom-more" @click.stop="openEdit(p)">+{{ p.bound_subdomains.length - 2 }}</span>
-          </div>
-          <span class="short-meta">{{ p.subcode_count || 0 }} {{ t('landing.stSubcodes') }} · {{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
+          <span class="lp-name">
+            <span class="short-title" :title="p.title">{{ p.title }}</span>
+            <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                  @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
+          </span>
+          <span class="lp-dom" v-if="p.bound_subdomains && p.bound_subdomains.length"
+                :title="p.bound_subdomains.join('\n') + ' · ' + t('common.copy')"
+                @click.stop="copyText('https://' + p.bound_subdomains[0], t('landing.publicUrlCopied'))">
+            {{ p.bound_subdomains[0] }}<i v-if="p.bound_subdomains.length > 1"> +{{ p.bound_subdomains.length - 1 }}</i>
+          </span>
+          <span v-else class="lp-dom muted">—</span>
+          <span class="lp-subcount" :title="(p.pixel_ids||[]).length + ' ' + t('landing.pixelsUnit')">{{ p.subcode_count || 0 }}</span>
           <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
           <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
           <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%（累计）'">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
           <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-else-if="p.last_health_status" class="health-dot" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
+          <span v-else class="lp-fb-empty"></span>
           <div class="short-ops">
-            <a v-if="p.preview_url" class="mb" :href="p.preview_url" target="_blank" rel="noopener">{{ t('common.preview') }}</a>
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
-            <button class="mb" :disabled="healthCheckingId === p.id" @click="checkHealth(p)">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
-            <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+            <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p) }">
+              <button class="mb" :title="t('landing.moreOps')">⋯</button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="check" :disabled="healthCheckingId === p.id">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</el-dropdown-item>
+                  <el-dropdown-item command="preview" :disabled="!p.preview_url">{{ t('common.preview') }}</el-dropdown-item>
+                  <el-dropdown-item command="archive" divided>{{ t('landing.archive') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
-      <div v-if="modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ visibleShortPages.length }}</i></div>
-    <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
+      <div v-if="visibleShortPages.length" class="lp-thead">
+        <span>{{ t('landing.lpColStatus') }}</span>
+        <span>{{ t('landing.lpColLink') }}</span>
+        <span>{{ t('landing.lpColTarget') }}</span>
+        <span>{{ t('landing.stSubcodes') }}</span>
+        <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span>
+        <span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span>
+        <span>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</span>
+        <span>FB</span>
+        <span></span>
+      </div>
+    <!-- 短链行式（2026-09-16 重设计：与落地页同表结构） -->
       <div v-if="visibleShortPages.length" class="short-list">
-        <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
+        <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
-          <span class="short-title" :title="p.title">{{ p.title }}</span>
-          <span class="owner-cell"><span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
-                @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span></span>
-          <span class="short-url" :title="(p.target_urls||[]).join(' | ')">🔗 {{ (p.target_urls||[])[0] || '—' }}<i v-if="(p.target_urls||[]).length > 1"> +{{ p.target_urls.length - 1 }}</i></span>
-          <span class="short-rot">{{ rotLabel(p.rotation_mode) }}</span>
-          <span class="short-stat">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="lp-name">
+            <span class="short-title" :title="p.title">{{ p.title }}</span>
+            <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+                  @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
+          </span>
+          <span class="lp-dom" :title="(p.target_urls||[]).join('\n') + ' · ' + t('common.copy')"
+                @click.stop="copyText((p.target_urls||[])[0] || '', t('common.copied'))">
+            {{ (p.target_urls||[])[0] || '—' }}<i v-if="(p.target_urls||[]).length > 1"> +{{ p.target_urls.length - 1 }}</i>
+          </span>
+          <span class="lp-subcount">{{ p.subcode_count || 0 }}</span>
+          <span class="short-stat" :title="t('landing.stVisitsTip')">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stPassTip')">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
           <span class="short-stat" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="lp-fb-empty"></span>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
-            <button class="mb danger" @click="archive(p)">{{ t('landing.archive') }}</button>
+            <el-dropdown trigger="click" @command="cmd => { if (cmd==='archive') archive(p) }">
+              <button class="mb" :title="t('landing.moreOps')">⋯</button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="archive">{{ t('landing.archive') }}</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
@@ -1349,11 +1396,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .st-tag.warn{background:rgba(255,159,10,.15);color:var(--warning)}
 .lp-body{font-size:12px;color:var(--t3);margin-top:6px}
 .lp-foot{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
-.lp-dom-chips{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow:hidden;margin:0;min-width:0}
-.dom-chip{font-size:11px;font-family:var(--font-mono);color:var(--ac);background:transparent;border:1px solid var(--bd);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;line-height:1.2}
-.dom-chip:hover{border-color:var(--ac);background:var(--acg)}
-.dom-more{font-size:11px;color:var(--t3);cursor:pointer;padding:1px 4px;flex-shrink:0}
-.dom-more:hover{color:var(--ac)}
+.lp-dom-chips{display:none}   /* 旧域名按钮堆已废弃（重设计为 .lp-dom 文本属性）——占位防残留引用 */
 .lp-sub-row{display:flex;align-items:center;gap:4px;margin-bottom:2px}
 .lp-sub-more{font-size:11px;color:var(--ac);cursor:pointer;padding:2px 0}
 .lp-sub-more:hover{text-decoration:underline}
@@ -1522,18 +1565,33 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .short-rot{color:var(--t3);font-size:11px;white-space:nowrap}
 .short-stat{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;white-space:nowrap}
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
-/* 行对齐（2026-09-16 用户反馈「排列不统一」）：每行是独立 grid，变宽列会让各行列边界漂移——
-   owner/域名/标签列全部固定宽，标题列吃剩余，保证所有行列边界一致；域名 chips 单行不折行 */
-.lp-row2{grid-template-columns:64px minmax(110px,1fr) 64px 176px 112px repeat(3,84px) 92px auto;gap:8px}
+/* 表格式行（2026-09-16 重设计）：表头+行同 grid 模板 → 跨行严格对齐；域名=文本属性（主域+N）；
+   名称列内联 owner chip；操作收敛 2 常驻 + ⋯ 菜单 */
+.lp-thead,.lp-row2{grid-template-columns:64px minmax(200px,1fr) minmax(150px,210px) 56px 78px 78px 78px 60px auto;gap:10px;align-items:center}
+.lp-thead{display:grid;padding:4px 14px;font-size:11px;font-weight:600;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:6px}
+.lp-name{display:flex;align-items:center;gap:8px;min-width:0}
+.lp-dom{font-size:12px;color:var(--ac);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;min-width:0}
+.lp-dom:hover{text-decoration:underline}
+.lp-dom i{font-style:normal;color:var(--t3);margin-left:3px}
+.lp-dom.muted{color:var(--t3);cursor:default}
+.lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:right;cursor:default}
+.lp-fb-empty{display:inline-block;width:1px}
 .owner-cell{min-width:0;overflow:hidden}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右）；固定列宽保各行对齐 */
 .owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:2px 7px;border-radius:8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;line-height:1.2}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
-@media(max-width:900px){.lp-row2{grid-template-columns:1fr 1fr;row-gap:6px}.lp-dom-chips{grid-column:1/-1}}
+@media(max-width:900px){
+  .lp-thead{display:none}
+  .lp-row2{grid-template-columns:64px 1fr 56px auto;row-gap:6px}
+  .lp-name{grid-column:2}
+  .lp-dom{grid-column:1 / -1}
+  .lp-fb-empty{display:none}
+  .short-ops{flex-wrap:wrap;justify-content:flex-end}
+}
 .short-ops{display:flex;gap:5px}
 .st-tag.err{background:rgba(255,69,58,.12);color:var(--error)}   /* subcodeStatus('deleted') 曾无样式渲染成裸文本 */
-@media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}.short-ops{flex-wrap:wrap;grid-column:1/-1;justify-content:flex-end}}
+
 
 /* 域名管理表格（批2） */
 .dm-table{margin-top:0}
