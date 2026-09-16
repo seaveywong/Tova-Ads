@@ -2380,3 +2380,23 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 - Messenger 欢迎语 80 字符上限来自 FB greeting 官方限制；WA 4096 为消息文本通用上限——若 FB 政策调整需同步（已在 hint 标注"FB 官方限制"）。
 - launch.py 的 typed-body 调用点未加 contact_fields（该端点为旧手动建表单路径，无模板 config；编辑器已全覆盖主路径）。
 - 消息预览为静态形态模拟（非真实发送链路），与列表「预览」弹窗同口径。
+
+---
+
+## 对抗复审 · 2026-09-16 深夜（范围 7cd20ce..HEAD，9 commits）
+
+**方法**：两名独立对抗审查代理（后端 / 前端+契约）+ 作者自查，全部 findings 落地修复后统一部署验证。
+
+**结论：0 P0 / 4 P1 / 12 P2，全部修复**（commit「fix(对抗复审吸收)」）。
+
+| 级别 | 发现 | 修复 |
+|---|---|---|
+| P1 | 表单创建失败留痕在批量/结构模式被收尾「完成X/Y」覆盖（progress 是临时位） | `_resolve_lead_form` 加 `_diag` 降级回报；三模式统一落 `item.error`（auto_subcode_warn 通道） |
+| P1 | 团队删除与 cron 并发竞态：删除窗口插入行顶住 FK→半删 500；删除零审计 | 进门先 suspended；FK 撞上重扫一轮；平台级 write_log 留痕 |
+| P1 | `/landing-lib/cf-zones` 裸拉 50 个 zone 不翻页（>50 域名全漏，DNS 实况误显） | 改 `cf.list_zones()` 自动翻页 |
+| P1 | 异常账户禁投只有前端闸（API 直调/快照过期可绕） | 部署 runner 后端闸：account_status 2停用/7封禁 拒建 |
+| P2×12 | zone门httpx异常误拦 / bind zone未找到无声 / 1892019翻页limit错配 / 保活note记死系列 / 导入同步零日志 / CF错误页嗅探误伤用户页 / 存量页bound_subdomains=NULL豁免失效 / 全选与只选正常重复 / 预检全异常提示误导 / owner筛选空态+行错位 / AdminTeams搜索被清 / 池徽标口径 | 见 commit message 逐条 |
+
+**验证**：smoke `_smoke_five_fixes.py` 重跑——硬删 e2e 全过零残留；zone 门在 zone=active 时正确放行（当日 marketbriefnow.xyz zone 自愈为 active，lp57 恢复 200，新发布域名+Worker 全过；早前 zone=moved 时 400 拦截已实测）。
+
+**遗留待办**：多素材×多文案两模式（用户拍板保留待办）；强删前资源统计弹窗（低频超管场景）；导入同步 e2e smoke（需真导入新账户时补）。
