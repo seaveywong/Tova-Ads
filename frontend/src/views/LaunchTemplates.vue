@@ -4482,5 +4482,5 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 /* 文案长度计数/预警（2026-09-16）：FB 展示层折叠阈值——正文>125 折叠进 See more、标题>40 截断 */
 .len-hint{font-size:10px;color:var(--t3);align-self:flex-end;margin-left:6px;font-variant-numeric:tabular-nums;flex:none}
 .len-hint.warn{color:var(--warning);cursor:help;font-weight:600}
-.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;flex-shrink:0}
 </style>

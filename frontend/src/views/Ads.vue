@@ -641,8 +641,8 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .grp-dot.fb { background: #1877f2 }
 .grp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%) }
 .acc-name { font-weight: 600; color: var(--t1) }
-.owner-chip { font-size: 10px; color: var(--ac); background: var(--acg); padding: 1px 7px; border-radius: 8px; white-space: nowrap; display: inline-block }
-.owner-chip.none { color: var(--t3); background: var(--bg3) }
+.owner-chip { font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap }
+.owner-chip.none { color: var(--t3) }
 .acc-name.clk { cursor: pointer }
 .acc-name.clk:hover { color: var(--ac); text-decoration: underline }
 .acc-id { font-size: 11px; color: var(--t3); cursor: pointer }

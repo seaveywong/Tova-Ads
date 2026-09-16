@@ -1578,7 +1578,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:right;cursor:default}
 .lp-fb-empty{display:inline-block;width:1px}
 .owner-cell{min-width:0;overflow:hidden}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右）；固定列宽保各行对齐 */
-.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:2px 7px;border-radius:8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;line-height:1.2}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;line-height:1.2}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}

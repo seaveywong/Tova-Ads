@@ -860,7 +860,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .mm-qr{font-size:12px;padding:5px 12px;background:var(--bg2);border:1px solid var(--ac);color:var(--ac);border-radius:16px}
 .messenger-mockup.wa .mm-bubble{background:#005c4b}
 .messenger-mockup.wa .mm-qr{border-color:#25d366;color:#4ade80}
-.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;flex-shrink:0}
 </style>
 
 <style scoped>

@@ -631,8 +631,8 @@ const doInspect = async (force = false) => {
 .scd-unit{font-size:12px;color:var(--t3)}
 .scd-note{margin-top:8px;font-size:11px;color:var(--t3);line-height:1.5}
 .head-btn.sm{padding:5px 12px;font-size:12px}
-.owner-chip{font-size:10px;color:var(--ac);background:var(--acg);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
-.owner-chip.team{color:var(--t3);background:var(--bg3)}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;flex-shrink:0}
+.owner-chip.team{color:var(--t3)}
 .scope-picker{display:flex;gap:10px;flex:1}
 .sp-opt{flex:1;padding:8px 12px;border:1.5px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,background .15s}
 .sp-opt:hover{border-color:var(--ac)}

@@ -892,7 +892,7 @@ const countryLabel = (code) => {
 .score-badge.ai{background:rgba(120,120,128,.55);color:#fff;font-size:10px}
 .score-badge:hover{filter:brightness(1.1)}
 .owner-row{margin-top:2px}
-.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap}
 .score-hero{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
 .score-big{font-size:40px;font-weight:800;line-height:1}
 .score-big.gs{color:var(--success)}.score-big.ga{color:var(--ac)}.score-big.gc{color:var(--warning)}.score-big.gd{color:var(--error)}
