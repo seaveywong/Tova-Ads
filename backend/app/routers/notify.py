@@ -31,7 +31,7 @@ def list_notifications(
     决策①：只看自己角色订阅的（notification.roles 空=全员，否则含自己角色才看）。
     日期：date_preset/date_from/date_to → 业务日（北京）→ UTC 窗口（照 dashboard.py）。
     """
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_, func, and_
     from datetime import datetime, timezone, timedelta
     BIZ_TZ = timezone(timedelta(hours=8))
     query = db.query(Notification).filter(Notification.tenant_id == user.tenant_id)
@@ -57,13 +57,20 @@ def list_notifications(
         utc_start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc)
         utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BIZ_TZ).astimezone(timezone.utc) + timedelta(days=1)
         query = query.filter(Notification.created_at >= utc_start, Notification.created_at < utc_end)
-    # 角色订阅过滤
+    # 归属路由（2026-09-17）：user_id 非空=定向给某人的账户级告警——只有本人可见；
+    # 广播行（user_id 空）才走角色订阅过滤。owner 从此不再看到 operator 账户的告警。
     role = (user.role or "owner").lower()
     padded = func.concat(",", func.coalesce(Notification.roles, ""), ",")
     query = query.filter(or_(
-        Notification.roles.is_(None),
-        Notification.roles == "",
-        padded.like(f"%,{role},%"),
+        Notification.user_id == user.id,
+        and_(
+            Notification.user_id.is_(None),
+            or_(
+                Notification.roles.is_(None),
+                Notification.roles == "",
+                padded.like(f"%,{role},%"),
+            ),
+        ),
     ))
     if level:
         query = query.filter(Notification.level == level)

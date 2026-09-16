@@ -231,8 +231,22 @@ def emit_notification(
     roles = roles or _roles_for_event(event_type)
     # act_id 账户维度关联：映射进已有 target_type/target_id 列（零迁移）——
     # 前端 notiActId 从 body 正则提取是脆弱路径，落库后可直接按列过滤
-    if act_id and not target_type and not target_id:
-        target_type, target_id = "account", act_id
+    # 归属路由（2026-09-17 用户拍板「owner 不该收 operator 账户的告警」）：
+    # 带 act_id 的账户级告警 → 站内信 user_id=账户归属人（他人不可见）+ TG 只发归属人绑定
+    _owner_uid = None
+    if act_id:
+        try:
+            from ..models.fb import Account as _Acc
+            _acc_row = db.query(_Acc.owner_user_id).filter(
+                _Acc.tenant_id == tenant_id, _Acc.act_id == act_id).first()
+            if _acc_row and _acc_row[0]:
+                _owner_uid = _acc_row[0]
+        except Exception:
+            pass
+        if not target_type and not target_id:
+            target_type, target_id = "account", act_id
+    if _owner_uid and user_id is None:
+        user_id = _owner_uid
     if not _storm_allows(db, tenant_id, event_type):
         n = _record_storm_suppression(tenant_id, event_type)
         # 当日该事件首条被压制 → 补一条站内 summary（per-tenant 24h dedup），
@@ -254,14 +268,16 @@ def emit_notification(
 
     if send_tg and (force_tg or level in ("critical", "warning")):
         try:
-            _send_tg_by_role(db, tenant_id, roles, level, title, body, reply_markup)
+            _send_tg_by_role(db, tenant_id, roles, level, title, body, reply_markup,
+                             only_user_id=user_id if (user_id and act_id) else None)
         except Exception as e:
             logger.warning(f"[TG] 发送失败（站内信已兜底）: {e}")
     return True
 
 
 def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
-                     level: str, title: str, body: str, reply_markup=None):
+                     level: str, title: str, body: str, reply_markup=None,
+                     only_user_id: int | None = None):
     """按角色路由 TG：用户级绑定优先，无则 fallback 租户级。chat_id 去重防重复。
     critical 放宽（统一规则）：level=="critical" → 发给该租户所有已绑 TG 的用户
     （operator 也能收到 token_expired/orphan_account 等系统级 critical）；
@@ -298,6 +314,9 @@ def _send_tg_by_role(db: Session, tenant_id: int, roles: list[str],
             TenantMembership.tenant_id == tenant_id,
             TenantMembership.role.in_(roles),
         ).all()] if roles else []
+        # 归属路由：账户级告警（only_user_id）只发归属人——不再按角色广播
+        if only_user_id:
+            user_ids = [only_user_id]
         ubindings = db.query(UserTgBinding).filter(
             UserTgBinding.tenant_id == tenant_id,
             UserTgBinding.user_id.in_(user_ids),
