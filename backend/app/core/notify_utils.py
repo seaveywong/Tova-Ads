@@ -229,6 +229,11 @@ def emit_notification(
     返回：True=已发；False=被每日风暴上限抑制（见 _storm_allows）。
     """
     roles = roles or _roles_for_event(event_type)
+    # 归属路由兜底（2026-09-17 事故：低额告警只传 target_type/target_id 不传 act_id →
+    # 绕过归属路由广播全员，owner 收到 operator 账户告警）。统一规则：凡账户级通知
+    # （target_type=account 且非全账户广播 "*"）自动按账户归属人路由——一处兜底覆盖全部调用点。
+    if not act_id and target_type == "account" and target_id and str(target_id) != "*":
+        act_id = str(target_id)
     # act_id 账户维度关联：映射进已有 target_type/target_id 列（零迁移）——
     # 前端 notiActId 从 body 正则提取是脆弱路径，落库后可直接按列过滤
     # 归属路由（2026-09-17 用户拍板「owner 不该收 operator 账户的告警」）：
