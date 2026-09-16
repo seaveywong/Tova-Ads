@@ -689,14 +689,16 @@ const countryLabel = (code) => {
         <div class="edit-row">
           <label>{{ t('assets.headlines') }} <button class="add-btn" @click="addH">{{ t('assets.addOne') }}</button></label>
           <div v-for="(h, i) in editForm.headlines" :key="'h'+i" class="variant-row">
-            <input v-model="editForm.headlines[i]" class="edit-input" :placeholder="t('assets.headlinePh')" maxlength="60" />
+            <input v-model="editForm.headlines[i]" class="edit-input" :placeholder="t('assets.headlinePh')" maxlength="120" />
+              <span v-if="(editForm.headlines[i]||'').length > 40" class="len-hint warn" :title="t('launch.lenHintHeadlineTip')">{{ (editForm.headlines[i]||'').length }}/40</span>
             <button v-if="editForm.headlines.length > 1" class="del-btn" @click="delH(i)">✕</button>
           </div>
         </div>
         <div class="edit-row">
           <label>{{ t('assets.bodies') }} <button class="add-btn" @click="addB">{{ t('assets.addOne') }}</button></label>
           <div v-for="(b, i) in editForm.bodies" :key="'b'+i" class="variant-row">
-            <textarea v-model="editForm.bodies[i]" class="edit-textarea" rows="2" :placeholder="t('assets.bodyPh')" maxlength="200"></textarea>
+            <textarea v-model="editForm.bodies[i]" class="edit-textarea" rows="3" :placeholder="t('assets.bodyPh')" maxlength="900"></textarea>
+              <span v-if="(editForm.bodies[i]||'').length > 125" class="len-hint warn" :title="t('launch.lenHintBodyTip')">{{ (editForm.bodies[i]||'').length }}/125</span>
             <button v-if="editForm.bodies.length > 1" class="del-btn" @click="delB(i)">✕</button>
           </div>
         </div>
@@ -912,4 +914,6 @@ const countryLabel = (code) => {
 .score-caliber{font-size:11px;color:var(--t3);line-height:1.5}
 .score-nodata{text-align:center;padding:32px 0;color:var(--t3)}
 .score-ai-note{font-size:12px;margin-top:8px;color:var(--ac)}
+.len-hint{font-size:10px;color:var(--t3);align-self:flex-end;margin-left:6px;font-variant-numeric:tabular-nums;flex:none}
+.len-hint.warn{color:var(--warning);cursor:help;font-weight:600}
 </style>
