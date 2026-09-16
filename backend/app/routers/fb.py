@@ -1740,6 +1740,10 @@ def list_accounts(
             pq = pq.filter(PerfSnapshot.snapshot_date <= date_to)
         rows = pq.group_by(PerfSnapshot.act_id).all()
         spend_map = {r[0]: {"spend": float(r[1] or 0), "conversions": int(r[2] or 0)} for r in rows}
+    # 归属运营（2026-09-17）：owner 看全局时快速区分名下（operator 本身只见自己）
+    from ..models.auth import User as _U
+    _owner_ids = {a.owner_user_id for a in accs if a.owner_user_id}
+    _owner_map = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(_owner_ids or [0])).all()} if _owner_ids else {}
     out = []
     for a in accs:
         cur = a.currency or "USD"
@@ -1760,7 +1764,8 @@ def list_accounts(
             "spend_cap": from_minor_units(a.spend_cap, cur),
             "amount_spent": from_minor_units(a.amount_spent, cur),
             "available_usd": avail_usd, "balance_kind": bal_kind,
-            "owner_user_id": a.owner_user_id, "fb_credential_id": a.fb_credential_id,
+            "owner_user_id": a.owner_user_id, "owner_email": _owner_map.get(a.owner_user_id or 0, ""),
+            "fb_credential_id": a.fb_credential_id,
             "bound_alias": (cred.alias or cred.fb_user_name) if cred else None,
             "bound_status": cred.status if cred else "unbound",
             "bound_available": _is_cred_available(cred) if cred else False,

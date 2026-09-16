@@ -16,6 +16,26 @@ const route = useRoute()
 const router = useRouter()
 const accounts = ref([])
 const selectedActs = ref([])
+// 所有者筛选（2026-09-17）：owner 看全局时按人过滤其名下账户的广告
+const ownerFilter = ref('')
+const columnsPop = ref(false)
+const toolCmd = (cmd) => {
+  if (cmd === 'columns') columnsPop.value = true
+  else if (cmd === 'verify') verifyLive()
+  else if (cmd === 'redirect') openRedirectMgmt()
+}
+const ownerOptions = computed(() => {
+  const seen = new Map()
+  for (const a of accounts.value) {
+    if (a.owner_email && !seen.has(a.owner_email)) seen.set(a.owner_email, a.owner_email.split('@')[0])
+  }
+  return [...seen.entries()].map(([email, label]) => ({ email, label }))
+})
+const ownerMatch = (row) => {
+  if (!ownerFilter.value) return true
+  const acc = accounts.value.find(a => a.act_id === row.act_id)
+  return (acc?.owner_email || '') === ownerFilter.value
+}
 const datePreset = ref('last_2d')   // 默认近2天：账户时区(GMT-3等)与北京业务日跨日错位，纯「今天」常漏昨天桶的小消耗（2026-09-16 用户「0.02显示为0」反馈，数据本身精确）
 const showCustom = ref(false)
 const customFrom = ref('')
@@ -383,7 +403,7 @@ const curList = computed(() => {
   if (tab.value === 'campaign') arr = data.value.campaigns || []
   else if (tab.value === 'adset') { arr = data.value.adsets || []; if (drillCampaign.value) arr = arr.filter(a => _idOf(a.campaign_id) === drillCampaign.value) }
   else { arr = data.value.ads || []; if (drillAdset.value) arr = arr.filter(a => String(_idOf(a.adset_id)) === String(drillAdset.value)); else if (drillCampaign.value) arr = arr.filter(a => String(_idOf(a.campaign_id)) === String(drillCampaign.value)) }
-  arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatchRow(a, a.effective_status))
+  arr = arr.filter(a => platMatch(a) && actMatch(a) && statusMatchRow(a, a.effective_status) && ownerMatch(a))
   // 脱管/被禁账户排后面（用户反馈：不好区分，正常在前异常在后）
   const _deadRank = (a) => accStateTag(a) ? 1 : 0
   arr = arr.slice()
@@ -912,16 +932,29 @@ const unsubscribeLeads = async () => {
       </el-select>
       <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'" :title="t('adm.filterAbnormalTip')">{{ t('adm.filterAbnormal') }}</button></div>
+      <el-select v-if="tab !== 'lead' && ownerOptions.length > 1" v-model="ownerFilter" clearable filterable
+                 :placeholder="t('adm.ownerFilterPh')" class="ctrl-btn owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
+        <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
+      </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
-      <el-popover v-if="tab !== 'lead'" trigger="click" width="250" placement="bottom-end">
-        <template #reference><button class="ctrl-btn">{{ t('adm.columns') }}</button></template>
+      <!-- 工具收纳（2026-09-17 精简）：列/核验/跳转链接 进 ⋯，工具条只留高频项 -->
+      <el-dropdown v-if="tab !== 'lead'" trigger="click" placement="bottom-end" @command="toolCmd">
+        <button class="ctrl-btn">⋯<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="columns">{{ t('adm.columns') }}</el-dropdown-item>
+            <el-dropdown-item command="verify" :disabled="liveVerifying">{{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</el-dropdown-item>
+            <el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-popover :visible="columnsPop" width="250" placement="bottom-end">
+        <template #reference><span></span></template>
         <el-checkbox-group v-model="viewPrefs[tab].columns" class="column-options">
           <el-checkbox v-for="col in availableColumns" :key="col.id" :value="col.id">{{ t('adm.' + col.label) }}</el-checkbox>
         </el-checkbox-group>
       </el-popover>
-      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="liveVerifying" @click="verifyLive" :title="t('adm.liveVerifyTip')">{{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</button>
-      <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
-      <button v-if="tab !== 'lead'" class="ctrl-btn" @click="openRedirectMgmt">{{ t('adm.redirectLink') }}<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
+      <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok" :title="t('adm.liveVerifyTip')">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
       <span v-if="tab !== 'lead'" class="cache-at" :class="{ stale: cacheAgeStale }" :title="(cacheAgeStale ? t('adm.cacheAdsStaleTip') : t('adm.cacheAgeTip')) + (data.cached_at ? '\n' + t('adm.dataAsOf', { t: fmtTime(data.cached_at) }) : '')">{{ cacheAgeText }}</span>
     </div>
     <div v-if="loadError" class="page-error-bar">

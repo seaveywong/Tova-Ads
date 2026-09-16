@@ -443,7 +443,9 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         </div>
         <div class="acc">
           <div class="acc-name clk" :title="t('ads.openAdManager')" @click="router.push({ name: 'ad-manager', query: { act: d.a.act_id } })"><span v-if="platChip(d.a)" :class="['plat-chip', platChip(d.a)]">{{ platChip(d.a).toUpperCase() }}</span>{{ (d.a.name && d.a.name !== d.a.act_id) ? d.a.name : t('ads.unnamedAccount') }}</div>
-          <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}</div>
+          <div class="acc-id" @click="copyId(d.a.act_id)">{{ d.a.act_id }}
+            <span v-if="d.a.owner_email" class="owner-chip" :title="t('ads.ownerChipTip', { email: d.a.owner_email })">{{ d.a.owner_email.split('@')[0] }}</span>
+          </div>
         </div>
         <div class="grp-cell"><span v-if="d.a.group_label" class="tag grp" :title="d.a.group_label">{{ d.a.group_label }}</span><span v-else class="grp-none">—</span></div>
         <div>{{ fmtMoney(d.a.balance, d.a.currency) }}<span v-if="d.a.balance_usd != null && d.a.currency !== 'USD'" class="sub"> ≈${{ d.a.balance_usd }}</span></div>
@@ -640,6 +642,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .grp-dot.fb { background: #1877f2 }
 .grp-dot.tt { background: linear-gradient(135deg, #25f4ee 45%, #fe2c55 55%) }
 .acc-name { font-weight: 600; color: var(--t1) }
+.owner-chip { font-size: 10px; color: var(--ac); background: var(--acg); padding: 0 6px; border-radius: 8px; margin-left: 6px; white-space: nowrap }
 .acc-name.clk { cursor: pointer }
 .acc-name.clk:hover { color: var(--ac); text-decoration: underline }
 .acc-id { font-size: 11px; color: var(--t3); cursor: pointer }
