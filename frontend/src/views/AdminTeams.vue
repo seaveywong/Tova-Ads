@@ -231,25 +231,23 @@ const submitMemberAdd = async () => {
 
 <template>
   <div class="page">
-    <div class="card">
-      <div class="head">
-        <div class="head-text">
-          <div class="t">{{ t('teams.title') }}</div>
-          <div class="d">{{ t('teams.desc') }}</div>
-        </div>
+    <header class="page-head">
+      <div class="ph-left">
+        <h1 class="ph-title">{{ t('teams.title') }}</h1>
+        <span class="ph-fresh">{{ t('teams.summary', { n: teams.length, m: teams.filter(x => x.status === 'active').length, d: teams.reduce((s2, x) => s2 + (x.domains || 0), 0) }) }}</span>
+      </div>
+      <div class="ph-actions">
         <button class="btn primary" @click="openCreate"><span class="plus">+</span> {{ t('teams.createTeam') }}</button>
       </div>
-
-      <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" :empty-text="t('teams.noTeams')" row-key="id">
-        <el-table-column prop="id" label="ID" width="56" align="center" />
-        <el-table-column :label="t('teams.teamName')" min-width="180">
+    </header>
+    <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" :empty-text="t('teams.noTeams')" row-key="id">
+        <el-table-column prop="id" label="ID" width="52" align="center" />
+        <el-table-column :label="t('teams.teamName')" min-width="220">
           <template #default="{ row }">
-            <span class="name">{{ row.name }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.status')" width="96">
-          <template #default="{ row }">
-            <span :class="['status', row.status]"><i class="sdot"></i>{{ statusLabel(row.status) }}</span>
+            <div class="name-cell">
+              <span class="name">{{ row.name }}</span>
+              <span :class="['status', row.status]"><i class="sdot"></i>{{ statusLabel(row.status) }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column :label="t('teams.members')" width="68" align="center">
@@ -267,7 +265,7 @@ const submitMemberAdd = async () => {
             <span :class="['num', { zero: row.accounts === 0 }]">{{ row.accounts }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('teams.createdAt')" width="160">
+        <el-table-column :label="t('teams.createdAt')" width="130">
           <template #default="{ row }"><span class="mute">{{ (row.created_at || '').slice(0,16).replace('T',' ') }}</span></template>
         </el-table-column>
         <el-table-column :label="t('common.operation')" width="240" fixed="right">
@@ -294,7 +292,7 @@ const submitMemberAdd = async () => {
             </div>
           </template>
         </el-table-column>
-      </el-table></div>
+      </el-table>
     </div>
 
     <!-- 建团队弹窗 -->
@@ -393,6 +391,8 @@ const submitMemberAdd = async () => {
 .plus{font-weight:600;margin-right:2px}
 
 .name{color:var(--t1);font-weight:500}
+.name-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.name-cell .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
 .status .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .status.active{color:var(--success)}

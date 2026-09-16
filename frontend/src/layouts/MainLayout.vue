@@ -85,6 +85,9 @@ const navGroups = computed(() => {
   return allNavGroups
     .map(g => ({ ...g, items: g.items.filter(item => {
         if ((item.name === 'kpi-mapping' || item.name === 'admin-teams') && !isSuperadmin.value) return false
+        // 超管侧栏隐藏「成员权限」——成员管理已收纳进 团队管理 抽屉（2026-09-17 用户拍板）；
+        // 普通 owner 仍需要本页管自己团队（Members.vue 服务 owner，AdminTeams 仅超管可达）
+        if (item.name === 'members' && isSuperadmin.value) return false
         if (isSuperadmin.value) return true  // 超管看全部导航（平台管理员）
         const required = NAV_PERMS[item.name] || []
         return required.length === 0 || required.every(p => perms.includes(p))

@@ -478,7 +478,7 @@ export default {
     changeTypeBtn: 'Switch token type',
     tokenTypeConfirm: 'Switch this token from "{from}" to "{to}". Write operations (ad creation / stop-loss) route by the new type: operate tokens take priority for writes. Continue?',
     tokenTypeSaved: 'Token type switched',
-    ttmanage: 'Manage', ttoperate: 'Operate',
+    ttmanage: 'Manage', summary: '{n} teams · {m} active · {d} domains', ttoperate: 'Operate',
     noPages: 'No pages',
     viewMembersBtn: 'View members',
     manageAssetsBtn: 'Manage assets',

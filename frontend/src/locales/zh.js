@@ -931,7 +931,7 @@ export default {
     desc: '平台所有团队（租户）。建团队时自动创建 3 个系统角色，可指定首任管理员。归档后团队隐藏但数据保留。',
     createTeam: '建团队', noTeams: '暂无团队',
     teamName: '团队名', members: '成员', adAccounts: '广告账户', createdAt: '创建时间',
-    manage: '管理', manageTitle: '团队管理 · {name}', rename: '改名', suspend: '停用', activate: '激活', archive: '归档', restore: '恢复',
+    manage: '管理', summary: '共 {n} 个团队 · {m} 个启用 · {d} 个域名', manageTitle: '团队管理 · {name}', rename: '改名', suspend: '停用', activate: '激活', archive: '归档', restore: '恢复',
     domains: '域名', domainTitle: '域名管理 · {name}', domainAssigned: '已分配域名', domainNone: '暂无域名（从下方平台池勾选分配）',
     domainPool: '平台域名池（全部域名）', domainPoolEmpty: '平台无可用域名', domainAssignedTo: '已分给', domainFree: '未分配',
     domainSearch: '搜索域名', zoneActive: '已解析', zonePending: '解析中', domainOccupied: '已分配给其他团队',
