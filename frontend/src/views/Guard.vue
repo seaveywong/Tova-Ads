@@ -7,6 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { isSuperadminSync } from '../router'
 import { fmtTime } from '../composables/useTz'
 const isSuper = isSuperadminSync()
+const isOwnerOrSuper = isSuper || localStorage.getItem('tova_role') === 'owner'   // 作用域选择仅 owner/超管可见（operator 恒为名下）
 
 const { t } = useI18n()
 const route = useRoute()
@@ -219,7 +220,7 @@ const confirmDiscard = async () => {
 }
 const openCreate = () => {
   editing.value = null
-  form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, kpi_scope: '', conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [] }
+  form.value = { name: '', rule_type: 'bleed_abs', category: t('guard.cat.bleed'), params: {}, kpi_scope: '', conversion_source: 'either', landing_metric: 'pass', action: 'pause', scope_act_ids: [], rule_scope: 'user' }
   onTypeChange()
   snapForm()
   editOpen.value = true
@@ -238,6 +239,7 @@ const openEdit = (r) => {
     landing_metric: landingMetric, kpi_scope: kpiScope,
     action: r.action,
     scope_act_ids: r.scope_act_id ? r.scope_act_id.split(',').map(s => s.trim()).filter(Boolean) : [],
+    rule_scope: r.rule_scope || 'user',
   }
   snapForm()
   editOpen.value = true
@@ -256,6 +258,7 @@ const save = async () => {
     name: form.value.name.trim(), rule_type: form.value.rule_type, category: form.value.category,
     params: cleanParams, conversion_source: form.value.conversion_source,
     action: form.value.action, scope_act_id: (form.value.scope_act_ids || []).join(','),
+    rule_scope: form.value.rule_scope || 'user',
   }
   try {
     if (editing.value) await PUT(`/guard/rules/${editing.value}`, body)
@@ -369,8 +372,8 @@ const doInspect = async (force = false) => {
       <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
-          <span v-if="r.created_by_name" class="owner-chip" :title="t('guard.ruleOwnerTip', { name: r.created_by_name })">{{ t('guard.ruleScopeMine') }} · {{ r.created_by_name.split('@')[0] }}</span>
-          <span v-else class="owner-chip team" :title="t('guard.ruleScopeTeamTip')">{{ t('guard.ruleScopeTeam') }}</span>
+          <span v-if="r.rule_scope === 'team'" class="owner-chip team" :title="t('guard.ruleScopeTeamTip')">{{ t('guard.ruleScopeTeamOpt') }}</span>
+          <span v-else-if="r.created_by_name" class="owner-chip" :title="t('guard.ruleOwnerTip', { name: r.created_by_name })">{{ t('guard.ruleScopeMine') }} · {{ r.created_by_name.split('@')[0] }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" />
@@ -452,8 +455,20 @@ const doInspect = async (force = false) => {
             <option value="visit">{{ t('guard.lm.visit') }}</option>
           </select>
         </div>
+        <div class="form-l" v-if="isOwnerOrSuper"><label>{{ t('guard.ruleScopeLabel') }}</label>
+          <div class="scope-picker">
+            <div :class="['sp-opt', { on: form.rule_scope === 'user' }]" @click="form.rule_scope = 'user'">
+              <div class="sp-t">{{ t('guard.ruleScopeUser') }}</div>
+              <div class="sp-d">{{ t('guard.ruleScopeUserDesc') }}</div>
+            </div>
+            <div :class="['sp-opt', { on: form.rule_scope === 'team' }]" @click="form.rule_scope = 'team'">
+              <div class="sp-t">{{ t('guard.ruleScopeTeamOpt') }}</div>
+              <div class="sp-d">{{ t('guard.ruleScopeTeamDesc') }}</div>
+            </div>
+          </div>
+        </div>
         <div class="form-l"><label>{{ t('guard.scopeAccountsLabel') }}</label>
-          <el-select v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip
+          <el-select v-model="form.scope_act_ids" multiple filterable collapse-tags collapse-tags-tooltip :teleported="false"
             :placeholder="t('guard.scopeAccountsPh')" style="width:100%">
             <el-option v-for="a in accountsList" :key="a.act_id" :value="a.act_id"
               :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + `${a.name}（${a.act_id}）`">
@@ -577,4 +592,10 @@ const doInspect = async (force = false) => {
 .head-btn.sm{padding:5px 12px;font-size:12px}
 .owner-chip{font-size:10px;color:var(--ac);background:var(--acg);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
 .owner-chip.team{color:var(--t3);background:var(--bg3)}
+.scope-picker{display:flex;gap:10px;flex:1}
+.sp-opt{flex:1;padding:8px 12px;border:1.5px solid var(--bd);border-radius:8px;cursor:pointer;transition:border-color .15s,background .15s}
+.sp-opt:hover{border-color:var(--ac)}
+.sp-opt.on{border-color:var(--ac);background:color-mix(in srgb, var(--ac) 7%, transparent)}
+.sp-t{font-size:13px;font-weight:600;margin-bottom:2px}
+.sp-d{font-size:11px;color:var(--t3);line-height:1.4}
 </style>

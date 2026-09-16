@@ -577,6 +577,7 @@ def _rule_ctx(r) -> SimpleNamespace:
         action=(getattr(r, "action", None) or "default"),
         scope_act_id=getattr(r, "scope_act_id", None),
         created_by=getattr(r, "created_by", None),
+        rule_scope=getattr(r, "rule_scope", None) or "user",
     )
 
 
@@ -1309,13 +1310,15 @@ def _inspect_account_worker(ctx: dict) -> dict:
             if _obj_gaps:
                 res["objective_gaps"] = res.get("objective_gaps", 0) + _obj_gaps
         # 该账户适用规则：全局(scope_act_id NULL) + 本账户(scope_act_id==acc.act_id)，并存各评估。
-        # 归属隔离（2026-09-17 用户拍板）：规则只作用于创建人名下的账户——owner 的规则不再关
-        # operator 的账户；created_by NULL（存量/默认规则）= 团队全域。无覆盖时走保底止血（下方）。
+        # 归属隔离（2026-09-17 用户拍板）+ 作用域（同日二轮）：rule_scope=team → 团队全域
+        # （owner/超管在 UI 显式选择）；user（默认）→ 只作用于创建人名下账户；created_by NULL
+        # （存量/默认规则）= 团队全域。无覆盖时走保底止血（下方，防线不降级）。
         acc_rules = [r for r in all_rules
                      if (r.scope_act_id is None
                          or acc.act_id in [x.strip() for x in (r.scope_act_id or "").split(",")])
-                     and (getattr(r, "created_by", None) is None
-                          or getattr(acc, "owner_user_id", None) == r.created_by)]
+                     and (getattr(r, "rule_scope", None) == "team"
+                          or (getattr(r, "created_by", None) is None
+                              or getattr(acc, "owner_user_id", None) == r.created_by))]
         # 规则兜底：该账户无任何规则覆盖（如用户只配了别的账户级规则）→ 注入保底止血
         if not acc_rules:
             acc_rules = [ctx["default_rule"]]

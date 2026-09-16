@@ -26,6 +26,7 @@ class CreateRuleIn(BaseModel):
     conversion_source: str = "either"
     action: str = "default"
     scope_act_id: str = ""  # 空=全局（名下所有账户）；填 act_id(裸数字)=仅该账户
+    rule_scope: str = "user"   # user=仅创建人名下 / team=全团队（仅 owner/超管，后端强校验）
     enabled: bool = True
 
 
@@ -37,6 +38,7 @@ class UpdateRuleIn(BaseModel):
     conversion_source: str | None = None
     action: str | None = None
     scope_act_id: str | None = None
+    rule_scope: str | None = None
     enabled: bool | None = None
 
 
@@ -74,8 +76,17 @@ def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db
     return [{"id": r.id, "name": r.name, "category": r.category, "rule_type": r.rule_type,
              "created_by": r.created_by, "created_by_name": umap.get(r.created_by, ""),
              "params": json.loads(r.params) if r.params else {}, "conversion_source": r.conversion_source,
-             "action": r.action, "scope_act_id": r.scope_act_id, "enabled": r.enabled,
+             "action": r.action, "scope_act_id": r.scope_act_id, "rule_scope": r.rule_scope or "user", "enabled": r.enabled,
              "hits": hit_map.get(r.rule_type, {"count": 0, "last_at": None})} for r in rules]
+
+
+def _valid_rule_scope(user, scope: str) -> str:
+    """作用域校验（2026-09-17）：team 仅 owner/超管可选——operator 强制 user（前端不展示，后端兜底）。"""
+    if scope not in ("user", "team"):
+        raise HTTPException(400, "rule_scope 必须是 user/team")
+    if scope == "team" and user.role != "owner" and not getattr(user, "is_superadmin", False):
+        raise HTTPException(403, "仅团队 owner/平台超管可将规则设为全团队作用域")
+    return scope
 
 
 @router.post("/rules")
@@ -83,10 +94,11 @@ def create_rule(body: CreateRuleIn, user: CurrentUser = Depends(require_permissi
                 db: Session = Depends(get_db)):
     if (body.action or "default").lower() not in RULE_ACTIONS:
         raise HTTPException(400, f"action 必须是 {sorted(RULE_ACTIONS)} 之一")
+    rule_scope = _valid_rule_scope(user, body.rule_scope or "user")
     rule = GuardRule(tenant_id=user.tenant_id, created_by=user.id, name=body.name, category=body.category,
                      rule_type=body.rule_type, params=json.dumps(body.params),
                      conversion_source=body.conversion_source, action=body.action,
-                     scope_act_id=body.scope_act_id or None, enabled=body.enabled)
+                     scope_act_id=body.scope_act_id or None, rule_scope=rule_scope, enabled=body.enabled)
     db.add(rule)
     db.flush()
     rid = rule.id
@@ -125,6 +137,8 @@ def update_rule(rule_id: int, body: UpdateRuleIn,
         rule.action = body.action
     if body.scope_act_id is not None:
         rule.scope_act_id = body.scope_act_id or None
+    if body.rule_scope is not None:
+        rule.rule_scope = _valid_rule_scope(user, body.rule_scope)
     if body.enabled is not None:
         rule.enabled = body.enabled
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",

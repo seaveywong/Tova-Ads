@@ -3,6 +3,7 @@
 // 在此为嵌套对象——vue-i18n 的 t('guard.cat.bleed') 按点号走嵌套路径解析。
 export default {
   zh: {
+    ruleScopeLabel: '作用域', ruleScopeUser: '仅名下账户', ruleScopeUserDesc: '规则只作用于自己名下的账户，不影响其他成员', ruleScopeTeamOpt: '全团队', ruleScopeTeamDesc: '作用于团队全部账户（含操作员的）',
     ruleScopeMine: '仅自己账户', ruleOwnerTip: '该规则只作用于创建人（{name}）名下的账户——不会影响其他成员的账户', ruleScopeTeam: '全团队', ruleScopeTeamTip: '无创建人（存量/系统默认）——作用于团队全部账户',
     pageTitle: '规则引擎', rulesCount: '{n} 条规则',
     loadFail: '加载失败', nameRequired: '填规则名', created: '已创建', deleted: '已删', toggleFail: '开关失败', inspectFail: '巡检失败',
@@ -36,6 +37,7 @@ export default {
     ago: { minutes: ' · {n}分钟前', hours: ' · {n}小时前', date: ' · {d}' },
   },
   en: {
+    ruleScopeLabel: 'Scope', ruleScopeUser: 'Own accounts only', ruleScopeUserDesc: 'Applies only to your own accounts; other members unaffected', ruleScopeTeamOpt: 'Whole team', ruleScopeTeamDesc: 'Applies to all team accounts (including operators',
     ruleScopeMine: 'Own accounts', ruleOwnerTip: 'This rule only applies to accounts owned by its creator ({name}) — other members are unaffected', ruleScopeTeam: 'Whole team', ruleScopeTeamTip: 'No creator (legacy/system default) — applies to all team accounts',
     pageTitle: 'Rule Engine', rulesCount: '{n} rules',
     loadFail: 'Failed to load', nameRequired: 'Enter a rule name', created: 'Created', deleted: 'Deleted', toggleFail: 'Toggle failed', inspectFail: 'Inspection failed',
