@@ -197,6 +197,7 @@ def set_page_category(
         FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id).first()
     if not cred:
         raise HTTPException(404, "令牌不存在")
+    _cred_scope_or_404(db, user, cred_id)
     cat = body.category.strip()
     if not cat or len(cat) > 120:
         raise HTTPException(400, "类别需 1-120 字符")
@@ -393,6 +394,7 @@ def rename_credential(
     db: Session = Depends(get_db),
 ):
     """修改令牌名称。"""
+    _cred_scope_or_404(db, user, cred_id)
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
@@ -404,11 +406,41 @@ def rename_credential(
     return {"id": cred_id, "alias": cred.alias}
 
 
+def _visible_cred_ids(db, user) -> set[int] | None:
+    """operator 的令牌可见集（RBAC 口径：名下账户+关联资源）：绑着自己名下账户的令牌。
+    owner/超管返回 None=不限。令牌本身是团队级资源（无 owner 字段），可见性经由账户推导。"""
+    if user.role != "operator":
+        return None
+    from ..models.fb import AccountFbCredential, Account as _Acc
+    rows = db.query(AccountFbCredential.fb_credential_id).join(
+        _Acc, _Acc.id == AccountFbCredential.account_id
+    ).filter(
+        AccountFbCredential.tenant_id == user.tenant_id,
+        AccountFbCredential.status == "active",
+        _Acc.owner_user_id == user.id,
+        _Acc.is_managed == True,  # noqa: E712
+    ).all()
+    return {r[0] for r in rows}
+
+
 @router.get("/credentials")
 def list_credentials(user: CurrentUser = Depends(require_permission("ads.read")), db: Session = Depends(get_db)):
-    """列出令牌（完整字段 + 关联账户数，供前端令牌管理页面）。"""
-    creds = db.query(FbCredential).filter(FbCredential.tenant_id == user.tenant_id).all()
+    """列出令牌（完整字段 + 关联账户数，供前端令牌管理页面）。
+    operator 只看绑着自己名下账户的令牌（2026-09-16 用户拍板：不能像 owner 看全团队）。"""
+    q = db.query(FbCredential).filter(FbCredential.tenant_id == user.tenant_id)
+    _vis = _visible_cred_ids(db, user)
+    if _vis is not None:
+        q = q.filter(FbCredential.id.in_(_vis or [0]))
+    creds = q.all()
     return [_cred_to_dict(c, db) for c in creds]
+
+
+def _cred_scope_or_404(db, user, cred_id: int):
+    """operator 只能动可见令牌（绑自己名下账户）；owner 不限。404 统一口径不泄露存在性。"""
+    _vis = _visible_cred_ids(db, user)
+    if _vis is not None and cred_id not in _vis:
+        raise HTTPException(404, "令牌不存在")
+    return None
 
 
 @router.delete("/credentials/{cred_id}")
@@ -1191,6 +1223,7 @@ def refresh_credential_accounts(
     db: Session = Depends(get_db),
 ):
     """刷新该令牌【已导入】账户的实时状态/余额。不新增导入（导入走手动选择）。"""
+    _cred_scope_or_404(db, user, cred_id)
     cred = db.query(FbCredential).filter(
         FbCredential.tenant_id == user.tenant_id,
         FbCredential.id == cred_id,
