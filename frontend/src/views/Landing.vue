@@ -131,6 +131,7 @@ const rotationOptions = computed(() => [
 const openCreate = () => {
   editingId.value = null
   form.value = emptyForm()
+  protTestResult.value = null; showAdvanced.value = false   // 会话残留清理（复审P1：A页防护模拟结果曾带进B页/新建）
   // 新页默认开「屏蔽机房/VPN」（用平台集中清单）+ 屏蔽爬虫 + 必带广告参数——新页统一规范
   form.value.protection_rules = {
     datacenter_block: datacenterAsns.value.map(d => d.asn),
@@ -143,6 +144,7 @@ const openCreate = () => {
 }
 const openEdit = async (p) => {
   editingId.value = p.id
+  protTestResult.value = null; showAdvanced.value = false   // 会话残留清理
   try {
     const detail = await GET(`/landing/pages/${p.id}`)
     form.value = {
@@ -286,7 +288,7 @@ const archive = async (p) => {
   try {
     await ElMessageBox.confirm(t('landing.archiveConfirm', { title: p.title }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
     await DELETE(`/landing/pages/${p.id}`); ElMessage.success(t('landing.archived')); await loadPages()
-  } catch {}
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 
 // ── 落地页自检 ──
@@ -341,6 +343,7 @@ const newSubCount = ref(1)
 const openSubcodes = async (p) => {
   subPage.value = p; subOpen.value = true; newSubCount.value = 1
   subStatus.value = 'all'; subQ.value = ''; subSort.value = 'created'
+  subFbStatus.value = {}; subTargetEdit.value = {}   // 换页清残留（复审P2：旧页单项检测结果曾带进新页）
   await loadSubcodes(p.id)
 }
 const loadSubcodes = async (pid) => {
@@ -410,17 +413,16 @@ const _subBase = () => {
   if (!base) { ElMessage.warning(t('landing.copyUrlNoDomain')); return null }
   return base
 }
-const copyFbLink = (slug) => {
+const copyFbLink = async (slug) => {
   const base = _subBase(); if (!base) return
   const url = `https://${base}/a/${slug}?ad={{ad.id}}`
-  navigator.clipboard?.writeText(url)
-  ElMessage({ message: t('landing.copiedFb', { url: _esc(url) }), dangerouslyUseHTMLString: true, type: 'success', duration: 6000 })
+  const ok = await _copyRaw(url)
+  if (ok) ElMessage({ message: t('landing.copiedFb', { url: _esc(url) }), dangerouslyUseHTMLString: true, type: 'success', duration: 6000 })
 }
-const copyTtLink = (slug) => {
+const copyTtLink = async (slug) => {
   const base = _subBase(); if (!base) return
   const url = `https://${base}/a/${slug}`
-  navigator.clipboard?.writeText(url)
-  ElMessage.success(t('landing.copiedTt'))
+  await copyText(url, t('landing.copiedTt'))
 }
 const previewTestUrl = (slug) => {
   const base = _subBase(); if (!base) return ''
@@ -452,6 +454,7 @@ const checkAllSubFb = async () => {
     subFbStatus.value = m
     if (r.blocked > 0) ElMessage.error(t('landing.fbBatchBlocked', { blocked: r.blocked, total: r.total }))
     else ElMessage.success(t('landing.fbBatchAllNormal', { total: r.total }))
+    if (r.capped) ElMessage.warning(t('landing.fbBatchCapped'))   // 后端限 50 个/批（超时会撞网关 + FB 限流）
   } catch (e) { ElMessage.error(t('landing.fbBatchFail') + '：' + (e.message || '')) }
   subFbBatchLoading.value = false
 }
@@ -474,7 +477,26 @@ const setTab = (tv) => {
   tab.value = tv
   router.replace({ name: 'landing', query: tv === 'manage' ? {} : { tab: 'logs' } })
 }
-const copyText = (txt, msg) => { navigator.clipboard?.writeText(txt); ElMessage.success(msg || t('common.copied')) }
+const _copyRaw = async (txt) => {
+  // clipboard 兜底（复审P1：非安全上下文/权限拒绝时曾「未复制却报成功」——广告链接贴错是真金白银）
+  let ok = false
+  try { await navigator.clipboard?.writeText(txt); ok = true } catch {}
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      ok = document.execCommand('copy')
+      ta.remove()
+    } catch {}
+  }
+  if (!ok) ElMessage.error(t('landing.copyFail'))
+  return ok
+}
+const copyText = async (txt, msg) => {
+  const ok = await _copyRaw(txt)
+  if (ok) ElMessage.success(msg || t('common.copied'))
+}
 const randomPrefix = () => 'go' + Math.random().toString(36).slice(2, 7)
 const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : h }
 // 子域名管理
@@ -511,7 +533,7 @@ watch([() => form.value.subdomain_prefix, () => form.value.custom_domains], () =
   if (!prefix || !root) { subdomainStatus.value = ''; return }
   _subTimer = setTimeout(async () => {
     try {
-      const r = await GET(`/landing/pages/check-subdomain?prefix=${encodeURIComponent(prefix)}&root=${encodeURIComponent(rootOf(root))}&pid=${editingId.value || 0}`)
+      const r = await GET(`/landing/subdomain-check?prefix=${encodeURIComponent(prefix)}&root=${encodeURIComponent(rootOf(root))}&pid=${editingId.value || 0}`)
       subdomainStatus.value = r.available ? 'ok' : 'taken'
     } catch { subdomainStatus.value = '' }
   }, 400)
@@ -549,7 +571,7 @@ const syncPixels = async () => {
 const editPixel = (p) => { pixelForm.value = { id: p.id, pixel_id: p.pixel_id, pixel_name: p.pixel_name || '', note: p.note || '', platform: p.platform || 'fb', tt_access_token: '', test_event_code: p.test_event_code || '', fb_capi_enabled: !!p.fb_capi_enabled } }
 const delPixel = async (p) => {
   try { await ElMessageBox.confirm(t('landing.delPixelConfirm', { id: p.pixel_id }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/pixels/${p.id}`); ElMessage.success(t('common.done')); await loadLib() }
-  catch {}
+  catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 const savePixel = async () => {
   if (!pixelForm.value.pixel_id.trim()) return ElMessage.warning(t('landing.warnPixelId'))
@@ -647,7 +669,7 @@ const uploadLandingTpl = async () => {
   tplUploading.value = false
 }
 const delLandingTpl = async (tpl) => {
-  try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch {}
+  try { await ElMessageBox.confirm(t('landing.delTplConfirm', { name: tpl.name }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' }); await DELETE(`/landing-lib/templates/${tpl.id}`); ElMessage.success(t('common.done')); await loadLandingTemplates() } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
 // ── 页面规范（对外文档，2026-09-14）：只讲「怎么写」，不讲内部实现。
 // 交付方（外包/开发者）照此写页面 → zip 上传 → 严校验（不符规范拒传，报错引用条目）。
@@ -756,7 +778,7 @@ const init = async () => {
   // 超管标志读 MainLayout 挂载时写入的 localStorage（省一次 /auth/me）
   isSuper.value = localStorage.getItem('tova_super') === '1'
 }
-onMounted(async () => { await loadAsnBlocklist(); await init() })
+onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅新建表单用——并行不阻塞首屏
 </script>
 
 <template>
@@ -799,7 +821,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
       </el-select>
     </div>
 
-    <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ cntLp }}</i></div>
+    <div v-if="modeFilter !== 'short'" class="lp-sec-label">📄 {{ t('landing.tabLpOnly') }} <i>{{ visibleLpPages.length }}</i></div>
     <div class="list" v-loading="loading">
       <!-- 落地页行式（2026-09-15 重大重构）：卡退场——行=状态+标题+域名+子码·像素+今日三指标+标记+操作；
            7天/累计/通过率全部收进 hover，编辑/子码/自检进抽屉 -->
@@ -810,14 +832,14 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           <span class="owner-cell"><span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
                 @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span></span>
           <div class="lp-dom-chips" v-if="p.bound_subdomains && p.bound_subdomains.length" :title="p.bound_subdomains.join(' | ')">
-            <button v-for="sub in p.bound_subdomains.slice(0,3)" :key="sub" class="dom-chip"
+            <button v-for="sub in p.bound_subdomains.slice(0,2)" :key="sub" class="dom-chip"
                     :title="'https://' + sub" @click.stop="copyText('https://' + sub, t('landing.publicUrlCopied'))">🔗 {{ sub.split('.')[0] }}</button>
-            <span v-if="p.bound_subdomains.length > 3" class="dom-more" @click.stop="openEdit(p)">+{{ p.bound_subdomains.length - 3 }}</span>
+            <span v-if="p.bound_subdomains.length > 2" class="dom-more" @click.stop="openEdit(p)">+{{ p.bound_subdomains.length - 2 }}</span>
           </div>
           <span class="short-meta">{{ p.subcode_count || 0 }} {{ t('landing.stSubcodes') }} · {{ (p.pixel_ids||[]).length }} {{ t('landing.pixelsUnit') }}</span>
           <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
           <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stPassRateTip') + ' ' + ((p.today_visit ? Math.round((p.today_click||0)/p.today_visit*100) : 0)) + '% · ' + t('landing.stMore', { v: (p.pass_rate || 0) + '%', a: (p.click_count||0) + '/' + (p.visit_count||0) }) + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%（累计）'">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
           <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-else-if="p.last_health_status" class="health-dot" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
@@ -830,7 +852,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
           </div>
         </div>
       </div>
-      <div v-if="modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ cntShort }}</i></div>
+      <div v-if="modeFilter === 'short'" class="lp-sec-label">🔗 {{ t('landing.tabShortOnly') }} <i>{{ visibleShortPages.length }}</i></div>
     <!-- 短链行式（批2）：目标URL+轮换为主信息，今日/7天数据，无像素/自检 -->
       <div v-if="visibleShortPages.length" class="short-list">
         <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
@@ -1191,6 +1213,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         <div v-for="p in pixels" :key="p.id" class="sub-row">
           <span :class="['plat-chip', p.platform || 'fb']">{{ (p.platform || 'fb').toUpperCase() }}</span>
           <code>{{ p.pixel_id }}</code>
+          <span v-if="p.status === 'dead'" class="fb-badge fail" :title="t('landing.pixelDeadTip')">⛔ {{ t('landing.pixelDead') }}</span>
           <span class="sub-ad">{{ p.pixel_name || '-' }}</span>
           <span v-if="p.platform === 'tt'" class="tag" :class="p.tt_has_token ? 'ok' : 'warn'">{{ p.tt_has_token ? t('landing.hasToken') : t('landing.noToken') }}</span>
           <span v-if="(p.platform || 'fb') === 'fb' && p.fb_capi_enabled" class="tag ok" :title="t('landing.fbCapiLabel')">{{ t('landing.fbCapiTag') }}</span>
@@ -1225,7 +1248,7 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
         </div>
         <div v-for="d in domains" :key="d.id" class="dm-row">
           <span class="dm-name"><code>{{ d.domain }}</code><span v-if="d.blocked" class="dm-blocked" :title="t('landing.fbBlocked')">⛔</span></span>
-          <span :class="['tag', dnsLive(d) === 'active' ? 'ok' : 'warn']" :title="dnsLive(d)">{{ zoneStatusLabel(dnsLive(d)) }}</span>
+          <span :class="['tag', dnsLive(d) === 'active' ? 'ok' : (dnsLive(d) ? 'warn' : '')]" :title="dnsLive(d)">{{ zoneStatusLabel(dnsLive(d)) }}</span>
           <span class="sub-ad">{{ d.usage_count || 0 }} {{ t('landing.pagesUnit') }}<i v-if="d.label"> · {{ d.label }}</i></span>
           <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_visits || 0, a: (domainStats[d.domain] || {}).visits || 0 })">{{ (domainStats[d.domain] || {}).today_visits ?? '—' }}</span>
           <span class="dm-num" :title="t('landing.stMore', { v: (domainStats[d.domain] || {}).last7d_pass || 0, a: (domainStats[d.domain] || {}).pass || 0 })">{{ (domainStats[d.domain] || {}).today_pass ?? '—' }}</span>
@@ -1320,21 +1343,21 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .tag{font-size:10px;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--t3)}
 .tag.fb-block{background:var(--error);color:#fff;font-weight:600}
 .tag.fb-warn{background:var(--warning);color:#fff;font-weight:600}
-.st-tag{font-size:10px;padding:1px 7px;border-radius:9px}
+.st-tag{font-size:10px;padding:2px 8px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;line-height:1.2;white-space:nowrap}
 .st-tag.ok{background:rgba(48,209,88,.15);color:var(--success)}
 .st-tag.off{background:var(--bg3);color:var(--t3)}
 .st-tag.warn{background:rgba(255,159,10,.15);color:var(--warning)}
 .lp-body{font-size:12px;color:var(--t3);margin-top:6px}
 .lp-foot{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
-.lp-dom-chips{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:2px 0 6px}
-.dom-chip{font-size:11px;font-family:var(--font-mono);color:var(--ac);background:transparent;border:1px solid var(--bd);border-radius:6px;padding:1px 8px;cursor:pointer;white-space:nowrap}
+.lp-dom-chips{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;overflow:hidden;margin:0;min-width:0}
+.dom-chip{font-size:11px;font-family:var(--font-mono);color:var(--ac);background:transparent;border:1px solid var(--bd);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;line-height:1.2}
 .dom-chip:hover{border-color:var(--ac);background:var(--acg)}
-.dom-more{font-size:11px;color:var(--t3);cursor:pointer;padding:1px 4px}
+.dom-more{font-size:11px;color:var(--t3);cursor:pointer;padding:1px 4px;flex-shrink:0}
 .dom-more:hover{color:var(--ac)}
 .lp-sub-row{display:flex;align-items:center;gap:4px;margin-bottom:2px}
 .lp-sub-more{font-size:11px;color:var(--ac);cursor:pointer;padding:2px 0}
 .lp-sub-more:hover{text-decoration:underline}
-.mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer}
+.mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1.3;white-space:nowrap}
 .mb:hover{color:var(--ac);border-color:var(--ac)}
 .mb.danger{color:var(--error);border-color:rgba(239,68,68,.4)}
 .mb.danger:hover{color:#fff;background:var(--error);border-color:var(--error)}
@@ -1499,15 +1522,18 @@ onMounted(async () => { await loadAsnBlocklist(); await init() })
 .short-rot{color:var(--t3);font-size:11px;white-space:nowrap}
 .short-stat{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;white-space:nowrap}
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
-.lp-row2{grid-template-columns:70px minmax(130px,1.15fr) auto minmax(170px,1.1fr) 118px repeat(3,minmax(88px,.7fr)) auto auto}
-.owner-cell{min-width:0}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右） */
-.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px;white-space:nowrap;flex-shrink:0}
+/* 行对齐（2026-09-16 用户反馈「排列不统一」）：每行是独立 grid，变宽列会让各行列边界漂移——
+   owner/域名/标签列全部固定宽，标题列吃剩余，保证所有行列边界一致；域名 chips 单行不折行 */
+.lp-row2{grid-template-columns:64px minmax(110px,1fr) 64px 176px 112px repeat(3,84px) 92px auto;gap:8px}
+.owner-cell{min-width:0;overflow:hidden}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右）；固定列宽保各行对齐 */
+.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:2px 7px;border-radius:8px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;line-height:1.2}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
 @media(max-width:900px){.lp-row2{grid-template-columns:1fr 1fr;row-gap:6px}.lp-dom-chips{grid-column:1/-1}}
 .short-ops{display:flex;gap:5px}
-@media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}}
+.st-tag.err{background:rgba(255,69,58,.12);color:var(--error)}   /* subcodeStatus('deleted') 曾无样式渲染成裸文本 */
+@media(max-width:900px){.short-row{grid-template-columns:1fr 1fr;row-gap:6px}.short-ops{flex-wrap:wrap;grid-column:1/-1;justify-content:flex-end}}
 
 /* 域名管理表格（批2） */
 .dm-table{margin-top:0}

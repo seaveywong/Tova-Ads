@@ -154,8 +154,9 @@ def domains_stats(user: CurrentUser = Depends(require_permission("ads.read")),
             if _page_uses_domain(pg, d):
                 dom_pids[d].add(pg.id)
     bj = _dt.now(_tz(_td(hours=8)))
-    t0 = (bj.replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=None)
-    d7 = ((bj - _td(days=6)).replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=None)
+    # aware UTC（复审P2：timestamptz 列 + naive 参数按会话时区解释，会话非 UTC 时窗口偏移）
+    t0 = (bj.replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=_tz.utc)
+    d7 = ((bj - _td(days=6)).replace(hour=0, minute=0, second=0, microsecond=0) - _td(hours=8)).replace(tzinfo=_tz.utc)
     _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
     _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
     page_stats: dict = {}

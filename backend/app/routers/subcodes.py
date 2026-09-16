@@ -9,9 +9,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from ..core.database import get_db
-from ..core.deps import CurrentUser, require_permission
+from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..models.launch import LandingAdLink
 from ..schemas.launch import GenerateSubcodeIn, SubcodeOut
+
+
+def _page_scope(db: Session, user, page_id):
+    """页归属校验（复审P1 补漏：批AJ 只覆盖了 pages CRUD——generate/events/fb-check 曾
+    收任意 page_id）：页必须存在、属于本租户；operator 只能操作自己创建的页。"""
+    if not page_id:
+        return None
+    from ..models.launch import LandingPage
+    p = db.query(LandingPage).filter(
+        LandingPage.id == page_id, LandingPage.tenant_id == user.tenant_id).first()
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")
+    return p
 
 router = APIRouter(prefix="/subcodes", tags=["subcodes"])
 
@@ -33,6 +47,9 @@ def generate(
     db: Session = Depends(get_db),
 ):
     """生成子码（reserved）→ 后续铺广告时创意链接用此 /a/{slug}。"""
+    # 复审P1：page_id 曾不校验直接落库（跨租户页 id/不存在的 id 均可——route_next 的
+    # 跨页防护对 page_id=NULL 短路放行，等于往别的页的流量上注入本租户跳转配置）
+    _page_scope(db, user, body.page_id)
     slug = _gen_slug(db)
     link = LandingAdLink(
         tenant_id=user.tenant_id,
@@ -173,12 +190,13 @@ def subcode_events(
     db: Session = Depends(get_db),
 ):
     """子码访问日志（landing_events per page/slug，前端弹窗展示）。"""
+    _page_scope(db, user, page_id)   # 复审P1：operator 枚举 page_id 曾可看他人页明细
     from ..models.landing_event import LandingEvent
     q = db.query(LandingEvent).filter(
         LandingEvent.page_id == page_id, LandingEvent.tenant_id == user.tenant_id)
     if slug:
         q = q.filter(LandingEvent.slug == slug)
-    evs = q.order_by(LandingEvent.id.desc()).limit(min(limit, 500)).all()
+    evs = q.order_by(LandingEvent.id.desc()).limit(max(1, min(limit, 500))).all()
     return [{"id": e.id, "event_type": e.event_type, "slug": e.slug, "ad_id": e.ad_id,
              "country": e.country, "city": e.city, "decision": e.decision, "reason": e.reason,
              "user_agent": (e.user_agent or "")[:80], "referrer": e.referrer,
@@ -325,6 +343,7 @@ def fb_check_subcode(
     base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _page_scope(db, user, body.page_id)   # 复审P1：归属校验
     url = f"{base.rstrip('/')}/a/{body.slug}"
     status, detail = _fb_ban_probe_batch(db, user.tenant_id, [url])[0]
     return {"status": status, "detail": detail, "url": url}
@@ -344,14 +363,16 @@ def fb_check_batch(
     base, p = _resolve_page_base(db, user.tenant_id, body.page_id)
     if not p:
         raise HTTPException(404, "落地页不存在")
+    _page_scope(db, user, body.page_id)   # 复审P1：归属校验
     links = db.query(LandingAdLink).filter(
         LandingAdLink.page_id == body.page_id,
         LandingAdLink.tenant_id == user.tenant_id,
         LandingAdLink.status == "active",
-    ).all()
+    ).limit(50).all()   # 复审P2：无上限时 N×10s/5并发必撞网关超时 + 大批 scrape 易触发 FB 限流
     urls = [f"{base.rstrip('/')}/a/{link.slug}" for link in links]
     probe_res = _fb_ban_probe_batch(db, user.tenant_id, urls)
     results = [{"slug": link.slug, "status": st, "detail": det, "url": u}
                for link, (st, det), u in zip(links, probe_res, urls)]
     blocked = [r for r in results if r["status"] == "fail"]
-    return {"total": len(results), "blocked": len(blocked), "results": results}
+    return {"total": len(results), "blocked": len(blocked), "capped": len(links) >= 50,
+            "results": results}

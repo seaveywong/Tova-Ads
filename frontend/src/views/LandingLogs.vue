@@ -371,9 +371,9 @@ watch(() => route.query, (q) => {
       <template v-for="e in items" :key="e.id">
       <div class="row" :class="{ open: expanded.has(e.id) }" @click="toggleRow(e.id)">
         <div class="t-time">▸ {{ fmtTime(e.created_at) }}</div>
-        <div><code class="slug" @click="goSlug(e.slug)" :title="t('lplogs.clickFilterSubcode', { slug: e.slug })">/a/{{ e.slug }}</code></div>
-        <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? t('lplogs.clickFilterAccount', { name: e.act_name }) : ''" @click="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
-        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\n' + t('lplogs.fbClickId') + ': ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? t('lplogs.clickFilterAd', { adId: e.ad_id }) : ''" @click="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? t('lplogs.redirectSetTitle', { url: redirectMap[e.ad_id] }) : t('lplogs.setRedirect')">{{ t('lplogs.redirectShort') }}</button></div>
+        <div><code class="slug" @click.stop="goSlug(e.slug)" :title="t('lplogs.clickFilterSubcode', { slug: e.slug })">/a/{{ e.slug }}</code></div>
+        <div class="t-act" :class="{ clk: e.act_id }" :title="e.act_id ? t('lplogs.clickFilterAccount', { name: e.act_name }) : ''" @click.stop="goAct(e.act_id)">{{ e.act_name || (e.act_id ? e.act_id.slice(-8) : '-') }}</div>
+        <div class="t-ad" :title="(e.act_name || e.act_id || '') + (e.fbclid ? '\n' + t('lplogs.fbClickId') + ': ' + e.fbclid : '')"><span class="ad-id" :class="{ clk: e.ad_id }" :title="e.ad_id ? t('lplogs.clickFilterAd', { adId: e.ad_id }) : ''" @click.stop="goAd(e.ad_id)">{{ e.ad_id || '-' }}</span><button v-if="e.ad_id" class="rd-link" :class="{on: redirectMap[e.ad_id]}" @click.stop="openRedirect(e.ad_id)" :title="redirectMap[e.ad_id] ? t('lplogs.redirectSetTitle', { url: redirectMap[e.ad_id] }) : t('lplogs.setRedirect')">{{ t('lplogs.redirectShort') }}</button></div>
         <div class="t-px" :title="e.fired_pixel_ids ? t('lplogs.firedPixelHint', { ids: e.fired_pixel_ids }) : t('lplogs.pixelNotRecorded')">
           <code v-if="e.fired_pixel_ids">{{ pixelLabel(e) }}</code>
           <span v-else class="muted">—</span>

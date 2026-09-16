@@ -426,6 +426,55 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         try: _os.unlink(_worker_tmp)
         except Exception: pass
 
+    # 2.8 域名校验前置（复审P1：曾排在部署后——400 时新 worker 已上线，DB 回滚留旧值，
+    #     DB↔worker 漂移 + 幽灵 CF 项目）。纯 DB 查 + 1 次 CF zones 查询，无需先部署
+    if body.custom_domains is not None:
+        # 显式传了列表（含 []=清空域名）：不再兜底 custom_domain / 域名库
+        roots = [d.rstrip("/") for d in body.custom_domains if d]
+    else:
+        roots = [body.custom_domain.rstrip("/")] if body.custom_domain else []
+        if not roots:
+            lib = _pick_domain_from_lib(db, user.tenant_id)
+            if lib:
+                roots = [lib]
+    # 域名白名单校验：请求指定的每个根域必须属于本租户域名库（active）——
+    # 否则可传平台域名/他租户域名到 get_zone_id 命中后绑定（跨租户接管/钓鱼载体）
+    if roots:
+        from ..models.landing_lib import LandingDomain as _LD
+        allowed = {_domain_root(r.domain) for r in db.query(_LD).filter(
+            _LD.tenant_id == user.tenant_id, _LD.status == "active").all()}
+        bad = [_domain_root(r) for r in roots if _domain_root(r) not in allowed]
+        if bad:
+            raise HTTPException(400, f"域名不在本团队域名库中：{', '.join(sorted(set(bad)))}")
+        # zone 健康门（2026-09-16 marketbriefnow.xyz 事故：zone=moved——域名 NS 被指到别的
+        # CF 账户，新子域名在 CF 侧永远验不过，部署出来必 522）。新绑根域 zone 非 active
+        # 直接拦下报原因；已绑过的根域不拦（编辑场景，老子域名靠 CF 边缘存量继续服务）。
+        _bound_roots = set()
+        try:
+            _bound_roots = {_domain_root(s) for s in _json.loads(existing.bound_subdomains or "[]")}
+        except Exception:
+            pass
+        if existing and existing.custom_domain:   # 迁移0061 前的存量页 bound_subdomains=NULL
+            _bound_roots.add(_domain_root(existing.custom_domain.replace("https://", "").replace("http://", "")))
+        for r in roots:
+            _r = _domain_root(r)
+            if _r in _bound_roots:
+                continue
+            # 查询成功才判状态；CF 查询失败（success=False / httpx 异常）跳过本门——部署环节
+            # 本身还要调 CF，真故障会在那里自然报错，不应在门口用「未接入平台」误导（曾的坑）
+            try:
+                _zd = cf._get("/zones", params={"name": _r})
+            except Exception:
+                continue
+            if _zd.get("success") is not True:
+                continue
+            _zrows = _zd.get("result") or []
+            _zst = (_zrows[0] or {}).get("status") if _zrows else None
+            if not _zrows or _zst != "active":
+                raise HTTPException(
+                    400, f"域名 {_r} 解析状态异常（{_zst or '未接入平台'}）：域名 NS 未指向平台，"
+                         f"新子域名无法激活（发布后必然不可访问）。请在域名服务商处把 NS 改为平台分配的 NS，或换用其他域名")
+
     # 3. 部署（wrangler CLI）
     result = cf.deploy_via_wrangler(body.project_name, files)
     pages_url = result.get("url", f"https://{body.project_name}.pages.dev")
@@ -486,53 +535,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
 
 
     # 4. 绑域名（每页独立子域名 lp{page_id}.{根域}——封禁隔离 + URL 独立；
-    #    custom_domains 是用户选的根域名，绑的是派生子域名）
-    if body.custom_domains is not None:
-        # 显式传了列表（含 []=清空域名）：不再兜底 custom_domain / 域名库
-        roots = [d.rstrip("/") for d in body.custom_domains if d]
-    else:
-        roots = [body.custom_domain.rstrip("/")] if body.custom_domain else []
-        if not roots:
-            lib = _pick_domain_from_lib(db, user.tenant_id)
-            if lib:
-                roots = [lib]
-    # 域名白名单校验：请求指定的每个根域必须属于本租户域名库（active）——
-    # 否则可传平台域名/他租户域名到 get_zone_id 命中后绑定（跨租户接管/钓鱼载体）
-    if roots:
-        from ..models.landing_lib import LandingDomain as _LD
-        allowed = {_domain_root(r.domain) for r in db.query(_LD).filter(
-            _LD.tenant_id == user.tenant_id, _LD.status == "active").all()}
-        bad = [_domain_root(r) for r in roots if _domain_root(r) not in allowed]
-        if bad:
-            raise HTTPException(400, f"域名不在本团队域名库中：{', '.join(sorted(set(bad)))}")
-        # zone 健康门（2026-09-16 marketbriefnow.xyz 事故：zone=moved——域名 NS 被指到别的
-        # CF 账户，新子域名在 CF 侧永远验不过，部署出来必 522）。新绑根域 zone 非 active
-        # 直接拦下报原因；已绑过的根域不拦（编辑场景，老子域名靠 CF 边缘存量继续服务）。
-        _bound_roots = set()
-        try:
-            _bound_roots = {_domain_root(s) for s in _json.loads(existing.bound_subdomains or "[]")}
-        except Exception:
-            pass
-        if existing and existing.custom_domain:   # 迁移0061 前的存量页 bound_subdomains=NULL
-            _bound_roots.add(_domain_root(existing.custom_domain.replace("https://", "").replace("http://", "")))
-        for r in roots:
-            _r = _domain_root(r)
-            if _r in _bound_roots:
-                continue
-            # 查询成功才判状态；CF 查询失败（success=False / httpx 异常）跳过本门——部署环节
-            # 本身还要调 CF，真故障会在那里自然报错，不应在门口用「未接入平台」误导（曾的坑）
-            try:
-                _zd = cf._get("/zones", params={"name": _r})
-            except Exception:
-                continue
-            if _zd.get("success") is not True:
-                continue
-            _zrows = _zd.get("result") or []
-            _zst = (_zrows[0] or {}).get("status") if _zrows else None
-            if not _zrows or _zst != "active":
-                raise HTTPException(
-                    400, f"域名 {_r} 解析状态异常（{_zst or '未接入平台'}）：域名 NS 未指向平台，"
-                         f"新子域名无法激活（发布后必然不可访问）。请在域名服务商处把 NS 改为平台分配的 NS，或换用其他域名")
+    #    custom_domains 是用户选的根域名，绑的是派生子域名；roots/白名单/zone 门已在 2.8 前置）
     bound = []
     bind_errors = []
     sub_prefix = (body.subdomain_prefix or "").strip().lower()
@@ -684,9 +687,13 @@ def publish_landing(
 ):
     """发布落地页（upsert：同租户同标题=更新，否则新建；每页独立 CF 项目 tovaads-landing-{id}）。"""
     from ..models.launch import LandingPage
+    if not (body.title or "").strip():
+        raise HTTPException(400, "标题必填")   # 空 title 会 upsert 命中任意空标题页（复审P0 伴生路径）
     existing = db.query(LandingPage).filter(
         LandingPage.tenant_id == user.tenant_id, LandingPage.title == body.title
     ).first()
+    if existing:
+        _ro(user, existing, attr="owner_user_id")   # 复审P0：upsert 曾无归属检查——operator 可覆写同租户他人页面
     is_new = not existing  # 本次是否首次发布（决定 action_log 记 create 还是 update）
     if not existing:
         existing = LandingPage(tenant_id=user.tenant_id, owner_user_id=user.id,
@@ -946,10 +953,12 @@ def list_landing_pages(
         from ..core.landing_source import crawler_filter_cond
         from sqlalchemy import case as _case
         _bj_now = datetime.now(timezone(timedelta(hours=8)))
+        # aware UTC（复审P2：created_at 是 timestamptz，naive 值按会话时区解释——会话 TZ 非
+        # UTC 时今日/近7天整体偏移；/logs 系列一直用 aware，两套口径统一）
         _bj_today_start = (_bj_now.replace(hour=0, minute=0, second=0, microsecond=0)
-                           - timedelta(hours=8)).replace(tzinfo=None)   # naive UTC，对齐表列
+                           - timedelta(hours=8)).replace(tzinfo=timezone.utc)
         _bj_7d_start = ((_bj_now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
-                        - timedelta(hours=8)).replace(tzinfo=None)
+                        - timedelta(hours=8)).replace(tzinfo=timezone.utc)
         _is_visit = LandingEvent.event_type.in_(["visit", "redirect"])
         _is_pass = LandingEvent.event_type.in_(["click", "redirect"])
         _is_block = LandingEvent.event_type == "block"
@@ -1281,15 +1290,19 @@ def add_subdomain(pid: int, body: dict,
     ).first()
     if clash:
         raise HTTPException(400, f"子域名 {sub} 已被「{clash.title}」占用")
-    # CF 绑定
+    # CF 绑定（复审P1：zone 查不到曾静默跳过仍入库——public_url/自检指向从未绑定的死域名）
     cf_token = settings.cf_api_token
     cf_account = settings.cf_account_id
     if cf_token and cf_account:
         from ..core.cf_client import CfClient
         cf = CfClient(cf_token, cf_account)
         try:
-            if cf.get_zone_id(_domain_root(sub)):
-                cf.bind_custom_domain(f"tovaads-landing-{p.id}", sub)
+            if not cf.get_zone_id(_domain_root(sub)):
+                raise HTTPException(400, f"根域名 {_domain_root(sub)} 的 CF zone 未找到"
+                                         f"（NS 可能已移出平台）——子域名未绑定，不入库")
+            cf.bind_custom_domain(f"tovaads-landing-{p.id}", sub)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(400, f"CF 绑定失败: {e}")
     # 加入 bound_subdomains
@@ -1350,7 +1363,9 @@ def delete_subdomain(pid: int, hostname: str,
     return {"ok": True, "bound_subdomains": subs}
 
 
-@router.get("/pages/check-subdomain")
+@router.get("/subdomain-check")   # 复审P1：原路径 /pages/check-subdomain 被 /pages/{pid} 路由
+                                  # 遮蔽恒 422（FastAPI 按注册序匹配，str 转 int 失败）→ 前端
+                                  # 「可用/已占用」实时指示静默失效
 def check_subdomain(prefix: str = "", root: str = "", pid: int = 0,
                     user: CurrentUser = Depends(require_permission("ads.read")),
                     db: Session = Depends(get_db)):
@@ -1862,14 +1877,19 @@ def landing_logs(
     from ..models.landing_event import LandingEvent
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     BUSINESS_TZ = _tz(_td(hours=8))
+    if page_id:
+        # 复审P1：页归属校验（operator 枚举 page_id 曾可看他人页日志明细）
+        from ..models.launch import LandingPage as _LP
+        _p = db.query(_LP).filter(_LP.id == page_id, _LP.tenant_id == user.tenant_id).first()
+        if not _p:
+            raise HTTPException(404, "落地页不存在")
+        _ro(user, _p, attr="owner_user_id")
     _controlled = _controlled_ad_ids(db, user.tenant_id)
     qb = db.query(LandingEvent).filter(LandingEvent.tenant_id == user.tenant_id)
     if page_id:
         qb = qb.filter(LandingEvent.page_id == page_id)
     if slug:
         qb = qb.filter(LandingEvent.slug == slug)
-    if ad_id:
-        qb = qb.filter(LandingEvent.ad_id == ad_id)
     if ad_id:
         qb = qb.filter(LandingEvent.ad_id == ad_id)
     if act_id:
@@ -1926,13 +1946,16 @@ def landing_logs(
 
 
 def _logs_filtered(db, tenant_id, page_id, slug, ad_id, act_id, event_type, decision,
-                   date_from, date_to, q):
+                   date_from, date_to, q, source_type: str = ""):
     """批2：/logs/agg 与 /logs/export 共用的筛选构造（与 /landing/logs 同口径：北京业务日
     边界转 UTC + q 模糊。刻意不抽 /logs 本体——动存量筛选有回归风险，双份口径注释钉死）。"""
     from ..models.landing_event import LandingEvent
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     BUSINESS_TZ = _tz(_td(hours=8))
     qb = db.query(LandingEvent).filter(LandingEvent.tenant_id == tenant_id)
+    if source_type:
+        # 复审P1：导出/聚合曾忽略「来源」筛选——CSV 与屏幕所见口径对不上
+        qb = _apply_source_filter(qb, source_type, _controlled_ad_ids(db, tenant_id))
     if page_id:
         qb = qb.filter(LandingEvent.page_id == page_id)
     if slug:
@@ -1970,13 +1993,13 @@ def landing_logs_agg(
     user: CurrentUser = Depends(require_permission("ads.read")),
     page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
     event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
-    q: str = "", db: Session = Depends(get_db),
+    q: str = "", source_type: str = "", db: Session = Depends(get_db),
 ):
     """日志聚合（批2）：总量 + 事件类型/国家/设备分布 top——筛选条一键看结构，此前只有来源分布。"""
     from sqlalchemy import func as _fn
     from ..models.landing_event import LandingEvent as _LE
     qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
-                        event_type, decision, date_from, date_to, q)
+                        event_type, decision, date_from, date_to, q, source_type)
 
     def _top(col, n=6):
         rows = qb.with_entities(col, _fn.count()).filter(col.isnot(None), col != "").group_by(col).order_by(_fn.count().desc()).limit(n).all()
@@ -1993,14 +2016,14 @@ def landing_logs_export(
     user: CurrentUser = Depends(require_permission("ads.read")),
     page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
     event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
-    q: str = "", db: Session = Depends(get_db),
+    q: str = "", source_type: str = "", db: Session = Depends(get_db),
 ):
     """CSV 导出（批2）：同筛选口径，上限 1 万行（防止拖库式导出拖垮连接）。"""
     import csv, io as _io
     from fastapi.responses import Response as _Resp
     from ..models.landing_event import LandingEvent as _LE
     qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
-                        event_type, decision, date_from, date_to, q)
+                        event_type, decision, date_from, date_to, q, source_type)
     rows = qb.order_by(_LE.created_at.desc()).limit(10000).all()
     buf = _io.StringIO()
     w = csv.writer(buf)
@@ -2059,6 +2082,8 @@ def landing_log_source_stats(
         qb = qb.filter(LandingEvent.page_id == page_id)
     if slug:
         qb = qb.filter(LandingEvent.slug == slug)
+    if ad_id:
+        qb = qb.filter(LandingEvent.ad_id == ad_id)   # 复审P1：收了参数从不筛——按广告筛时分布 chip 虚大
     if act_id:
         qb = qb.filter(LandingEvent.act_id == act_id)
     if event_type:

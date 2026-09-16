@@ -4,7 +4,7 @@ export default {
   zh: {
     pageTitle: '投放链接', headMeta: '{n} 条 · {blocked} 屏蔽',
     chipDisplay: '落地页', chipRedirect: '短链',
-    createdBy: '创建人',    filterByOwner: '按创建人筛选', filterByOwnerTip: '筛选该创建人创建的链接', clickToFilter: '点击筛选此人', stSubcodes: '子码', stVisits: '访问', stPass: '通过', stPassRate: '通过率', stVisitsTip: '真人访问量（visit+redirect，已剔除爬虫/审核机器人）', stPassTip: '通过量 = 点击 CTA 或自动跳转到达目标的访客数（爬虫不计）', stPassRateTip: '通过率 = 通过 ÷ 访问（均为真人口径，爬虫不计），访问量低时波动大', stBlocked: '屏蔽',
+    createdBy: '创建人',    filterByOwner: '按创建人筛选', filterByOwnerTip: '筛选该创建人创建的链接', clickToFilter: '点击筛选此人', stSubcodes: '子码', stVisits: '访问', stPass: '通过', stPassRate: '通过率', stVisitsTip: '真人访问量（visit+redirect，已剔除爬虫/审核机器人）', stPassTip: '通过量 = 点击 CTA 或自动跳转到达目标的访客数（爬虫不计）', stPassRateTip: '通过率 = 通过 ÷ 访问（均为真人口径，爬虫不计），访问量低时波动大', stBlocked: '屏蔽', stBlockedTip: '被防护规则拦截的访问（爬虫/机房/审核机器人等）', copyFail: '复制失败——请手动复制', pixelDead: '已失效', pixelDeadTip: '体检判定 FB 侧已删/解绑——不再被随机轮换选中，建议删除', fbBatchCapped: '单批最多检测 50 个子码，本次只检了前 50 个',
     tabManage: '链接管理', tabLogs: '访问日志', totalPages: '共 {n} 个链接', viewData: '查看数据',
     tabAll: '全部', tabLpOnly: '落地页', tabShortOnly: '短链',
     emptyNoLp: '暂无落地页链接', emptyNoShort: '暂无短链', emptyOwnerFiltered: '{owner} 暂无此类链接', clearOwnerFilter: '清除创建人筛选',
@@ -82,7 +82,7 @@ export default {
     pageTitle: 'Ad Links', headMeta: '{n} links · {blocked} blocked',
     chipDisplay: 'Landing', chipRedirect: 'Short Link',
     createdBy: 'Creator', filterByOwner: 'Filter by creator', filterByOwnerTip: 'Show only links created by this person', clickToFilter: 'Click to filter',
-    stSubcodes: 'Subcodes', stVisits: 'Visits', stPass: 'Pass', stPassRate: 'Pass Rate', stVisitsTip: 'Real-human visits (visit + redirect; crawlers / review bots excluded)', stPassTip: 'Pass = visitors who clicked CTA or were auto-redirected to the target (crawlers excluded)', stPassRateTip: 'Pass rate = pass / visits, human traffic only (crawlers excluded); volatile at low volume', stBlocked: 'Blocked',
+    stSubcodes: 'Subcodes', stVisits: 'Visits', stPass: 'Pass', stPassRate: 'Pass Rate', stVisitsTip: 'Real-human visits (visit + redirect; crawlers / review bots excluded)', stPassTip: 'Pass = visitors who clicked CTA or were auto-redirected to the target (crawlers excluded)', stPassRateTip: 'Pass rate = pass / visits, human traffic only (crawlers excluded); volatile at low volume', stBlocked: 'Blocked', stBlockedTip: 'Visits blocked by protection rules (crawlers/datacenter/review bots)', copyFail: 'Copy failed — please copy manually', pixelDead: 'Dead', pixelDeadTip: 'Health check found it deleted/unlinked on FB — excluded from random rotation; consider deleting', fbBatchCapped: 'Batch check is capped at 50 subcodes; only the first 50 were checked',
     tabManage: 'Links', tabLogs: 'Access Logs', totalPages: '{n} links', viewData: 'View Data',
     tabAll: 'All', tabLpOnly: 'Landing Pages', tabShortOnly: 'Short Links',
     emptyNoLp: 'No landing-page links yet', emptyNoShort: 'No short links yet', emptyOwnerFiltered: '{owner} has no links of this type', clearOwnerFilter: 'Clear creator filter',
