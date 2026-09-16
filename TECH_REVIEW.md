@@ -2400,3 +2400,50 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 **验证**：smoke `_smoke_five_fixes.py` 重跑——硬删 e2e 全过零残留；zone 门在 zone=active 时正确放行（当日 marketbriefnow.xyz zone 自愈为 active，lp57 恢复 200，新发布域名+Worker 全过；早前 zone=moved 时 400 拦截已实测）。
 
 **遗留待办**：多素材×多文案两模式（用户拍板保留待办）；强删前资源统计弹窗（低频超管场景）；导入同步 e2e smoke（需真导入新账户时补）。
+
+---
+
+## 版本交付 · 2026-09-17（内部铺放版）
+
+### 交付验收：17 PASS / 0 FAIL
+
+| 模块 | 端点 | 状态 |
+|---|---|---|
+| 投放模板 | /launch-templates (3 个) | ✅ |
+| 表单模板 | /form-templates/forms (1 个) | ✅ |
+| 消息模板 | /form-templates/messages (0 个) | ✅ |
+| 部署历史 | /launch-templates/jobs (5 条) | ✅ |
+| 广告管理器 | /ads/list (26 系列/56 广告) | ✅ |
+| 落地页 | /landing/pages (5 个) | ✅ |
+| 像素库 | /landing-lib/pixels (23 个) | ✅ |
+| 域名库 | /landing-lib/domains (1 个) | ✅ |
+| 素材库评分 | /assets (16 个/4 带分) | ✅ |
+| 规则引擎 | /guard/rules (2 条) | ✅ |
+| 保活 | /guard/keepalive/retry | ✅ |
+| 团队管理 | /admin/tenants/detail | ✅ |
+| 域名池 | /admin/domains/discover | ✅ |
+| 通知 | /notifications?platform=fb | ✅ |
+| 未读数 | /notifications/unread-count | ✅ |
+| 账户 | /fb/accounts (16 个带归属) | ✅ |
+| 令牌 | /fb/credentials (8 个带录入人) | ✅ |
+
+### 引擎健康（近 30 分钟）
+- 巡检：正常完成（评估 7 条广告）
+- 哨兵：30 轮巡逻完成
+- 错误：0 条
+
+### 本版本包含的核心能力
+1. **广告发布全链路**：模板→部署→FB 创建（campaign/adset/ad）→表单模板（Instant Form）→消息模板→素材→文案
+2. **1:1 FB 投放**：三层结构树、批量素材、受众定向、排期、预算、ROI
+3. **落地页系统**：CF Pages 部署、域名绑定、子码追踪、像素 fire、防护规则、自检
+4. **守护引擎**：规则止损（按人隔离）、哨兵、保活、预算告警、FB 屏蔽扫描
+5. **团队管理**：成员/域名分配、彻底删除、席位权限
+6. **素材评分**：hash 匹配+相对基准评分+角标+详情弹窗
+7. **归属体系**：全资源归属人标签+筛选（账户/素材/模板/表单/部署/令牌/域名）
+8. **通知归属路由**：谁的账户谁收告警
+9. **RBAC**：operator 隔离（账户/令牌/规则/告警/素材/模板）
+
+### 已知限制
+- TT sandbox 未实测（等用户提供 app_id）
+- 商业化计费未实施（规划书已落盘 Mira_2.0_docs/14）
+- lc 名下账户零规则保护（用户拍板的语义）
