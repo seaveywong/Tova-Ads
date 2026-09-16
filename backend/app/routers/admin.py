@@ -118,6 +118,7 @@ class TenantIn(BaseModel):
 def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
     """团队列表 + 概况（成员数/广告账户数），超管用。"""
     from ..models.fb import Account
+    from ..models.landing_lib import LandingDomain
     tenants = db.query(Tenant).order_by(Tenant.id).all()
     # 计数批量预取（原每租户 2 条 COUNT = N+1）
     member_counts = dict(db.query(
@@ -126,6 +127,9 @@ def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(
     account_counts = dict(db.query(
         Account.tenant_id, func.count(Account.id)
     ).filter(Account.is_managed == True).group_by(Account.tenant_id).all())  # noqa: E712
+    domain_counts = dict(db.query(
+        LandingDomain.tenant_id, func.count(LandingDomain.id)
+    ).group_by(LandingDomain.tenant_id).all())
     result = []
     for t in tenants:
         member_count = member_counts.get(t.id, 0)
@@ -133,6 +137,7 @@ def list_tenants_detail(user=Depends(require_superadmin), db: Session = Depends(
         result.append({
             "id": t.id, "name": t.name, "plan": t.plan, "status": t.status,
             "members": member_count, "accounts": account_count,
+            "domains": domain_counts.get(t.id, 0),
             "created_at": str(t.created_at) if t.created_at else "",
         })
     return result

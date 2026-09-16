@@ -144,11 +144,8 @@ const unassignDomain = async (d) => {
   load()
 }
 const hasMore = (row) => {
-  if (row.id === 1) return false
-  if (row.status === 'active') return true
-  if (row.status === 'suspended') return true
-  if (row.status === 'archived') return true
-  return false
+  // ⋯ 只装破坏性操作（归档/彻底删除）；主团队(id=1)两项后端都拒绝 → 无菜单
+  return row.id !== 1
 }
 
 // 成员管理（列表/改角色/移除/加成员，超管跨租户）
@@ -236,7 +233,12 @@ const submitMemberAdd = async () => {
         </el-table-column>
         <el-table-column :label="t('teams.members')" width="68" align="center">
           <template #default="{ row }">
-            <span :class="['num', { zero: row.members === 0 }]">{{ row.members }}</span>
+            <button :class="['num', 'num-btn', { zero: row.members === 0 }]" :title="t('teams.memberManageTitle', { name: row.name })" @click="openMembers(row)">{{ row.members }}</button>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('teams.domains')" width="72" align="center">
+          <template #default="{ row }">
+            <button :class="['num', 'num-btn', { zero: row.domains === 0 }]" :title="t('teams.domainTitle', { name: row.name })" @click="openDomains(row)">{{ row.domains || 0 }}</button>
           </template>
         </el-table-column>
         <el-table-column :label="t('teams.adAccounts')" width="88" align="center">
@@ -247,21 +249,23 @@ const submitMemberAdd = async () => {
         <el-table-column :label="t('teams.createdAt')" width="160">
           <template #default="{ row }"><span class="mute">{{ (row.created_at || '').slice(0,16).replace('T',' ') }}</span></template>
         </el-table-column>
-        <el-table-column :label="t('common.operation')" width="172" fixed="right">
+        <el-table-column :label="t('common.operation')" width="240" fixed="right">
           <template #default="{ row }">
             <div class="ops">
               <button class="op primary" @click="openMembers(row)">{{ t('teams.members') }}</button>
               <button class="op" @click="openDomains(row)">{{ t('teams.domains') }}</button>
               <button class="op" @click="rename(row)">{{ t('teams.rename') }}</button>
+              <!-- 状态流转行内可见（2026-09-16 用户反馈：曾收进 ⋯ 里等于没有）——
+                   active→停用 / suspended→激活 / archived→恢复；主团队(id=1)不可停用 -->
+              <button v-if="row.status === 'active' && row.id !== 1" class="op" @click="handleOp('suspend', row)">{{ t('teams.suspend') }}</button>
+              <button v-if="row.status === 'suspended'" class="op" @click="handleOp('activate', row)">{{ t('teams.activate') }}</button>
+              <button v-if="row.status === 'archived'" class="op" @click="handleOp('restore', row)">{{ t('teams.restore') }}</button>
               <el-dropdown v-if="hasMore(row)" trigger="click" @command="c => handleOp(c, row)">
                 <button class="op more" :title="t('common.more')">⋯</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item v-if="row.status === 'active'" command="suspend">{{ t('teams.suspend') }}</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status === 'suspended'" command="activate">{{ t('teams.activate') }}</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" divided class="danger">{{ t('teams.archive') }}</el-dropdown-item>
-                    <el-dropdown-item v-if="row.status === 'archived'" command="restore">{{ t('teams.restore') }}</el-dropdown-item>
-                    <el-dropdown-item v-if="row.id !== 1" command="harddelete" divided class="danger">{{ t('teams.hardDeleteBtn') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="row.status !== 'archived'" command="archive" class="danger">{{ t('teams.archive') }}</el-dropdown-item>
+                    <el-dropdown-item command="harddelete" divided class="danger">{{ t('teams.hardDeleteBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -376,6 +380,10 @@ const submitMemberAdd = async () => {
 
 .num{color:var(--t1);font-variant-numeric:tabular-nums;font-weight:500}
 .num.zero{color:var(--t3);font-weight:400}
+/* 计数即入口（点成员数开成员弹窗/点域名数开域名抽屉）——零值不可点 */
+.num-btn{background:transparent;border:none;padding:2px 6px;border-radius:4px;cursor:pointer;font:inherit}
+.num-btn:not(.zero):hover{background:var(--acg);color:var(--ac)}
+.num-btn.zero{cursor:default}
 .mute{color:var(--t3);font-size:12px;font-variant-numeric:tabular-nums}
 
 .ops{display:flex;align-items:center;gap:4px}
