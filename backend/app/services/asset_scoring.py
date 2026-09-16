@@ -177,9 +177,11 @@ def maybe_recompute(db, tenant_id: int, max_age_h: int = 6):
     latest = db.query(AssetScore.computed_at).filter(
         AssetScore.tenant_id == tenant_id).order_by(AssetScore.computed_at.desc()).first()
     if not latest or not latest[0] or datetime.now(timezone.utc) - latest[0] > timedelta(hours=max_age_h):
+        # advisory lock 自持连接（acquire_run_lock(key) 单参，返回持锁 conn；非 session 方法——
+        # 曾误传 db 导致 TypeError 500 素材页全挂）。try 拿不到=别人在算，本请求直接跳过。
         from ..core.database import acquire_run_lock, release_run_lock
-        lock = acquire_run_lock(db, 120)   # try 模式：拿不到立即返回 None
-        if not lock:
+        _lock_conn = acquire_run_lock(120)
+        if not _lock_conn:
             return
         try:
             n = compute_asset_scores(db, tenant_id)
@@ -188,4 +190,4 @@ def maybe_recompute(db, tenant_id: int, max_age_h: int = 6):
             db.rollback()
             log.warning(f"[AssetScore] tenant={tenant_id} 重算失败（列表不带新分）: {e}")
         finally:
-            release_run_lock(db, 120)
+            release_run_lock(_lock_conn, 120)
