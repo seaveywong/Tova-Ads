@@ -103,6 +103,20 @@ const RULE_TYPES = computed(() => ({
   ]},
 }))
 const SCALE_TYPES = ['slow_scale', 'roas_scale', 'fast_scale']
+// 作用域+账户筛组合一（2026-09-17）：曾「仅自己账户」与「全局」两个标签并排——口径打架误导。
+// 统一话术：自己全部账户 / 自己账户中的 N 个 / 团队全部账户 / 团队账户中的 N 个
+const ruleIsTeam = (r) => r.rule_scope === 'team' || !r.created_by   // 存量无创建人=团队全域（引擎同口径）
+const ruleScopeText = (r) => {
+  const n = r.scope_act_id ? r.scope_act_id.split(',').filter(Boolean).length : 0
+  if (ruleIsTeam(r)) return n ? t('guard.scopeTeamN', { n }) : t('guard.scopeTeamAll')
+  return n ? t('guard.scopeUserN', { n }) : t('guard.scopeUserAll')
+}
+const ruleScopeTip = (r) => {
+  const who = r.created_by_name ? r.created_by_name.split('@')[0] : ''
+  if (ruleIsTeam(r)) return t('guard.ruleScopeTeamTip')
+  return t('guard.ruleOwnerTip', { name: r.created_by_name || '' }) + (who ? '' : '')
+}
+
 const isScaleType = (rt) => SCALE_TYPES.includes(rt)
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign'), scale: t('guard.action.scale') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
@@ -372,10 +386,8 @@ const doInspect = async (force = false) => {
       <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
-          <span v-if="r.rule_scope === 'team'" class="owner-chip team" :title="t('guard.ruleScopeTeamTip')">{{ t('guard.ruleScopeTeamOpt') }}</span>
-          <span v-else-if="r.created_by_name" class="owner-chip" :title="t('guard.ruleOwnerTip', { name: r.created_by_name })">{{ t('guard.ruleScopeMine') }} · {{ r.created_by_name.split('@')[0] }}</span>
+          <span :class="['owner-chip', { team: ruleIsTeam(r) }]" :title="ruleScopeTip(r)">{{ ruleScopeText(r) }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
-          <span class="scope-tag">{{ r.scope_act_id ? t('guard.scopeAccounts', { n: r.scope_act_id.split(',').length }) : t('guard.scopeGlobal') }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" />
         </div>
         <div class="rule-body">
