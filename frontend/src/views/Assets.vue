@@ -406,6 +406,20 @@ const remove = async (a) => {
 }
 
 // 卡片 ⋯ 下拉分发（低频操作收进下拉，卡片只留 AI分析/详情 主按钮）
+// ── 素材评分（2026-09-16）：角标直显 + 详情弹窗（GET /assets/{id}/score）──
+const scoreOpen = ref(false)
+const scoreAsset = ref(null)
+const scoreDetail = ref(null)
+const scoreLoading = ref(false)
+const openScore = async (a) => {
+  scoreAsset.value = a; scoreOpen.value = true; scoreLoading.value = true; scoreDetail.value = null
+  try { scoreDetail.value = await GET(`/assets/${a.id}/score`) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  scoreLoading.value = false
+}
+const gradeCls = (g) => ({ S: 'gs', A: 'ga', B: 'gb', C: 'gc', D: 'gd' }[g] || 'gb')
+const dimBar = (k) => ((scoreDetail.value?.dims || {})[k] ?? 0)
+
 const onCardCmd = (cmd, a) => {
   if (cmd === 'copy') openEdit(a)
   else if (cmd === 'detail') openPreview(a)   // 批BS：详情入口收进 ⋯（缩略图点击即预览）
@@ -506,6 +520,12 @@ const countryLabel = (code) => {
         <div class="thumb-wrap" @click="openPreview(a)" style="cursor:pointer">
           <img v-if="a.type === 'image'" :src="a.public_url" :alt="a.name" class="thumb" loading="lazy" />
           <video v-else-if="a.type === 'video'" :src="a.public_url" class="thumb" preload="metadata" />
+          <span v-if="a.score != null" :class="['score-badge', gradeCls(a.grade)]" @click.stop="openScore(a)"
+                :title="t('assets.scoreTitle') + ' · ' + (a.score) + ' ' + (a.grade || '')">
+            {{ a.score }} {{ a.grade }}<i v-if="a.trend === 'up'">↗</i><i v-else-if="a.trend === 'down'">↘</i>
+          </span>
+          <span v-else-if="a.ai_status === 'done'" class="score-badge ai" @click.stop="openScore(a)"
+                :title="t('assets.scoreAiTip')">{{ t('assets.scoreAi') }}</span>
           <span v-if="a.type === 'video' && a.duration_sec" class="dur-badge">{{ fmtDuration(a.duration_sec) }}</span>
           <span v-if="isTkVertical(a)" class="tk-badge" :title="t('assets.tkVerticalTitle')">♪ {{ t('assets.tkVertical') }}</span>
           <span class="type-badge">{{ a.type === 'video' ? t('assets.typeVideo') : t('assets.typeImage') }}</span>
@@ -520,6 +540,7 @@ const countryLabel = (code) => {
             <input v-model="editingName" class="name-input" @keyup.enter="saveRename(a)" @blur="saveRename(a)" />
           </div>
           <div v-else class="name" :title="t('assets.dblclickRename')" @dblclick="startRename(a)">{{ a.name }}</div>
+          <div v-if="a.owner_email" class="owner-row"><span class="owner-chip" :title="a.owner_email">{{ a.owner_email.split('@')[0] }}</span></div>
           <!-- 标签（国家/FB 上传标记收进同一行 chip） -->
           <div class="tag-row" :title="(a.tags || []).join(' · ')">
             <span v-for="tg in (a.tags || []).slice(0,2)" :key="tg" class="tag-chip">{{ tg }}</span>
@@ -553,6 +574,47 @@ const countryLabel = (code) => {
           </el-dropdown>
         </div>
       </div>
+    <!-- 素材评分详情（2026-09-16）：总分+五维+数值表+基准对比+口径 -->
+    <el-dialog v-model="scoreOpen" :title="t('assets.scoreTitle') + ' · ' + (scoreAsset?.name || '')" width="560px">
+      <div v-loading="scoreLoading" style="min-height:120px">
+        <template v-if="scoreDetail">
+          <div v-if="scoreDetail.score == null" class="score-nodata">
+            <div>{{ t('assets.scoreNoData') }}</div>
+            <div v-if="scoreDetail.ai_available" class="score-ai-note">{{ t('assets.scoreAiNote') }}</div>
+          </div>
+          <template v-else>
+            <div class="score-hero">
+              <div :class="['score-big', gradeCls(scoreDetail.grade)]">{{ scoreDetail.score }}</div>
+              <div :class="['score-grade', gradeCls(scoreDetail.grade)]">{{ scoreDetail.grade }}</div>
+              <div class="score-trend" v-if="scoreDetail.stats?.trend === 'up'">↗ {{ t('assets.trendUp') }}</div>
+              <div class="score-trend down" v-else-if="scoreDetail.stats?.trend === 'down'">↘ {{ t('assets.trendDown') }}</div>
+            </div>
+            <div class="score-dims">
+              <div class="dim-row"><span class="dim-l">{{ t('assets.dimCtr') }}</span><div class="dim-bar"><i :style="{ width: dimBar('ctr') + '%' }"></i></div><span class="dim-v">{{ dimBar('ctr') }}</span></div>
+              <div class="dim-row"><span class="dim-l">{{ t('assets.dimConv') }}</span><div class="dim-bar"><i :style="{ width: dimBar('conv') + '%' }"></i></div><span class="dim-v">{{ dimBar('conv') }}</span></div>
+              <div class="dim-row"><span class="dim-l">{{ t('assets.dimConf') }}</span><div class="dim-bar"><i :style="{ width: dimBar('conf') + '%' }"></i></div><span class="dim-v">{{ dimBar('conf') }}</span></div>
+              <div class="dim-row"><span class="dim-l">{{ t('assets.dimCov') }}</span><div class="dim-bar"><i :style="{ width: dimBar('cov') + '%' }"></i></div><span class="dim-v">{{ dimBar('cov') }}</span></div>
+            </div>
+            <table class="score-stats">
+              <tr><th></th><th>{{ t('assets.win30') }}</th><th>{{ t('assets.win7') }}</th></tr>
+              <tr><td>{{ t('assets.stSpend') }}</td><td>${{ (scoreDetail.stats?.spend ?? 0).toFixed(2) }}</td><td>—</td></tr>
+              <tr><td>{{ t('assets.stImp') }}</td><td>{{ Math.round(scoreDetail.stats?.impressions ?? 0).toLocaleString() }}</td><td>—</td></tr>
+              <tr><td>{{ t('assets.stClicks') }}</td><td>{{ Math.round(scoreDetail.stats?.clicks ?? 0).toLocaleString() }}</td><td>—</td></tr>
+              <tr><td>CTR</td><td>{{ (scoreDetail.stats?.ctr ?? 0).toFixed(2) }}%</td><td>{{ (scoreDetail.stats?.ctr_7d ?? 0).toFixed(2) }}%</td></tr>
+              <tr><td>{{ t('assets.stConv') }}</td><td>{{ Math.round(scoreDetail.stats?.conversions ?? 0) }}</td><td>—</td></tr>
+              <tr><td>CPA</td><td>{{ scoreDetail.stats?.cpa != null ? '$' + scoreDetail.stats.cpa.toFixed(2) : '—' }}</td><td>—</td></tr>
+              <tr><td>{{ t('assets.stAds') }}</td><td>{{ scoreDetail.stats?.ads_n ?? 0 }} / {{ scoreDetail.stats?.acts_n ?? 0 }} {{ t('assets.stActs') }}</td><td>—</td></tr>
+            </table>
+            <div class="score-base">{{ t('assets.baseCmp', { ctr: scoreDetail.stats?.base_ctr ?? '—', cpa: scoreDetail.stats?.base_cpa ?? '—' }) }}</div>
+            <div class="score-caliber">{{ t('assets.caliberNote') }}</div>
+          </template>
+        </template>
+      </div>
+      <template #footer>
+        <button class="btn" @click="scoreOpen = false">{{ t('common.close') }}</button>
+      </template>
+    </el-dialog>
+
       <div v-if="!assets.length && !loading" class="empty-block">
         <div>{{ hasActiveFilter ? t('assets.emptyFiltered') : t('assets.empty') }}</div>
         <button v-if="hasActiveFilter" class="btn" @click="clearFilters">{{ t('assets.clearFilter') }}</button>
@@ -816,4 +878,38 @@ const countryLabel = (code) => {
 .preview-ai-failed .preview-ai-line { color: var(--t2); word-break: break-word; }
 .preview-ai-title { font-size: 12px; color: var(--t3); margin-bottom: 6px; }
 .preview-ai-line { font-size: 13px; color: var(--t1); margin-top: 4px; line-height: 1.5; }
+
+/* 素材评分（2026-09-16） */
+.score-badge{position:absolute;top:8px;right:8px;z-index:3;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;cursor:pointer;backdrop-filter:blur(4px);display:inline-flex;align-items:center;gap:2px;line-height:1.3}
+.score-badge i{font-style:normal;margin-left:1px}
+.score-badge.gs{background:rgba(48,209,88,.9);color:#032b12}
+.score-badge.ga{background:rgba(10,132,255,.9);color:#fff}
+.score-badge.gb{background:rgba(120,120,128,.85);color:#fff}
+.score-badge.gc{background:rgba(255,159,10,.9);color:#3a2500}
+.score-badge.gd{background:rgba(255,69,58,.9);color:#fff}
+.score-badge.ai{background:rgba(120,120,128,.55);color:#fff;font-size:10px}
+.score-badge:hover{filter:brightness(1.1)}
+.owner-row{margin-top:2px}
+.owner-chip{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:8px}
+.score-hero{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.score-big{font-size:40px;font-weight:800;line-height:1}
+.score-big.gs{color:var(--success)}.score-big.ga{color:var(--ac)}.score-big.gc{color:var(--warning)}.score-big.gd{color:var(--error)}
+.score-grade{font-size:20px;font-weight:700;color:var(--t2)}
+.score-trend{font-size:12px;color:var(--success);margin-left:auto}
+.score-trend.down{color:var(--error)}
+.score-dims{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.dim-row{display:grid;grid-template-columns:64px 1fr 30px;gap:8px;align-items:center;font-size:12px}
+.dim-l{color:var(--t3)}
+.dim-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.dim-bar i{display:block;height:100%;background:var(--ac);border-radius:3px}
+.dim-v{color:var(--t1);font-variant-numeric:tabular-nums;text-align:right}
+.score-stats{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px}
+.score-stats th{color:var(--t3);font-weight:600;text-align:right;padding:4px 8px;border-bottom:1px solid var(--bd)}
+.score-stats th:first-child{text-align:left}
+.score-stats td{padding:4px 8px;text-align:right;border-bottom:1px solid var(--bd);font-variant-numeric:tabular-nums}
+.score-stats td:first-child{text-align:left;color:var(--t2)}
+.score-base{font-size:12px;color:var(--t2);margin-bottom:6px}
+.score-caliber{font-size:11px;color:var(--t3);line-height:1.5}
+.score-nodata{text-align:center;padding:32px 0;color:var(--t3)}
+.score-ai-note{font-size:12px;margin-top:8px;color:var(--ac)}
 </style>

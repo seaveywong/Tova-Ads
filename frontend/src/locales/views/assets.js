@@ -1,6 +1,7 @@
 // Assets namespace（素材库）。zh/en 同文件。
 export default {
   zh: {
+    scoreTitle: '素材评分', scoreAi: 'AI', scoreAiTip: '无投放数据——点击查看 AI 预估', scoreNoData: '暂无投放数据，未评分', scoreAiNote: '该素材已完成 AI 分析，可在「文案」中查看预估质量参考', trendUp: '近7天 CTR 上升', trendDown: '近7天 CTR 下降', dimCtr: '点击率', dimConv: '转化', dimConf: '置信度', dimCov: '覆盖', win30: '近30天', win7: '近7天', stSpend: '花费', stImp: '展示', stClicks: '点击', stConv: '转化数', stAds: '在用广告/账户', stActs: '账户', baseCmp: '团队基准：CTR {ctr}% · CPA {cpa}', caliberNote: '口径：按素材全部关联广告（hash 匹配，跟帖模式除外）聚合；基准=同团队全部素材广告近7天加权。分数为相对基准的比值（1.0=50分）。置信度随花费增长；每日自动重算。',
     pageTitle: '素材库', assetCount: '{n} 个素材',
     typeImage: '图片', typeVideo: '视频', tagPh: '标签', searchNamePh: '搜索名称',
     aiRecognition: 'AI 识别', aiOnTitle: 'AI 识别开：点 AI分析 自动生成文案/受众', aiOffTitle: 'AI 识别关：手动键入文案/受众',
@@ -37,6 +38,7 @@ export default {
     uploadSummary: '成功 {ok} · 失败 {fail} · 重复 {dup}',
   },
   en: {
+    scoreTitle: 'Asset Score', scoreAi: 'AI', scoreAiTip: 'No delivery data — click for AI estimate', scoreNoData: 'No delivery data yet; unscored', scoreAiNote: 'AI analysis done — see Copy for a quality reference', trendUp: 'CTR rising (7d)', trendDown: 'CTR declining (7d)', dimCtr: 'CTR', dimConv: 'Conv.', dimConf: 'Confidence', dimCov: 'Coverage', win30: '30 days', win7: '7 days', stSpend: 'Spend', stImp: 'Impressions', stClicks: 'Clicks', stConv: 'Conversions', stAds: 'Ads/Accounts', stActs: 'accounts', baseCmp: 'Team baseline: CTR {ctr}% · CPA {cpa}', caliberNote: 'Scope: all linked ads of this asset (hash matching; post-reuse excluded). Baseline = weighted 7-day aggregate of all team assets. Scores are relative to baseline (1.0 = 50). Confidence grows with spend; recomputed daily.',
     pageTitle: 'Asset Library', assetCount: '{n} asset(s)',
     typeImage: 'Image', typeVideo: 'Video', tagPh: 'Tag', searchNamePh: 'Search name',
     aiRecognition: 'AI Recognition', aiOnTitle: 'AI Recognition ON: click AI Analysis to auto-generate copy/audience', aiOffTitle: 'AI Recognition OFF: enter copy/audience manually',

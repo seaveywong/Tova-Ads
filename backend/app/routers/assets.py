@@ -107,6 +107,25 @@ def _asset_dict(a: Asset) -> dict:
     }
 
 
+@router.get("/{aid}/score")
+def asset_score_detail(aid: int,
+                       user: CurrentUser = Depends(require_permission("assets.manage")),
+                       db: Session = Depends(get_db)):
+    """素材评分明细（弹窗直读快照；无数据返回 ai_available 让前端走预估位）。"""
+    from ..models.scoring import AssetScore
+    from ..services.asset_scoring import maybe_recompute
+    a = db.query(Asset).filter(Asset.id == aid, Asset.tenant_id == user.tenant_id).first()
+    if not a:
+        raise HTTPException(404, "素材不存在")
+    maybe_recompute(db, user.tenant_id)
+    sc = db.query(AssetScore).filter(AssetScore.asset_id == aid).first()
+    if not sc or sc.score is None:
+        return {"score": None, "ai_available": a.ai_status == "done"}
+    return {"score": sc.score, "grade": sc.grade,
+            "dims": json.loads(sc.dims or "{}"), "stats": json.loads(sc.stats or "{}"),
+            "computed_at": str(sc.computed_at or ""), "ai_available": a.ai_status == "done"}
+
+
 @router.get("")
 def list_assets(
     type: Optional[str] = None,
@@ -126,7 +145,30 @@ def list_assets(
     if search:
         q = q.filter(Asset.name.ilike(f"%{search}%"))
     rows = q.order_by(Asset.id.desc()).all()
-    return [_asset_dict(a) for a in rows]
+    # 素材评分（2026-09-16）：惰性重算（>6h 过期才跑，量小同步）+ 快照批量附到列表
+    from ..services.asset_scoring import maybe_recompute
+    maybe_recompute(db, user.tenant_id)
+    from ..models.scoring import AssetScore
+    from ..models.auth import User as _U
+    scores = {r.asset_id: r for r in db.query(AssetScore).filter(
+        AssetScore.tenant_id == user.tenant_id).all()}
+    uids = {a.owner_user_id for a in rows if a.owner_user_id}
+    umap = {u.id: u.email for u in db.query(_U).filter(_U.id.in_(uids or [0])).all()} if uids else {}
+    out = []
+    for a in rows:
+        d = _asset_dict(a)
+        d["owner_email"] = umap.get(a.owner_user_id, "")
+        sc = scores.get(a.id)
+        d["score"] = sc.score if sc else None
+        d["grade"] = sc.grade if sc else None
+        d["trend"] = None
+        if sc and sc.stats:
+            try:
+                d["trend"] = json.loads(sc.stats).get("trend")
+            except Exception:
+                pass
+        out.append(d)
+    return out
 
 
 @router.get("/ai-options")
