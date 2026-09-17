@@ -2553,7 +2553,8 @@ def _sentinel_auto_arm_check(db, trace_id: str) -> int:
                                              remaining=f"{max(0, hours - _elapsed.total_seconds() / 3600):.0f}")
                     emit_notification(db, tenant_id=tid, level="warning",
                                       event_type="sentinel_auto_arm_warning", trace_id=trace_id,
-                                      title=_t_w, body=_b_w)
+                                      title=_t_w, body=_b_w,
+                                      user_id=uid)   # 个人事件个人收（复审 2026-09-17：曾广播全租户）
                     write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="sentinel",
                               target_type="user", target_id=str(uid),
                               action_type="sentinel_auto_arm_warning", source="watchdog",
@@ -2579,7 +2580,8 @@ def _sentinel_auto_arm_check(db, trace_id: str) -> int:
                                              hours=hours, who=_who, n=len(accounts))
                     emit_notification(db, tenant_id=tid, level="critical",
                                       event_type="sentinel_auto_armed", trace_id=trace_id,
-                                      title=_t_a, body=_b_a)
+                                      title=_t_a, body=_b_a,
+                                      user_id=uid)   # 个人事件个人收（复审 2026-09-17：曾广播全租户，critical 更会 TG 推全员）
                     write_log(db, tenant_id=tid, trace_id=trace_id, actor_type="sentinel",
                               target_type="user", target_id=str(uid),
                               action_type="sentinel_auto_armed", source="watchdog",
