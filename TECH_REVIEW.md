@@ -2563,3 +2563,28 @@ FB 偶发 200/5xx 空体 → resp.json() ValueError 原直接 unknown 且不重�
 
 ### 备注
 live 11/16（5 个在管账户本轮实时拉取失败回落库内窗口值，来源列如实标注「库内」）——与 FB 空体/令牌轮换相关，回落路径已保证数字仍是严格窗口口径。
+
+## 批CT：落地日志 visitor_id 补齐 + 发布 P0 修复（2026-09-17 深夜，6177215）
+
+### 概述
+用户拍板补齐 landing_events.visitor_id（曾全空致 UV 误判——"独立访客=1"实为空串假象）。
+
+### 变更
+| 层 | 内容 |
+|---|---|
+| worker（landing.py WORKER_SOURCE） | /a/ 路径读/生成 `_lp_vid` cookie；visit/redirect beacon 带 visitor_id；display 302（Response.redirect→等价构造以加 Set-Cookie）与 redirect 桥页响应种 cookie（老访客不重种；拦截路径不种） |
+| 页面脚本 _d_decode | 点击 beacon 读 cookie（直访回落 localStorage 自生成并双写）→ visitor_id |
+| ingest | 零改动（字段既有透传）；防重复防护不受影响（IP 判定） |
+
+### 过程中抓到并修复的 P0
+`_d_decode` 注入 `re.sub(r"\1"+拼接)`——JS 正则 `\s` 在 re.sub **替换模板**是 bad escape → **所有页面发布 500**。改 lambda 函数替换（函数替换不做转义处理）。发现路径：页61重发布实测报错；错误发生在注入阶段未触达部署/落库，无半态。
+
+### 激活与验证
+- 页61 隔离 e2e：新访客 302+Set-Cookie ✓ / 老访客不重种 ✓ / 页面脚本含 vid ✓ / 302 目标结构不变 ✓
+- 页 56/57/62 忠实重发布（description 从 CF 旧部署 URL + preview token + 浏览器 UA 反提取——曾因防护 403 和 CF 拦 python-UA 三次失败；**提取结果=Our product 与原部署一致→零副作用**）；三页自检无 fail
+- visitor_id 非空事件已入库（发布 smoke 探测先行，真实流量陆续跟上）
+
+### 经验
+- re.sub 动态替换串必须用 lambda（含反斜杠的注入内容早晚会炸）
+- 服务器侧探针抓 CF Pages：python-UA 会被边缘拦（换浏览器 UA）；防护页用 preview token 绕行
+- 页面发布配置中 description 不落库——程序化重发必须先反提取（本次路径已验证可复用）
