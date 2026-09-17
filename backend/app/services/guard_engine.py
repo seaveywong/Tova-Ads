@@ -670,6 +670,7 @@ def _apply_scale(db, fb, tenant_id, acc, trace_id, rule, detail, ad_id, adset_id
         events.append({"kind": "notify", "kwargs": dict(
             tenant_id=tenant_id, level=level, event_type="rule_scale",
             trace_id=trace_id, title=_t, body=_b,
+            act_id=acc.act_id,   # 归属路由（2026-09-17 全面审计：漏传=广播=owner 收别人的）
             target_type="adset", target_id=(adset_id or ad_id),
             force_tg=force_tg, platform="fb")})
         _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
@@ -1772,6 +1773,7 @@ def _inspect_account_worker(ctx: dict) -> dict:
                             tenant_id=tenant_id, level="warning",
                             event_type="rule_pause", trace_id=trace_id,
                             title=_t_rp, body=_b_rp,
+                            act_id=acc.act_id,   # 归属路由（2026-09-17 全面审计）
                             target_type="ad", target_id=ad_id,
                             platform=platform,
                             reply_markup={"inline_keyboard": [[

@@ -1688,9 +1688,11 @@ def _emit_health_alert(db, p, res):
               action_type="landing_health_alert", source="landing",
               target_type="landing_page", target_id=str(p.id), result="success",
               metadata={"overall": res["overall"], "summary": (res.get("summary") or "")[:100], "affected_ads": _affected})
+    # 归属路由（2026-09-17 全面审计）：页面归属人优先；无归属人回落角色广播
     emit_notification(db, tenant_id=p.tenant_id, level=_level,
                       event_type="landing_health", trace_id=_tid,
                       target_type="landing_page", target_id=str(p.id),
+                      user_id=p.owner_user_id,
                       roles=["owner", "operator"],
                       title=f"{_prefix}：{p.title}",
                       body=_body[:200], platform="fb")

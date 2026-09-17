@@ -148,10 +148,13 @@ def check_account_budget_progress(
                       metadata={"act_id": acc.act_id, "progress": round(progress, 1),
                                 "spend": spend, "budget": budget})
             # 98% 档升级 critical（TG 必达语义：预算几乎烧完，最后一道提醒）；文案不变
+            # act_id 必传（2026-09-17 全面审计）：归属路由只认 act_id/account——漏传=按角色
+            # 广播=owner 收到别人的预算告警（rh11111 事故实证）
             emit_notification(db, tenant_id=tenant_id,
                               level=("critical" if tier >= 98 else "warning"),
                               event_type=f"budget_progress_{tier}", trace_id=trace_id,
                               title=_title, body=_body,
+                              act_id=acc.act_id,
                               target_type="adset", target_id=adset_id,
                               platform=(acc.platform or "fb"))
             alerts.append({"adset_id": adset_id, "tier": tier,
