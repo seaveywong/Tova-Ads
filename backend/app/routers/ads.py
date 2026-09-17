@@ -754,11 +754,14 @@ _BREAKDOWN_CACHE_TTL = 60
 def ads_spend_report(date_from: str = "", date_to: str = "", act_ids: str = "", platform: str = "",
                      user: CurrentUser = Depends(require_permission("ads.read")),
                      db: Session = Depends(get_db)):
-    """复制消耗账户（2026-09-17 用户需求）：按广告管理器当前筛选（日期段/账户多选/平台）
-    出行级数据——日期/归属人/账户名/账户ID/消耗金额(USD)。
-    口径：在管 FB 账户逐个打一次账户级 insights 拉最新；已移除（或 API 失败）用
-    perf_snapshots 库内记录（range 有数据→段内合计；无→最后一次记录，日期如实展示）。
-    TT 账户无同步账户级报表助手——一律走库内口径。"""
+    """复制消耗账户（2026-09-17 用户需求 + 晚间窗口严格化改版）：按广告管理器当前筛选
+    （日期段/账户多选/平台）出行级数据——日期/归属人/账户名/账户ID/消耗金额(USD)。
+
+    窗口语义（2026-09-17 拍板：严格遵循所选窗口）：消耗列 = **选定窗口内**的消耗，
+    日期口径 = 各账户本地日（与看板一致）。在管 FB 账户实时打一次账户级 insights；
+    已移除/API 失败用 perf_snapshots 窗口合计；**窗口内无记录 = 0**——不再拿旧日期
+    数据冒充窗口值（曾因此被投诉不遵循窗口按钮）。已移除账户的「最后一次库内记录」
+    降为参考字段 last_record（弹窗副列展示，不进复制）。TT 无同步账户级报表——库内口径。"""
     from ..core.deps import scope_account_query
     from ..services.guard_engine import to_usd
     from ..models.auth import User
@@ -768,7 +771,7 @@ def ads_spend_report(date_from: str = "", date_to: str = "", act_ids: str = "", 
         raise HTTPException(400, "date_from/date_to required")
     rng_label = f"{date_from}~{date_to}"
     q = scope_account_query(db.query(Account).filter(Account.tenant_id == user.tenant_id), user)
-    # 含已移除（is_managed=false 软删，历史保留）——用户明确要求移除的也给最后数据
+    # 含已移除（is_managed=false 软删，历史保留）——用户明确要求移除的也给数据
     _ids = [a.strip() for a in act_ids.split(",") if a.strip()]
     if _ids:
         q = q.filter(Account.act_id.in_(_ids))
@@ -782,32 +785,37 @@ def ads_spend_report(date_from: str = "", date_to: str = "", act_ids: str = "", 
         for u in db.query(User).filter(User.id.in_(_owner_ids)).all():
             _owner_map[u.id] = u.email or f"#{u.id}"
 
-    def _db_row(act_id: str, plat: str):
-        """库内口径：range 有→段内合计（日期=range）；无→最后一次记录（日期=那天）。"""
-        base = [PerfSnapshot.tenant_id == user.tenant_id, PerfSnapshot.act_id == act_id,
-                PerfSnapshot.platform == plat]
+    def _window_spend(act_id: str, plat: str) -> float:
+        """库内窗口合计（snapshot_date=账户本地日，与看板同基准）。无记录=0。"""
         r = db.query(func.sum(PerfSnapshot.spend)).filter(
-            *base, PerfSnapshot.snapshot_date >= date_from,
+            PerfSnapshot.tenant_id == user.tenant_id, PerfSnapshot.act_id == act_id,
+            PerfSnapshot.platform == plat,
+            PerfSnapshot.snapshot_date >= date_from,
             PerfSnapshot.snapshot_date <= date_to).first()
-        if r and (r[0] or 0) != 0:
-            return round(r[0], 2), rng_label, "db"
+        return round(r[0] or 0, 2)
+
+    def _last_record(act_id: str, plat: str):
+        """最后一次库内记录（仅已移除账户的参考信息——展示其停投前最后一天消耗）。"""
         last = db.query(PerfSnapshot.snapshot_date, func.sum(PerfSnapshot.spend)).filter(
-            *base).group_by(PerfSnapshot.snapshot_date).order_by(
+            PerfSnapshot.tenant_id == user.tenant_id, PerfSnapshot.act_id == act_id,
+            PerfSnapshot.platform == plat).group_by(
+            PerfSnapshot.snapshot_date).order_by(
             PerfSnapshot.snapshot_date.desc()).first()
         if last and (last[1] or 0) != 0:
-            return round(last[1], 2), last[0], "db_last"
-        return None, "", "none"
+            return {"date": last[0], "spend": round(last[1], 2)}
+        return None
 
     rows = []
-    _live_targets = []   # (act_id) 在管+FB 才打实时
+    _live_targets = []   # 在管+FB 才打实时
     for acc in accs:
         plat = acc.platform or "fb"
-        spend_usd, date_label, source = _db_row(acc.act_id, plat)
         rows.append({
-            "date": date_label, "owner": _owner_map.get(acc.owner_user_id, "") if acc.owner_user_id else "",
+            "date": rng_label,
+            "owner": _owner_map.get(acc.owner_user_id, "") if acc.owner_user_id else "",
             "account_name": acc.name or "", "act_id": acc.act_id, "platform": plat,
-            "spend_usd": spend_usd, "currency": acc.currency or "USD",
-            "managed": bool(acc.is_managed), "source": source,
+            "spend_usd": _window_spend(acc.act_id, plat), "currency": acc.currency or "USD",
+            "managed": bool(acc.is_managed), "source": "db",
+            "last_record": (None if acc.is_managed else _last_record(acc.act_id, plat)),
         })
         if acc.is_managed and plat == "fb":
             _live_targets.append(acc.act_id)
@@ -843,8 +851,7 @@ def ads_spend_report(date_from: str = "", date_to: str = "", act_ids: str = "", 
             if usd is not None:   # 未知币种汇率缺失→保库内值（不写错数）
                 r["spend_usd"] = round(usd, 2)
                 r["source"] = "live"
-                r["date"] = rng_label
-    rows.sort(key=lambda r: (r["spend_usd"] is None, -(r["spend_usd"] or 0), r["account_name"]))
+    rows.sort(key=lambda r: (-(r["spend_usd"] or 0), r["account_name"]))
     return {"range": rng_label, "rows": rows,
             "live_count": sum(1 for r in rows if r["source"] == "live")}
 

@@ -357,11 +357,16 @@ const breakdownLoading = ref(false)
 const breakdownRows = ref([])
 const breakdownDim = ref('age')
 const breakdownTarget = ref(null)
-// 复制消耗账户（2026-09-17）：按当前筛选（日期段/账户多选/平台）出行级数据；
-// 在管=实时拉 FB 账户级 insights，已移除/API 失败=库内最后记录（来源列如实标注）
+// 复制消耗账户（2026-09-17 + 晚间窗口严格化）：消耗列=严格选定窗口内（各账户本地日，与看板同基准）；
+// 在管=实时拉 FB，已移除=库内窗口合计（无记录=0），「最后记录」仅参考不进复制
 const spendRepOpen = ref(false)
 const spendRepLoading = ref(false)
 const spendRep = ref(null)
+const srOnlySpend = ref(true)   // 默认只看窗口内有消耗的（对账场景零行是噪音）
+const srRows = computed(() => {
+  const all = (spendRep.value?.rows) || []
+  return srOnlySpend.value ? all.filter(r => (r.spend_usd || 0) > 0) : all
+})
 const openSpendReport = async () => {
   spendRepLoading.value = true
   try {
@@ -373,9 +378,9 @@ const openSpendReport = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   spendRepLoading.value = false
 }
-const srSourceLabel = (s) => ({ live: t('adm.srLive'), db: t('adm.srDb'), db_last: t('adm.srDbLast'), none: t('adm.srNone') }[s] || s)
+const srSourceLabel = (s) => ({ live: t('adm.srLive'), db: t('adm.srDb') }[s] || s)
 const copySpendReport = () => {
-  const rows = (spendRep.value?.rows) || []
+  const rows = srRows.value
   if (!rows.length) { ElMessage.info(t('adm.srEmpty')); return }
   const head = [t('adm.srDate'), t('adm.srOwner'), t('adm.srAccName'), t('adm.srAccId'), t('adm.srSpend')].join('\t')
   const body = rows.map(r => [r.date, r.owner, r.account_name, r.act_id, r.spend_usd == null ? '' : r.spend_usd].join('\t')).join('\n')
@@ -982,19 +987,21 @@ const unsubscribeLeads = async () => {
         </el-checkbox-group>
         <template #footer><button class="ctrl-btn" @click="columnsPop = false">{{ t('common.done') }}</button></template>
       </el-dialog>
-      <el-dialog v-model="spendRepOpen" :title="t('adm.srTitle', { range: spendRep?.range || '' })" width="760px" append-to-body>
+      <el-dialog v-model="spendRepOpen" :title="t('adm.srTitle', { range: spendRep?.range || '' })" width="820px" append-to-body>
         <div class="sr-meta">
-          {{ t('adm.srMeta', { live: (spendRep?.rows || []).filter(r => r.source === 'live').length, db: (spendRep?.rows || []).filter(r => r.source !== 'live').length }) }}
+          <label class="sr-chk"><input type="checkbox" v-model="srOnlySpend" /> {{ t('adm.srOnlySpend') }}</label>
+          <span class="sr-basis" :title="t('adm.srBasisTip')">{{ t('adm.srBasis') }}</span>
+          <span>{{ t('adm.srMeta', { live: (spendRep?.rows || []).filter(r => r.source === 'live').length, db: (spendRep?.rows || []).filter(r => r.source !== 'live').length }) }}</span>
         </div>
         <div class="tbl" style="max-height:420px;overflow:auto">
           <table class="manager-table">
             <thead><tr>
               <th>{{ t('adm.srDate') }}</th><th>{{ t('adm.srOwner') }}</th><th>{{ t('adm.srAccName') }}</th>
               <th>{{ t('adm.srAccId') }}</th><th style="text-align:right">{{ t('adm.srSpend') }}</th>
-              <th>{{ t('adm.srSource') }}</th><th>{{ t('adm.srStatus') }}</th>
+              <th>{{ t('adm.srSource') }}</th><th>{{ t('adm.srStatus') }}</th><th>{{ t('adm.srLastRec') }}</th>
             </tr></thead>
             <tbody>
-              <tr v-for="r in (spendRep?.rows || [])" :key="r.act_id">
+              <tr v-for="r in srRows" :key="r.act_id">
                 <td>{{ r.date || '-' }}</td>
                 <td>{{ r.owner || '-' }}</td>
                 <td>{{ r.account_name }}</td>
@@ -1002,14 +1009,15 @@ const unsubscribeLeads = async () => {
                 <td style="text-align:right">{{ r.spend_usd == null ? '-' : Number(r.spend_usd).toFixed(2) }}</td>
                 <td><span :class="['sr-src', r.source]">{{ srSourceLabel(r.source) }}</span></td>
                 <td>{{ r.managed ? t('adm.srManaged') : t('adm.srRemoved') }}</td>
+                <td class="sr-last" :title="t('adm.srLastRecTip')">{{ r.last_record ? `${r.last_record.date} · ${Number(r.last_record.spend).toFixed(2)}` : '-' }}</td>
               </tr>
-              <tr v-if="!(spendRep?.rows || []).length"><td colspan="7" style="text-align:center;color:var(--t3)">{{ t('adm.srEmpty') }}</td></tr>
+              <tr v-if="!srRows.length"><td colspan="8" style="text-align:center;color:var(--t3)">{{ t('adm.srEmpty') }}</td></tr>
             </tbody>
           </table>
         </div>
         <template #footer>
           <button class="ctrl-btn" @click="spendRepOpen = false">{{ t('common.close') }}</button>
-          <button class="ctrl-btn primary" :disabled="!(spendRep?.rows || []).length" @click="copySpendReport">{{ t('adm.srCopy') }}</button>
+          <button class="ctrl-btn primary" :disabled="!srRows.length" @click="copySpendReport">{{ t('adm.srCopy') }}</button>
         </template>
       </el-dialog>
       <span v-if="liveVerifiedAt && tab !== 'lead'" class="cache-at live-ok" :title="t('adm.liveVerifyTip')">{{ t('adm.liveVerifiedAt', { time: liveVerifiedAt }) }}</span>
@@ -1392,7 +1400,10 @@ const unsubscribeLeads = async () => {
 .rf-flag { color: var(--error); cursor: pointer; font-size: 11px; margin-left: 2px }
 .rf-flag:hover { opacity: .8 }
 .cache-at { font-size: 11px; color: var(--t3); white-space: nowrap; margin-left: 8px }
-.sr-meta { font-size: 12px; color: var(--t3); margin-bottom: 8px }
+.sr-meta { font-size: 12px; color: var(--t3); margin-bottom: 8px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap }
+.sr-chk { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--t2) }
+.sr-basis { cursor: help; border-bottom: 1px dotted var(--t3) }
+.sr-last { font-size: 11px; color: var(--t3); white-space: nowrap }
 .sr-src { font-size: 10px; padding: 1px 6px; border-radius: 4px; white-space: nowrap }
 .sr-src.live { color: #30d158; background: rgba(48,209,88,.12) }
 .sr-src.db { color: var(--t3); background: rgba(128,128,140,.14) }
