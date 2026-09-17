@@ -152,6 +152,12 @@ export default{
     const actId=url.searchParams.get("act")||url.searchParams.get("act_id")||"";
     const fbclid=url.searchParams.get("fbclid")||"";
     const referer=request.headers.get("referer")||"";
+    // 访客 ID（2026-09-17 补 UV 统计）：cookie _lp_vid 沿用=跨次访问同人；无则生成并在
+    // 放行响应上种 cookie（display 302 / redirect 桥页）。防护拦截路径不种（被挡的人无需标识）。
+    // 点击 beacon 由页面 _d_decode 读同一 cookie（直访无 cookie 时回落 localStorage 自生成）。
+    const _vc=(request.headers.get("Cookie")||"").match(/(?:^|;\s*)_lp_vid=([^;]+)/);
+    const vid=_vc?_vc[1]:("v"+Date.now().toString(36)+Math.random().toString(36).slice(2,10));
+    const _vidCookie="; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
     const verdict=(LP_CONFIG.block_enabled&&!_isPreview)?evalProtection(request,url,cf):{blocked:false};
     if(verdict.blocked){
       sendEvent("block",{slug:slug,reason:verdict.reason,country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
@@ -178,7 +184,7 @@ export default{
       }catch(e){}
     }
     if(LP_CONFIG.redirect_mode==="redirect"){
-      sendEvent("redirect",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,target_url:LP_CONFIG.target,decision:"redirect",country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
+      sendEvent("redirect",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,target_url:LP_CONFIG.target,decision:"redirect",visitor_id:vid,country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
       const dest=new URL(LP_CONFIG.target);
       url.searchParams.forEach((v,k)=>{if(!k.startsWith("_")&&!dest.searchParams.has(k))dest.searchParams.set(k,v);});
       // 跳转桥页（批次III 修 B11）：跳转前 fire 页配置像素（FB PageView+转化事件 / TT 同口径），
@@ -199,7 +205,9 @@ export default{
         +'<a id="cta" href="'+_escH(dest.toString())+'" style="display:inline-block;padding:12px 32px;background:#0071e3;color:#fff;text-decoration:none;border-radius:8px;font-size:16px">Continue</a>'
         +'<noscript><p><a href="'+_escH(dest.toString())+'">Continue</a></p></noscript>'
         +'</body></html>';
-      return new Response(_bridge,{status:200,headers:{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"}});
+      const _bh={"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"};
+      if(!_vc)_bh["Set-Cookie"]="_lp_vid="+vid+_vidCookie;   // 桥页响应种访客 cookie（老访客不重种）
+      return new Response(_bridge,{status:200,headers:_bh});
     }
     // display 模式：调 route_next 拿像素+目标 → 编码 _d → 302 到落地页
     let rd={};
@@ -210,14 +218,17 @@ export default{
     const _target=rd.target_url||LP_CONFIG.target;
     const _ttclid=new URL(request.url).searchParams.get("ttclid")||"";
     const _d=btoa(unescape(encodeURIComponent(JSON.stringify({p:(rd.pixel_ids||[]).join(","),tp:(rd.tt_pixel_ids||[]).join(","),tc:(rd.tt_conversion_events||[]).join(","),eid:(rd.tt_event_id||""),t:_target,c:(rd.conversion_events||[]).join(","),s:slug,a:adId,ai:actId}))));
-    sendEvent("visit",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,pixel_ids:(rd.pixel_ids||[]).join(","),tt_pixel_ids:(rd.tt_pixel_ids||[]).join(","),tt_conversion_events:(rd.tt_conversion_events||[]).join(","),tt_event_id:(rd.tt_event_id||""),ttclid:_ttclid,target_url:_target,decision:"display",country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
+    sendEvent("visit",{slug:slug,ad_id:adId,act_id:actId,fbclid:fbclid,pixel_ids:(rd.pixel_ids||[]).join(","),tt_pixel_ids:(rd.tt_pixel_ids||[]).join(","),tt_conversion_events:(rd.tt_conversion_events||[]).join(","),tt_event_id:(rd.tt_event_id||""),ttclid:_ttclid,target_url:_target,decision:"display",visitor_id:vid,country:cf.country||"",city:cf.city||"",asn:String(cf.asn||""),referer:referer,user_agent:ua,ip:ip},ctx);
     const lp=new URL(request.url);
     lp.pathname="/";
     const q=new URLSearchParams();
     q.set("_d",_d);
     if(fbclid)q.set("fbclid",fbclid);
     lp.search="?"+q.toString();
-    return Response.redirect(lp.toString(),302);
+    // 种访客 cookie（Response.redirect 不可加头，改等价 302 构造；老访客已带 cookie 不重种）
+    const _rh={"Location":lp.toString()};
+    if(!_vc)_rh["Set-Cookie"]="_lp_vid="+vid+_vidCookie;
+    return new Response(null,{status:302,headers:_rh});
   }
 };
 """
@@ -365,12 +376,14 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             .replace("{{TITLE}}", body.title)
             .replace("{{DESCRIPTION}}", body.description))
     # 注入 _d 解码脚本到 <head> 开头（FB 官方推荐位置，像素尽早加载；DOMContentLoaded 兜底按钮绑定）
-    _d_decode = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _pids=info.p?info.p.split(',').filter(Boolean):[];var _conv=info.c?info.c.split(',').filter(Boolean):[];if(!window.fbq){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');}_pids.forEach(function(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');});if(info.t){try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}window.__lp_target=info.t;}try{if(typeof LP_CONV!=='undefined')LP_CONV=_conv;}catch(e){}var _slug=info.s||'',_ad=info.a||'',_act=info.ai||'',_tgt=info.t||'',_eid=info.eid||'';function _lpClick(){_pids.forEach(function(pid){_conv.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});try{navigator.sendBeacon('/__events/ingest',JSON.stringify({event_type:'click',slug:_slug,ad_id:_ad,act_id:_act,target_url:_tgt,decision:'click',pixel_ids:_pids.concat(window.__tt_pids||[]).join(','),pixel_events:_conv.join(',')}));}catch(e){}}var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=window.__lp_target||'';try{if(!t&&typeof LP_TARGET_URL!=='undefined')t=LP_TARGET_URL}catch(e){}if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;_lpClick();}},{capture:true});if(info.t){document.addEventListener('DOMContentLoaded',function(){var cta=document.getElementById('cta')||document.querySelector('[onclick*=\"goNext\"]');if(cta)cta.href=info.t;try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}});}}catch(e){}})();</script>"""
+    _d_decode = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _pids=info.p?info.p.split(',').filter(Boolean):[];var _conv=info.c?info.c.split(',').filter(Boolean):[];if(!window.fbq){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');}_pids.forEach(function(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');});if(info.t){try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}window.__lp_target=info.t;}try{if(typeof LP_CONV!=='undefined')LP_CONV=_conv;}catch(e){}var _slug=info.s||'',_ad=info.a||'',_act=info.ai||'',_tgt=info.t||'',_eid=info.eid||'';var _vid='';try{var _cm=document.cookie.match(/(?:^|;\\s*)_lp_vid=([^;]+)/);_vid=_cm?_cm[1]:(localStorage.getItem('_lp_vid')||'');if(!_vid){_vid='v'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);try{localStorage.setItem('_lp_vid',_vid);document.cookie='_lp_vid='+_vid+';path=/;max-age=31536000;SameSite=Lax';}catch(e){}}}catch(e){}function _lpClick(){_pids.forEach(function(pid){_conv.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});try{navigator.sendBeacon('/__events/ingest',JSON.stringify({event_type:'click',slug:_slug,ad_id:_ad,act_id:_act,target_url:_tgt,decision:'click',visitor_id:_vid,pixel_ids:_pids.concat(window.__tt_pids||[]).join(','),pixel_events:_conv.join(',')}));}catch(e){}}var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=window.__lp_target||'';try{if(!t&&typeof LP_TARGET_URL!=='undefined')t=LP_TARGET_URL}catch(e){}if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;_lpClick();}},{capture:true});if(info.t){document.addEventListener('DOMContentLoaded',function(){var cta=document.getElementById('cta')||document.querySelector('[onclick*=\"goNext\"]');if(cta)cta.href=info.t;try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}});}}catch(e){}})();</script>"""
     # TK 像素解码脚本（独立于 FB，从 _d.tp 读取 TK 像素并 fire ttq；event_id 从 _d.eid 取，和后端 S2S 同 UUID 去重）
     _d_decode_tt = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _tpids=info.tp?info.tp.split(',').filter(Boolean):[];if(!_tpids.length)return;var _tconv=info.tc?info.tc.split(',').filter(Boolean):[];var _eid=info.eid||'';!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};_tpids.forEach(function(pid){ttq.load(pid);});window.__tt_pids=_tpids;ttq.page();}(window,document,'ttq');var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=_tgt||'';if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;try{var _props=_eid?{event_id:_eid}:{};if(_tconv.length){_tconv.forEach(function(evt){ttq.track(evt,_props);});}else{ttq.track('ClickButton',_props);}}catch(err){}}},{capture:true});}catch(e){}})();</script>"""
     _full_decode = _d_decode + _d_decode_tt
     if "<head" in html:
-        html = re.sub(r"(<head[^>]*>)", r"\1" + _full_decode, html, count=1)
+        # 替换串用 lambda（函数替换不做 \ 转义处理）——_d_decode 含 JS 正则（\s 等），
+        # 曾用 r"\1"+拼接：\s 在 re.sub 替换模板里是 bad escape → 发布全 500（2026-09-17 实证）
+        html = re.sub(r"(<head[^>]*>)", lambda m: m.group(1) + _full_decode, html, count=1)
     elif "</body>" in html:
         html = html.replace("</body>", _full_decode + "\n</body>", 1)
     else:
