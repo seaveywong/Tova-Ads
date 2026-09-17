@@ -2522,3 +2522,23 @@ i18n zh/en 成对；build 修一处 node 转义引入的引号断裂（resetPwdD
 
 ### 附：无主账户定论
 用户质疑正确——导入链路（用户→授权令牌→/fb/import）建账户时强制 `owner_user_id=user.id`（fb.py:1662），全库 owner 为空=0。批CP 的"无主账户无人覆盖"提醒纯理论兜底，现网不存在此情形。
+
+## 批CR：通知归属审计 + FB 客户端健壮性 + 复审补漏（2026-09-17 晚，23ace10 / 43c5822 / 本次）
+
+### 概述
+rh11111 预算告警发给非归属人（第三起同类）触发 **44 个 emit_notification 发送点全面审计**；哨兵「拉系列失败：Expecting value」定位为 FB 瞬时空响应体；复审再抓出哨兵倒计时通知同款漏发。
+
+### 审计结论（44 点分类）
+- 🔴 修复 5 处漏网（均为账户/个人派生事件缺路由参数）：budget_progress（本次事故）/ rule_scale / rule_pause / landing_health（+user_id=页归属人）/ sentinel_auto_arm_warning+armed（复审补，批CP 后仍广播）
+- ✅ 15 处已正确（account_sync×4 / low_balance / orphan / unmanage / 哨兵TT暂停 / keepalive_burnt / emergency_done / 倒计时等）
+- ⊙ ~24 处 by-design 租户级：系统运维 / 凭证级（团队资产）/ 跨账户聚合 info
+- **铁律固化**：账户派生事件 emit 必传 act_id；个人事件必传 user_id；页面类传归属人 user_id
+
+### fb_client GET 空响应体（43c5822）
+FB 偶发 200/5xx 空体 → resp.json() ValueError 原直接 unknown 且不重试。现 GET 按 2^n 退避重试；POST/DELETE 不重放（幂等保护）；持续失败文案说人话。mock smoke：失败一次→重试成功；持续失败→新文案。
+
+### rh11111 一分钟双告之谜
+同账户 3 个**同名**广告组（模板部署副本）各自独立触发 50% 档——dedup 按 adset_id 不按名。结论：广告组/账户名不唯一，看数据别只看名字。
+
+### 复审六维
+对齐规划✓（全部用户拍板方向）/ SOP✓（backup+双门+commit+push 齐备）/ i18n✓（24 新键 zh/en 成对）/ FB API✓（GET 重试幂等安全）/ 数据层✓（spend-report 53 账户断言过）/ 坑✓（线程 session 隔离、旧状态键无害残留已记录）。journal 零 Traceback。
