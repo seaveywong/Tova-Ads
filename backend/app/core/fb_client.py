@@ -134,7 +134,22 @@ class FbClient:
                     resp = httpx.delete(url, params=params, timeout=TIMEOUT)
                 else:
                     resp = httpx.get(url, params=params, timeout=TIMEOUT)
-                result = resp.json()
+                try:
+                    result = resp.json()
+                except ValueError as _je:
+                    # 空/非 JSON 响应体（FB 瞬时故障常见：200 空体或 5xx 空体）。
+                    # GET 幂等 → 纳入重试；POST/DELETE 响应已到达（服务端可能已执行）
+                    # → 不重放，只归类报错（同网络超时的幂等保护口径）
+                    if method == "GET" and attempt < MAX_RETRIES - 1:
+                        wait = 2 ** attempt
+                        logger.info(f"[FB] 响应体非 JSON（HTTP {resp.status_code}），"
+                                    f"{wait}s 后重试 GET: {str(_je)[:60]}")
+                        time.sleep(wait)
+                        continue
+                    raise FbApiError(
+                        "unknown",
+                        f"FB 响应异常（空/非 JSON 响应体，HTTP {resp.status_code}；"
+                        f"通常为 FB 瞬时故障，稍后自动重试）", {}, resp.status_code)
                 if "error" in result:
                     err = result["error"]
                     cat, friendly = classify_fb_error(err)
