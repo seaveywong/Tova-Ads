@@ -1393,6 +1393,78 @@ def delete_subdomain(pid: int, hostname: str,
     return {"ok": True, "bound_subdomains": subs}
 
 
+@router.delete("/pages/{pid}/hard")
+def hard_delete_landing_page(pid: int,
+                             user: CurrentUser = Depends(require_permission("landing.manage")),
+                             db: Session = Depends(get_db)):
+    """彻底删除落地页（2026-09-18 用户需求）：本地 + CF 两侧全清。
+    与 DELETE /pages/{pid}（=归档，软删）区分——真删走 /hard。
+    CF：逐个子域 DNS 记录 → 项目域名解绑 → Pages 项目删除（幂等，不存在算成功）。
+    DB：子码（FK 约束先删）→ 页面行。落地事件保留（无 FK，历史分析数据）。
+    CF 任一步失败即中止不删库（页面保留可重试），避免出现「库里没了 CF 残留」的僵尸资源。"""
+    import json as _json
+    from ..models.launch import LandingPage, LandingAdLink
+    from ..core.cf_client import CfClient
+    from ..core.config import settings
+    from ..core.log_utils import write_log, new_trace_id
+    p = db.query(LandingPage).filter(LandingPage.id == pid, LandingPage.tenant_id == user.tenant_id).first()
+    if not p:
+        raise HTTPException(404, "落地页不存在")
+    _ro(user, p, attr="owner_user_id")   # operator 只能删自己创建的
+    # 收集该页所有 hostname（bound_subdomains + custom_domain + 默认 lp{id} 兜底）
+    hosts: list[str] = []
+    try:
+        if p.bound_subdomains:
+            hosts = _json.loads(p.bound_subdomains)
+    except Exception:
+        pass
+    if p.custom_domain:
+        _h = p.custom_domain.split("://", 1)[-1].split("/")[0]
+        if _h and _h not in hosts:
+            hosts.append(_h)
+    _links = db.query(LandingAdLink).filter(LandingAdLink.page_id == p.id,
+                                            LandingAdLink.status == "active").count()
+    # ── CF 清理（失败聚合报错）──
+    cf_errors: list[str] = []
+    dns_deleted = 0
+    cf_token = settings.cf_api_token
+    cf_account = settings.cf_account_id
+    if cf_token and cf_account:
+        cf = CfClient(cf_token, cf_account)
+        for host in hosts:
+            root = _domain_root(host)
+            try:
+                zone_id = cf.get_zone_id(root)
+                if not zone_id:
+                    continue   # zone 不在本账户（外部 NS）——无记录可删
+                for rec in cf.list_dns_records(zone_id):
+                    if rec.get("name", "").lower() == host.lower():
+                        cf.delete_dns_record(zone_id, rec["id"])
+                        dns_deleted += 1
+            except Exception as e:
+                cf_errors.append(f"DNS {host}: {str(e)[:80]}")
+        try:
+            for host in hosts:
+                try: cf.unbind_custom_domain(f"tovaads-landing-{p.id}", host)
+                except Exception: pass   # 解绑失败不阻断——项目删除会级联
+            cf.delete_project(f"tovaads-landing-{p.id}")
+        except Exception as e:
+            cf_errors.append(f"Pages 项目: {str(e)[:80]}")
+    if cf_errors:
+        raise HTTPException(500, "CF 清理失败（页面未删除，可重试）：" + "；".join(cf_errors)[:200])
+    # ── DB 清理 ──
+    db.query(LandingAdLink).filter(LandingAdLink.page_id == p.id).delete(synchronize_session="fetch")
+    title = p.title
+    db.delete(p)
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="landing_page", target_id=str(pid),
+              action_type="delete", source="user", result="success",
+              trigger_detail=f"删除落地页 {title}（DNS {dns_deleted} 条 + Pages 项目；活动子码 {_links}）")
+    db.commit()
+    return {"ok": True, "title": title, "dns_deleted": dns_deleted,
+            "project_deleted": True, "active_links_removed": _links}
+
+
 @router.get("/subdomain-check")   # 复审P1：原路径 /pages/check-subdomain 被 /pages/{pid} 路由
                                   # 遮蔽恒 422（FastAPI 按注册序匹配，str 转 int 失败）→ 前端
                                   # 「可用/已占用」实时指示静默失效

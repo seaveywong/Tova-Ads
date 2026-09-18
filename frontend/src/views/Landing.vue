@@ -290,6 +290,18 @@ const archive = async (p) => {
     await DELETE(`/landing/pages/${p.id}`); ElMessage.success(t('landing.archived')); await loadPages()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
+// 彻底删除（2026-09-18）：本地 + CF 两侧全清（DNS 记录 + Pages 项目）；与归档（软删）区分
+const deletePage = async (p) => {
+  try {
+    await ElMessageBox.confirm(t('landing.pageDelConfirm', { title: p.title, n: p.subcode_count || 0 }), t('landing.deletePage'), { type: 'error', confirmButtonClass: 'el-button--danger', confirmButtonText: t('landing.deletePage') })
+    deletingId.value = p.id
+    const r = await DELETE(`/landing/pages/${p.id}/hard`)
+    ElMessage.success(t('landing.pageDeleted', { dns: r.dns_deleted ?? 0, n: r.active_links_removed ?? 0 }))
+    await loadPages()
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+  deletingId.value = null
+}
+const deletingId = ref(null)
 
 // ── 落地页自检 ──
 const healthResult = ref(null)
@@ -863,13 +875,14 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
-            <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p) }">
+            <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p); else if (cmd==='delete') deletePage(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="check" :disabled="healthCheckingId === p.id">{{ healthCheckingId === p.id ? t('landing.checking') : t('landing.selfCheck') }}</el-dropdown-item>
                   <el-dropdown-item command="preview" :disabled="!p.preview_url">{{ t('common.preview') }}</el-dropdown-item>
                   <el-dropdown-item command="archive" divided>{{ t('landing.archive') }}</el-dropdown-item>
+                  <el-dropdown-item command="delete" divided class="danger-item">{{ t('landing.deletePage') }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>

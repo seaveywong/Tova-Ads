@@ -39,6 +39,14 @@ class CfClient:
             return {"success": False, "errors": [{"code": r.status_code,
                      "message": f"CF returned non-JSON (HTTP {r.status_code}): {r.text[:120]}"}]}
 
+    def _delete(self, path: str, timeout: int = 30) -> dict:
+        r = httpx.delete(f"{CF_API_BASE}{path}", headers=self.headers, timeout=timeout)
+        try:
+            return r.json()
+        except Exception:
+            # 204 No Content 等空体响应当成功处理
+            return {"success": 200 <= r.status_code < 300, "http_status": r.status_code}
+
     # ── Pages 项目 ──
     def list_projects(self) -> list:
         data = self._get(f"/accounts/{self.account_id}/pages/projects")
@@ -289,6 +297,25 @@ class CfClient:
         if not data.get("success"):
             raise RuntimeError(f"CF 添加 DNS 记录失败: {data.get('errors')}")
         return data.get("result", {})
+
+    def delete_dns_record(self, zone_id: str, record_id: str) -> bool:
+        """删单条 DNS 记录（落地页删除时清子域 CNAME）。记录不存在=幂等成功。"""
+        data = self._delete(f"/zones/{zone_id}/dns_records/{record_id}")
+        if data.get("success"):
+            return True
+        code = str((data.get("errors") or [{}])[0].get("code", ""))
+        if code == "8103" or data.get("http_status") == 404:   # record do not exist
+            return True
+        raise RuntimeError(f"CF 删除 DNS 记录失败: {data.get('errors')}")
+
+    def delete_project(self, name: str) -> bool:
+        """删 CF Pages 项目（含其部署/域名绑定）。项目不存在=幂等成功。"""
+        data = self._delete(f"/accounts/{self.account_id}/pages/projects/{name}", timeout=60)
+        if data.get("success"):
+            return True
+        if data.get("http_status") == 404:
+            return True
+        raise RuntimeError(f"CF 删除 Pages 项目失败: {data.get('errors')}")
 
     def list_email_addresses(self, zone_id: str) -> list:
         """目的地邮箱列表（含验证状态；自动翻页）。
