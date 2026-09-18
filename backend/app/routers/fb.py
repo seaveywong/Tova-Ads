@@ -415,11 +415,14 @@ def rename_credential(
 
 
 def _visible_cred_ids(db, user) -> set[int] | None:
-    """operator 的令牌可见集（RBAC 口径：名下账户+关联资源）：绑着自己名下账户的令牌。
-    owner/超管返回 None=不限。令牌本身是团队级资源（无 owner 字段），可见性经由账户推导。"""
+    """operator 的令牌可见集（RBAC 口径：名下账户+自建资源）：
+    绑着自己名下账户的令牌 ∪ 自己创建的令牌。
+    ∪自建是 2026-09-18 修的缺口：可见性原只经账户推导，OAuth 授权后未导入账户的
+    空窗期创建人看不到自己的令牌（rename/更新/删除/重绑经 _cred_scope_or_404 同断）。
+    owner/超管返回 None=不限。"""
     if user.role != "operator":
         return None
-    from ..models.fb import AccountFbCredential, Account as _Acc
+    from ..models.fb import AccountFbCredential, Account as _Acc, FbCredential
     rows = db.query(AccountFbCredential.fb_credential_id).join(
         _Acc, _Acc.id == AccountFbCredential.account_id
     ).filter(
@@ -428,7 +431,13 @@ def _visible_cred_ids(db, user) -> set[int] | None:
         _Acc.owner_user_id == user.id,
         _Acc.is_managed == True,  # noqa: E712
     ).all()
-    return {r[0] for r in rows}
+    ids = {r[0] for r in rows}
+    own = db.query(FbCredential.id).filter(
+        FbCredential.tenant_id == user.tenant_id,
+        FbCredential.created_by == user.id,
+    ).all()
+    ids |= {r[0] for r in own}
+    return ids
 
 
 @router.get("/credentials")
@@ -1280,12 +1289,24 @@ def get_assets(
     整响应按租户 5min 缓存（fresh=1 绕过）：每 cred 2 次 FB 调用 × N 令牌，调用方（模板编辑器
     主页下拉）每次打开都拉——资产集合准静态。"""
     ck = f"fbassets:{user.tenant_id}"
-    if not fresh:
-        cached = _asset_cache_get(ck)
-        if cached is not None:
-            return cached
-    from ..core.fb_tokens import iter_tenant_clients
-    pairs = iter_tenant_clients(db, user.tenant_id)
+    if user.role == "operator":
+        # operator 资产面只看可见令牌（2026-09-18 审计：原聚合全租户令牌=看全团队 FB 资产）
+        _vis = _visible_cred_ids(db, user)
+        ck = f"fbassets:{user.tenant_id}:{user.id}"
+        if not fresh:
+            cached = _asset_cache_get(ck)
+            if cached is not None:
+                return cached
+        from ..core.fb_tokens import iter_tenant_clients
+        pairs = [(c, f) for c, f in iter_tenant_clients(db, user.tenant_id)
+                 if c.id in (_vis or set())]
+    else:
+        if not fresh:
+            cached = _asset_cache_get(ck)
+            if cached is not None:
+                return cached
+        from ..core.fb_tokens import iter_tenant_clients
+        pairs = iter_tenant_clients(db, user.tenant_id)
     if not pairs:
         raise HTTPException(400, "未绑定 FB 凭证")
     accounts, pages = [], []
@@ -1640,6 +1661,10 @@ def import_accounts(
             if exists.fb_credential_id != cred_id:
                 exists.fb_credential_id = cred_id
             exists.is_managed = True  # 重新导入 = 恢复纳管（把软删的拉回活跃管理）
+            if not exists.owner_user_id:
+                # 存量无主账户认领归属（2026-09-18 审计）：否则 operator 导入"成功"
+                # 却在账户清单看不到（归属空 = 谁都看不到）。他人归属不抢。
+                exists.owner_user_id = user.id
             # 多令牌同账户：加 account_fb_credentials 关联（已有则跳过 → 多 token 共管）
             if not db.query(AccountFbCredential).filter(
                 AccountFbCredential.account_id == exists.id,

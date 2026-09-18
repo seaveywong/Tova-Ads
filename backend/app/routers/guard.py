@@ -55,8 +55,14 @@ class SentinelArmIn(BaseModel):
 @router.get("/rules")
 def list_rules(user: CurrentUser = Depends(require_permission("rules.read")), db: Session = Depends(get_db)):
     _q = db.query(GuardRule).filter(GuardRule.tenant_id == user.tenant_id)
-    if user.role == "operator":   # 批AG：operator 只看自己创建的（引擎也已按创建人隔离：规则只作用于创建人名下账户）
-        _q = _q.filter(GuardRule.created_by == user.id)
+    if user.role == "operator":
+        # 自建规则 + 影响自己名下账户的规则（team 作用域/存量 NULL 创建人——引擎会用它们
+        # 管 operator 账户，2026-09-18 审计：曾对 operator 不可见=「影响自己的规则看不到」）。
+        # 改/删仍受 require_owned 闸（只能动自建），可见≠可管。
+        from sqlalchemy import or_
+        _q = _q.filter(or_(GuardRule.created_by == user.id,
+                           GuardRule.created_by.is_(None),
+                           GuardRule.rule_scope == "team"))
     rules = _q.all()
     # 每条规则的命中统计（action_logs: pause/increase_budget by rule_engine, 按 trigger_type 聚合；
     # increase_budget=扩量规则的"命中"，否则扩量规则永远显示未命中）

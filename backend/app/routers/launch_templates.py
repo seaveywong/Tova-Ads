@@ -3711,6 +3711,9 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
         Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
     if not acc:
         raise HTTPException(404, "账户不存在")
+    from ..core.deps import account_operable
+    if not account_operable(user, acc):   # 2026-09-18 审计：原漏闸——operator 可对任意租户账户拉主页
+        raise HTTPException(404, "账户不存在")
     fb = client_for_account(db, user.tenant_id, act_id, "write")
     if not fb:
         raise HTTPException(400, "该账户无可用写令牌——无法拉取主页列表")

@@ -175,13 +175,14 @@ def pages_status(
     整响应按租户 5min 缓存（fresh=1 绕过）：N_creds 次权限面 + N_pages 次订阅查询，
     两个面板（潜客 tab/部署抽屉权限总览）每次打开都全量打——权限与订阅均准静态。
     订阅写入（subscribe/unsubscribe 端点）已同步失效缓存。"""
-    from .fb import _asset_cache_get, _asset_cache_set
-    ck = f"leadpages:{user.tenant_id}"
+    from .fb import _asset_cache_get, _asset_cache_set, _visible_cred_ids
+    _vis = _visible_cred_ids(db, user) if user.role == "operator" else None
+    ck = f"leadpages:{user.tenant_id}" + (f":{user.id}" if _vis is not None else "")
     if not fresh:
         cached = _asset_cache_get(ck)
         if cached is not None:
             return cached
-    clients = _tenant_fb_clients(db, user.tenant_id)
+    clients = _tenant_fb_clients(db, user.tenant_id, only_cred_ids=_vis)
     if not clients:
         return {"pages": [], "error": "no active FB credential"}
     # 我方 App id 集（订阅列表按 app 匹配；无 App 配置时退化为「有任意订阅即算」）
@@ -246,14 +247,17 @@ def pages_status(
     return out
 
 
-def _tenant_fb_clients(db: Session, tenant_id: int) -> list:
+def _tenant_fb_clients(db: Session, tenant_id: int, only_cred_ids: set | None = None) -> list:
     """租户全部活跃令牌的 FbClient 列表 [(client, alias)]。
     潜客链路（订阅/拉取）按页/表单走的是用户级权限（页管理/leads_retrieval），不同令牌权限面
     不同——单取首个 active 曾令订阅全灭（首个是操作员令牌，无 pages_manage_metadata）。"""
     out = []
-    for c in db.query(FbCredential).filter(
+    q = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-    ).all():
+    )
+    if only_cred_ids is not None:
+        q = q.filter(FbCredential.id.in_(only_cred_ids or [0]))
+    for c in q.all():
         try:
             out.append((FbClient(decrypt(c.access_token_enc)), c.alias or f"#{c.id}"))
         except Exception:
