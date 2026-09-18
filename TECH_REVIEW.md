@@ -2653,3 +2653,18 @@ OK：/fb/accounts、/ads/list、/ads/spend-report、/landing/pages、/assets、/
 1. launch.py/tickets.py/ai.py/compliance.py 四整文件 + 13 条散布孤儿路由（cron/回调/运维端点保留）
 2. KpiConfig L0：补管理 UI 还是砍掉该层
 3. 保活默认 $5/天 是否符合预期（注释已正，默认值未动）
+
+## 批CW：全库审计——断层/孤儿/逻辑不匹配清剿（2026-09-18，本 commit）
+
+### 审计方法
+四路并行 agent：①API 契约（325 前端调用 × 307 后端路由逐一比对）②后端孤儿（250 符号+51 表引用计数）③前端一致性（3370 键 i18n/路由/composables/localStorage）④声称 vs 实际（七域 docstring 与行为逐条核对）。
+
+### 结论概览
+- **断层**：API 契约 0 条 404；真实断层在页面脚本运行时（_d_decode_tt `_tgt` 未定义——TT 点击转化黑洞，断言门只查 marker 拦不住运行时错误）
+- **孤儿**：5 死函数+1 死配置键+1 死 system_settings 键+1 不可达回退，全删；launch.py(v1)/ai.py/tickets/compliance 四 router 前端零调用（保留——计划中/运维端点，删除需拍板）
+- **逻辑不匹配**：9 处行为偏差（TG 定向组合语义/TT 扩量三连/防护测试双向失真/诊断三处口径/smoke 告警绕过 TG）+8 处文档漂移，全修
+
+### 遗留
+- _d_decode_tt 修复需重发布生效（TT 上线前必须重发全部用 TT 像素的页）
+- balance_alert_threshold 死键（读活写无——settings UI 未暴露，默认 20 一直在用）
+- 前端 169 个死 i18n 键、launch.py v1 旧 router 整体下线——建议下次文案/清理批拍板
