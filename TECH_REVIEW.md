@@ -2588,3 +2588,21 @@ live 11/16（5 个在管账户本轮实时拉取失败回落库内窗口值，�
 - re.sub 动态替换串必须用 lambda（含反斜杠的注入内容早晚会炸）
 - 服务器侧探针抓 CF Pages：python-UA 会被边缘拦（换浏览器 UA）；防护页用 preview token 绕行
 - 页面发布配置中 description 不落库——程序化重发必须先反提取（本次路径已验证可复用）
+
+## 批CU：落地页彻底删除（2026-09-18，本 commit）
+
+### 概述
+用户需求：「落地页删除要本地的+CF侧都删除」。原状：只有归档（软删，DELETE /pages/{pid}=archive 语义），无真删；cf_client 无删除能力。
+
+### 变更
+| 端 | 内容 |
+|---|---|
+| cf_client | +`_delete` 助手、`delete_dns_record`（记录不存在=幂等成功）、`delete_project`（项目不存在=幂等成功） |
+| landing.py | +`DELETE /pages/{pid}/hard`：收集 bound_subdomains+custom_domain hostnames → 逐个 zone 找名删记录 → 解绑项目域名（吞错，项目删级联）→ 删 Pages 项目；CF 全败聚合报错且**不删库**；DB 删子码（FK）→ 删页行；审计 write_log；landing_events 保留 |
+| 前端 | ⋯ 菜单红色「彻底删除」→ 强确认（清除范围/活动子码数/不可恢复/建议归档）→ 成功回报 DNS n 条+子码 n 个 |
+
+### 坑（复审抓到）
+路由冲突：`DELETE /pages/{pid}` 已被 archive_landing_page 占用（FastAPI 先注册者胜）——真删若同路径会被遮蔽静默变成归档。改 `/hard` 显式区分。
+
+### 验证（真实删除测试页61，真调 CF API）
+DB 页+子码清 ✓；CF Pages 项目复查 404 ✓；zone 中 lp61 记录消失 ✓；事件保留 4 条 ✓；二次删 404 幂等 ✓；线上 chunk 含 deletePage ✓。
