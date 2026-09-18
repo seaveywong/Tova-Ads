@@ -837,8 +837,10 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
             friendly_error=friendly, metadata=metadata, platform="tt")})
 
     def _notify_evt(level, action_disp, budget_disp, force_tg):
-        # 通知去重 60min/目标（同 FB _apply_scale；action_log 标记供 dedup_recent）
-        if dedup_recent(db, tenant_id, "rule_scale_notified", (adset_id or ad_id), 60):
+        # 通知去重 60min/目标：键带 act 前缀（2026-09-18 全库审计——TT adgroup_id 是平台内
+        # 小整数，同租户多广告主同 ID 互撞互压；rule_pause 路径同款已修）
+        _dedup_key = f"{acc.act_id}:{adset_id or ad_id}"
+        if dedup_recent(db, tenant_id, "rule_scale_notified", _dedup_key, 60):
             return
         _t, _b = notify_text(loc, "rule_scale",
                              category=category, name=_esc(acc.name), act_id=acc.act_id,
@@ -851,6 +853,7 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
         events.append({"kind": "notify", "kwargs": dict(
             tenant_id=tenant_id, level=level, event_type="rule_scale",
             trace_id=trace_id, title=_t, body=_b,
+            act_id=acc.act_id,   # 归属路由（2026-09-18 全库审计：adset 级漏传=广播=owner 收别人的）
             target_type="adset", target_id=(adset_id or ad_id),
             force_tg=force_tg, platform="tt")})
         _log_evt("rule_scale_notified", "success", f"target={adset_id or ad_id}",
@@ -860,16 +863,13 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
         _log_evt("increase_budget_skipped", "success", f"{detail} | 无 adset_id，跳过")
         return
 
-    # 契约函数延迟 import（B 组并行在 ad_ops 写；services 优先、core 兜底）。
-    # 未合入 → observe-only 兜底（同 P0 波次占位模式：不动预算，不进扩量冷却）
+    # 契约函数（services/ad_ops 唯一定义处——core 版是部署链路，无此函数；旧的双 import
+    # 兜底第二分支永不可达，2026-09-18 全库审计清理）
     _set_daily = None
     try:
         from ..services.ad_ops import tt_set_budget_daily as _set_daily
     except ImportError:
-        try:
-            from ..core.ad_ops import tt_set_budget_daily as _set_daily
-        except ImportError:
-            _set_daily = None
+        _set_daily = None
     if _set_daily is None:
         _log_evt("observe_alert", "success",
                  f"{detail} | TT 扩量预算通道未就绪，仅观察（未动预算） "
@@ -953,7 +953,10 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
                     ("planned: " if loc == "en" else "拟 ") + budget_disp, True)
         return
 
-    # 真扩量：契约函数（B 组）——写+核验+审计在其内部，此处只按 bool 结果记账
+    # 真扩量：tt_set_budget_daily 是轻调用（不回读不核验，生效由下一轮快照确认——
+    # 2026-09-18 全库审计纠正旧注释"写+核验+审计在其内部"的不实声称）。
+    # 因此成功也**不进 24h 扩量冷却**：静默失败时下一轮读到的预算未变、本函数的
+    # 「目标≤当前」守卫不成立会原样重设（幂等），自愈；通知侧 60min dedup 防重。
     try:
         _ok = bool(_set_daily(tt, acc.act_id, adset_id, new_amount))
     except Exception as e:
@@ -963,7 +966,8 @@ def _apply_scale_tt(db, tt, tenant_id, acc, trace_id, rule, detail, ad_id, adset
                     str(e)[:300], False)
         return
     if _ok:
-        scaled_targets.add(adset_id)  # TT 载体恒为 adgroup（P0-4：与冷却键/日志 target_id 一致）
+        # 不加 scaled_targets（轻调用未核验——见上）；记账走 scale_details
+        res["scaled"] += 1
         res["scaled"] += 1
         res["scale_details"].append({"act_id": acc.act_id, "ad_id": ad_id, "ad_name": ad_name,
                                      "level": "adset", "target": adset_id, "platform": "tt",
@@ -1946,10 +1950,11 @@ def run_inspection(force: bool = False):
 
     动作由 rule.action 唯一控制（observe=只告警 / pause*=止损暂停链 / scale=扩量加预算）
     ——无全局 dry_run（2026-07-07 用户决策）。
-    规则作用域：全局(scope_act_id NULL=名下所有账户) + 账户级(scope_act_id=指定账户)，并存各评估。
+    规则作用域：scope_act_id 过滤 + 归属隔离（user 作用域且有创建人→只作用于创建人名下账户；
+    team 作用域/存量 NULL 创建人→全租户，见 1305-1310）。
     并发（1.0 移植）：账户级 ThreadPoolExecutor，guard_concurrency（1-8，默认 4）；
         每任务线程自建 SuperSessionLocal（session 非线程安全）；日志/通知收口主线程回放（events）。
-    学习期保护：guard_learning_hours（默认 24h，0=关）——创建 < N 小时的广告静默跳过（心跳计数）。
+    学习期保护：guard_learning_hours（默认 0=不保护，no-protection-periods 铁律；>0 才跳过创建 < N 小时的广告）。
     多 worker 进程：advisory lock 101 保证每轮只有一个 worker 真跑（防 TG spam）。
     force=True 跳过成功冷却（手动触发用；替代旧"改全局 COOLDOWN_MIN"的竞态写法）。
     """
@@ -1974,7 +1979,8 @@ def run_inspection(force: bool = False):
 
     try:
         learning_hours = _sys_float(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
-        # 取所有有可用 FB 凭证的租户（不只 guard_rules——租户无规则也巡检，注入保底止血线，防裸奔），
+        # 取所有有可用 FB 凭证的租户（不只 guard_rules——租户无规则也巡检快照留痕；
+        # 兜底止血规则已拆除（2026-09-17 用户拍板）：零覆盖=零干预），
         # 并上「有 managed TT 账户」的租户——纯 TT 租户（无任何 FB 凭证）不再被整个跳过。
         # 审计#2（2026-09-12）：status 含 rate_limited——rate_limited 永不自动回 active，
         # 硬过滤 ==active 会让「全部令牌限流过一次」的租户整租户停止巡检（止损停摆）；
@@ -2842,8 +2848,9 @@ def run_watchdog():
                 except Exception:
                     pass
 
-        # ── ③ 哨兵倒计时（dead-man switch，2026-09-13 用户定稿方案）：团队超过 N 小时无任何
-        # 登录态交互 → 全部纳管账户 sentinel_auto_armed + critical 告警；剩 25% 时间 warning 预警。
+        # ── ③ 哨兵倒计时（dead-man switch，个人制 2026-09-15 拍板+名下口径 2026-09-17）：
+        # 每用户自己的开关/小时数；本人超过 N 小时无登录态交互 → 只 arm 本人名下纳管账户
+        # + 个人定向告警（user_id=uid）；剩 25% 时间 warning 预警（同个人定向）。
         # 默认关（system_settings per-tenant）；解除只手动 disarm。与巡检/哨兵全兼容（字段已有）。
         try:
             alerts["sentinel_auto_armed"] = _sentinel_auto_arm_check(db, trace_id)
@@ -3023,8 +3030,9 @@ def run_sentinel_patrol():
 
     哨兵是 kill-switch（不走规则评估）：手动 arm 或自动 arm 后，发现 ACTIVE 系列直接停。
     FB 走 campaign 级全停；TT（P4）走 ad 级 DISABLE（_sentinel_pause_tt）。
-    与规则巡检独立。dedup：每 campaign（FB）/每广告（TT）1h 内不重复停——
-    但键=日志 AND 实际已停（P1-4：日志命中仍回读 effective_status，仍 ACTIVE 则重停）；
+    与规则巡检独立。dedup：FB 每 campaign 1h 内不重复停（键=日志 AND 实际已停——
+    P1-4：日志命中仍回读 effective_status，仍 ACTIVE 则重停）；TT 路径故意无停机去重
+    （复审A P1，每轮全量 DISABLE），仅通知去重（键 act_id:ad_id）；
     无令牌/拉取/停失败不再静默（P0-6：聚合发 sentinel_failure critical）。
     """
     lock = acquire_run_lock(106)
@@ -3388,7 +3396,7 @@ def _ka_budget_minor(usd: float, currency: str) -> int:
 
 
 def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope: int | None = None):
-    """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 $1/天 Page Like（详见各分支注释）。
+    """每日保活扫描：warming 账户连续 idle_days 天无消耗 → 建 Page Like 保活广告（预算=配置 budget_usd/天，默认 $5/天；详见各分支注释）。
     保活广告 campaign_name 含 [Tova-保活] → 巡检/哨兵跳过不停。
 
     每轮把每账户结果落库 accounts.keepalive_state（active_ad/has_spend/failed/burnt）——
@@ -3585,7 +3593,7 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope
                             "bid_strategy": "LOWEST_COST_WITHOUT_CAP", "destination_type": "ON_PAGE",
                             "promoted_object": json.dumps({"page_id": page_id}),
                             "targeting": json.dumps({"geo_locations": {"countries": ["US"]}, "age_min": 18, "age_max": 65}),
-                            # 批CD：daily_budget=配置值（默认 $1/天）——保活语义是「每天最多 $1 的
+                            # 批CD：daily_budget=配置值（默认 $5/天，budget_usd）——保活语义是「每天最多 $budget 的
                             # 持续小额活动」。$1 lifetime 两个死穴（今晨全败实证）：①lifetime 最低 $30
                             # （1885272）②花完自停=账户又闲置，保活失效。花销上界=budget/天/账户，
                             # 账户有真实投放后（has_spend 检查）保活不再新建。

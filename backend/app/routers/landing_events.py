@@ -105,6 +105,8 @@ class EventIngestIn(BaseModel):
     user_agent: str = ""
     visitor_id: str = ""
     referrer: str = ""
+    referer: str = ""   # worker beacon 实际发的键名（HTTP 头拼写）——曾只声明 referrer 致
+                        # Pydantic 静默丢弃，落地日志来源列全表恒空（2026-09-18 审计修复）
     metadata: str = ""
     ip: str = ""
     tt_pixel_ids: str = ""
@@ -136,8 +138,10 @@ def ingest_event(body: EventIngestIn, request: Request):
     _ALLOWED_EVENTS = {"visit", "click", "submit", "block", "redirect"}
     if body.event_type not in _ALLOWED_EVENTS:
         return {"ok": False, "skipped": "bad_event_type"}
-    # ② 字段长度钳制（防超长垃圾）
-    for f in ("slug", "ad_id", "act_id", "path", "pixel_ids", "user_agent", "referer", "ip"):
+    # ② 字段长度钳制（防超长垃圾；referer 先归一到 referrer 再钳）
+    if not body.referrer and body.referer:
+        body.referrer = body.referer
+    for f in ("slug", "ad_id", "act_id", "path", "pixel_ids", "user_agent", "referrer", "ip"):
         v = getattr(body, f, None)
         if isinstance(v, str) and len(v) > 500:
             setattr(body, f, v[:500])

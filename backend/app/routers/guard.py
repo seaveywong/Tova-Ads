@@ -48,7 +48,8 @@ class AllowanceIn(BaseModel):
 
 
 class SentinelArmIn(BaseModel):
-    act_ids: list[str] | None = None  # None=全租户(Owner) / 指定账户
+    # None=批量 arm/disarm 本人名下在管账户（2026-09-17 个人口径，含超管/owner）；指定 act_ids=点名（点名不受名下限制）
+    act_ids: list[str] | None = None
 
 
 # ── 规则 CRUD ──
