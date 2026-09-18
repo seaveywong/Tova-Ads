@@ -1504,10 +1504,24 @@ def diagnose_ad(
     if link:
         result["subcode"] = link.slug
 
-    # 4. 规则评估
+    # 4. 规则评估（归属隔离同引擎口径——2026-09-18 全库审计：原只按 scope_act_id 过滤，
+    # 诊断展示的规则集比引擎实际执行的宽，用户看到"会命中"的规则引擎根本不跑）
     rules = db.query(GuardRule).filter(
         GuardRule.tenant_id == user.tenant_id, GuardRule.enabled == True).all()
-    acc_rules = [r for r in rules if not r.scope_act_id or _act_id in [s.strip() for s in r.scope_act_id.split(",")]]
+
+    def _rule_applies_to_acc(r, act_id: str, owner_uid) -> bool:
+        if r.scope_act_id and act_id not in [s.strip() for s in r.scope_act_id.split(",")]:
+            return False
+        # 与 guard_engine 归属判定一致：user 作用域+有创建人 → 只作用于创建人名下账户；
+        # team 作用域 / NULL 创建人（存量）→ 全租户
+        if (r.rule_scope or "user") == "user" and r.created_by is not None:
+            return owner_uid == r.created_by
+        return True
+
+    _owner_uid = db.query(Account.owner_user_id).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == _act_id).first()
+    _owner_uid = (_owner_uid or [None])[0]
+    acc_rules = [r for r in rules if _rule_applies_to_acc(r, _act_id, _owner_uid)]
 
     fb_conv = result["fb_conversions"]
     # 批AO：诊断面板顶层综合转化与列表口径对齐 = max(FB, 真人落地访问)（爬虫已在上游排除；
@@ -1575,10 +1589,13 @@ def diagnose_ad(
     # 5. 冷却状态
     now_utc = datetime.now(timezone.utc)
     succ_cd = now_utc - timedelta(minutes=COOLDOWN_MIN)
+    # 冷却查询键同引擎写入口径（2026-09-18 全库审计）：TT 路径 target_id 写的是
+    # "act_id:ad_id" 前缀键，裸 ad_id 匹配 → TT 广告冷却恒空
+    _cd_keys = [_ad_short, f"{_act_id}:{_ad_short}"] if _plat == "tt" else [_ad_short]
     for r in acc_rules:
         succ = db.query(ActionLog).filter(
             ActionLog.tenant_id == user.tenant_id,
-            ActionLog.target_id == _ad_short,
+            ActionLog.target_id.in_(_cd_keys),
             ActionLog.trigger_type == r.rule_type,
             ActionLog.action_type == "pause",
             ActionLog.result == "success",
@@ -1595,19 +1612,21 @@ def diagnose_ad(
             }
             break
 
-    # 6. 加白状态
+    # 6. 加白状态（2026-09-18 审计：补 act 维度——同 ad_id 跨账户曾误判已加白；
+    # allowance 按 ad_id+act 写入，跨平台同 ID 也不该互相命中）
     wl = db.query(GuardAllowance).filter(
         GuardAllowance.tenant_id == user.tenant_id,
         GuardAllowance.ad_id == _ad_short,
+        GuardAllowance.act_id == _act_id,
         GuardAllowance.allowance_date == acc_today,
         GuardAllowance.status == "active",
     ).first()
     result["whitelisted"] = bool(wl)
 
-    # 7. 最近操作
+    # 7. 最近操作（键同冷却口径：TT 前缀键也要能看到）
     for r in db.query(ActionLog).filter(
         ActionLog.tenant_id == user.tenant_id,
-        ActionLog.target_id == _ad_short,
+        ActionLog.target_id.in_(_cd_keys),
     ).order_by(ActionLog.created_at.desc()).limit(5).all():
         result["recent_actions"].append({
             "time": r.created_at.isoformat() if r.created_at else "",

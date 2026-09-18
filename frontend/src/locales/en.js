@@ -478,7 +478,7 @@ export default {
     changeTypeBtn: 'Switch token type',
     tokenTypeConfirm: 'Switch this token from "{from}" to "{to}". Write operations (ad creation / stop-loss) route by the new type: operate tokens take priority for writes. Continue?',
     tokenTypeSaved: 'Token type switched',
-    ttmanage: 'Manage', summary: '{n} teams · {m} active · {d} domains', ttoperate: 'Operate',
+    ttmanage: 'Manage', ttoperate: 'Operate',
     noPages: 'No pages',
     viewMembersBtn: 'View members',
     manageAssetsBtn: 'Manage assets',
@@ -917,6 +917,7 @@ export default {
   teams: {
     title: 'Team Management',
     desc: 'All teams (tenants) on the platform. Creating a team automatically generates 3 system roles and lets you designate the first owner. Archived teams are hidden but their data is retained.',
+    summary: '{n} teams · {m} active · {d} domains',
     createTeam: 'Create Team', noTeams: 'No teams',
     teamName: 'Team Name', members: 'Members', adAccounts: 'Ad Accounts', createdAt: 'Created At',
     manage: 'Manage', manageTitle: 'Team Management · {name}', rename: 'Rename', suspend: 'Suspend', activate: 'Activate', archive: 'Archive', restore: 'Restore',

@@ -65,10 +65,3 @@ def permissions_for_role(db, tenant_id: int, role_name: str) -> set[str]:
         logger.debug(f"[RBAC] DB 查角色失败，退回硬编码: {e}")
     # 兜底
     return ROLE_PERMISSIONS.get(role_name, set())
-
-
-def permissions_for(role: str) -> set[str]:
-    """硬编码兜底（JWT 解析时用——无 DB 上下文）。"""
-    if not role:
-        return set()
-    return ROLE_PERMISSIONS.get(role, set())

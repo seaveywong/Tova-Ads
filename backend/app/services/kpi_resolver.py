@@ -275,19 +275,6 @@ def _resolve_kpi_impl(db: Session, tenant_id: int, campaign_id: str, objective: 
             "target_cpa": target_cpa}
 
 
-def target_cpa_for(db: Session, tenant_id: int, campaign_id: str) -> Optional[float]:
-    """取 campaign 的手动 target_cpa（cpa_exceed/consecutive_bad 用，无则 None→用规则自带）。"""
-    if not campaign_id:
-        return None
-    r = db.query(KpiConfig).filter(
-        KpiConfig.tenant_id == tenant_id,
-        KpiConfig.target_type == "campaign",
-        KpiConfig.target_id == campaign_id,
-        KpiConfig.enabled == True,  # noqa: E712
-    ).first()
-    return (r.target_cpa if r and r.target_cpa else None)
-
-
 # ── 方案B 双列（0093）：wrapper 注入 results_fb（FB 口径成效）──
 # 只算 kpi_field 对应的 action 数量，不做任何兜底——与 FB Ads Manager 的「成效」列算法一致
 def resolve_kpi(db, tenant_id, campaign_id, objective, opt_goal="", actions=None):

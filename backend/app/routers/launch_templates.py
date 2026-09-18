@@ -3733,7 +3733,8 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     """重试一个失败 item（重置为 pending，再跑一次）。
 
     守卫：① job 必须 failed/partial（running 中的重试=与原循环并发跑同账户→双份广告）
-         ② item 必须 fail（success 重试=重复部署；creating/pending 在跑中）。"""
+         ② item 允许 fail/pending/creating——creating/pending 也重置（批AP：worker 崩溃
+         卡死的行自我修复；job 级终态闸已挡住真正的在跑并发），success 不可重试（=重复部署）。"""
     j = db.query(LaunchJob).filter(LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id).first()
     if not j:
         raise HTTPException(404, "job 不存在")

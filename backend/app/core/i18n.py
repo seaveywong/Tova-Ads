@@ -365,6 +365,7 @@ DATA = {
     "landing.protSampleBlockedCountry": {"zh": "非允许国（中国）", "en": "Non-allowed country (China)"},
     "landing.protSampleDebugQuery": {"zh": "带调试参数", "en": "With debug param"},
     "landing.protSampleDebugReferer": {"zh": "调试来源 Referer", "en": "Debug source Referer"},
+    "landing.protSampleDatacenter": {"zh": "数据中心 IP（DigitalOcean AS14061）", "en": "Datacenter IP (DigitalOcean AS14061)"},
     # ── landing_lib.py：模板上传 warning（不拦截，提示用户改模板）──
     "landing.tplWarnResourceFiles": {
         "zh": "检测到 {n} 个资源文件：当前仅部署 index.html，资源文件不会上线（多文件模板支持开发中）——请将样式/脚本内联进 index.html",

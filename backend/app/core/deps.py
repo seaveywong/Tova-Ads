@@ -72,7 +72,9 @@ def get_current_user(
 ) -> CurrentUser:
     """解析 JWT → 校验用户 → 设 RLS 会话上下文（此请求的 db session）。
 
-    SET LOCAL 随事务结束自动清，防泄漏。平台超管用 is_superadmin（v2 接 BYPASSRLS 角色）。
+    set_config(is_local=false)=会话级（非 SET LOCAL——见下方内联注释：SET LOCAL 随中途
+    commit 蒸发曾击穿批量写/紧急暂停）。连接归池 rollback/reset 清理，不泄漏下一请求。
+    平台超管用 is_superadmin（v2 接 BYPASSRLS 角色）。
     """
     try:
         payload = decode_token(creds.credentials)

@@ -160,7 +160,6 @@ export default {
     no_write_token: '无写令牌',
     has_keepalive: '已有保活广告',
     keepalive_burnt: '强绑主页不匹配(1815645)×2 已熔断——对齐主页后手动「立即保活」重试',
-    keepalive_burnt: '强绑主页不匹配(1815645)×2 已熔断——对齐主页后手动「立即保活」重试',
     no_page: '无可用主页',
     no_page_token: '令牌无此主页权限',
     no_asset: '无保活素材',

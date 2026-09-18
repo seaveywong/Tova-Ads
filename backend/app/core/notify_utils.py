@@ -273,8 +273,11 @@ def emit_notification(
 
     if send_tg and (force_tg or level in ("critical", "warning")):
         try:
+            # TG 定向条件=user_id 即可（2026-09-18 全库审计：原要求 user_id AND act_id——
+            # 纯个人事件（哨兵倒计时/紧急暂停完成/落地页归属人）无 act_id，TG 仍广播全员，
+            # 站内定向 TG 广播=幽灵口径不一致）
             _send_tg_by_role(db, tenant_id, roles, level, title, body, reply_markup,
-                             only_user_id=user_id if (user_id and act_id) else None)
+                             only_user_id=user_id if user_id else None)
         except Exception as e:
             logger.warning(f"[TG] 发送失败（站内信已兜底）: {e}")
     return True

@@ -14,7 +14,8 @@ logger = logging.getLogger("toveads.ads_cache")
 
 
 def run_ads_cache_sync():
-    """定时拉所有账户（FB+TT）campaigns/adsets/ads（全状态）→ upsert ads_cache。"""
+    """定时拉 TT 账户 campaigns/adsets/ads（全状态）→ upsert ads_cache。
+    FB 广告层由巡检独家回写（下方 platform != tt 跳过）；本任务只兜 TT（含三层恒拉）。"""
     db = SuperSessionLocal()
     lock = acquire_run_lock(111)
     if not lock:

@@ -297,17 +297,29 @@ def _read_page_description(page_id) -> str:
 
 
 def _emit_landing_alert(project_name: str, msg: str, tenant_id: int = 1):
-    """落地页 worker 异常告警（发布后 smoke 失败用）。"""
+    """落地页 worker 异常告警（发布后 smoke 失败/自动回滚用）。
+    走 emit_notification 全链（2026-09-18 全库审计：曾裸 db.add 只落站内——
+    「发布损坏/自动回滚」这种 critical 不推 TG，夜里回滚了无人知晓；也无 dedup）。"""
     try:
         from ..core.database import SuperSessionLocal
-        from ..models.notify import Notification
-        from datetime import datetime, timezone
+        from ..core.notify_utils import emit_notification
+        from ..core.log_utils import write_log, new_trace_id
         db = SuperSessionLocal()
         try:
             _loc = tenant_locale(db, tenant_id)
-            db.add(Notification(tenant_id=tenant_id, level="critical", event_type="landing_worker_error",
-                                title=L(_loc, "landing.workerError", project=project_name), body=msg,
-                                created_at=datetime.now(timezone.utc)))
+            _tid = new_trace_id()
+            if not emit_notification(
+                    db, tenant_id=tenant_id, level="critical",
+                    event_type="landing_worker_error", trace_id=_tid,
+                    title=L(_loc, "landing.workerError", project=project_name), body=msg,
+                    roles=["owner", "operator"]):
+                # 被风暴上限压制也要留审计痕
+                write_log(db, tenant_id=tenant_id, trace_id=_tid, actor_type="system",
+                          action_type="landing_worker_error", source="landing",
+                          result="suppressed", trigger_detail=f"{project_name}: {msg[:120]}")
+            write_log(db, tenant_id=tenant_id, trace_id=_tid, actor_type="system",
+                      action_type="landing_worker_error", source="landing",
+                      result="fail", trigger_detail=f"{project_name}: {msg[:120]}")
             db.commit()
         finally:
             db.close()
@@ -378,7 +390,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
     # 注入 _d 解码脚本到 <head> 开头（FB 官方推荐位置，像素尽早加载；DOMContentLoaded 兜底按钮绑定）
     _d_decode = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _pids=info.p?info.p.split(',').filter(Boolean):[];var _conv=info.c?info.c.split(',').filter(Boolean):[];if(!window.fbq){!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s);}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');}_pids.forEach(function(pid){fbq('init',pid);fbq('trackSingle',pid,'PageView');});if(info.t){try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}window.__lp_target=info.t;}try{if(typeof LP_CONV!=='undefined')LP_CONV=_conv;}catch(e){}var _slug=info.s||'',_ad=info.a||'',_act=info.ai||'',_tgt=info.t||'',_eid=info.eid||'';var _vid='';try{var _cm=document.cookie.match(/(?:^|;\\s*)_lp_vid=([^;]+)/);_vid=_cm?_cm[1]:(localStorage.getItem('_lp_vid')||'');if(!_vid){_vid='v'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);try{localStorage.setItem('_lp_vid',_vid);document.cookie='_lp_vid='+_vid+';path=/;max-age=31536000;SameSite=Lax';}catch(e){}}}catch(e){}function _lpClick(){_pids.forEach(function(pid){_conv.forEach(function(evt){fbq('trackSingle',pid,evt,_eid?{eventID:_eid}:undefined);});});try{navigator.sendBeacon('/__events/ingest',JSON.stringify({event_type:'click',slug:_slug,ad_id:_ad,act_id:_act,target_url:_tgt,decision:'click',visitor_id:_vid,pixel_ids:_pids.concat(window.__tt_pids||[]).join(','),pixel_events:_conv.join(',')}));}catch(e){}}var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=window.__lp_target||'';try{if(!t&&typeof LP_TARGET_URL!=='undefined')t=LP_TARGET_URL}catch(e){}if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;_lpClick();}},{capture:true});if(info.t){document.addEventListener('DOMContentLoaded',function(){var cta=document.getElementById('cta')||document.querySelector('[onclick*=\"goNext\"]');if(cta)cta.href=info.t;try{if(typeof LP_TARGET_URL!=='undefined')LP_TARGET_URL=info.t;}catch(e){}});}}catch(e){}})();</script>"""
     # TK 像素解码脚本（独立于 FB，从 _d.tp 读取 TK 像素并 fire ttq；event_id 从 _d.eid 取，和后端 S2S 同 UUID 去重）
-    _d_decode_tt = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _tpids=info.tp?info.tp.split(',').filter(Boolean):[];if(!_tpids.length)return;var _tconv=info.tc?info.tc.split(',').filter(Boolean):[];var _eid=info.eid||'';!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};_tpids.forEach(function(pid){ttq.load(pid);});window.__tt_pids=_tpids;ttq.page();}(window,document,'ttq');var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=_tgt||'';if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;try{var _props=_eid?{event_id:_eid}:{};if(_tconv.length){_tconv.forEach(function(evt){ttq.track(evt,_props);});}else{ttq.track('ClickButton',_props);}}catch(err){}}},{capture:true});}catch(e){}})();</script>"""
+    _d_decode_tt = """<script>(function(){var _d=new URLSearchParams(location.search).get('_d');if(!_d)return;try{var info=JSON.parse(decodeURIComponent(escape(atob(_d))));var _tpids=info.tp?info.tp.split(',').filter(Boolean):[];if(!_tpids.length)return;var _tconv=info.tc?info.tc.split(',').filter(Boolean):[];var _eid=info.eid||'';var _tgt=info.t||'';!function(w,d,t){w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"];ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.load=function(e){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{};ttq._i[e]=[];ttq._i[e]._u=i;ttq._t=ttq._t||{};ttq._t[e]=+new Date;ttq._o=ttq._o||{};ttq._o[e]={};var o=d.createElement("script");o.type="text/javascript";o.async=!0;o.src=i+"?sdkid="+e+"&lib="+t;var a=d.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a);};_tpids.forEach(function(pid){ttq.load(pid);});window.__tt_pids=_tpids;ttq.page();}(window,document,'ttq');var _fired=false;function _isCta(el){if(!el)return false;if(el.id==='cta'||/goNext/.test(el.getAttribute('onclick')||''))return true;var h=el.getAttribute('href')||'';if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return false;var t=_tgt||'';if(!t)return true;var _ab=function(u){try{return new URL(u,location.href).href.split('?')[0]}catch(e){return u}};return _ab(h)===_ab(t)}document.addEventListener('click',function(e){if(_fired)return;var el=e.target.closest('[onclick*=\"goNext\"],#cta,a[href]');if(el&&_isCta(el)){_fired=true;try{var _props=_eid?{event_id:_eid}:{};if(_tconv.length){_tconv.forEach(function(evt){ttq.track(evt,_props);});}else{ttq.track('ClickButton',_props);}}catch(err){}}},{capture:true});}catch(e){}})();</script>"""
     _full_decode = _d_decode + _d_decode_tt
     if "<head" in html:
         # 替换串用 lambda（函数替换不做 \ 转义处理）——_d_decode 含 JS 正则（\s 等），
@@ -1138,40 +1150,47 @@ def archive_landing_page(
 
 
 # ── 落地页自检（健康检查 + 防护测试）──
-def _eval_protection_py(rules, ua="", country="", referer="", query=""):
-    """Python 版防护评估（1:1 对齐 Worker evalProtection 检查顺序）。"""
-    if not rules or not isinstance(rules, dict) or not rules:
-        return {"blocked": False, "reason": ""}
+def _eval_protection_py(rules, ua="", country="", referer="", query="", asn=""):
+    """Python 版防护评估（与 Worker evalProtection 同一检查集与顺序——2026-09-18 全库审计
+    对齐：内置 crawler_block 最先；补 required_query/datacenter_block；移除 Worker 从未实现
+    的 source_allow/source_block 遗留键——曾双向失真：配了 source 规则测试显示拦截而线上
+    从不拦、Googlebot 画像低估实际防护）。"""
+    rules = rules if isinstance(rules, dict) else {}
+    # 注意不因空规则早退：内置 crawler_block 与用户规则无关（worker 同款——防护开着时
+    # 零配置也拦爬虫），早退会让"零规则+Googlebot"画像低估实际防护
     u = (ua or "").lower()
-    ref = (referer or "").lower()
-    q = (query or "").lower()
-    # device
+    # device（同 worker 判定）
     dev_type = "desktop"
-    if "/mobile/iphone/ipod/android.*mobile/blackberry/opera mini/".find(u) >= 0 or any(k in u for k in ["mobile", "iphone", "ipod"]):
+    if any(k in u for k in ["mobile", "iphone", "ipod"]):
         dev_type = "mobile"
     elif any(k in u for k in ["ipad", "tablet", "playbook", "silk"]) or ("android" in u and "mobile" not in u):
         dev_type = "tablet"
-    # source
-    src = ""
-    if any(k in ref for k in ["facebook", "fb.com", "m.me"]): src = "facebook"
-    elif "instagram" in ref: src = "instagram"
-    elif "google" in ref: src = "google"
-    elif "tiktok" in ref: src = "tiktok"
-    elif ref: src = "other"
+    # query 参数表（worker 用 URLSearchParams；这里收 "k=v&..." 或带 ? 前缀）
+    from urllib.parse import parse_qs
+    qmap = {k: v[0] for k, v in parse_qs((query or "").lstrip("?")).items()}
 
     def _list_hit(lst, s):
         if not isinstance(lst, list) or not lst: return False
         return any(str(k).lower() in (s or "").lower() for k in lst)
 
+    _BOT_UA = ["facebookexternalhit", "facebot", "meta-externalagent", "googlebot", "googleother",
+               "googleweblight", "bingbot", "baiduspider", "bytespider", "yandexbot", "duckduckbot",
+               "applebot", "twitterbot", "linkedinbot", "telegrambot", "whatsapp", "semrushbot",
+               "ahrefsbot", "mj12bot", "petalbot", "slurp", "crawler", "spider", "bot/", "bot;"]
+    _rq = rules.get("required_query")
+    _dc = rules.get("datacenter_block")
     checks = [
+        ("crawler_block", any(b in u for b in _BOT_UA)),
         ("country_allow", isinstance(rules.get("country_allow"), list) and len(rules["country_allow"]) and country not in rules["country_allow"]),
         ("country_block", isinstance(rules.get("country_block"), list) and country in rules.get("country_block", [])),
-        ("source_allow", isinstance(rules.get("source_allow"), list) and len(rules["source_allow"]) and src not in rules["source_allow"]),
-        ("source_block", isinstance(rules.get("source_block"), list) and src in rules.get("source_block", [])),
         ("device_block", isinstance(rules.get("device_block"), list) and dev_type in rules.get("device_block", [])),
         ("ua_block", _list_hit(rules.get("ua_block"), ua)),
         ("referer_block", _list_hit(rules.get("referer_block"), referer)),
         ("query_block", _list_hit(rules.get("query_block"), query)),
+        ("required_query", isinstance(_rq, list) and len(_rq)
+            and not any(qmap.get(k) and "{{" not in str(qmap[k]) for k in _rq)),
+        ("datacenter_block", isinstance(_dc, list) and len(_dc)
+            and str(asn) in [str(x).strip() for x in _dc]),
     ]
     for name, hit in checks:
         if hit: return {"blocked": True, "reason": name}
@@ -1179,12 +1198,13 @@ def _eval_protection_py(rules, ua="", country="", referer="", query=""):
 
 
 _PROTECTION_PROFILES = [
-    {"label": "桌面浏览器（美国）", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0", "country": "US", "referer": "", "query": ""},
-    {"label": "移动端（美国）", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "", "query": ""},
-    {"label": "Googlebot 爬虫", "ua": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "country": "US", "referer": "", "query": ""},
-    {"label": "非允许国（中国）", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0", "country": "CN", "referer": "", "query": ""},
-    {"label": "带调试参数", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "", "query": "?preview=1"},
-    {"label": "调试来源 Referer", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "https://debug.example.com/preview", "query": ""},
+    {"label": "桌面浏览器（美国）", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0", "country": "US", "referer": "", "query": "", "asn": ""},
+    {"label": "移动端（美国）", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "", "query": "", "asn": ""},
+    {"label": "Googlebot 爬虫", "ua": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "country": "US", "referer": "", "query": "", "asn": ""},
+    {"label": "非允许国（中国）", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0", "country": "CN", "referer": "", "query": "", "asn": ""},
+    {"label": "带调试参数", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "", "query": "?preview=1", "asn": ""},
+    {"label": "调试来源 Referer", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4) Safari/605.1", "country": "US", "referer": "https://debug.example.com/preview", "query": "", "asn": ""},
+    {"label": "数据中心 IP（DigitalOcean AS14061）", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0", "country": "US", "referer": "", "query": "", "asn": "14061"},
 ]
 
 
@@ -1194,17 +1214,19 @@ def protection_test(
     request: Request,
     user: CurrentUser = Depends(require_permission("ads.read")),
 ):
-    """防护规则测试：6 类画像本地模拟（0 网络开销，瞬时返回）。"""
+    """防护规则测试：7 类画像本地模拟（0 网络开销，瞬时返回；检查集与线上 Worker 一致）。"""
     loc = req_locale(request)
-    # profile label → i18n code（_PROTECTION_PROFILES 顺序固定：桌面/移动/Googlebot/非允许国/调试参数/调试来源）
+    # profile label → i18n code（_PROTECTION_PROFILES 顺序固定：桌面/移动/Googlebot/非允许国/调试参数/调试来源/机房IP）
     _label_codes = [
         "landing.protSampleDesktop", "landing.protSampleMobile", "landing.protSampleGooglebot",
         "landing.protSampleBlockedCountry", "landing.protSampleDebugQuery", "landing.protSampleDebugReferer",
+        "landing.protSampleDatacenter",
     ]
     rules = body.get("rules") or {}
     results = []
     for idx, p in enumerate(_PROTECTION_PROFILES):
-        v = _eval_protection_py(rules, ua=p["ua"], country=p["country"], referer=p["referer"], query=p["query"])
+        v = _eval_protection_py(rules, ua=p["ua"], country=p["country"], referer=p["referer"],
+                                query=p["query"], asn=p.get("asn", ""))
         results.append({"label": L(loc, _label_codes[idx]), "blocked": v["blocked"], "reason": v["reason"]})
     blocked_count = sum(1 for r in results if r["blocked"])
     return {"profiles": results, "blocked_count": blocked_count, "pass_count": len(results) - blocked_count}

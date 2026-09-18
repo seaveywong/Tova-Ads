@@ -3,7 +3,6 @@
 关键：所有业务查询必须在 tenant_ctx 内执行，把 tenant_id/is_superadmin
 设进 PG 会话变量，RLS 策略据此过滤（见 09 多租户隔离）。
 """
-from contextlib import contextmanager
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from .config import settings
@@ -36,22 +35,6 @@ def get_system_db():
         yield db
     finally:
         db.close()
-
-
-@contextmanager
-def tenant_ctx(db: Session, tenant_id: int, is_superadmin: bool = False):
-    """设置 RLS 会话上下文（请求/操作期间）。
-
-    set_config(is_local=false)=会话级：中途 commit 后仍生效（SET LOCAL 会随事务蒸发）。
-    连接归池 rollback/reset 清理，不泄漏到下一请求。
-    平台超管用 BYPASSRLS 角色（toveads_super）连接，或这里 is_superadmin=True。
-    """
-    db.execute(text("SELECT set_config('app.tenant_id', :tid, false)"), {"tid": str(tenant_id)})
-    db.execute(
-        text("SELECT set_config('app.is_superadmin', :s, false)"),
-        {"s": "true" if is_superadmin else "false"},
-    )
-    yield
 
 
 def acquire_run_lock(key: int):

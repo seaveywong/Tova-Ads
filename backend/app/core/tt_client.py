@@ -112,19 +112,6 @@ def throttle_strike(key: str) -> float:
         return _strike_locked(key, _throttle(key), time.time())
 
 
-def throttle_snapshot() -> dict:
-    """限流器快照（观测/排障）：{endpoint: {count_60s, strikes, blocked_remaining_s}}。"""
-    now = time.time()
-    with _rate_lock:
-        out = {}
-        for key, th in _rate_state.items():
-            while th.window and th.window[0] <= now - RATE_WINDOW_S:
-                th.window.popleft()
-            out[key] = {"count_60s": len(th.window), "strikes": th.strikes,
-                        "blocked_remaining_s": round(max(0.0, th.blocked_until - now), 1)}
-        return out
-
-
 def _throttle_enter(key: str) -> None:
     """请求前门禁：封路中 → 短封睡等后重过门禁，长封直接拒；滑动窗超软顶 → 记 strike。"""
     while True:

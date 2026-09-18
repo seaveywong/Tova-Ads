@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_alg: str = "HS256"
     jwt_expire_min: int = 10080  # 7 天（搭配滑动续期=闲置超7天才掉线；活跃用永不掉）
-    jwt_refresh_expire_days: int = 7
     # 环境
     app_env: str = "development"
     # FB 凭证加密（Fernet）
