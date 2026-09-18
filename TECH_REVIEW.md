@@ -2627,3 +2627,29 @@ OK：/fb/accounts、/ads/list、/ads/spend-report、/landing/pages、/assets、/
 
 ### 验证
 三角色断言 smoke：gl 可见集=[33,34,35]（含 0 绑定自建 34）✓；他人未绑令牌 30 不可见 ✓；超管 None 不限 ✓；lc 令牌客户端过滤 1/10 ✓；journal 零 Traceback。
+
+## 批CW：全库审计——断层/孤儿/逻辑不匹配（2026-09-18，四路 agent + 人工复核）
+
+### 审计方法与覆盖
+四路并行扫描：①前后端 API 契约（325 调用点 × 307 端点全比对+路由遮蔽排查）②后端孤儿（路由/函数/模型三层+平行实现甄别）③前端一致性（3370×2 i18n 键求值比对+动态键注册表逐归约+路由/组件/composable）④声称vs实现（6 引擎文件 docstring 对照）。
+
+### 已修（本 commit）
+- **P0 referer/referrer 错位**：worker 发 `referer`，ingest 模型只声明 `referrer` → Pydantic 静默丢弃 → 落地日志来源列**自上线恒空**（搜索/CSV 同失明）。补字段+归一+e2e 验证 ✓
+- 4 处注释与实现相反（保活 lifetime→daily、$1→$5/天、哨兵 arm 范围）——其中 2 处涉钱
+- 审计时点后已自愈 2 处（学习期 docstring、watchdog ③）+ en.js teams.summary 错位
+
+### 审计结论汇总
+| 维度 | 结论 |
+|---|---|
+| 断层 | **0 条 404 断层**（前端 325 调用 100% 匹配；无路由遮蔽） |
+| 真孤儿-路由 | launch.py 整文件(3，被 launch-templates 取代)/tickets.py(5，从未接 UI)/compliance.py(4，认证计划挂起)/ai.py(3，被 settings/ai 平行取代)+散布 13 条（详见 git 附卷） |
+| 真孤儿-函数 | 5 个（permissions_for/throttle_snapshot/normalize_tt_metrics/tt_kpi_field/target_cpa_for）+rbac 死导入 |
+| 死表 | 6 个（Invitation/TokenHealth/Ticket/TicketMessage/CertifiedPage——物理删需迁移另立项） |
+| **功能断链** | **KpiConfig：kpi_resolver L0 手动层有读无写 UI**——L0 永远空转，规则永远吃自带阈值（补 UI 或删 L0 待拍板） |
+| 前端 | 路由/组件零孤儿；i18n 2758 静态+~60 动态键仅 1 处 en 错位（已好）；169 死键(5%)+4 僵尸变量+meta.icon 无消费 |
+| 平行实现 | ai.py vs settings.py：settings 为现行超集，ai.py 整文件可删（AiClient 保留） |
+
+### 待拍板（删除清单——批CW 不擅自删）
+1. launch.py/tickets.py/ai.py/compliance.py 四整文件 + 13 条散布孤儿路由（cron/回调/运维端点保留）
+2. KpiConfig L0：补管理 UI 还是砍掉该层
+3. 保活默认 $5/天 是否符合预期（注释已正，默认值未动）
