@@ -2606,3 +2606,24 @@ live 11/16（5 个在管账户本轮实时拉取失败回落库内窗口值，�
 
 ### 验证（真实删除测试页61，真调 CF API）
 DB 页+子码清 ✓；CF Pages 项目复查 404 ✓；zone 中 lp61 记录消失 ✓；事件保留 4 条 ✓；二次删 404 幂等 ✓；线上 chunk 含 deletePage ✓。
+
+## 批CV：RBAC 可见性——gl 自建令牌不可见根因 + 全库视图审计（2026-09-18，本 commit）
+
+### 概述
+用户报告：gl OAuth 授权的令牌 gl 自己看不到（仅超管/owner 可见）。根因：令牌可见集只经「绑名下在管账户」推导，漏 ∪「自建」。授权→导入账户是两步，空窗期创建人自建令牌不可见（且经 _cred_scope_or_404 连锁断 rename/更新/校验/刷新/删除/重绑）。随后 Explore agent 全面审计 13 类资源列表端点。
+
+### 修复清单（P1 + 5 P2）
+| 端点 | 问题 | 修 |
+|---|---|---|
+| /fb/credentials（+全部 _cred_scope_or_404 路径） | 可见集漏自建 | ∪ created_by==uid（单点） |
+| /guard/rules | 影响自己的 team/NULL 规则不可见 | or_ 条件补看（require_owned 闸保住可见≠可管） |
+| /fb/import 重导 | 无主账户不认领→导入成功却看不到 | owner NULL 时认领（他人归属不抢） |
+| /fb/assets | operator 看全团队 FB 资产 | 可见令牌过滤+独立缓存键 |
+| /leads/pages | 同上（主页+订阅实况） | _tenant_fb_clients 加 only_cred_ids 参数 |
+| /launch-templates/pages | 漏 account_operable 闸 | 补闸 |
+
+### 审计结论（OK/by-design 不改）
+OK：/fb/accounts、/ads/list、/ads/spend-report、/landing/pages、/assets、/launch-templates、/form-templates、/audiences。by-design 共享资产：/fb/apps、/landing-lib/pixels、/landing-lib/domains、/subcodes。存量 NULL created_by/owner 行（批AG 前）为数据迁移边角非代码缺口。
+
+### 验证
+三角色断言 smoke：gl 可见集=[33,34,35]（含 0 绑定自建 34）✓；他人未绑令牌 30 不可见 ✓；超管 None 不限 ✓；lc 令牌客户端过滤 1/10 ✓；journal 零 Traceback。
