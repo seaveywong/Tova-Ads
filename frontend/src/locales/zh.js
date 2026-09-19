@@ -840,6 +840,7 @@ export default {
     cfOnboardOk: '域名 {d} 已加入 CF——请到注册商把 NS 改为下面两台（改完回到这里刷新看状态变 active）',
     cfOnboardNsHint: '到你的域名注册商 → DNS/Nameserver 设置 → 替换为以下 CF NS（点即复制）：',
     cfZonesTitle: '域名（zone）', cfPagesTitle: 'Pages 项目', cfNoZones: '暂无域名', cfNoRecords: '无 DNS 记录', cfLpLink: '关联的落地页',
+    cfAccountNsTip: '本账户的 CF 名称服务器——在域名注册商把 DNS/Nameserver 改成这两台（点即复制），改完回这里刷新看状态变 active。', cfPendingHint: 'NS 未生效，去注册商确认',
     cfEmailTokenLabel: '邮箱管理 Token（可选）', cfEmailTokenPh: '用户级 API Token（cfat_ 开头的账户级不行）',
     cfEmailTokenHint: 'Email Routing 的目的地邮箱/转发规则管理只支持用户级 API Token。CF 后台 → My Profile → API Tokens → Create Token：Zone·tovaads.com 的 Email Routing Addresses·Edit + DNS·Edit + Zone·Read。只做启用/DNS 可不填。',
     emNeedUserToken: '⚠ 目的地邮箱/转发规则管理需要用户级 CF Token——去「域名服务配置」填「邮箱管理 Token」后刷新（启用和 DNS 配置不受影响）。',

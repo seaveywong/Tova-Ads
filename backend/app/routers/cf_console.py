@@ -86,7 +86,7 @@ def cf_onboard_zone(body: ZoneIn, _=Depends(_cf_client_for_user)):
     d = (body.domain or "").strip().lower().rstrip(".")
     d = d.replace("https://", "").replace("http://", "").split("/")[0]
     if not re.match(r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$", d) or "." not in d or len(d) > 253:
-        raise HTTPException(400, "INVALID_DOMAIN")
+        raise HTTPException(400, "域名格式不正确（例：mybrand.com）")
     cf = _cf()
     z = cf.create_zone(d)
     _CACHE.pop("overview", None)

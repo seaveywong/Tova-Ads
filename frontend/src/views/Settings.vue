@@ -259,7 +259,12 @@ const cfExpanded = ref('')          // 当前展开 DNS 的 zone id
 const cfOnboardDomain = ref('')
 const cfOnboarding = ref(false)
 const cfOnboardResult = ref(null)  // {zone, name_servers}——向导结果（NS 指引）
-// copyText 已有全局版（39 行）——批CY 区块直接复用，去掉局部版
+const cfZoneStatusCls = (s) => ({ active: 'ok', exists: 'ok', pending: 'warn' }[s] || 'warn')
+// 账户级 CF 名称服务器：同账户所有 zone 共用一对——向导常驻展示（注册商要填的地址）
+const cfAccountNs = computed(() => {
+  const z = (cfOverview.value?.zones || []).find(x => (x.name_servers || []).length)
+  return (z && z.name_servers) || (cfOnboardResult.value?.name_servers) || []
+})
 const loadCfOverview = async () => {
   cfLoading.value = true
   try { cfOverview.value = await GET('/cf-console/overview', 60000) }
@@ -766,53 +771,62 @@ const runKeepaliveNow = async () => {
         <span class="field-hint">{{ t('settings.cfEmailTokenHint') }}</span></div>
       <button class="btn primary" :disabled="cfSaving" @click="saveCf">{{ t('common.save') }}</button>
 
-      <!-- ── CF 管控台（批CY 一期）：接入向导 / 域名总览 / Pages 项目 ── -->
+      <!-- ── CF 管控台（批CY）：面板化——接入向导(常驻NS) / 域名 / Pages 项目 ── -->
       <div class="cf-console">
-        <div class="cf-sub">{{ t('settings.cfOnboardTitle') }}</div>
-        <div class="form-l cf-onboard">
-          <input v-model="cfOnboardDomain" class="input" :placeholder="t('settings.cfOnboardPh')" @keyup.enter="onboardZone" />
-          <button class="btn" :disabled="cfOnboarding" @click="onboardZone">{{ cfOnboarding ? t('common.loading') : t('settings.cfOnboardBtn') }}</button>
-        </div>
-        <div v-if="cfOnboardResult" class="cf-ns-guide">
-          <div class="cf-ns-tip">{{ t('settings.cfOnboardNsHint') }}</div>
-          <div v-for="ns in cfOnboardResult.name_servers" :key="ns" class="cf-ns-row" @click="copyText(ns)">{{ ns }} <i>⧉</i></div>
+        <div class="cf-panel">
+          <div class="cf-panel-hd">{{ t('settings.cfOnboardTitle') }}</div>
+          <div class="cf-panel-bd">
+            <div class="cf-onboard">
+              <input v-model="cfOnboardDomain" class="input" :placeholder="t('settings.cfOnboardPh')" @keyup.enter="onboardZone" />
+              <button class="btn primary" :disabled="cfOnboarding" @click="onboardZone">{{ cfOnboarding ? t('common.loading') : t('settings.cfOnboardBtn') }}</button>
+            </div>
+            <div v-if="cfAccountNs.length" class="cf-ns-box">
+              <div class="cf-ns-tip">{{ t('settings.cfAccountNsTip') }}</div>
+              <div v-for="ns in cfAccountNs" :key="ns" class="cf-ns-row" @click="copyText(ns)">{{ ns }} <i>⧉</i></div>
+            </div>
+          </div>
         </div>
 
-        <div class="cf-sub cf-sub2">
-          <span>{{ t('settings.cfZonesTitle') }}（{{ (cfOverview?.zones || []).length }}）</span>
-          <button class="btn sm" :disabled="cfLoading" @click="loadCfOverview">{{ cfLoading ? t('common.loading') : '⟳' }}</button>
-        </div>
-        <div v-loading="cfLoading" class="cf-zone-list">
-          <template v-for="z in (cfOverview?.zones || [])" :key="z.id">
-            <div class="cf-zone-row" @click="toggleZoneDns(z)">
-              <span :class="['cf-badge', cfZoneStatusCls(z.status)]">{{ z.status }}</span>
-              <span class="cf-zone-name">{{ z.name }}</span>
-              <span class="cf-zone-plan">{{ z.plan }}</span>
-              <i class="cf-arrow" :class="{ open: cfExpanded === z.id }">▸</i>
-            </div>
-            <div v-if="cfExpanded === z.id" class="cf-dns">
-              <div class="cf-ns-line" :title="t('common.copy')" @click="copyText((z.name_servers || []).join('\n'))">
-                NS: {{ (z.name_servers || []).join(' · ') || '-' }}
+        <div class="cf-panel">
+          <div class="cf-panel-hd">
+            <span>{{ t('settings.cfZonesTitle') }} <em>{{ (cfOverview?.zones || []).length }}</em></span>
+            <button class="btn sm" :disabled="cfLoading" @click="loadCfOverview">{{ cfLoading ? t('common.loading') : '⟳' }}</button>
+          </div>
+          <div class="cf-panel-bd" v-loading="cfLoading">
+            <template v-for="z in (cfOverview?.zones || [])" :key="z.id">
+              <div class="cf-zone-row" @click="toggleZoneDns(z)">
+                <span :class="['cf-badge', cfZoneStatusCls(z.status)]">{{ z.status }}</span>
+                <span class="cf-zone-name">{{ z.name }}</span>
+                <span v-if="z.status === 'pending'" class="cf-zone-hint">{{ t('settings.cfPendingHint') }}</span>
+                <span class="cf-zone-plan">{{ z.plan }}</span>
+                <i class="cf-arrow" :class="{ open: cfExpanded === z.id }">▸</i>
               </div>
-              <div v-for="r in (cfZoneDns[z.id] || [])" :key="r.id" class="cf-dns-row">
-                <span class="cf-dns-type">{{ r.type }}</span>
-                <span class="cf-dns-name">{{ r.name }}</span>
-                <span class="cf-dns-content" :title="r.content">{{ r.content }}</span>
-                <span class="cf-dns-proxy">{{ r.proxied ? '☁' : 'DNS' }}</span>
+              <div v-if="cfExpanded === z.id" class="cf-dns">
+                <div class="cf-ns-line" :title="t('common.copy')" @click="copyText((z.name_servers || []).join(' / '))">
+                  NS: {{ (z.name_servers || []).join(' · ') || '-' }}
+                </div>
+                <div v-for="r in (cfZoneDns[z.id] || [])" :key="r.id" class="cf-dns-row">
+                  <span class="cf-dns-type">{{ r.type }}</span>
+                  <span class="cf-dns-name">{{ r.name }}</span>
+                  <span class="cf-dns-content" :title="r.content">{{ r.content }}</span>
+                  <span class="cf-dns-proxy">{{ r.proxied ? '☁' : 'DNS' }}</span>
+                </div>
+                <div v-if="!(cfZoneDns[z.id] || []).length" class="cf-dns-empty">{{ t('settings.cfNoRecords') }}</div>
               </div>
-              <div v-if="!(cfZoneDns[z.id] || []).length" class="cf-dns-empty">{{ t('settings.cfNoRecords') }}</div>
-            </div>
-          </template>
-          <div v-if="!(cfOverview?.zones || []).length && !cfLoading" class="cf-dns-empty">{{ t('settings.cfNoZones') }}</div>
+            </template>
+            <div v-if="!(cfOverview?.zones || []).length && !cfLoading" class="cf-dns-empty">{{ t('settings.cfNoZones') }}</div>
+          </div>
         </div>
 
-        <div class="cf-sub cf-sub2">{{ t('settings.cfPagesTitle') }}（{{ (cfOverview?.pages || []).length }}）</div>
-        <div class="cf-page-list">
-          <div v-for="p in (cfOverview?.pages || [])" :key="p.name" class="cf-page-row">
-            <span class="cf-zone-name">{{ p.name }}</span>
-            <span class="cf-page-domains" :title="(p.domains || []).join('\n')">{{ (p.domains || []).join(' · ') || '-' }}</span>
-            <span class="cf-page-lp" :title="t('settings.cfLpLink')">{{ p.page_title ? `📄 ${p.page_title}（${p.page_status}）` : '' }}</span>
-            <span class="cf-page-date">{{ (p.created_on || '').slice(0, 10) }}</span>
+        <div class="cf-panel">
+          <div class="cf-panel-hd">{{ t('settings.cfPagesTitle') }} <em>{{ (cfOverview?.pages || []).length }}</em></div>
+          <div class="cf-panel-bd">
+            <div v-for="p in (cfOverview?.pages || [])" :key="p.name" class="cf-page-row">
+              <span class="cf-zone-name">{{ p.name }}</span>
+              <span class="cf-page-domains" :title="(p.domains || []).join(' / ')">{{ (p.domains || []).join(' · ') || '-' }}</span>
+              <span class="cf-page-lp" :title="t('settings.cfLpLink')">{{ p.page_title ? ('📄 ' + p.page_title + '（' + p.page_status + '）') : '' }}</span>
+              <span class="cf-page-date">{{ (p.created_on || '').slice(0, 10) }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1243,26 +1257,29 @@ const runKeepaliveNow = async () => {
 .ib-cap { width: 90px; padding: 6px 8px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 6px; color: var(--t1); font-size: 13px; font-family: inherit; box-sizing: border-box }
 .ib-cap:focus { border-color: var(--ac); outline: none }
 <style scoped>
-/* CF 管控台（批CY 一期） */
-.cf-console { margin-top: 18px; border-top: 1px solid var(--bd); padding-top: 14px }
-.cf-sub { font-size: 13px; font-weight: 600; margin: 6px 0 8px }
-.cf-sub2 { display: flex; align-items: center; justify-content: space-between; margin-top: 16px }
-.cf-onboard { display: flex; gap: 8px }
-.cf-ns-guide { margin: 10px 0 4px; padding: 10px 12px; background: var(--bg2); border: 1px dashed var(--bd); border-radius: 8px }
-.cf-ns-tip { font-size: 12px; color: var(--t3); margin-bottom: 6px; line-height: 1.5 }
-.cf-ns-row { font-family: ui-monospace, monospace; font-size: 13px; cursor: pointer; padding: 3px 0 }
+/* CF 管控台（批CY）：面板化布局 */
+.cf-console { margin-top: 18px; display: flex; flex-direction: column; gap: 14px }
+.cf-panel { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden }
+.cf-panel-hd { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--bd) }
+.cf-panel-hd em { font-style: normal; color: var(--t3); font-weight: 400; margin-left: 4px }
+.cf-panel-bd { padding: 6px 14px 10px }
+.cf-onboard { display: flex; gap: 8px; margin-top: 6px }
+.cf-ns-box { margin-top: 10px; padding: 8px 12px; border: 1px dashed var(--bd); border-radius: 8px; background: var(--bg3) }
+.cf-ns-tip { font-size: 12px; color: var(--t3); margin-bottom: 4px; line-height: 1.5 }
+.cf-ns-row { font-family: ui-monospace, monospace; font-size: 13px; cursor: pointer; padding: 3px 0; display: flex; justify-content: space-between }
 .cf-ns-row:hover { color: var(--ac) }
-.cf-zone-list { min-height: 40px }
-.cf-zone-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--bd); cursor: pointer }
-.cf-zone-row:hover { background: var(--bg2) }
+.cf-zone-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--bd); cursor: pointer }
+.cf-zone-row:last-child { border-bottom: none }
+.cf-zone-row:hover { background: var(--bg3) }
 .cf-badge { font-size: 10px; padding: 1px 7px; border-radius: 4px; white-space: nowrap }
 .cf-badge.ok { color: #30d158; background: rgba(48,209,88,.12) }
 .cf-badge.warn { color: #ff9f0a; background: rgba(255,159,10,.12) }
 .cf-zone-name { font-weight: 600; font-size: 13px }
+.cf-zone-hint { font-size: 11px; color: #ff9f0a }
 .cf-zone-plan { font-size: 11px; color: var(--t3); margin-left: auto }
 .cf-arrow { font-size: 11px; color: var(--t3); transition: transform .15s }
 .cf-arrow.open { transform: rotate(90deg) }
-.cf-dns { padding: 6px 4px 10px 26px; border-bottom: 1px solid var(--bd); background: var(--bg2) }
+.cf-dns { padding: 6px 2px 10px 24px; border-bottom: 1px solid var(--bd); background: var(--bg3) }
 .cf-ns-line { font-size: 11px; color: var(--t3); margin-bottom: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 .cf-dns-row { display: flex; gap: 10px; font-size: 12px; padding: 2px 0; align-items: baseline }
 .cf-dns-type { color: var(--ac); font-size: 10px; min-width: 38px }
@@ -1270,7 +1287,8 @@ const runKeepaliveNow = async () => {
 .cf-dns-content { color: var(--t3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .cf-dns-proxy { font-size: 10px; color: var(--t3) }
 .cf-dns-empty { font-size: 12px; color: var(--t3); text-align: center; padding: 12px 0 }
-.cf-page-row { display: flex; gap: 12px; padding: 7px 4px; border-bottom: 1px solid var(--bd); font-size: 12px; align-items: baseline }
+.cf-page-row { display: flex; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--bd); font-size: 12px; align-items: baseline }
+.cf-page-row:last-child { border-bottom: none }
 .cf-page-domains { color: var(--t3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .cf-page-lp { color: var(--t2); white-space: nowrap }
 .cf-page-date { font-size: 11px; color: var(--t3); margin-left: auto; white-space: nowrap }

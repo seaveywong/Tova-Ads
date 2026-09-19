@@ -829,6 +829,7 @@ export default {
     cfOnboardOk: 'Domain {d} added to CF — change the nameservers at your registrar to the two below (then refresh here until status turns active)',
     cfOnboardNsHint: 'At your registrar → DNS/Nameserver settings → replace with these CF nameservers (click to copy):',
     cfZonesTitle: 'Domains (zones)', cfPagesTitle: 'Pages projects', cfNoZones: 'No domains', cfNoRecords: 'No DNS records', cfLpLink: 'Linked landing page',
+    cfAccountNsTip: "This account's Cloudflare nameservers — set them at your registrar (click to copy), then refresh here until the status turns active.", cfPendingHint: 'NS not active yet — check your registrar',
     cfEmailTokenLabel: 'Email admin token (optional)', cfEmailTokenPh: 'User-level API token (cfat_ account tokens do not work)',
     cfEmailTokenHint: 'Email Routing address/rule management only supports user-level API tokens. CF dashboard -> My Profile -> API Tokens -> Create Token with Zone (tovaads.com): Email Routing Addresses Edit + DNS Edit + Zone Read. Leave empty if you only need enable/DNS.',
     emNeedUserToken: 'Warning: managing destination addresses / forwarding rules requires a user-level CF token — fill "Email admin token" in Domain service config, then refresh (enable & DNS are unaffected).',
