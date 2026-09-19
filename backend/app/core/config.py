@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     # Cloudflare API
     cf_api_token: str = ""
     cf_account_id: str = ""
-    porkbun_api_key: str = ""     # 域名代购（批DD 预埋；Settings→Porkbun 配置后生效）
+    porkbun_api_key: str = ""     # 域名代购注册商凭据（批DD 预埋；Settings→域名注册商 配置后生效）
     porkbun_secret_key: str = ""
+    dynadot_api_key: str = ""     # Dynadot（主力注册商 2026-09-19：单 Key，支付宝充值余额）
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
     # 前端 base URL（OAuth 完成页"返回前端"链接用）

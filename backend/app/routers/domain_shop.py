@@ -1,9 +1,10 @@
-"""域名商店路由（批DD 预埋 2026-09-19）：Porkbun 代购——查价/下单/批准→自动注册→自动接入 CF。
+"""域名商店路由（批DD 预埋 2026-09-19；同日切 Dynadot 主力）：查价/下单/批准→自动注册→自动接入 CF。
 
 状态机：pending_payment（等付款；钱包上线后自动冻结扣，当前=超管人工确认收款）
   → approved（超管确认）→ 注册链（registering→registered→bound） / failed（原因入库）
-全自动链 = Porkbun 注册（NS 直指 CF）→ CF 建 zone → 入 landing_domains（source=purchased）
-→ 团队立即可在其下建落地页子域。Porkbun 未配置：查价/批准返回明确引导，订单可先建。
+全自动链 = 注册商注册（NS 指向 CF）→ CF 建 zone → 入 landing_domains（source=purchased）
+→ 团队立即可在其下建落地页子域。注册商由 system_settings['domain_registrar'] 选（dynadot|porkbun），
+未配置：查价/批准返回明确引导，订单可先建。
 计费预埋：手续费 system_settings['domain_shop_fee_usd']（默认 5），钱包上线后换 pricing_rules。
 """
 import re
@@ -16,11 +17,12 @@ from ..core.database import get_db, SuperSessionLocal
 from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.log_utils import write_log, new_trace_id
 from ..core.porkbun_client import PorkbunClient, porkbun_configured
+from ..core.dynadot_client import DynadotClient, DynadotError
 from ..models.landing_lib import LandingDomain
 
 router = APIRouter(prefix="/domains-shop", tags=["domains-shop"])
 
-# 查价缓存（模块级 10min——Porkbun pricing 全表一次拉，逐单查太浪费）
+# 查价缓存（模块级 10min——两注册商 pricing 全表均一次拉，逐单查太浪费且 Dynadot 限 1 req/s）
 _PRICING_CACHE: dict = {}
 _PRICING_TTL = 600
 
@@ -28,10 +30,47 @@ _FEE_KEY = "domain_shop_fee_usd"
 _DEFAULT_FEE = 5.0
 
 
-def _client() -> PorkbunClient:
+def _reg_name(db) -> str:
+    """当前注册商（system_settings['domain_registrar']，默认 dynadot）。"""
+    from ..models.system import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar").first()
+    return (row.value if row and row.value in ("dynadot", "porkbun") else "dynadot")
+
+
+def _reg_ready(db) -> bool:
+    if _reg_name(db) == "dynadot":
+        return bool(settings.dynadot_api_key)
+    return porkbun_configured(settings)
+
+
+def _registrar_client(db):
+    """按选择返回注册商客户端；未配置 400 引导。"""
+    if _reg_name(db) == "dynadot":
+        if not settings.dynadot_api_key:
+            raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
+        return DynadotClient(settings.dynadot_api_key)
     if not porkbun_configured(settings):
         raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
     return PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
+
+
+def _pricing(client, db) -> dict:
+    """{tld: {registration, renewal}}（10min 缓存；两注册商客户端已统一此形状）。"""
+    import time as _t
+    now = _t.time()
+    if not _PRICING_CACHE or now - _PRICING_CACHE["at"] > _PRICING_TTL:
+        _PRICING_CACHE["pricing"] = client.pricing()
+        _PRICING_CACHE["at"] = now
+    return _PRICING_CACHE["pricing"] or {}
+
+
+def _avail(client, d: str) -> dict:
+    """可注册性 + 实时价：Dynadot search 一步到位；Porkbun check。"""
+    if isinstance(client, DynadotClient):
+        r = client.search(d)
+        return {"available": r["available"], "price": r.get("price_usd")}
+    chk = client.check(d)
+    return {"available": str(chk.get("porkbunAvailable")) == "yes", "price": None}
 
 
 def _fee(db) -> float:
@@ -57,22 +96,18 @@ def _norm_domain(raw: str) -> str:
 @router.get("/check")
 def check_domain(domain: str = "", user: CurrentUser = Depends(require_permission("landing.manage")),
                  db: Session = Depends(get_db)):
-    """可注册性 + 实时报价（成本 + 手续费 + 总价）。未配置 Porkbun → 400 引导。"""
+    """可注册性 + 实时报价（成本 + 手续费 + 总价）。未配置注册商 → 400 引导。"""
     d = _norm_domain(domain)
     tld = d.rsplit(".", 1)[-1]
-    import time as _t
-    now = _t.time()
-    if not _PRICING_CACHE or now - _PRICING_CACHE["at"] > _PRICING_TTL:
-        _PRICING_CACHE["pricing"] = _client().pricing()
-        _PRICING_CACHE["at"] = now
-    price = (_PRICING_CACHE["pricing"] or {}).get(tld)
+    client = _registrar_client(db)
+    price = _pricing(client, db).get(tld)
     if not price or price.get("registration") is None:
         raise HTTPException(400, f"暂不支持 .{tld} 后缀")
-    chk = _client().check(d)
-    available = str(chk.get("porkbunAvailable")) == "yes"
+    av = _avail(client, d)
     fee = _fee(db)
-    cost = price["registration"]
-    return {"domain": d, "available": available, "tld": tld,
+    # Dynadot search 自带实时价（premium 域与表价不同），有则优先
+    cost = av.get("price") if av.get("price") is not None else price["registration"]
+    return {"domain": d, "available": av["available"], "tld": tld,
             "cost_usd": cost, "fee_usd": fee, "total_usd": round(cost + fee, 2),
             "renewal_usd": price.get("renewal")}
 
@@ -89,18 +124,16 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
     d = _norm_domain(body.domain)
     if body.years < 1 or body.years > 10:
         raise HTTPException(400, "年限 1-10")
-    import time as _t
-    now = _t.time()
-    if not _PRICING_CACHE or now - _PRICING_CACHE["at"] > _PRICING_TTL:
-        _PRICING_CACHE["pricing"] = _client().pricing()
-        _PRICING_CACHE["at"] = now
-    price = (_PRICING_CACHE["pricing"] or {}).get(d.rsplit(".", 1)[-1])
+    client = _registrar_client(db)
+    tld = d.rsplit(".", 1)[-1]
+    price = _pricing(client, db).get(tld)
     if not price or price.get("registration") is None:
-        raise HTTPException(400, f"暂不支持 .{d.rsplit('.', 1)[-1]} 后缀")
-    chk = _client().check(d)
-    if str(chk.get("porkbunAvailable")) != "yes":
+        raise HTTPException(400, f"暂不支持 .{tld} 后缀")
+    av = _avail(client, d)
+    if not av["available"]:
         raise HTTPException(400, "该域名不可注册（已被占用或不支持）")
-    cost = round(price["registration"] * body.years, 2)
+    unit = av.get("price") if av.get("price") is not None else price["registration"]
+    cost = round(unit * body.years, 2)
     fee = _fee(db)
     from ..models.system import SystemSetting  # noqa: F401（表已 import 路径一致）
     from ..models.domain_shop import DomainOrder
@@ -165,11 +198,12 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
         raise HTTPException(404, "订单不存在")
     if o.status not in ("pending_payment", "approved"):
         raise HTTPException(400, f"状态 {o.status} 不可批准")
-    if not porkbun_configured(settings):
+    if not _reg_ready(db):
         o.status = "approved"
         o.approved_by, o.approved_at = user.id, datetime.now(timezone.utc)
         db.commit()
-        raise HTTPException(400, "PORKBUN_NOT_CONFIGURED_ORDER_APPROVED")
+        reg = _reg_name(db).upper()
+        raise HTTPException(400, f"{reg}_NOT_CONFIGURED_ORDER_APPROVED")
     o.status = "registering"
     o.approved_by, o.approved_at = user.id, datetime.now(timezone.utc)
     db.commit()
@@ -186,9 +220,15 @@ def _fulfill(o, user, db) -> dict:
         # ① CF 先建 zone（拿到分配的 NS 对）
         zone = cf.create_zone(o.domain)
         ns = zone.get("name_servers") or []
-        # ② Porkbun 注册并 NS 直指 CF——注册生效后 zone 自动转 active
-        pb = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
-        reg = pb.register(o.domain, o.years, ns=ns)
+        # ② 注册商注册并把 NS 指到 CF——注册生效后 zone 自动转 active。
+        #    Dynadot register 不带 NS 参数：注册→set_ns 两步（客户端内已限速 1.1s）。
+        if _reg_name(db) == "dynadot":
+            dyna = DynadotClient(settings.dynadot_api_key)
+            dyna.register(o.domain, o.years)
+            dyna.set_ns(o.domain, ns)
+        else:
+            pb = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
+            pb.register(o.domain, o.years, ns=ns)
         # ③ 入域名库（团队立即可建落地页）
         exists = db.query(LandingDomain).filter(
             LandingDomain.tenant_id == o.tenant_id, LandingDomain.domain == o.domain).first()

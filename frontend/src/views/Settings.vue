@@ -247,34 +247,44 @@ const saveCf = async () => {
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); cfSaving.value = false; return }
     await PUT('/settings/cf', body)
     ElMessage.success(t('common.saved'))
-    await loadCf(); loadPb()
+    await loadCf(); loadRg()
   } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   cfSaving.value = false
 }
-// ── Porkbun 凭据（批DD 预埋：超管注册 porkbun.com 后填入即激活域名商店）──
-const pbCfg = ref({ configured: false, api_key_masked: '' })
-const pbForm = ref({ api_key: '', secret_key: '' })
-const pbSaving = ref(false)
-const pbTesting = ref(false)
-const loadPb = async () => { try { pbCfg.value = await GET('/settings/porkbun') } catch {} }
-const savePb = async () => {
-  pbSaving.value = true
+// ── 域名注册商（批DD Porkbun 预埋 → 2026-09-19 切 Dynadot 主力；选择器+双凭据一卡）──
+const rgCfg = ref({ registrar: 'dynadot', dynadot: { configured: false, key_masked: '' }, porkbun: { configured: false, key_masked: '' } })
+const rgForm = ref({ dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' })
+const rgSaving = ref(false)
+const rgTesting = ref(false)
+const loadRg = async () => { try { rgCfg.value = await GET('/settings/registrar') } catch {} }
+const setRegistrar = async (r) => {
+  try {
+    await PUT('/settings/registrar', { registrar: r })
+    rgCfg.value.registrar = r
+    ElMessage.success(t('common.saved'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')); rgCfg.value.registrar = r === 'dynadot' ? 'porkbun' : 'dynadot' }
+}
+const saveRg = async () => {
+  rgSaving.value = true
   try {
     const body = {}
-    if (pbForm.value.api_key) body.api_key = pbForm.value.api_key
-    if (pbForm.value.secret_key) body.secret_key = pbForm.value.secret_key
-    if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); pbSaving.value = false; return }
-    await PUT('/settings/porkbun', body)
-    ElMessage.success(t('common.saved')); pbForm.value = { api_key: '', secret_key: '' }
-    await loadPb()
+    if (rgForm.value.dynadot_api_key) body.dynadot_api_key = rgForm.value.dynadot_api_key
+    if (rgForm.value.porkbun_api_key) body.porkbun_api_key = rgForm.value.porkbun_api_key
+    if (rgForm.value.porkbun_secret_key) body.porkbun_secret_key = rgForm.value.porkbun_secret_key
+    if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); rgSaving.value = false; return }
+    await PUT('/settings/registrar', body)
+    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }
+    await loadRg()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  pbSaving.value = false
+  rgSaving.value = false
 }
-const testPb = async () => {
-  pbTesting.value = true
-  try { const r = await POST('/settings/porkbun/test', {}); ElMessage.success(t('settings.pbTestOk', { a: r.account || '' })) }
-  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  pbTesting.value = false
+const testRg = async () => {
+  rgTesting.value = true
+  try {
+    const r = await POST('/settings/registrar/test', {})
+    ElMessage.success(t('settings.rgTestOk', { a: r.account || '', b: r.balance ? ` · ${r.balance}` : '' }))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  rgTesting.value = false
 }
 // ── CF 管控台（批CY 一期：zone 总览/接入向导/Pages 项目——超管专属，sec-cf 卡内）──
 const cfOverview = ref(null)
@@ -631,7 +641,7 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-guard-tuning', label: t('settings.gtTitle') })
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
-    secs.push({ id: 'sec-porkbun', label: t('settings.pbTitle') })
+    secs.push({ id: 'sec-porkbun', label: t('settings.rgTitle') })
     secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
     secs.push({ id: 'sec-fbapps', label: t('settings.faTitle') })
@@ -898,13 +908,27 @@ const runKeepaliveNow = async () => {
     </div>
 
     <div v-if="isSuper && activeSection==='sec-porkbun'" id="sec-porkbun" class="card">
-      <div class="t">{{ t('settings.pbTitle') }}</div>
-      <div class="d">{{ t('settings.pbDesc') }}</div>
-      <div class="form-l"><label>API Key</label><input v-model="pbForm.api_key" class="input" :placeholder="pbCfg.configured ? pbCfg.api_key_masked : 'pk1_...'" /></div>
-      <div class="form-l"><label>Secret Key</label><input v-model="pbForm.secret_key" class="input" type="password" :placeholder="pbCfg.configured ? '********' : 'sk1_...'" /></div>
+      <div class="t">{{ t('settings.rgTitle') }}</div>
+      <div class="d">{{ t('settings.rgDesc') }}</div>
+      <div class="form-l"><label>{{ t('settings.rgSelect') }}</label>
+        <el-radio-group :model-value="rgCfg.registrar" @update:model-value="setRegistrar">
+          <el-radio-button value="dynadot">Dynadot</el-radio-button>
+          <el-radio-button value="porkbun">Porkbun</el-radio-button>
+        </el-radio-group>
+        <span v-if="rgCfg[rgCfg.registrar]?.configured" class="tag ok" style="margin-left:8px">{{ t('settings.rgReady') }}</span>
+        <span v-else class="tag warn" style="margin-left:8px">{{ t('settings.rgNoKey') }}</span>
+      </div>
+      <template v-if="rgCfg.registrar === 'dynadot'">
+        <div class="form-l"><label>API Key</label><input v-model="rgForm.dynadot_api_key" class="input" :placeholder="rgCfg.dynadot.configured ? rgCfg.dynadot.key_masked : 'Tools → API 生成'" /></div>
+        <div class="field-hint">{{ t('settings.rgDdHint') }}</div>
+      </template>
+      <template v-else>
+        <div class="form-l"><label>API Key</label><input v-model="rgForm.porkbun_api_key" class="input" :placeholder="rgCfg.porkbun.configured ? rgCfg.porkbun.key_masked : 'pk1_...'" /></div>
+        <div class="form-l"><label>Secret Key</label><input v-model="rgForm.porkbun_secret_key" class="input" type="password" :placeholder="rgCfg.porkbun.configured ? '********' : 'sk1_...'" /></div>
+      </template>
       <div style="display:flex;gap:8px">
-        <button class="btn primary" :disabled="pbSaving" @click="savePb">{{ t('common.save') }}</button>
-        <button class="btn" :disabled="pbTesting" @click="testPb">{{ t('settings.pbTest') }}</button>
+        <button class="btn primary" :disabled="rgSaving" @click="saveRg">{{ t('common.save') }}</button>
+        <button class="btn" :disabled="rgTesting" @click="testRg">{{ t('settings.pbTest') }}</button>
       </div>
       <div class="field-hint">{{ t('settings.pbHint') }}</div>
     </div>

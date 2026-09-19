@@ -404,6 +404,105 @@ def test_porkbun(user: CurrentUser = Depends(require_superadmin)):
     return {"ok": True, "account": str(r.get("identity") or "")[:60]}
 
 
+# ── 域名注册商（2026-09-19 换 Dynadot 主力）：选择器 + Dynadot 凭据，统一一个卡 ──
+def _mask(k: str) -> str:
+    return (k[:6] + "***" + k[-4:]) if len(k) > 10 else ("***" if k else "")
+
+
+def _registrar_setting(db: Session) -> str:
+    from ..models.system import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar").first()
+    return (row.value if row and row.value in ("dynadot", "porkbun") else "dynadot")
+
+
+class RegistrarConfigIn(BaseModel):
+    registrar: str = ""            # dynadot | porkbun（空=不改）
+    dynadot_api_key: str = ""
+    porkbun_api_key: str = ""
+    porkbun_secret_key: str = ""
+
+
+@router.get("/registrar")
+def get_registrar(user: CurrentUser = Depends(require_superadmin),
+                  db: Session = Depends(get_db)):
+    from ..core.porkbun_client import porkbun_configured
+    return {"registrar": _registrar_setting(db),
+            "dynadot": {"configured": bool(settings.dynadot_api_key),
+                        "key_masked": _mask(settings.dynadot_api_key or "")},
+            "porkbun": {"configured": porkbun_configured(settings),
+                        "key_masked": _mask(settings.porkbun_api_key or "")}}
+
+
+@router.put("/registrar")
+def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_superadmin),
+                  db: Session = Depends(get_db)):
+    """选择注册商（system_settings）+ 写凭据（.env 即时生效）。"""
+    from ..models.system import SystemSetting
+    if body.registrar:
+        if body.registrar not in ("dynadot", "porkbun"):
+            raise HTTPException(400, "registrar 仅支持 dynadot/porkbun")
+        row = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar").first()
+        if not row:
+            row = SystemSetting(key="domain_registrar")
+            db.add(row)
+        row.value = body.registrar
+        db.commit()
+    env_updates = {}
+    if body.dynadot_api_key:
+        env_updates["DYNADOT_API_KEY"] = _clean_token(body.dynadot_api_key)
+    if body.porkbun_api_key:
+        env_updates["PORKBUN_API_KEY"] = _clean_token(body.porkbun_api_key)
+    if body.porkbun_secret_key:
+        env_updates["PORKBUN_SECRET_KEY"] = _clean_token(body.porkbun_secret_key)
+    if env_updates:
+        from pathlib import Path
+        env_path = Path("/opt/toveads/backend/.env")
+        lines = env_path.read_text().splitlines() if env_path.exists() else []
+        updated_lines, found = [], set()
+        for line in lines:
+            s = line.strip()
+            if "=" in s and s.split("=", 1)[0] in env_updates:
+                k = s.split("=", 1)[0]
+                updated_lines.append(f"{k}={env_updates[k]}"); found.add(k); continue
+            updated_lines.append(line)
+        for k, v in env_updates.items():
+            if k not in found:
+                updated_lines.append(f"{k}={v}")
+        env_path.write_text("\n".join(updated_lines) + "\n")
+        settings.dynadot_api_key = env_updates.get("DYNADOT_API_KEY", settings.dynadot_api_key)
+        settings.porkbun_api_key = env_updates.get("PORKBUN_API_KEY", settings.porkbun_api_key)
+        settings.porkbun_secret_key = env_updates.get("PORKBUN_SECRET_KEY", settings.porkbun_secret_key)
+    return {"saved": True, "registrar": _registrar_setting(db)}
+
+
+@router.post("/registrar/test")
+def test_registrar(user: CurrentUser = Depends(require_superadmin),
+                   db: Session = Depends(get_db)):
+    """测试当前选中注册商：Dynadot 返回账户+余额；Porkbun 返回账号名。"""
+    reg = _registrar_setting(db)
+    if reg == "dynadot":
+        if not settings.dynadot_api_key:
+            raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
+        from ..core.dynadot_client import DynadotClient, DynadotError
+        try:
+            info = DynadotClient(settings.dynadot_api_key).account_info()
+        except DynadotError as e:
+            raise HTTPException(400, f"连接失败: {e}")
+        balance = str(info.get("AccountBalance") or "")
+        account = str(info.get("Username") or "")
+        return {"ok": True, "registrar": "dynadot", "account": account[:60],
+                "balance": balance[:40] or None}
+    # porkbun
+    from ..core.porkbun_client import PorkbunClient, porkbun_configured, PorkbunError
+    if not porkbun_configured(settings):
+        raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
+    try:
+        r = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key).ping()
+    except PorkbunError as e:
+        raise HTTPException(400, f"连接失败: {e}")
+    return {"ok": True, "registrar": "porkbun", "account": str(r.get("identity") or "")[:60]}
+
+
 # ── 数据保留（超管）── 各表老数据保留天数，0=永久
 class RetentionIn(BaseModel):
     days: dict = {}  # {table: days}，缺省用默认
