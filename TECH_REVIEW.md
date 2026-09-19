@@ -47,6 +47,33 @@
 
 ---
 
+## 2026-09-20b — 修复：跟帖帖子 ID/URL 识别读取不到（用户反馈：明明有主页权限）
+
+### 概述
+fb.py 单文件（commit b2918cb，已部署生产）。三层根因：①暗帖（广告帖大多未发布）GET /{裸帖号}
+用用户/系统令牌常 #10 无权——须帖所属主页页令牌；②_fetch_post_content ③ 只查 published_posts
+（仅有机帖），暗帖全不在内；③URL 变体（/watch?v= /reel/ /share/p/ fb.watch /l.php 包裹）解析不全。
+
+### 变更表
+| 件 | 变更 | 验证 |
+|---|---|---|
+| resolve-post 2c | 页令牌扫描：逐令牌列可管主页 → 拼 {page}_{post} 换页令牌试读（≤60 页命中即停） | 独立单测 48 页唯帖属主页命中（其余 #10 拒绝=机制本尊） |
+| _fetch_post_content ③ | published_posts → promotable_posts 优先（含暗帖）+ published 兜底 | 真暗帖内容可读（msg+图） |
+| _normalize_post_query | l.php 解包 + 短链跟随重定向；正则补 /watch?v= /reel/ | 真暗帖五输入形态（完整ID/裸号/permalink/posts/watch）全 200，10 PASS/0 FAIL |
+
+### 已知限制
+- 2c 扫描错页各留一行 FB 拒绝日志（手动识别低频可接受）。
+- 页已不在任何令牌下的旧帖仍 404（合理：无权读不到）。
+- /share/p 非数字码依赖重定向跟随（免登录可达性随 FB 策略）。
+
+### commits
+- b2918cb fix(launch): 跟帖帖子 ID/URL 识别读取不到
+
+### 关联 memory
+[[page-post-follow-mode]] · [[fb-real-deploy-chain-2026-09]]
+
+---
+
 ## 2026-09-08 — 批次 III：P2/清理与低频补齐（细分版位/redirect fire 像素/TT event_id/last-wins/死块清理/spend_cap 汇率统一）
 
 ### 概述
