@@ -2720,3 +2720,18 @@ Playwright 逐区量化（标签宽/输入宽/描述长度/溢出/JS 错误）�
 
 ### 排除的假警报
 operator 空分区=测试 JWT 过期（重铸即恢复）；CF 区 22px 输入=渲染瞬时假象。
+
+## 批DD：Porkbun 域名代购全链预埋（2026-09-19，b183cf8）
+
+### 概述
+用户拍板：域名模块先做、Porkbun 注册后即插即用。全链已预埋上线（迁移 0103 + porkbun_client + /domains-shop + Settings 凭据卡 + Landing 购买弹窗），凭据未配置时全链优雅降级（400 引导），填 Key 即激活。
+
+### 商业链
+下单（成本快照=实时价+手续费$5）→ pending_payment → 超管确认收款 → **全自动**：Porkbun 注册（NS 直指 CF）→ CF 建 zone → 入团队域名库 → 站内通知「已交付」→ 立即可建落地页。
+
+### 验证
+角色矩阵（匿名401 / operator审批403 / settings超管200 configured=false）✓ 未配置降级 400 引导 ✓ 坏域名 3 例 400 ✓ 状态机审批→approved待配置 / approved不可取消 ✓ journal 零异常。
+真实注册/查价路径待用户填 Key 后跑通（代码就绪）。
+
+### 待钱包（P0）接入
+付款自动冻结扣款（现为超管人工确认）、月租 cron、到期停解析、续费自动扣。
