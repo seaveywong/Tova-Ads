@@ -201,6 +201,33 @@ class CfClient:
             page += 1
         return out
 
+    def create_zone(self, domain: str) -> dict:
+        """外部注册商域名接入 CF（Full setup）。已存在=返回现存 zone（幂等，code 1061）。"""
+        data = self._post("/zones", json={
+            "name": domain, "account": {"id": self.account_id}, "type": "full"})
+        if data.get("success"):
+            return data.get("result", {})
+        errs = data.get("errors") or [{}]
+        if str(errs[0].get("code", "")) == "1061":
+            zid = self.get_zone_id(domain)
+            if zid:
+                return {"id": zid, "name": domain, "status": "exists"}
+        raise RuntimeError(f"CF 接入域名失败: {errs}")
+
+    def delete_zone(self, zone_id: str) -> bool:
+        """删 zone（连带其全部 DNS 记录——不可逆，调用方须二次确认）。不存在=幂等成功。"""
+        data = self._delete(f"/zones/{zone_id}")
+        if data.get("success"):
+            return True
+        if data.get("http_status") == 404:
+            return True
+        raise RuntimeError(f"CF 删除 zone 失败: {data.get('errors')}")
+
+    def list_project_domains(self, project_name: str) -> list:
+        """Pages 项目绑定的域名列表（管控台展示用）。"""
+        data = self._get(f"/accounts/{self.account_id}/pages/projects/{project_name}/domains")
+        return data.get("result", []) if data.get("success") else []
+
     def add_cname(self, zone_id: str, name: str, target: str) -> dict:
         """添加 CNAME 记录。"""
         data = self._post(
