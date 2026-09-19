@@ -76,6 +76,17 @@ const accPages = ref({})  // {act_id: [pages]}
 const accPixels = ref({}) // {act_id: [pixels]}
 const deployItems = ref({})  // {act_id: {page_id, pixel_id}}
 const deploying = ref(false)
+// 模板树内指定了主页的广告节点（部署抽屉提示用——让「部署分配 vs 节点指定」优先级显式可见，
+// 修复背景：节点烘焙主页曾静默压掉部署分配；现部署分配优先，跟帖节点除外）
+const tplNodePages = computed(() => {
+  try {
+    const st = deployTpl.value?.structure ? JSON.parse(deployTpl.value.structure) : null
+    if (!st?.adsets) return []
+    const set = new Set()
+    for (const s of st.adsets) for (const a of (s.ads || [])) if (a.page_id) set.add(a.page_id)
+    return [...set]
+  } catch { return [] }
+})
 // 像素策略（部署抽屉）：template=跟随模板（旧行为）/ random=随机用账户像素 / create=每账户新建像素
 const pixelStrategy = ref('template')
 // 主页权限总览（部署抽屉顶部折叠面板；懒加载——展开才拉 /leads/pages）
@@ -1026,13 +1037,29 @@ const specialCatsSel = computed({
 // 已声明特殊广告类别 → 年龄/性别定向被 FB 强制忽略（组卡受众区警告 + 输入禁用）
 const hasSpecialCats = computed(() => specialCatsSel.value.length > 0)
 // 组节点内联受众（audience_json 的编辑态；保存时序列化回 audience_json 列）
-const blankNodeAud = () => ({ countries: [], interests: [], age_min: 18, age_max: 65, gender: 0 })
+// 受众模型（受众 1:1 批 2026-09-19）：对齐 FB 广告组受众面板——细分（兴趣+行为）/细分排除/
+// 地理细化（州·城市·邮编 + 排除地区）/语言多选/自定义受众（名称存档，部署时按账户解析 id）
+const blankNodeAud = () => ({ countries: [], interests: [], behaviors: [], exclusions: [],
+  regions: [], cities: [], zips: [], excluded_geo: { countries: [], regions: [], cities: [] },
+  age_min: 18, age_max: 65, gender: 0, languages: [],
+  custom_audiences: [], excluded_custom_audiences: [] })
 const _audFromJson = (j) => {
   const a = blankNodeAud()
   try {
     const p = typeof j === 'string' ? JSON.parse(j || '{}') : (j || {})
     a.countries = Array.isArray(p.countries) ? p.countries : []
     a.interests = (Array.isArray(p.interests) ? p.interests : []).map(i => ({ id: String(i.id ?? ''), name: i.name || '' })).filter(i => i.id)
+    const _idn = (arr) => (Array.isArray(arr) ? arr : []).map(i => ({ id: String(i.id ?? ''), name: i.name || '', type: i.type })).filter(i => i.id)
+    a.behaviors = _idn(p.behaviors)
+    a.exclusions = _idn(p.exclusions)
+    const _geo = (arr) => (Array.isArray(arr) ? arr : []).map(g => ({ key: String(g.key ?? ''), name: g.name || '' })).filter(g => g.key)
+    a.regions = _geo(p.regions); a.cities = _geo(p.cities); a.zips = _geo(p.zips)
+    const eg = (p.excluded_geo && typeof p.excluded_geo === 'object') ? p.excluded_geo : {}
+    a.excluded_geo = { countries: Array.isArray(eg.countries) ? eg.countries : [], regions: _geo(eg.regions), cities: _geo(eg.cities) }
+    a.languages = (Array.isArray(p.languages) ? p.languages : []).map(l => ({ id: String(l.id ?? ''), name: l.name || '' })).filter(l => l.id)
+    const _ca = (arr) => (Array.isArray(arr) ? arr : []).map(c => ({ id: String(c.id ?? ''), name: c.name || '' })).filter(c => c.id || c.name)
+    a.custom_audiences = _ca(p.custom_audiences)
+    a.excluded_custom_audiences = _ca(p.excluded_custom_audiences)
     a.age_min = p.age_min || 18
     a.age_max = p.age_max || 65
     a.gender = p.gender || 0
@@ -1173,16 +1200,28 @@ const togglePlSec = (key) => {
   plOpenKeys.value = s
 }
 // 受众摘要（折叠头 chip）：受众库名 / 国家·兴趣数 / 未设置（默认 US 警示色）
-const nodeAudienceEmpty = (s) => !s.audience_id && !(s.aud?.countries || []).length && !(s.aud?.interests || []).length
+// 受众空判/摘要（受众 1:1 批：全维度计入——只配了行为/位置/自定义受众不算空）
+const _audDims = (s) => [
+  (s.aud?.countries || []).length, (s.aud?.interests || []).length, (s.aud?.behaviors || []).length,
+  geoItemsOf(s).length, (s.aud?.languages || []).length,
+  (s.aud?.custom_audiences || []).length, (s.aud?.excluded_custom_audiences || []).length,
+]
+const nodeAudienceEmpty = (s) => !s.audience_id && _audDims(s).every(n => !n)
 const nodeAudSummary = (s) => {
   if (s.audience_id) {
     const a = savedAudiences.value.find(x => x.id === s.audience_id)
     return a ? a.name : '#' + s.audience_id
   }
   const c = (s.aud?.countries || []).join(',') || ''
-  const n = (s.aud?.interests || []).length
-  if (!c && !n) return ''
-  return (c || '—') + ' · ' + t('launch.interestCount', { n })
+  const parts = []
+  const ints = (s.aud?.interests || []).length, bhvs = (s.aud?.behaviors || []).length
+  if (ints || bhvs) parts.push(t('launch.interestCount', { n: ints }) + (bhvs ? `+${t('launch.audBehaviors')}${bhvs}` : ''))
+  const geos = geoItemsOf(s).length
+  if (geos) parts.push(t('launch.audGeoCount', { n: geos }))
+  const cas = (s.aud?.custom_audiences || []).length
+  if (cas) parts.push(t('launch.audCustomCount', { n: cas }))
+  if (!c && !parts.length) return ''
+  return (c || '—') + (parts.length ? ' · ' + parts.join('/') : '')
 }
 // 版位摘要：自动（Advantage+）/ 手动 · N 平台
 const nodePlSummary = (s) => s.placement_mode === 'manual'
@@ -1226,7 +1265,8 @@ const advSecSummary = (s) => {
   if (s.advx_dpa) parts.push(t('launch.daypartLabel'))
   return parts.filter(Boolean).join(' · ')
 }
-// 组节点兴趣搜索：查询词按节点存（nodeInterestQ），结果共享、只渲染在发起搜索的组卡
+// 组节点兴趣搜索：查询词按节点存（nodeInterestQ），结果共享、只渲染在发起搜索的组卡。
+// 受众 1:1 批：兴趣+行为并行搜合并（_t 标类型），结果行可「＋包含 / －排除」
 const nodeInterestQ = ref({})
 const interestNodeKey = ref('')
 const searchInterestsForNode = async (s) => {
@@ -1234,17 +1274,97 @@ const searchInterestsForNode = async (s) => {
   if (!q) return
   interestNodeKey.value = s.key
   interestSearching.value = true
-  try { interestResults.value = await GET('/audiences/search?q=' + encodeURIComponent(q) + '&limit=10') }
-  catch (e) { showError(e, t('launch.interestSearchFail')) }
+  try {
+    const [ints, bhvs] = await Promise.all([
+      GET('/audiences/search?q=' + encodeURIComponent(q) + '&limit=10'),
+      GET('/audiences/search?q=' + encodeURIComponent(q) + '&limit=10&type=behavior').catch(() => []),
+    ])
+    interestResults.value = [
+      ...ints.map(r => ({ ...r, _t: 'interest' })),
+      ...bhvs.map(r => ({ ...r, _t: 'behavior' })),
+    ]
+  } catch (e) { showError(e, t('launch.interestSearchFail')) }
   interestSearching.value = false
 }
-const addNodeInterest = (s, it) => {
+const addNodeItem = (s, it, kind) => {   // kind: interests|behaviors|exclusions
   if (!s.aud) s.aud = blankNodeAud()
-  if (!s.aud.interests.some(x => x.id === String(it.id))) s.aud.interests.push({ id: String(it.id), name: it.name })
+  const arr = s.aud[kind] || (s.aud[kind] = [])
+  const key = String(it.id)
+  if (!arr.some(x => x.id === key)) arr.push({ id: key, name: it.name, ...(kind === 'exclusions' ? { type: it._t || 'interest' } : {}) })
 }
-const removeNodeInterest = (s, i) => s.aud.interests.splice(i, 1)
-const nodeInterestAdded = (s, id) => (s.aud?.interests || []).some(x => x.id === String(id))
+const addNodeInterest = (s, it) => addNodeItem(s, { ...it, _t: 'interest' }, 'interests')
+const removeNodeItem = (s, kind, i) => (s.aud[kind] || []).splice(i, 1)
+const removeNodeInterest = (s, i) => removeNodeItem(s, 'interests', i)
+const nodeItemAdded = (s, kind, id) => (s.aud?.[kind] || []).some(x => x.id === String(id))
+const nodeInterestAdded = (s, id) => nodeItemAdded(s, 'interests', id)
 const clearNodeInterestSearch = (s) => { interestNodeKey.value = ''; interestResults.value = []; nodeInterestQ.value = { ...nodeInterestQ.value, [s.key]: '' } }
+// ── 地理细化搜索（州/城市/邮编，受众 1:1 批）──
+const nodeGeoQ = ref({})
+const geoResults = ref([])
+const geoNodeKey = ref('')
+const geoSearching = ref(false)
+const searchGeoForNode = async (s) => {
+  const q = (nodeGeoQ.value[s.key] || '').trim()
+  if (q.length < 2) return
+  geoNodeKey.value = s.key
+  geoSearching.value = true
+  try {
+    const cs = (s.aud?.countries || []).join(',')
+    geoResults.value = await GET('/audiences/geo-search?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : '') + '&limit=10')
+  } catch (e) { showError(e, t('launch.geoSearchFail')) }
+  geoSearching.value = false
+}
+const GEO_TYPE_FIELD = { state: 'regions', city: 'cities', zip: 'zips' }
+const geoTypeLabel = (ty) => ({ state: t('launch.audGeoState'), city: t('launch.audGeoCity'), zip: t('launch.audGeoZip') }[ty] || ty)
+const addGeoItem = (s, g, exclude = false) => {
+  if (!s.aud) s.aud = blankNodeAud()
+  const fld = GEO_TYPE_FIELD[g.type]
+  if (!fld) return
+  if (exclude) {
+    const eg = s.aud.excluded_geo || (s.aud.excluded_geo = { countries: [], regions: [], cities: [] })
+    if (!(eg[fld] || (eg[fld] = [])).some(x => x.key === g.key)) eg[fld].push({ key: g.key, name: g.name })
+  } else if (!(s.aud[fld] || (s.aud[fld] = [])).some(x => x.key === g.key)) {
+    s.aud[fld].push({ key: g.key, name: g.name })
+  }
+}
+const removeGeoItem = (s, fld, i, exclude = false) => {
+  if (exclude) (s.aud.excluded_geo?.[fld] || []).splice(i, 1)
+  else (s.aud[fld] || []).splice(i, 1)
+}
+const geoItemsOf = (s) => [...(s.aud?.regions || []), ...(s.aud?.cities || []), ...(s.aud?.zips || [])]
+const geoExcludedOf = (s) => [...(((s.aud?.excluded_geo) || {}).regions || []), ...(((s.aud?.excluded_geo) || {}).cities || [])]
+// ── 语言搜索（adlocale，多选，受众 1:1 批）──
+const nodeLangQ = ref({})
+const langResults = ref([])
+const langNodeKey = ref('')
+const langSearching = ref(false)
+const searchLangForNode = async (s) => {
+  const q = (nodeLangQ.value[s.key] || '').trim()
+  if (!q) return
+  langNodeKey.value = s.key
+  langSearching.value = true
+  try { langResults.value = await GET('/audiences/search?type=locale&q=' + encodeURIComponent(q) + '&limit=10') }
+  catch (e) { showError(e, t('launch.interestSearchFail')) }
+  langSearching.value = false
+}
+const addLang = (s, l) => {
+  if (!s.aud) s.aud = blankNodeAud()
+  if (!(s.aud.languages || []).some(x => x.id === String(l.id))) (s.aud.languages || (s.aud.languages = [])).push({ id: String(l.id), name: l.name })
+}
+const removeLang = (s, i) => (s.aud.languages || []).splice(i, 1)
+const langAdded = (s, id) => (s.aud?.languages || []).some(x => x.id === String(id))
+// ── 自定义受众/类似受众（受众 1:1 批）：按名存档——受众 id 是账户级的，部署时按「id>同名」
+// 在每个目标账户解析（跨账户同名匹配）；编辑器不锁账户，名称即跨账户契约 ──
+const nodeCaQ = ref({})
+const addCustomAud = (s, exclude = false) => {
+  const q = (nodeCaQ.value[s.key] || '').trim()
+  if (!q) return
+  if (!s.aud) s.aud = blankNodeAud()
+  const fld = exclude ? 'excluded_custom_audiences' : 'custom_audiences'
+  if (!(s.aud[fld] || []).some(x => x.name === q)) (s.aud[fld] || (s.aud[fld] = [])).push({ name: q })
+  nodeCaQ.value = { ...nodeCaQ.value, [s.key]: '' }
+}
+const removeCustomAud = (s, fld, i) => (s.aud[fld] || []).splice(i, 1)
 const expandAllTree = () => { expandedTreeKeys.value = new Set(tree.value.adsets.map(s => s.key)) }
 const addTreeAdset = () => {
   if (tree.value.adsets.length >= TREE_ADSETS_MAX) return ElMessage.warning(t('launch.treeErrAdsetsMax', { n: TREE_ADSETS_MAX }))
@@ -1403,9 +1523,16 @@ const _cleanTreeForSave = () => tree.value.adsets.map(s => {
     budget_type: s.budget_type === 'lifetime' ? 'lifetime' : 'daily',
     audience_id: s.audience_id || 0,
     advantage_audience: s.advantage_audience !== false,
-    // 选了受众库 → 清内联 audience_json（部署走 SavedAudience 分支）；否则内联生效
+    // 选了受众库 → 清内联 audience_json（部署走 SavedAudience 分支）；否则内联生效。
+    // 受众 1:1 批：新维度全量序列化（旧模板无新键=后端按缺省解析，行为不变）
     audience_json: s.audience_id ? '' : JSON.stringify({
       countries: (aud?.countries || []), interests: (aud?.interests || []),
+      behaviors: (aud?.behaviors || []), exclusions: (aud?.exclusions || []),
+      regions: (aud?.regions || []), cities: (aud?.cities || []), zips: (aud?.zips || []),
+      excluded_geo: (aud?.excluded_geo || {}),
+      languages: (aud?.languages || []),
+      custom_audiences: (aud?.custom_audiences || []),
+      excluded_custom_audiences: (aud?.excluded_custom_audiences || []),
       age_min: (aud?.age_min || 18), age_max: (aud?.age_max || 65), gender: (aud?.gender || 0),
     }),
     conv_location: s.conv_location || '',
@@ -2859,6 +2986,70 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
                       </el-select>
 </div>
+                    <!-- 地理细化（受众 1:1）：州/城市/邮编搜索 + 包含/排除（FB 广告组「地区」同构） -->
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audGeoLabel') }}</label>
+                      <div class="interest-search">
+                        <input v-model="nodeGeoQ[s.key]" class="inp" :placeholder="t('launch.audGeoPh')" @keyup.enter="searchGeoForNode(s)" />
+                        <button class="btn sm" :disabled="geoSearching" @click="searchGeoForNode(s)">{{ geoSearching ? '…' : t('common.search') }}</button>
+                      </div>
+</div>
+                    <div v-if="geoSearching && geoNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
+                    <div v-else-if="geoResults.length && geoNodeKey === s.key" class="search-results">
+                      <div class="search-results-head"><span>{{ t('launch.audGeoHint') }}</span></div>
+                      <div v-for="g in geoResults" :key="g.key" class="search-item" @click="addGeoItem(s, g)">
+                        <span class="tdm-badge geo">{{ geoTypeLabel(g.type) }}</span>
+                        <span>{{ g.name }}<i v-if="g.region" style="font-style:normal;color:var(--t3);font-size:10px"> · {{ g.region }}</i></span>
+                        <button class="ex-btn" :title="t('launch.audExcludeGeo')" @click.stop="addGeoItem(s, g, true)">−</button>
+                        <span class="add">+</span>
+                      </div>
+</div>
+                    <div v-if="geoItemsOf(s).length || geoExcludedOf(s).length" class="row">
+                      <label>{{ t('launch.audSelGeo') }}</label>
+                      <div class="interest-list">
+                        <span v-for="(g,i) in (s.aud.regions||[])" :key="'r'+g.key" class="interest-chip geo">{{ g.name }} <button @click="removeGeoItem(s, 'regions', i)">✕</button></span>
+                        <span v-for="(g,i) in (s.aud.cities||[])" :key="'c'+g.key" class="interest-chip geo">{{ g.name }} <button @click="removeGeoItem(s, 'cities', i)">✕</button></span>
+                        <span v-for="(g,i) in (s.aud.zips||[])" :key="'z'+g.key" class="interest-chip geo">{{ g.name }} <button @click="removeGeoItem(s, 'zips', i)">✕</button></span>
+                        <span v-for="(g,i) in ((s.aud.excluded_geo||{}).regions||[])" :key="'er'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'regions', i, true)">✕</button></span>
+                        <span v-for="(g,i) in ((s.aud.excluded_geo||{}).cities||[])" :key="'ec'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'cities', i, true)">✕</button></span>
+                      </div>
+</div>
+                    <!-- 语言多选（受众 1:1）：FB「语言」定向 -->
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audLangLabel') }}</label>
+                      <div class="interest-search">
+                        <input v-model="nodeLangQ[s.key]" class="inp" :placeholder="t('launch.audLangPh')" @keyup.enter="searchLangForNode(s)" />
+                        <button class="btn sm" :disabled="langSearching" @click="searchLangForNode(s)">{{ langSearching ? '…' : t('common.search') }}</button>
+                      </div>
+</div>
+                    <div v-if="langSearching && langNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
+                    <div v-else-if="langResults.length && langNodeKey === s.key" class="search-results">
+                      <div v-for="l in langResults" :key="l.id" :class="['search-item', { added: langAdded(s, l.id) }]" @click="!langAdded(s, l.id) && addLang(s, l)">
+                        <span>{{ l.name }}</span>
+                        <span class="add" v-if="!langAdded(s, l.id)">+</span>
+                        <span class="added-mark" v-else>✓</span>
+                      </div>
+</div>
+                    <div v-if="(s.aud.languages||[]).length" class="row">
+                      <label>{{ t('launch.audSelLangs', { n: (s.aud.languages||[]).length }) }}</label>
+                      <div class="interest-list">
+                        <span v-for="(l,i) in (s.aud.languages||[])" :key="l.id" class="interest-chip lang">{{ l.name || l.id }} <button @click="removeLang(s, i)">✕</button></span>
+                      </div>
+</div>
+                    <!-- 自定义受众/类似受众（受众 1:1）：按名存档，部署时在目标账户按 id/同名解析 -->
+                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audCustomLabel') }}</label>
+                      <div class="interest-search">
+                        <input v-model="nodeCaQ[s.key]" class="inp" :placeholder="t('launch.audCustomPh')" @keyup.enter="addCustomAud(s)" />
+                        <button class="btn sm" :title="t('launch.audAddInclude')" @click="addCustomAud(s)">+</button>
+                        <button class="btn sm" :title="t('launch.audExclude')" @click="addCustomAud(s, true)">−</button>
+                      </div>
+</div>
+                    <div v-if="(s.aud.custom_audiences||[]).length || (s.aud.excluded_custom_audiences||[]).length" class="row">
+                      <label>{{ t('launch.audSelCustom') }}</label>
+                      <div class="interest-list">
+                        <span v-for="(c,i) in (s.aud.custom_audiences||[])" :key="'ca'+i" class="interest-chip ca">{{ c.name }} <button @click="removeCustomAud(s, 'custom_audiences', i)">✕</button></span>
+                        <span v-for="(c,i) in (s.aud.excluded_custom_audiences||[])" :key="'eca'+i" class="interest-chip excl">{{ c.name }} <button @click="removeCustomAud(s, 'excluded_custom_audiences', i)">✕</button></span>
+                      </div>
+                      <div class="hint" style="width:100%;margin:2px 0 0">{{ t('launch.audCustomHint') }}</div>
+</div>
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
                     <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
@@ -2870,10 +3061,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                       <div v-if="interestSearching && interestNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
                       <div v-else-if="interestResults.length && interestNodeKey === s.key" class="search-results">
                         <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearNodeInterestSearch(s)">{{ t('launch.clear') }} ✕</button></div>
-                        <div v-for="r in interestResults" :key="r.id" :class="['search-item', { added: nodeInterestAdded(s, r.id) }]" @click="!nodeInterestAdded(s, r.id) && addNodeInterest(s, r)">
+                        <div v-for="r in interestResults" :key="r._t + r.id"
+                             :class="['search-item', { added: nodeItemAdded(s, r._t === 'behavior' ? 'behaviors' : 'interests', r.id) }]"
+                             @click="addNodeItem(s, r, r._t === 'behavior' ? 'behaviors' : 'interests')">
+                          <span class="tdm-badge" :class="r._t">{{ r._t === 'behavior' ? t('launch.audBehaviors') : t('launch.audInterestType') }}</span>
                           <span>{{ r.name }}</span>
                           <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
-                          <span class="add" v-if="!nodeInterestAdded(s, r.id)">+</span>
+                          <button class="ex-btn" :title="t('launch.audExclude')" @click.stop="addNodeItem(s, r, 'exclusions')">−</button>
+                          <span class="add" v-if="!nodeItemAdded(s, r._t === 'behavior' ? 'behaviors' : 'interests', r.id)">+</span>
                           <span class="added-mark" v-else>✓</span>
 </div>
 </div>
@@ -2883,6 +3078,18 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>
                         <span v-if="!(s.aud.interests||[]).length" class="hint">{{ t('launch.addViaSearch') }}</span>
 </div>
+</div>
+                    <div v-show="!locIsMsg(s) && !s.advantage_audience && (s.aud.behaviors||[]).length" class="row">
+                      <label>{{ t('launch.audSelBehaviors', { n: (s.aud.behaviors||[]).length }) }}</label>
+                      <div class="interest-list">
+                        <span v-for="(it,i) in (s.aud.behaviors||[])" :key="'b'+it.id" class="interest-chip bhv">{{ it.name }} <button @click="removeNodeItem(s, 'behaviors', i)">✕</button></span>
+                      </div>
+</div>
+                    <div v-show="!locIsMsg(s) && !s.advantage_audience && (s.aud.exclusions||[]).length" class="row">
+                      <label>{{ t('launch.audSelExcluded', { n: (s.aud.exclusions||[]).length }) }}</label>
+                      <div class="interest-list">
+                        <span v-for="(it,i) in (s.aud.exclusions||[])" :key="'x'+it.id" class="interest-chip excl">{{ it.name }} <button @click="removeNodeItem(s, 'exclusions', i)">✕</button></span>
+                      </div>
 </div>
                     <div v-if="!locIsMsg(s) && !s.advantage_audience && aiInterestHints(s).length" class="row ai-hints-row">
                       <label>{{ t('launch.aiInterestHints') }}</label>
@@ -3533,6 +3740,10 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
       <div v-if="deployTpl?.post_source === 'reuse'" class="msg-aud-hint" style="margin-bottom:8px">
         {{ t('launch.reuseAccHint', { n: filteredDeployAccounts.filter(a => accManagesReusePage(a.act_id)).length, m: filteredDeployAccounts.length }) }}
       </div>
+      <!-- 节点指定主页提示：部署分配的主页将优先（跟帖节点除外）——优先级显式化不静默 -->
+      <div v-if="tplNodePages.length" class="msg-aud-hint" style="margin-bottom:8px">
+        {{ t('launch.nodePageHint', { n: tplNodePages.length }) }}
+      </div>
       <div class="acc-list" v-loading="accLoading">
         <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: (deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)}]">
           <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
@@ -3971,6 +4182,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .interest-list{display:flex;gap:4px;flex-wrap:wrap}
 .interest-chip{font-size:11px;padding:3px 8px;background:var(--acg);color:var(--ac);border-radius:var(--rs)   /* UI审计#8：容器圆角归一 */;display:flex;align-items:center;gap:4px}
 .interest-chip button{background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;padding:0}
+/* 受众 1:1 批：细分类型徽章 + 行为/排除/位置/语言/自定义受众 chip 配色 + 结果行排除按钮 */
+.tdm-badge{font-size:10px;padding:1px 6px;border-radius:4px;flex-shrink:0;background:var(--acg);color:var(--ac);white-space:nowrap}
+.tdm-badge.behavior{background:rgba(125,95,225,.13);color:#7d5fe1}
+.tdm-badge.geo{background:rgba(52,199,89,.13);color:var(--success)}
+.interest-chip.bhv{background:rgba(125,95,225,.12);color:#7d5fe1}
+.interest-chip.excl{background:rgba(255,69,58,.1);color:var(--error)}
+.interest-chip.geo{background:rgba(52,199,89,.12);color:var(--success)}
+.interest-chip.lang{background:rgba(255,159,10,.13);color:var(--warning)}
+.interest-chip.ca{background:rgba(10,132,255,.1);color:var(--ac)}
+.ex-btn{background:none;border:1px solid var(--bd);color:var(--error);border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:2px 6px;flex-shrink:0}
+.ex-btn:hover{border-color:var(--error);background:rgba(255,69,58,.08)}
 
 .asset-pick{display:flex;align-items:center;gap:10px}
 .asset-chosen{display:flex;align-items:center;gap:6px;flex:1}

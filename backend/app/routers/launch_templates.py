@@ -50,6 +50,20 @@ _SPECIAL_CATS = {"CREDIT", "EMPLOYMENT", "HOUSING",
 _DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?(Z|[+-]\d{2}:?\d{2})?$")
 
 
+def _resolve_ad_page(node_page: str, item_page: str, base_page: str, post_source: str) -> str:
+    """广告身份主页优先级（2026-09-19 修复「部署分配主页被静默忽略」）。
+
+    新帖：部署时显式分配(item) > 节点指定 > 模板/账户自动识别(base)——
+      部署分配是用户当下意志，节点页只是编辑期默认（模板 #258 实证：节点烘焙旧主页，
+      部署抽屉选了新主页仍全走节点旧主页）。
+    跟帖：节点/引用页优先——帖子绑死主页，部署分配跨主页无意义
+      （下游 _resolve_page_post 会以「帖子不能跨主页引用」400 拦下）。"""
+    node_page, item_page, base_page = (node_page or "").strip(), (item_page or "").strip(), (base_page or "").strip()
+    if post_source == "reuse":
+        return node_page or base_page
+    return item_page or node_page or base_page
+
+
 def _tpl_dict(t: LaunchTemplate) -> dict:
     return {
         "id": t.id, "name": t.name, "description": t.description or "",
@@ -1825,6 +1839,8 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
 
 def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenant_id: int = 0):
     """解析受众 → targeting dict。优先 audience_json（内联编辑），其次 SavedAudience，None=FB 默认。
+    受众 1:1 批（2026-09-19）：audience_json 新增 behaviors/exclusions/regions/cities/zips/
+    excluded_geo/languages(多)/custom_audiences/excluded_custom_audiences——旧 JSON 无新键=行为不变。
     SuperSession（BYPASSRLS）路径必须传 sdb_tenant_id 做 SavedAudience 归属过滤。"""
     # 1. 内联 audience_json（投放模板编辑器直接编辑的受众）
     if audience_json and audience_json.strip():
@@ -1837,17 +1853,26 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
             if not isinstance(interests, list):
                 interests = []
             resolved = [i for i in interests if isinstance(i, dict) and i.get("id")]
-            if countries or resolved:
-                t = build_targeting(
-                    countries=countries, interests=resolved,
+            behaviors = [b for b in (a.get("behaviors") or []) if isinstance(b, dict) and b.get("id")]
+            exclusions = [x for x in (a.get("exclusions") or []) if isinstance(x, dict) and x.get("id")]
+            regions = [r for r in (a.get("regions") or []) if isinstance(r, dict) and r.get("key")]
+            cities = [c for c in (a.get("cities") or []) if isinstance(c, dict) and c.get("key")]
+            zips = [z for z in (a.get("zips") or []) if isinstance(z, dict) and z.get("key")]
+            cas = [x for x in (a.get("custom_audiences") or [])
+                   if isinstance(x, dict) and (x.get("id") or x.get("name"))]
+            ecas = [x for x in (a.get("excluded_custom_audiences") or [])
+                    if isinstance(x, dict) and (x.get("id") or x.get("name"))]
+            if countries or resolved or behaviors or regions or cities or zips or cas or ecas:
+                return build_targeting(
+                    countries=countries, interests=resolved, behaviors=behaviors,
+                    exclusions=exclusions, regions=regions, cities=cities, zips=zips,
+                    excluded_geo=a.get("excluded_geo") if isinstance(a.get("excluded_geo"), dict) else None,
                     age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
-                    gender=a.get("gender") or 0, strategy=a.get("strategy") or "broad_interest",
+                    gender=a.get("gender") or 0,
+                    languages=[l for l in (a.get("languages") or []) if isinstance(l, dict) and l.get("id")],
+                    custom_audiences=cas, excluded_custom_audiences=ecas,
+                    strategy=a.get("strategy") or "broad_interest",
                 )
-                # 用户指定语言（FB targeting.languages：[{id,name}] 或 [id] 透传）
-                langs = a.get("languages") or []
-                if langs and isinstance(langs, list):
-                    t["languages"] = langs
-                return t
             # 内联受众空（无国家无兴趣）→ 落到 SavedAudience：显式选了受众的优先，
             # 否则旧数据里残留的空 audience_json 会把 SavedAudience 静默顶掉（都不空=FB 默认）
         except Exception:
@@ -1866,6 +1891,55 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
         age_min=aud.age_min, age_max=aud.age_max, gender=aud.gender,
         strategy=aud.strategy or "broad_interest",
     )
+
+
+def _resolve_custom_audiences(fb, act_id: str, targeting: dict | None) -> tuple[dict | None, str]:
+    """自定义受众跨账户解析（受众 1:1 批）。受众 id 是账户级的——模板 audience_json 里存的
+    id/name 只对建它的账户有效；部署到其他账户时按「id 命中 > 同名匹配」解析成本账户 id。
+    解析不到 → ValueError（该组失败原因显式——静默丢受众=定向悄悄变宽，违反不静默铁律）。
+    无自定义受众键 → 原样返回（零 FB 调用）。深拷贝后改写，不动调用方共享 dict。"""
+    if not targeting:
+        return targeting, ""
+    need = [k for k in ("custom_audiences", "excluded_custom_audiences") if targeting.get(k)]
+    if not need:
+        return targeting, ""
+    import copy
+    t = copy.deepcopy(targeting)
+    # 行缓存挂 fb 客户端（批量模式逐素材/树多组重复调——同账户只拉一次列表）
+    _cache = getattr(fb, "_ca_rows_cache", None)
+    if _cache is None:
+        _cache = fb._ca_rows_cache = {}
+    if act_id in _cache:
+        rows = _cache[act_id]
+    else:
+        try:
+            rows = fb.custom_audiences(act_id) or []
+        except Exception as e:
+            raise ValueError(f"读取账户自定义受众失败：{str(e)[:90]}")
+        _cache[act_id] = rows
+    by_id = {str(r.get("id")): r for r in rows if r.get("id")}
+    by_name: dict = {}
+    for r in rows:
+        by_name.setdefault(str(r.get("name") or "").strip().lower(), r)
+
+    def _res(entries):
+        out, notes = [], []
+        for x in entries or []:
+            xid, nm = str(x.get("id") or ""), str(x.get("name") or "").strip()
+            row = by_id.get(xid) or by_name.get(nm.lower())
+            if not row:
+                raise ValueError(f"账户 act_{act_id} 无自定义受众「{nm or xid}」"
+                                 f"（需在该账户的客户名单中有同名受众）")
+            out.append({"id": str(row["id"])})
+            if xid and str(row["id"]) != xid:
+                notes.append(f"{nm}→{row['id']}")
+        return out, notes
+
+    all_notes: list = []
+    for k in need:
+        t[k], _n = _res(t[k])
+        all_notes += _n
+    return t, ("自定义受众换本账户ID：" + "、".join(all_notes[:5]) if all_notes else "")
 
 
 def _budget_guard_400(t: LaunchTemplate) -> None:
@@ -2664,6 +2738,11 @@ def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, 
             video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, item.act_id, filepath)
         sdb.commit()  # 持久化 hash/video_id 缓存
     page_id = item.page_id or tpl.page_id
+    # 自定义受众跨账户解析（受众 1:1 批）：受众 id 账户级，按 id/同名换成本账户 id；
+    # 解析失败外抛 → 调用方记 item/系列失败（不静默丢受众）
+    targeting, _ca_note = _resolve_custom_audiences(fb, item.act_id, targeting)
+    if _ca_note:
+        _item_note(sdb, item, _ca_note[:90])
     # 批BR：统一走「优先账户自有像素」链（同树模式）；批BU：按 item 记忆——多素材多系列
     # 只在第一条核对（第一系列定了正确像素，后续直接复用，不逐条重复提示）
     _px_key = (item.pixel_id or tpl.pixel_id or "").strip()
@@ -3004,6 +3083,14 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         except Exception as e:
             _fail_group(sname, snode, f"受众解析失败：{e}")
             continue
+        # 自定义受众跨账户解析（受众 1:1 批）：受众 id 账户级，按 id/同名换成本账户 id
+        try:
+            targeting, _ca_note = _resolve_custom_audiences(fb, item.act_id, targeting)
+            if _ca_note:
+                _item_note(sdb, item, _ca_note[:90])
+        except ValueError as e:
+            _fail_group(sname, snode, str(e))
+            continue
         adv_node = {}
         if snode.get("advanced_config"):
             try:
@@ -3181,8 +3268,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                         message_template=(tpl.message_template or ""),
                     )
                     # Instant Form（LEADS）：节点表单模板 > 模板级 > AI 自动生成
-                    # 批O-2：广告身份用节点级主页（无=基础链：抽屉/模板/账户自动识别）
-                    _ad_page = str(anode.get("page_id") or "") or _page_id
+                    # 广告身份主页：批O-2 引入节点级；2026-09-19 优先级定稿见 _resolve_ad_page
+                    _ad_page = _resolve_ad_page(str(anode.get("page_id") or ""), item.page_id, _page_id, node_post)
                     lead_form_id = ""
                     _fdiag_t = {}
                     if tpl.objective == "OUTCOME_LEADS" and _ad_page:

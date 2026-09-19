@@ -17,22 +17,70 @@ from ..models.audience import SavedAudience
 router = APIRouter(prefix="/audiences", tags=["audiences"])
 
 
-# ── 兴趣搜索（代理 FB adinterest）──
+# ── 兴趣搜索（代理 FB adinterest；受众 1:1 批扩 type：行为/语言）──
 @router.get("/search")
-def search_interests(q: str, limit: int = 20,
+def search_interests(q: str, type: str = "interest", limit: int = 20,
                      user: CurrentUser = Depends(require_permission("ads.read")),
                      db: Session = Depends(get_db)):
-    """FB 兴趣词搜索（审计项目16）。返 [{id,name,audience_size,path}, ...]。"""
+    """FB 定向词搜索（审计项目16）。type=interest|behavior|locale。
+    返 [{id,name,audience_size,path}, ...]，供前端选兴趣/行为 → audience_json。"""
     if not q or len(q) < 1:
         raise HTTPException(400, "查询词 q 不能为空")
+    if type not in ("interest", "behavior", "locale"):
+        raise HTTPException(400, "type 必须是 interest/behavior/locale")
     from ..core.fb_tokens import first_client
-    fb = first_client(db, user.tenant_id)  # 兴趣搜索 token 无关，任一 active 即可
+    fb = first_client(db, user.tenant_id)  # 定向搜索 token 无关，任一 active 即可
     if not fb:
         raise HTTPException(400, "未绑定 FB 凭证")
     try:
+        if type == "behavior":
+            return fb.search_behaviors(q, limit=limit)
+        if type == "locale":
+            return fb.search_locales(q, limit=limit)
         return fb.search_interests(q, limit=limit)
     except FbApiError as e:
-        raise HTTPException(400, f"兴趣搜索失败：{e.friendly}")
+        raise HTTPException(400, f"定向搜索失败：{e.friendly}")
+
+
+@router.get("/geo-search")
+def geo_search(q: str, countries: str = "", limit: int = 20,
+               user: CurrentUser = Depends(require_permission("ads.read")),
+               db: Session = Depends(get_db)):
+    """FB 地理位置搜索（州/城市/邮编，type=adgeolocation）——受众 1:1 批。
+    countries=逗号分隔 ISO 码（限定在已选国家内搜，如 US）。返 [{key,name,type,country_code}]。"""
+    if not q or len(q) < 2:
+        raise HTTPException(400, "查询词至少 2 个字符")
+    from ..core.fb_tokens import first_client
+    fb = first_client(db, user.tenant_id)
+    if not fb:
+        raise HTTPException(400, "未绑定 FB 凭证")
+    cs = [c.strip().upper() for c in (countries or "").split(",") if c.strip()]
+    try:
+        return fb.search_geo(q, cs or None, limit=limit)
+    except FbApiError as e:
+        raise HTTPException(400, f"地理搜索失败：{e.friendly}")
+
+
+@router.get("/custom-audiences")
+def list_custom_audiences(act_id: str,
+                          user: CurrentUser = Depends(require_permission("ads.read")),
+                          db: Session = Depends(get_db)):
+    """账户自定义受众列表（含 Lookalike）——受众 1:1 批。受众 id 是账户级的：
+    模板里存名称/示例 id，部署时按名在本账户解析（跨账户同名匹配）。
+    RBAC：只允许查询本人可见账户（operator=名下）。"""
+    from ..models.fb import Account
+    from ..core.deps import scope_account_query
+    q = scope_account_query(db.query(Account), user)
+    if not q.filter(Account.act_id == act_id).first():
+        raise HTTPException(403, "该账户不在你的可见范围")
+    from ..core.fb_tokens import client_for_account
+    fb = client_for_account(db, user.tenant_id, act_id, "read")
+    if not fb:
+        raise HTTPException(400, f"账户 {act_id} 无可用读令牌")
+    try:
+        return fb.custom_audiences(act_id)
+    except FbApiError as e:
+        raise HTTPException(400, f"读取自定义受众失败：{e.friendly}")
 
 
 # ── 受众模板 CRUD ──

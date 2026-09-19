@@ -227,37 +227,107 @@ def is_messaging_destination(destination_type: str, optimization_goal: str) -> b
                       "MESSAGING_APPOINTMENT_CONVERSION"))
 
 
-# ── 受众定向构造（审计项目16，v1 仅兴趣受众）──
+# ── 受众定向构造（审计项目16 v1 兴趣 → 2026-09-19 受众 1:1 批全参化）──
+def _by_key(items: list | None) -> list[dict]:
+    """[{key,name}] → [{key}]（regions/cities/zips 的 FB 引用形状）。"""
+    return [{"key": str(x["key"])} for x in (items or []) if isinstance(x, dict) and x.get("key")]
+
+
+def _by_id_name(items: list | None, field: str = "id") -> list[dict]:
+    """[{id,name}] → [{id,name}]（过滤脏行；id/name 都可能作主键——custom_audiences 用）。"""
+    return [{"id": str(x[field]), "name": x.get("name", "")}
+            for x in (items or []) if isinstance(x, dict) and x.get(field)]
+
+
 def build_targeting(
     countries: list[str] | None = None,
     interests: list[dict] | None = None,
+    behaviors: list[dict] | None = None,
+    exclusions: list[dict] | None = None,
+    regions: list[dict] | None = None,
+    cities: list[dict] | None = None,
+    zips: list[dict] | None = None,
+    excluded_geo: dict | None = None,
     age_min: int = 18,
     age_max: int = 65,
     gender: int = 0,
+    languages: list | None = None,
+    custom_audiences: list[dict] | None = None,
+    excluded_custom_audiences: list[dict] | None = None,
     strategy: str = "broad_interest",
 ) -> dict:
-    """构造 AdSet.targeting（审计项目16：v1 仅 flexible_spec 兴趣，无 custom/lookalike）。
+    """构造 AdSet.targeting（受众 1:1 批：对齐 FB 广告组受众面板可配面）。
 
-    interests: [{"id":..., "name":...}, ...]（来自 FB adinterest 搜索）
+    兴趣/行为: [{"id","name"}]（FB adinterest/adbehavior 搜索）→ flexible_spec 单子句（组内 OR）
+    exclusions: [{"type":"interest"|"behavior","id","name"}] → targeting.exclusions（细分排除）
+    regions/cities/zips: [{"key","name"}]（adgeolocation 搜索）→ geo_locations 细化（与 countries 并存）
+    excluded_geo: {"countries":[], "regions":[], "cities":[]} → excluded_geo_locations
+    languages: [{"id"}]（adlocale 搜索）多语
+    custom_audiences/excluded_custom_audiences: [{"id"|"name"}]（账户级；部署链按账户解析 id）
     strategy:
-      broad_interest = 兴趣 + 默认宽定向（有 interests 才加 flexible_spec）
-      interest_only  = 仅兴趣
-      broad_only     = 仅国家/年龄/性别（忽略 interests）
+      broad_interest = 兴趣/行为 + 默认宽定向（有细分才加 flexible_spec）
+      interest_only  = 仅细分
+      broad_only     = 仅地理/年龄/性别（忽略 interests/behaviors）
     gender: 0=all 1=male 2=female
     """
-    countries = countries or ["US"]
+    countries = [str(c).upper() for c in (countries or []) if c] or ["US"]
+    geo: dict[str, Any] = {"countries": countries}
+    if _by_key(regions):
+        geo["regions"] = _by_key(regions)
+    if _by_key(cities):
+        geo["cities"] = _by_key(cities)
+    if _by_key(zips):
+        geo["zips"] = _by_key(zips)
     targeting: dict[str, Any] = {
-        "geo_locations": {"countries": countries},
+        "geo_locations": geo,
         "age_min": age_min,
         "age_max": age_max,
         "genders": [gender] if gender in (1, 2) else [],
     }
-    if strategy != "broad_only" and interests:
-        # flexible_spec: [{interests:[{id,name}]}]
-        flex_interests = [{"id": str(i["id"]), "name": i.get("name", "")}
-                          for i in interests if i.get("id")]
-        if flex_interests:
-            targeting["flexible_spec"] = [{"interests": flex_interests}]
+    # excluded_geo_locations（同构）
+    eg = (excluded_geo or {})
+    ex_geo: dict[str, Any] = {}
+    if [c for c in (eg.get("countries") or []) if c]:
+        ex_geo["countries"] = [str(c).upper() for c in eg["countries"] if c]
+    if _by_key(eg.get("regions")):
+        ex_geo["regions"] = _by_key(eg.get("regions"))
+    if _by_key(eg.get("cities")):
+        ex_geo["cities"] = _by_key(eg.get("cities"))
+    if ex_geo:
+        targeting["excluded_geo_locations"] = ex_geo
+    # 细分（兴趣+行为 单子句 OR；v1 单子句对齐 FB「详细定位」搜索框行为）
+    if strategy != "broad_only":
+        clause: dict[str, Any] = {}
+        if interests:
+            clause["interests"] = _by_id_name(interests)
+        if behaviors:
+            clause["behaviors"] = _by_id_name(behaviors)
+        if clause:
+            targeting["flexible_spec"] = [clause]
+        # 细分排除（exclusions 与 flexible_spec 同构数组）
+        ex_int = _by_id_name([x for x in (exclusions or []) if x.get("type") != "behavior"])
+        ex_bhv = _by_id_name([x for x in (exclusions or []) if x.get("type") == "behavior"])
+        if ex_int or ex_bhv:
+            ex_clause: dict[str, Any] = {}
+            if ex_int:
+                ex_clause["interests"] = ex_int
+            if ex_bhv:
+                ex_clause["behaviors"] = ex_bhv
+            targeting["exclusions"] = [ex_clause]
+    # 语言多选（[{id}]）
+    if languages:
+        langs = [{"id": str(x["id"])} for x in languages if isinstance(x, dict) and x.get("id")]
+        if langs:
+            targeting["languages"] = langs
+    # 自定义受众/类似受众（账户级 id；跨账户按名解析在部署链 _resolve_custom_audiences）
+    if custom_audiences:
+        ca = [x for x in custom_audiences if isinstance(x, dict) and (x.get("id") or x.get("name"))]
+        if ca:
+            targeting["custom_audiences"] = ca
+    if excluded_custom_audiences:
+        ca = [x for x in excluded_custom_audiences if isinstance(x, dict) and (x.get("id") or x.get("name"))]
+        if ca:
+            targeting["excluded_custom_audiences"] = ca
     return targeting
 
 

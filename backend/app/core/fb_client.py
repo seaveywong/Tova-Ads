@@ -560,6 +560,40 @@ class FbClient:
         })
         return data.get("data", [])
 
+    def search_behaviors(self, query: str, limit: int = 20) -> list[dict]:
+        """FB 行为词搜索（type=adbehavior）——受众 1:1 批（2026-09-19）：
+        行为（购买行为/设备/出行等）进 flexible_spec.behaviors。"""
+        data = self.get("search", {
+            "type": "adbehavior",
+            "q": query,
+            "limit": limit,
+        })
+        return data.get("data", [])
+
+    def search_geo(self, query: str, countries: list | None = None, limit: int = 20) -> list[dict]:
+        """FB 地理位置搜索（type=adgeolocation：州/城市/邮编）——受众 1:1 批。
+        返 [{key, name, type(state|city|zip), country_code, ...}]；
+        targeting.geo_locations.{regions,cities,zips} 用 [{key}] 引用。"""
+        params = {"type": "adgeolocation", "q": query, "limit": limit,
+                  "location_types": json.dumps(["state", "city", "zip"])}
+        if countries:
+            params["countries"] = json.dumps([str(c).upper() for c in countries][:10])
+        data = self.get("search", params)
+        return data.get("data", [])
+
+    def search_locales(self, query: str, limit: int = 20) -> list[dict]:
+        """语言搜索（type=adlocale）。返 [{id, name}]——targeting.languages 用 [{id}]。"""
+        data = self.get("search", {"type": "adlocale", "q": query, "limit": limit})
+        return data.get("data", [])
+
+    def custom_audiences(self, act_id: str) -> list[dict]:
+        """账户自定义受众列表（含 Lookalike）——受众 1:1 批：像素网站受众/类似受众直接选。
+        custom_audiences 的 id 是账户级的——跨账户部署按名解析（launch_templates 部署链）。"""
+        return self.get_paged(f"act_{act_id}/customaudiences", {
+            "fields": "id,name,subtype,approximate_count_lower_bound,operation_status",
+            "limit": 100,
+        })
+
 
 def debug_token_with_app_token(input_token: str, app_access_token: str) -> dict:
     """用 App 令牌 inspect 令牌（返回原始 JSON，含 data.scopes/app_id/is_valid/expires_at）。
