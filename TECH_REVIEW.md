@@ -5,6 +5,48 @@
 
 ---
 
+## 2026-09-20 — 双修：部署分配主页被节点主页静默覆盖（用户反馈）+ 受众定向 1:1 对齐 FB（用户反馈）
+
+### 概述
+两条用户反馈同批处理（后端 4 文件 + 前端 2 文件，零迁移，commit ec76ba6，已部署生产前后端）。
+**①主页优先级**：模板 #258（rh11111）三个广告节点烘焙 page_id=167626313097174（编辑器节点级主页），
+树部署链 `_ad_page = 节点页 or (item.page_id or tpl.page_id)` → 部署抽屉分配/随机分配的主页被静默压掉。
+定稿 `_resolve_ad_page`：**新帖节点 = 部署分配 > 节点指定 > 模板/自动识别**；跟帖节点 = 节点/引用页优先
+（帖子绑死主页，跨主页分配无意义，_resolve_page_post 会拦）。部署抽屉加提示（有节点指定主页时显式告知）。
+**②受众 1:1**：原仅 国家/年龄/性别/兴趣(+单语言)。现对齐 FB 广告组受众面板：细分排除 exclusions、
+地理细化 regions/cities/zips + excluded_geo_locations、语言多选、自定义受众/类似受众（名称存档+部署时跨账户按 id>同名解析，解析不到显式失败不静默丢定向）。
+
+### 变更表
+| 文件 | 变更 | 验证 |
+|---|---|---|
+| launch_templates.py | _resolve_ad_page（可测 helper）；_resolve_targeting 新键解析；_resolve_custom_audiences（deepcopy+fb 行缓存）；树链/平铺链（批量/重试经 _deploy_series_fb 覆盖）接入 CA 解析 | 服务器单测 5+8 断言 PASS；rh11111 旧 JSON 解析回归 PASS |
+| ad_builder.py | build_targeting 全参化（向后兼容旧签名）；_by_key/_by_id_name 形状 helper | 形状断言 7 项 PASS + 旧调用兼容 PASS |
+| audiences.py | /search 扩 type=interest\|behavior\|locale；/geo-search（adgeolocation）；/custom-audiences（账户级+scope_account_query RBAC） | 真 FB 请求：兴趣/语言/地理 200（行为见限制）；geo 短词 400 |
+| fb_client.py | search_behaviors/search_geo/search_locales/custom_audiences(get_paged) | 同上（经端点） |
+| LaunchTemplates.vue | 受众模型新键（_audFromJson/序列化/空判/摘要）；搜索结果徽章+排除按钮；位置/语言/自定义受众多行；部署抽屉 tplNodePages 提示 | Playwright 生产站实测（真实 FB 搜索：Austin/English(US)/排除 chips；摘要「US · 11兴趣/位置1/自定义1」；抽屉提示「模板内 1 个广告节点指定了主页…」可见；编辑后丢弃不污染 #258 实证） |
+| locales/views/launch.js | nodePageHint + aud* 20 键（zh/en 成对，en 零 CJK） | build ✓ |
+
+### 迁移
+无（audience_json 自由 JSON 新键向后兼容；structure node.page_id 原有）。
+
+### 生产环境变更
+仅代码（后端 4 文件 py_compile+import 双门过 restart；前端 CF master）。
+
+### 复审结论 / 已知限制
+1. **FB 已废弃 adbehavior 搜索**（实测 Unsupported get request，subcode 33；adinterest/adlocale/adgeolocation 同 token 正常）——行为维度模型/部署链/UI 就绪但暂无搜索来源；前端并行搜索自动降级纯兴趣（每搜多一次快速失败调用，日志一行）。
+2. 自定义受众跨账户：同名匹配是契约；账户无同名受众 → 该组显式失败（by design，不静默）。SavedAudience 库（/audiences POST）仍是 v1 字段，未扩新维度（模板内联已全量）。
+3. 位置/邮编定向走 geo_locations 细化键，与 FB 广告管理器「居住地/最近到访」语义差异：我们用默认 location_types（all）——如需「居住在这座城市的人」精确语义后续加 location_types 参数。
+4. 排除地区仅 countries/regions/cities（zips 排除 FB 不支持，未开）。
+
+### commits
+- 9cbf072 feat(domains): Dynadot 注册商切换（上一批）
+- ec76ba6 fix(launch): 部署分配主页优先级 + 受众 1:1
+
+### 关联 memory
+[[fb-real-deploy-chain-2026-09]]（targeting_automation 嵌套约束不变——advantage_audience 三态判定已覆盖新键：exclusions/custom_audiences 非空即视为非默认定向）· [[tree-launch-templates]]
+
+---
+
 ## 2026-09-08 — 批次 III：P2/清理与低频补齐（细分版位/redirect fire 像素/TT event_id/last-wins/死块清理/spend_cap 汇率统一）
 
 ### 概述
