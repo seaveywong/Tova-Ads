@@ -840,6 +840,7 @@ export default {
     cfOnboardOk: '域名 {d} 已加入 CF——请到注册商把 NS 改为下面两台（改完回到这里刷新看状态变 active）',
     cfOnboardNsHint: '到你的域名注册商 → DNS/Nameserver 设置 → 替换为以下 CF NS（点即复制）：',
     cfZonesTitle: '域名（zone）', cfPagesTitle: 'Pages 项目', cfNoZones: '暂无域名', cfNoRecords: '无 DNS 记录', cfLpLink: '关联的落地页',
+    pbTitle: 'Porkbun 域名代购', pbDesc: '域名商店注册商凭据（porkbun.com → Account → API Access 创建）。', pbTest: '测试连接', pbTestOk: '连接成功（{a}）', pbHint: '配置后「落地页 → 购买域名」自动激活：查价/下单/注册/接入 CF 全自动。',
     cfAccountNsTip: '注册商 NS 改为这两台（个别域名可能不同，以接入后返回为准）', cfPendingHint: 'NS 未生效，去注册商确认',
     cfUsageTitle: '用量与限额', cfToday: '今日', cfUvToday: '今日请求数 · 独立访客',
     cfLimitsLine: 'Free 档参考：静态请求 {a} · 带宽 {b} · Functions 调用 {c}/天 · 构建 {d}/月（付费档上调，以 zone 套餐为准）',

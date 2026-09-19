@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # Cloudflare API
     cf_api_token: str = ""
     cf_account_id: str = ""
+    porkbun_api_key: str = ""     # 域名代购（批DD 预埋；Settings→Porkbun 配置后生效）
+    porkbun_secret_key: str = ""
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
     # 前端 base URL（OAuth 完成页"返回前端"链接用）

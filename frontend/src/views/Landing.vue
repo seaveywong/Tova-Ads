@@ -87,6 +87,46 @@ const loadLib = async () => {
   pixels.value = p; domains.value = d; templates.value = t
 }
 
+// ── 域名商店（批DD 预埋：Porkbun 代购；凭据未配置时查价报引导）──
+const shopOpen = ref(false)
+const shopDomain = ref('')
+const shopChecking = ref(false)
+const shopQuote = ref(null)
+const shopOrdering = ref(false)
+const shopOrders = ref([])
+const shopLoadingOrders = ref(false)
+const shopStatusTxt = (st) => ({ pending_payment: t('landing.shStPending'), approved: t('landing.shStApproved'), registering: t('landing.shStReg'), registered: t('landing.shStRegd'), bound: t('landing.shStBound'), failed: t('landing.shStFailed'), cancelled: t('landing.shStCancel') }[st] || st)
+const openShop = async () => { shopOpen.value = true; await loadShopOrders() }
+const loadShopOrders = async () => {
+  shopLoadingOrders.value = true
+  try { shopOrders.value = await GET('/domains-shop/orders') } catch {}
+  shopLoadingOrders.value = false
+}
+const checkShopDomain = async () => {
+  if (!shopDomain.value.trim()) return
+  shopChecking.value = true; shopQuote.value = null
+  try { shopQuote.value = await GET('/domains-shop/check?domain=' + encodeURIComponent(shopDomain.value.trim()), 30000) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  shopChecking.value = false
+}
+const placeOrder = async () => {
+  shopOrdering.value = true
+  try {
+    await POST('/domains-shop/orders', { domain: shopDomain.value.trim(), years: 1 })
+    ElMessage.success(t('landing.shopOrdered'))
+    shopQuote.value = null
+    await loadShopOrders()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  shopOrdering.value = false
+}
+const cancelOrder = async (o) => {
+  try {
+    await ElMessageBox.confirm(t('landing.shCancelConfirm', { d: o.domain }), t('common.confirm'), { type: 'warning' })
+    await POST('/domains-shop/orders/' + o.id + '/cancel', {})
+    await loadShopOrders()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
+}
+
 // ── 发布/编辑抽屉 ──
 const drawerOpen = ref(false)
 const editingId = ref(null)
@@ -823,6 +863,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 
     <!-- 统一工具栏：模式筛选 + 创建人筛选（owner 看全团队时按人过滤）+ 计数 -->
     <div class="list-bar">
+      <button class="ctrl-btn" @click="openShop">{{ t('landing.shopBtn') }}</button>
       <div class="seg-bar">
         <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
@@ -1379,6 +1420,33 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </el-drawer>
     </div>
     <LandingLogs v-if="tab === 'logs'" />
+
+    <el-dialog v-model="shopOpen" :title="t('landing.shopTitle')" width="620px" append-to-body>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input v-model="shopDomain" class="ctrl-btn" style="flex:1;padding:6px 12px" :placeholder="t('landing.shopPh')" @keyup.enter="checkShopDomain" />
+        <button class="ctrl-btn" :disabled="shopChecking" @click="checkShopDomain">{{ shopChecking ? t('common.loading') : t('landing.shopCheck') }}</button>
+      </div>
+      <div v-if="shopQuote" class="shop-quote">
+        <div><b>{{ shopQuote.domain }}</b> · {{ shopQuote.available ? t('landing.shopAvail') : t('landing.shopTaken') }}</div>
+        <div v-if="shopQuote.available" class="shop-price">
+          {{ t('landing.shopCost') }} ${{ shopQuote.cost_usd }} + {{ t('landing.shopFee') }} ${{ shopQuote.fee_usd }} =
+          <b>${{ shopQuote.total_usd }}</b><i>（{{ t('landing.shopRenew') }} ${{ shopQuote.renewal_usd }}/yr）</i>
+        </div>
+        <button v-if="shopQuote.available" class="ctrl-btn primary" style="margin-top:8px" :disabled="shopOrdering" @click="placeOrder">{{ t('landing.shopOrder') }}</button>
+      </div>
+      <div style="margin-top:14px;font-size:13px;font-weight:600">{{ t('landing.shopOrders') }}</div>
+      <div v-loading="shopLoadingOrders" style="max-height:260px;overflow:auto">
+        <div v-for="o in shopOrders" :key="o.id" class="shop-order-row">
+          <span style="font-weight:600">{{ o.domain }}</span>
+          <span class="shop-st" :class="o.status">{{ shopStatusTxt(o.status) }}</span>
+          <span style="color:var(--t3)">${{ o.total_usd }}</span>
+          <span style="color:var(--t3);font-size:11px">{{ o.created_at }}</span>
+          <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
+          <span v-if="o.status === 'failed' && o.error" class="shop-err" :title="o.error">&#9888;</span>
+        </div>
+        <div v-if="!shopOrders.length && !shopLoadingOrders" style="text-align:center;color:var(--t3);font-size:12px;padding:10px">{{ t('landing.shopNoOrders') }}</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -1629,4 +1697,16 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .zone-import-bar{display:flex;align-items:center;justify-content:space-between;margin:10px 0 2px}
 .zone-sel-hint{font-size:11px;color:var(--t3)}
 .sub-ad i{font-style:normal;color:var(--t3)}
+
+/* 域名商店（批DD） */
+.shop-quote { margin-top: 10px; padding: 10px 14px; background: var(--bg2); border-radius: 8px; font-size: 13px }
+.shop-price { color: var(--t2); margin-top: 4px }
+.shop-price b { color: var(--t1) }
+.shop-price i { font-style: normal; font-size: 11px; color: var(--t3) }
+.shop-order-row { display: flex; gap: 10px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--bd); font-size: 12px }
+.shop-st { font-size: 10px; padding: 1px 7px; border-radius: 4px; background: rgba(128,128,140,.14); color: var(--t2) }
+.shop-st.bound { color: #30d158; background: rgba(48,209,88,.12) }
+.shop-st.pending_payment { color: #ff9f0a; background: rgba(255,159,10,.12) }
+.shop-st.failed { color: #ff453a; background: rgba(255,69,58,.12) }
+.shop-err { cursor: help }
 </style>

@@ -345,6 +345,65 @@ def set_cf_config(body: CfConfigIn, user: CurrentUser = Depends(require_superadm
     return {"saved": True}
 
 
+# ── Porkbun 域名代购凭据（批DD 预埋；超管注册 porkbun.com 后填入即激活商店）──
+class PorkbunConfigIn(BaseModel):
+    api_key: str = ""
+    secret_key: str = ""
+
+
+@router.get("/porkbun")
+def get_porkbun_config(user: CurrentUser = Depends(require_superadmin)):
+    from ..core.porkbun_client import porkbun_configured
+    k = settings.porkbun_api_key or ""
+    return {"configured": porkbun_configured(settings),
+            "api_key_masked": (k[:6] + "***" + k[-4:]) if len(k) > 10 else ("***" if k else "")}
+
+
+@router.put("/porkbun")
+def set_porkbun_config(body: PorkbunConfigIn, user: CurrentUser = Depends(require_superadmin)):
+    """写 .env + 运行时即时生效（同 CF 凭据模式）。"""
+    from pathlib import Path
+    updates = {}
+    if body.api_key:
+        updates["PORKBUN_API_KEY"] = _clean_token(body.api_key)
+    if body.secret_key:
+        updates["PORKBUN_SECRET_KEY"] = _clean_token(body.secret_key)
+    if not updates:
+        return {"saved": False, "detail": "无变更"}
+    env_path = Path("/opt/toveads/backend/.env")
+    lines = env_path.read_text().splitlines() if env_path.exists() else []
+    updated_lines, found = [], set()
+    for line in lines:
+        s = line.strip()
+        if "=" in s:
+            k = s.split("=", 1)[0]
+            if k in updates:
+                updated_lines.append(f"{k}={updates[k]}"); found.add(k); continue
+        updated_lines.append(line)
+    for k, v in updates.items():
+        if k not in found:
+            updated_lines.append(f"{k}={v}")
+    env_path.write_text("\n".join(updated_lines) + "\n")
+    if "PORKBUN_API_KEY" in updates:
+        settings.porkbun_api_key = updates["PORKBUN_API_KEY"]
+    if "PORKBUN_SECRET_KEY" in updates:
+        settings.porkbun_secret_key = updates["PORKBUN_SECRET_KEY"]
+    return {"saved": True}
+
+
+@router.post("/porkbun/test")
+def test_porkbun(user: CurrentUser = Depends(require_superadmin)):
+    """测试连接（ping——验证凭据 + 返回账号信息）。"""
+    from ..core.porkbun_client import PorkbunClient, porkbun_configured, PorkbunError
+    if not porkbun_configured(settings):
+        raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
+    try:
+        r = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key).ping()
+    except PorkbunError as e:
+        raise HTTPException(400, f"连接失败: {e}")
+    return {"ok": True, "account": str(r.get("identity") or "")[:60]}
+
+
 # ── 数据保留（超管）── 各表老数据保留天数，0=永久
 class RetentionIn(BaseModel):
     days: dict = {}  # {table: days}，缺省用默认

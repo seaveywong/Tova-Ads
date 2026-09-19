@@ -829,6 +829,7 @@ export default {
     cfOnboardOk: 'Domain {d} added to CF — change the nameservers at your registrar to the two below (then refresh here until status turns active)',
     cfOnboardNsHint: 'At your registrar → DNS/Nameserver settings → replace with these CF nameservers (click to copy):',
     cfZonesTitle: 'Domains (zones)', cfPagesTitle: 'Pages projects', cfNoZones: 'No domains', cfNoRecords: 'No DNS records', cfLpLink: 'Linked landing page',
+    pbTitle: 'Porkbun domains', pbDesc: 'Domain shop registrar credentials (porkbun.com → Account → API Access).', pbTest: 'Test', pbTestOk: 'Connected ({a})', pbHint: 'Once configured, Landing → Buy domain activates: pricing/order/register/CF onboarding fully automated.',
     cfAccountNsTip: 'Set registrar NS to these two (a domain may differ — the onboarding result is authoritative)', cfPendingHint: 'NS not active yet — check your registrar',
     cfUsageTitle: 'Usage & limits', cfToday: 'Today', cfUvToday: 'Requests today · unique visitors',
     cfLimitsLine: 'Free tier reference: static requests {a} · bandwidth {b} · Functions invocations {c}/day · builds {d}/month (higher on paid plans, per zone plan)',

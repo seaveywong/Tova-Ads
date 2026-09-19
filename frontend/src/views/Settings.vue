@@ -247,9 +247,34 @@ const saveCf = async () => {
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); cfSaving.value = false; return }
     await PUT('/settings/cf', body)
     ElMessage.success(t('common.saved'))
-    await loadCf()
+    await loadCf(); loadPb()
   } catch (e) { ElMessage.error(t('settings.saveFail', { msg: e.message || '' })) }
   cfSaving.value = false
+}
+// ── Porkbun 凭据（批DD 预埋：超管注册 porkbun.com 后填入即激活域名商店）──
+const pbCfg = ref({ configured: false, api_key_masked: '' })
+const pbForm = ref({ api_key: '', secret_key: '' })
+const pbSaving = ref(false)
+const pbTesting = ref(false)
+const loadPb = async () => { try { pbCfg.value = await GET('/settings/porkbun') } catch {} }
+const savePb = async () => {
+  pbSaving.value = true
+  try {
+    const body = {}
+    if (pbForm.value.api_key) body.api_key = pbForm.value.api_key
+    if (pbForm.value.secret_key) body.secret_key = pbForm.value.secret_key
+    if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); pbSaving.value = false; return }
+    await PUT('/settings/porkbun', body)
+    ElMessage.success(t('common.saved')); pbForm.value = { api_key: '', secret_key: '' }
+    await loadPb()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  pbSaving.value = false
+}
+const testPb = async () => {
+  pbTesting.value = true
+  try { const r = await POST('/settings/porkbun/test', {}); ElMessage.success(t('settings.pbTestOk', { a: r.account || '' })) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  pbTesting.value = false
 }
 // ── CF 管控台（批CY 一期：zone 总览/接入向导/Pages 项目——超管专属，sec-cf 卡内）──
 const cfOverview = ref(null)
@@ -606,6 +631,7 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-guard-tuning', label: t('settings.gtTitle') })
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
+    secs.push({ id: 'sec-porkbun', label: t('settings.pbTitle') })
     secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
     secs.push({ id: 'sec-fbapps', label: t('settings.faTitle') })
@@ -869,6 +895,18 @@ const runKeepaliveNow = async () => {
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="isSuper && activeSection==='sec-porkbun'" id="sec-porkbun" class="card">
+      <div class="t">{{ t('settings.pbTitle') }}</div>
+      <div class="d">{{ t('settings.pbDesc') }}</div>
+      <div class="form-l"><label>API Key</label><input v-model="pbForm.api_key" class="input" :placeholder="pbCfg.configured ? pbCfg.api_key_masked : 'pk1_...'" /></div>
+      <div class="form-l"><label>Secret Key</label><input v-model="pbForm.secret_key" class="input" type="password" :placeholder="pbCfg.configured ? '********' : 'sk1_...'" /></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" :disabled="pbSaving" @click="savePb">{{ t('common.save') }}</button>
+        <button class="btn" :disabled="pbTesting" @click="testPb">{{ t('settings.pbTest') }}</button>
+      </div>
+      <div class="field-hint">{{ t('settings.pbHint') }}</div>
     </div>
 
     <!-- 邮箱转发（超管）：状态行 + 目的地邮箱 + 别名映射 -->

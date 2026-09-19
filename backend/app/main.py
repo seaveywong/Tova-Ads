@@ -34,6 +34,7 @@ from .routers.tg_webhook import router as tg_webhook_router
 from .routers.assets import router as assets_router
 from .routers.backup import router as backup_router
 from .routers.cf_console import router as cf_console_router
+from .routers.domain_shop import router as domain_shop_router
 from .routers.fb_apps import router as fb_apps_router
 from .routers.fb_oauth import router as fb_oauth_router
 from .routers.tt_oauth import router as tt_oauth_router
@@ -167,6 +168,7 @@ app.include_router(landing_events_router)
 app.include_router(assets_router)
 app.include_router(backup_router)
 app.include_router(cf_console_router)
+app.include_router(domain_shop_router)
 app.include_router(fb_apps_router)
 from .routers.leads import router as leads_router
 from .routers.fb_webhook import router as fb_webhook_router
