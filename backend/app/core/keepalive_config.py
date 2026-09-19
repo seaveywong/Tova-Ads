@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 DEFAULT_KEEPALIVE = {
     "enabled": False,              # 团队开关：true=该团队所有 managed 账户自动纳入保活
-    "budget_usd": 5,              # 每条保活广告日预算（USD/天；批CD 定语义——lifetime 最低$30 会 1885272 且花完自停保活失效）
+    "budget_usd": 1,              # 兜底日预算 USD/天（每团队可在设置页改；批CD 定语义——lifetime 最低$30 会 1885272 且花完自停保活失效）
     "idle_days": 3,                # 连续 N 天无消耗 → 触发保活
     "asset_prefix": "YR",          # 素材库保活素材名前缀
     "campaign_prefix": "[Tova-保活]",  # 系列名标记（巡检/哨兵见此标记跳过不停）

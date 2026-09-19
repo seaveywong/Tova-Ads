@@ -26,11 +26,6 @@ def _cf() -> CfClient:
     return CfClient(token, acct)
 
 
-@router.get("/tenants")
-def list_tenants(user=Depends(require_superadmin), db: Session = Depends(get_system_db)):
-    """租户列表（分配域名时的下拉用）。"""
-    return [{"id": t.id, "name": t.name, "plan": t.plan, "status": t.status}
-            for t in db.query(Tenant).order_by(Tenant.id).all()]
 
 
 @router.get("/domains/discover")

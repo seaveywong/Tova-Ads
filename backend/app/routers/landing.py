@@ -771,27 +771,6 @@ def publish_landing(
         raise HTTPException(500, f"发布失败: {e}")
 
 
-@router.get("/projects")
-def list_cf_projects(
-    user: CurrentUser = Depends(require_permission("landing.manage")),
-    db: Session = Depends(get_db),
-):
-    """列 CF Pages 项目——只返回本租户落地页对应的 CF 项目（原返回全平台项目+全部域名）。
-
-    CF 项目名发布时按 tovaads-landing-{页id} 规范生成（页记录无 project_name 列，按 id 推导）。
-    domains 剥掉：那是 CF 侧项目级信息，含其他租户绑定的域名。"""
-    from ..core.cf_client import CfClient
-    from ..models.launch import LandingPage as _LP
-    cf_token = settings.cf_api_token
-    cf_account = settings.cf_account_id
-    if not cf_token or not cf_account:
-        raise HTTPException(500, "CF 未配置")
-    my_names = {f"tovaads-landing-{r.id}" for r in db.query(_LP.id).filter(
-        _LP.tenant_id == user.tenant_id).all()}
-    cf = CfClient(cf_token, cf_account)
-    projects = cf.list_projects()
-    return [{"name": p.get("name"), "subdomain": p.get("subdomain")}
-            for p in projects if p.get("name") in my_names]
 
 
 # ── 落地页记录 CRUD（Phase A：列表/详情/改/归档）──

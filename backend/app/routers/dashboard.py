@@ -662,37 +662,6 @@ def trend_data(
     return result
 
 
-@router.get("/ads")
-def ad_breakdown(
-    act_id: str,
-    date_preset: str = "today",
-    user: CurrentUser = Depends(require_permission("ads.read")),
-    db: Session = Depends(get_db),
-):
-    """单账户广告级（从 perf_snapshots 读，秒开）。看数据按业务日（北京），
-    snapshot_date 是账户本地日，按业务日历日查即命中该账户本地该日。
-    platform 取自账户行（fb/tt 各查各的快照——ad_id 跨平台可能撞号）。"""
-    _acc = db.query(Account).filter(
-        Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
-    if _acc and not account_operable(user, _acc):
-        raise HTTPException(404, "账户未纳管")   # 批AJ：deny 必须 404——曾设 None 后继续跑，泄漏他人账户广告级明细
-    _acc_plat = (_acc.platform or "fb") if _acc else "fb"
-    today = _business_today()
-    rows = db.query(PerfSnapshot).filter(
-        PerfSnapshot.tenant_id == user.tenant_id,
-        PerfSnapshot.act_id == act_id,
-        PerfSnapshot.platform == _acc_plat,
-        PerfSnapshot.snapshot_date == today,
-    ).all()
-    return {
-        "act_id": act_id, "date_preset": date_preset,
-        "ads": [{
-            "ad_id": r.ad_id, "spend": r.spend, "spend_native": r.spend_native,
-            "currency": r.currency, "conversions": r.conversions, "cpa": r.cpa,
-            "roas": r.roas, "impressions": r.impressions, "clicks": r.clicks,
-            "reach": r.reach, "frequency": r.frequency, "ctr": r.ctr, "cpc": r.cpc,
-        } for r in rows],
-    }
 
 
 @router.get("/landing")

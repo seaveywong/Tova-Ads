@@ -636,30 +636,6 @@ def check_credential(
     return result
 
 
-@router.get("/credentials/{cred_id}/accounts")
-def list_credential_accounts(
-    cred_id: int,
-    user: CurrentUser = Depends(require_permission("ads.read")),
-    db: Session = Depends(get_db),
-):
-    """列出该令牌能管的广告账户（FB /me/adaccounts，per-token，展开行用）。"""
-    cred = db.query(FbCredential).filter(
-        FbCredential.tenant_id == user.tenant_id,
-        FbCredential.id == cred_id,
-    ).first()
-    if not cred:
-        raise HTTPException(404, "令牌不存在")
-
-    token = decrypt(cred.access_token_enc)
-    fb = FbClient(token)
-    try:
-        accounts = fb.get_ad_accounts()
-    except FbApiError as e:
-        raise HTTPException(400, e.friendly)
-
-    return [{"account_id": a.get("account_id", ""), "name": a.get("name", ""),
-             "currency": a.get("currency", "USD"), "timezone_name": a.get("timezone_name", "UTC")}
-            for a in accounts]
 
 
 # ── 令牌资产（主页/像素）短缓存 ──────────────────────────────────────────────

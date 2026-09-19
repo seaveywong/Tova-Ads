@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from ..core.database import get_system_db
 from ..core.security import hash_password, verify_password, create_access_token
 from ..core.deps import get_current_user, CurrentUser
-from ..models.auth import User, TenantMembership, Invitation, Tenant
-from ..schemas.auth import RegisterIn, LoginIn, TokenOut, UserOut, UpdateTimezoneIn, UpdateEmailIn, UpdatePasswordIn
+from ..models.auth import User, TenantMembership, Tenant
+from ..schemas.auth import LoginIn, TokenOut, UserOut, UpdateTimezoneIn, UpdateEmailIn, UpdatePasswordIn
 from pydantic import BaseModel
 
 
@@ -28,32 +28,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _LOGIN_FAILS: dict = {}
 
 
-@router.post("/register", response_model=TokenOut)
-def register(body: RegisterIn, db: Session = Depends(get_system_db)):
-    """邀请码注册 → 建用户 + membership(默认 operator) → 返 token。"""
-    inv = db.query(Invitation).filter(Invitation.code == body.code).first()
-    if not inv or inv.used_by is not None:
-        raise HTTPException(400, "邀请码无效或已使用")
-    if inv.expires_at and inv.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(400, "邀请码已过期")
-    email_lc = body.email.strip().lower()
-    if not email_lc or "@" not in email_lc:
-        raise HTTPException(400, "邮箱格式不对")
-    if db.query(User).filter(User.email == email_lc).first():
-        raise HTTPException(400, "邮箱已注册")
-    if len(body.password or "") < 8:
-        raise HTTPException(400, "密码至少 8 位")
-
-    user = User(email=email_lc, password_hash=hash_password(body.password))
-    db.add(user)
-    db.flush()
-    db.add(TenantMembership(tenant_id=inv.tenant_id, user_id=user.id, role="operator"))
-    inv.used_by = user.id
-    inv.used_at = datetime.now(timezone.utc)
-    db.commit()
-
-    token = create_access_token(user_id=user.id, email=user.email, tenant_id=inv.tenant_id, role="operator")
-    return TokenOut(access_token=token, role="operator", tenant_id=inv.tenant_id)
 
 
 @router.post("/login")

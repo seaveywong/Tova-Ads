@@ -651,30 +651,6 @@ def ads_refresh_status(
     return st or {"running": False, "done": 0, "total": 0}
 
 
-@router.post("/refresh")
-def refresh_ads(
-    act_id: str = "",
-    user: CurrentUser = Depends(require_permission("ads.read")),
-    db: Session = Depends(get_db),
-):
-    """手动刷新 ads_cache（单账户 act_id 或全部）。FB/TT 平台分发（同 _bg_refresh）。"""
-    if act_id:
-        from ..core.deps import scope_account_query
-        accs = scope_account_query(db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.act_id == act_id), user).all()
-    else:
-        from ..core.deps import scope_account_query as _sc
-        accs = _sc(db.query(Account).filter(
-            Account.tenant_id == user.tenant_id, Account.is_managed == True,  # noqa: E712
-            Account.account_status == 1), user).all()
-    ok = 0
-    for a in accs:
-        fb = client_for_account(db, user.tenant_id, a.act_id, "read")
-        if fb and _sync_one(db, user.tenant_id, a.act_id, fb, platform=_acc_platform(a),
-                            currency=(a.currency or "USD")):
-            ok += 1
-    db.commit()
-    return {"refreshed": ok, "total": len(accs)}
 
 
 # live-status 同账户 10s 内存缓存（防连点/列表抖动重复打 FB；多 worker 各自一份，可接受）

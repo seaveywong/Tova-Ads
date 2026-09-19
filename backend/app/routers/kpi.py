@@ -21,71 +21,12 @@ class KpiConfigIn(BaseModel):
     target_type: str = "campaign"
 
 
-@router.get("")
-def list_kpi(user: CurrentUser = Depends(require_permission("ads.read")),
-             db: Session = Depends(get_db)):
-    rows = db.query(KpiConfig).filter(KpiConfig.tenant_id == user.tenant_id).all()
-    return [{"id": r.id, "target_type": r.target_type, "target_id": r.target_id,
-             "kpi_field": r.kpi_field, "target_cpa": r.target_cpa,
-             "source": r.source, "enabled": r.enabled} for r in rows]
 
 
-@router.post("")
-def set_kpi(body: KpiConfigIn, user: CurrentUser = Depends(require_permission("rules.create")),
-            db: Session = Depends(get_db)):
-    """upsert：同租户同 target 的 kpi_configs 覆盖。"""
-    existing = db.query(KpiConfig).filter(
-        KpiConfig.tenant_id == user.tenant_id,
-        KpiConfig.target_type == body.target_type,
-        KpiConfig.target_id == body.target_id,
-    ).first()
-    if existing:
-        existing.kpi_field = body.kpi_field
-        existing.target_cpa = body.target_cpa
-        existing.enabled = True
-        row = existing
-    else:
-        row = KpiConfig(tenant_id=user.tenant_id, target_type=body.target_type,
-                        target_id=body.target_id, kpi_field=body.kpi_field,
-                        target_cpa=body.target_cpa, source="manual")
-        db.add(row)
-    db.flush()
-    tid = new_trace_id()
-    write_log(db, tenant_id=user.tenant_id, trace_id=tid, actor_type="user",
-              actor_user_id=user.id, target_type="kpi_config", target_id=str(row.id),
-              action_type="upsert", source="user", result="success",
-              metadata={"campaign_id": body.target_id, "target_cpa": body.target_cpa})
-    db.commit()
-    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
-    return {"id": row.id, "trace_id": tid, "target_id": body.target_id,
-            "kpi_field": body.kpi_field, "target_cpa": body.target_cpa}
 
 
-@router.delete("/{kid}")
-def delete_kpi(kid: int, user: CurrentUser = Depends(require_permission("rules.create")),
-               db: Session = Depends(get_db)):
-    row = db.query(KpiConfig).filter(
-        KpiConfig.id == kid, KpiConfig.tenant_id == user.tenant_id).first()
-    if not row:
-        raise HTTPException(404, "KPI 配置不存在")
-    db.delete(row)
-    db.commit()
-    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
-    return {"id": kid, "deleted": True}
 
 
-@router.put("/{kid}")
-def toggle_kpi(kid: int, enabled: bool,
-               user: CurrentUser = Depends(require_permission("rules.create")),
-               db: Session = Depends(get_db)):
-    row = db.query(KpiConfig).filter(
-        KpiConfig.id == kid, KpiConfig.tenant_id == user.tenant_id).first()
-    if not row:
-        raise HTTPException(404, "KPI 配置不存在")
-    row.enabled = enabled
-    db.commit()
-    from ..core.kpi_mapping import reset_kpi_mapping_cache as _rk; _rk()   # 缓存失效
-    return {"id": kid, "enabled": row.enabled}
 
 
 # ── KPI 映射配置（系统级，超管）──
@@ -122,7 +63,3 @@ def put_mapping(body: KpiMappingIn,
     return {"saved": True}
 
 
-@router.get("/categories")
-def get_categories(user: CurrentUser = Depends(require_permission("ads.read"))):
-    """返回 KPI 字段分类（看板筛选/诊断用，非超管也可读）。"""
-    return KPI_CATEGORIES

@@ -103,15 +103,6 @@ def _visible_scope(user, db):
     )
 
 
-@router.get("/unread-count")
-def unread_count(
-    user: CurrentUser = Depends(require_permission("ads.read")),
-    db: Session = Depends(get_db),
-):
-    """未读数（顶栏红点用）——与列表同口径（只数自己角色可见的）。"""
-    return {"unread": _visible_scope(user, db).filter(
-        Notification.read_at == None,  # noqa: E711
-    ).count()}
 
 
 @router.post("/read")
@@ -139,48 +130,6 @@ class TgBindingIn(BaseModel):
     chat_id: str
 
 
-@router.post("/tg/binding")
-def set_tg_binding(
-    body: TgBindingIn,
-    user: CurrentUser = Depends(require_permission("members.manage")),
-    db: Session = Depends(get_db),
-):
-    """绑/换 TG bot（加密存 bot_token）。Owner 专用。
-    2026-09-15：Bot 全局化——配置后自动同步到所有还没 Bot 的团队（一个 Bot 服务全平台）。"""
-    existing = db.query(TenantTgBinding).filter(
-        TenantTgBinding.tenant_id == user.tenant_id,
-    ).first()
-    # 全局同步：配置了 Bot → 所有没有 Bot 的团队也自动获得（新团队不用再配）
-    from ..core.database import SuperSessionLocal as _SS
-    from ..models.auth import Tenant as _T
-    _sdb = _SS()
-    try:
-        _all_tids = [t.id for t in _sdb.query(_T).all()]
-        for _tid in _all_tids:
-            _has = _sdb.query(TenantTgBinding).filter(
-                TenantTgBinding.tenant_id == _tid).first()
-            if not _has:
-                _sdb.add(TenantTgBinding(tenant_id=_tid,
-                                          bot_token_enc=encrypt(body.bot_token),
-                                          chat_id=body.chat_id))
-        _sdb.commit()
-    except Exception:
-        _sdb.rollback()
-    finally:
-        _sdb.close()
-    if existing:
-        existing.bot_token_enc = encrypt(body.bot_token)
-        existing.chat_id = body.chat_id
-        existing.verified_at = None
-    else:
-        binding = TenantTgBinding(
-            tenant_id=user.tenant_id,
-            bot_token_enc=encrypt(body.bot_token),
-            chat_id=body.chat_id,
-        )
-        db.add(binding)
-    db.commit()
-    return {"status": "saved"}
 
 
 @router.post("/tg/test")

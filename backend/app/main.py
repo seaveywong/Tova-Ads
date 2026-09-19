@@ -20,15 +20,12 @@ from .core.log_utils import new_trace_id
 from .routers.auth import router as auth_router
 from .routers.fb import router as fb_router
 from .routers.subcodes import router as subcodes_router
-from .routers.launch import router as launch_router
 from .routers.guard import router as guard_router
 from .routers.notify import router as notify_router
-from .routers.tickets import router as tickets_router
 from .routers.dashboard import router as dashboard_router
 from .routers.landing import router as landing_router
 from .routers.compliance import router as compliance_router
 from .routers.audiences import router as audiences_router
-from .routers.ai import router as ai_router
 from .routers.landing_lib import router as landing_lib_router
 from .routers.admin import router as admin_router
 from .routers.kpi import router as kpi_router
@@ -154,15 +151,12 @@ async def _unhandled_exception_handler(request, exc):
 app.include_router(auth_router)
 app.include_router(fb_router)
 app.include_router(subcodes_router)
-app.include_router(launch_router)
 app.include_router(guard_router)
 app.include_router(notify_router)
-app.include_router(tickets_router)
 app.include_router(dashboard_router)
 app.include_router(landing_router)
 app.include_router(compliance_router)
 app.include_router(audiences_router)
-app.include_router(ai_router)
 app.include_router(landing_lib_router)
 app.include_router(tg_webhook_router)
 app.include_router(admin_router)
