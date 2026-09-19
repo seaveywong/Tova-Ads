@@ -927,7 +927,8 @@ def _fetch_post_content_uncached(db: Session, tenant_id: int, post_id: str) -> d
             break  # 拉失败 → 用缓存兜底
         if cached and (cached.get("message") or cached.get("picture") or cached.get("headline")):
             return cached
-    # ③ FB published_posts 边（有机帖：page token 读边）
+    # ③ FB promotable_posts 边（2026-09-20 起用：published_posts 只有有机帖——广告暗帖全不在内，
+    #    这正是「明明有主页权限却读不到」的主因之一；promotable_posts 含已发布+未发布可投帖）
     page_id = post_id.split("_")[0] if "_" in post_id else ""
     if not page_id:
         return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "link": "", "permalink_url": ""} if pp_msg else {}
@@ -938,20 +939,59 @@ def _fetch_post_content_uncached(db: Session, tenant_id: int, post_id: str) -> d
             pt = ""
         if not pt:
             continue
-        try:
-            posts = FbClient(pt).get_paged(f"{page_id}/published_posts",
-                                           {"fields": "id,message,attachments{media{src}},permalink_url", "limit": 100})
-        except Exception:
-            continue
-        for p in posts:
-            if str(p.get("id", "")) == str(post_id):
-                atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
-                picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
-                return {"message": (p.get("message") or "")[:500], "headline": "", "picture": picture,
-                        "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
-        break  # 该令牌管此主页但 published_posts 里没这条（暗帖/已删）→ 不再试别的令牌
+        _hit = None
+        for _edge in ("promotable_posts", "published_posts"):
+            try:
+                posts = FbClient(pt).get_paged(f"{page_id}/{_edge}",
+                                               {"fields": "id,message,attachments{media{src}},permalink_url", "limit": 100})
+            except Exception:
+                continue
+            for p in posts:
+                if str(p.get("id", "")) == str(post_id):
+                    atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+                    picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+                    _hit = {"message": (p.get("message") or "")[:500], "headline": "", "picture": picture,
+                            "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
+                    break
+            if _hit:
+                return _hit
+        break  # 该令牌管此主页但两边里都没这条（已删/他令牌页）→ 不再试别的令牌
     # 都没图：至少返 page_posts 的 message（若有），比空好
     return {"message": pp_msg, "headline": "", "picture": "", "cta_type": "", "link": "", "permalink_url": ""} if pp_msg else {}
+
+
+def _normalize_post_query(q: str) -> str:
+    """粘贴内容归一化（跟帖识别 2026-09-20 修复）：l.php 外链包一层 → 解出真 URL；
+    短链（fb.watch / share/p / share/v / story.php 跳转链）→ 跟随重定向到规范 permalink。
+    失败原样返回（不阻断——上层正则还能从原文提取）。"""
+    import re as _re
+    from urllib.parse import urlparse, parse_qs, unquote
+    if not q or not _re.search(r"https?://|facebook\.com|fb\.watch|fb\.me", q, _re.I):
+        return q
+    u = q if q.startswith("http") else "https://" + q.lstrip("/")
+    # l.php / l.facebook.com 外链跳转包：真地址在 u= 参数
+    try:
+        pu = urlparse(u)
+        if "l.php" in (pu.path or "") or (pu.netloc or "").startswith("l.facebook.com"):
+            inner = (parse_qs(pu.query).get("u") or [""])[0]
+            if inner:
+                u = unquote(inner)
+    except Exception:
+        pass
+    # 短链形态跟随重定向（免登录；拿到最终 URL 即返回，不读内容）
+    import httpx
+    try:
+        pu = urlparse(u)
+        path = pu.path or ""
+        if (pu.netloc or "").startswith(("fb.watch", "fb.me", "www.facebook.com", "m.facebook.com", "web.facebook.com", "business.facebook.com")) \
+           and _re.search(r"^/(share/[pv]/|reel/|story\.php)", path):
+            r = httpx.get(u, follow_redirects=True, timeout=8,
+                          headers={"User-Agent": "Mozilla/5.0 (compatible; TovaAdsBot/1.0)"})
+            if r.url and str(r.url) != u:
+                return str(r.url)
+    except Exception:
+        pass
+    return u
 
 
 @router.post("/resolve-post")
@@ -965,6 +1005,7 @@ def resolve_post(body: ResolvePostIn,
     q = (body.q or "").strip()
     if not q:
         raise HTTPException(400, "空")
+    q = _normalize_post_query(q)   # 2026-09-20：短链/l.php 包裹归一化（失败原样）
     page_id = post_id = source = ""
     content = {}
     # 1. 完整 {page}_{post} → 直接拆
@@ -973,10 +1014,11 @@ def resolve_post(body: ResolvePostIn,
         post_id = m.group(1); page_id = post_id.split("_", 1)[0]; source = "full"
     else:
         # 2. 裸 post 号 / URL → 提取帖子号
-        # 优先 URL 里的 post 段（/posts/{n}/、fbid=/story_fbid=、permalink/..._{n}），否则取最长数字串
-        # （避免把主页 ID 当帖子号——permalink 里页 ID 在前，帖号在后）
-        url_m = (re.search(r"/posts/(\d{10,})", q) or re.search(r"[?&](?:fbid|story_fbid)=(\d{10,})", q)
-                 or re.search(r"/permalink/\d+_(\d+)", q) or re.search(r"/videos/(\d{10,})", q))
+        # 优先 URL 里的 post 段（/posts/{n}/、fbid=/story_fbid=、permalink/..._{n}、/reel/、/watch?v=），
+        # 否则取最长数字串（避免把主页 ID 当帖子号——permalink 里页 ID 在前，帖号在后）
+        url_m = (re.search(r"/posts/(\d{10,})", q) or re.search(r"[?&](?:fbid|story_fbid|v)=(\d{10,})", q)
+                 or re.search(r"/permalink/\d+_(\d+)", q)
+                 or re.search(r"/(?:videos|reel)/(\d{10,})", q))
         if url_m:
             post_num = url_m.group(1)
         else:
@@ -1014,6 +1056,46 @@ def resolve_post(body: ResolvePostIn,
                     content = {"message": (p.get("message") or "")[:300], "headline": "", "picture": picture,
                                "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
                     break
+            # 2c. 页令牌扫描（2026-09-20 修复「明明有主页权限却读取不到」）：
+            # 暗帖（广告帖大多是暗帖）GET /{裸帖号} 即使用户令牌有主页权限也常无权——须帖所属
+            # 主页的页令牌，且暗帖裸号常读不到、要拼全 ID 按页试。逐令牌列可管主页 → 拼全 ID
+            # 换页令牌试读（上限 60 页防失控），命中即停。
+            if not post_id:
+                _pages_tried = 0
+                for _cred, fb in iter_tenant_clients(db, user.tenant_id):
+                    try:
+                        _pgs = fb.get_pages() or []
+                    except Exception:
+                        continue
+                    for _pg in _pgs:
+                        _pages_tried += 1
+                        if _pages_tried > 60:
+                            break
+                        _pg_id = str(_pg.get("id") or "")
+                        if not _pg_id:
+                            continue
+                        try:
+                            _pt = fb.get_page_access_token(_pg_id)
+                        except Exception:
+                            _pt = ""
+                        if not _pt:
+                            continue
+                        try:
+                            p = FbClient(_pt).get(f"{_pg_id}_{post_num}", {
+                                "fields": "id,message,attachments{media{src}},permalink_url"})
+                        except Exception:
+                            continue
+                        full = str(p.get("id") or "")
+                        if not full:
+                            continue
+                        atts = (p.get("attachments") or {}).get("data", []) if isinstance(p.get("attachments"), dict) else []
+                        picture = (atts[0].get("media") or {}).get("src", "") if atts and isinstance(atts[0], dict) else ""
+                        page_id, post_id, source = _pg_id, full, "fb"
+                        content = {"message": (p.get("message") or "")[:300], "headline": "", "picture": picture,
+                                   "cta_type": "", "link": "", "permalink_url": p.get("permalink_url", "")}
+                        break
+                    if post_id or _pages_tried > 60:
+                        break
             if not post_id:
                 raise HTTPException(404, "未找到该帖子（本地缓存无、令牌也无权访问）")
     # full/local → 补内容预览（FB 兜底已带 content）；无权访问则空字段
