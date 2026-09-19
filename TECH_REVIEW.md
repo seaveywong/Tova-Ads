@@ -2668,3 +2668,17 @@ OK：/fb/accounts、/ads/list、/ads/spend-report、/landing/pages、/assets、/
 - _d_decode_tt 修复需重发布生效（TT 上线前必须重发全部用 TT 像素的页）
 - balance_alert_threshold 死键（读活写无——settings UI 未暴露，默认 20 一直在用）
 - 前端 169 个死 i18n 键、launch.py v1 旧 router 整体下线——建议下次文案/清理批拍板
+
+## 批CX：孤儿清理执行（2026-09-18，用户拍板删除+确认零影响）
+
+### 执行
+23 端点删除（openapi 250→227 恰好对上）：launch.py/tickets.py/ai.py 三整文件 + 散布 12 条（详见 commit）。保留判定：compliance（计划功能）、assets 维护 3 条（运维）、KpiConfig 读链路（表有 1 行生效数据，删读路径会改解析行为——只删无 UI 的 CRUD）。
+
+### 零影响验证（四重）
+①悬空引用 grep 0 命中（AST 删除精确到函数边界）②14 文件 AST 语法校验全过 ③服务器 py_compile+import 门 ④运行时抽查：10 存活端点 401、6 删除端点 404/405、journal 0 Traceback。
+
+### 附带
+保活兜底预算 5→1 USD/天（租户1已显式配 $2/天不受影响；机制=每团队设置页可配，兜底只作用于从未配置的团队）。
+
+### KpiConfig 说明（用户问"这是什么"）
+转化成效指标的解析优先级层之一：广告系列成效在 FB 里叫 OFFSITE_CONVERSIONS 等通用名，系统要把它翻译成"购买/表单提交"等具体口径——解析顺序 L0=KpiConfig 手动指定(无UI,历史遗留1行) → L1=转化映射页(有UI,现行主用) → L2=按系列目标自动推断。L0 从来没有管理界面，仅剩那 1 行历史数据在生效。处置：读链路保留(删了会改变那1行影响的账户解析)，死 CRUD 已删；将来要么给 L0 补 UI 要么迁移掉那 1 行后整层删除。
