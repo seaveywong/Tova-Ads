@@ -781,7 +781,7 @@ const runKeepaliveNow = async () => {
               <button class="btn primary" :disabled="cfOnboarding" @click="onboardZone">{{ cfOnboarding ? t('common.loading') : t('settings.cfOnboardBtn') }}</button>
             </div>
             <div v-if="cfAccountNs.length" class="cf-ns-box">
-              <div class="cf-ns-tip">{{ t('settings.cfAccountNsTip') }}</div>
+              <div class="cf-ns-tip">{{ t('settings.cfAccountNsTip') }}<i @click="copyText(cfAccountNs.join(' / '))" class="cf-copy-all">⧉</i></div>
               <div v-for="ns in cfAccountNs" :key="ns" class="cf-ns-row" @click="copyText(ns)">{{ ns }} <i>⧉</i></div>
             </div>
           </div>
@@ -1084,11 +1084,11 @@ const runKeepaliveNow = async () => {
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
 /* 锚点导航 */
-.anchor-strip{position:sticky;top:0;z-index:50;display:flex;gap:4px;overflow-x:auto;background:var(--bg);padding:8px 0 6px;border-bottom:1px solid var(--bd);scrollbar-width:thin}
+.anchor-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0 14px;position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--bd);margin-bottom:14px}
 /* 分组标签竖排两行式排版更稳：个人/平台 标签 + 下方细分按钮行同高对齐 */
-.anchor-group-label{font-size:10px;color:var(--t3);align-self:center;padding:0 6px 0 2px;white-space:nowrap;flex-shrink:0;font-weight:600;letter-spacing:.02em}
+.anchor-group-label{font-size:11px;color:var(--t3);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-right:2px}
 .anchor-sep{width:1px;align-self:stretch;background:var(--bd);margin:4px 6px;flex-shrink:0}
-.anchor-btn{padding:4px 12px;background:transparent;color:var(--t3);border:1px solid transparent;border-radius:var(--rs);font-size:12px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.anchor-btn{font-size:12px;padding:5px 12px;border-radius:999px;border:1px solid var(--bd);background:transparent;color:var(--t2);cursor:pointer;transition:all .15s;white-space:nowrap}
 .anchor-btn:hover{color:var(--t1);background:var(--bg2)}
 .anchor-btn.active{background:var(--ac);color:#fff}
 .card{scroll-margin-top:60px}
@@ -1230,6 +1230,13 @@ const runKeepaliveNow = async () => {
 .em-alias-input{max-width:150px;flex:0 1 150px}
 .em-domain{color:var(--t3);font-size:12px;flex-shrink:0}
 @media (max-width:768px){.em-add-row{flex-wrap:wrap}.em-alias-input{flex:1 1 100%;max-width:none}.em-domain{order:2}.em-add-row .el-select{order:3;flex:1 1 100%}}
+
+/* ── 设置页壳层重构（批CZ）：卡片标题排版 + CF NS 复制角标 ── */
+.card > .t { font-size: 15px; font-weight: 700; padding-bottom: 10px; border-bottom: 1px solid var(--bd); margin-bottom: 14px; letter-spacing: .2px }
+.card > .d { margin-top: -6px }
+.cf-copy-all { float: right; cursor: pointer; color: var(--t3); font-style: normal; padding: 0 4px }
+.cf-copy-all:hover { color: var(--ac) }
+@media (max-width: 768px) { .anchor-strip { top: 48px } }
 </style>
 
 /* FB App 配置行 + 导入行为表单 */
