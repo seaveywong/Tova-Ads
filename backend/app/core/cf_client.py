@@ -201,6 +201,11 @@ class CfClient:
             page += 1
         return out
 
+    def graphql(self, query: str, variables: dict | None = None) -> dict:
+        """GraphQL Analytics API（zone 请求量/带宽/独立访客等）。权限不足时 errors 含 authz。"""
+        data = self._post("/graphql", json={"query": query, "variables": variables or {}})
+        return data
+
     def create_zone(self, domain: str) -> dict:
         """外部注册商域名接入 CF（Full setup）。已存在=返回现存 zone（幂等，code 1061）。"""
         data = self._post("/zones", json={

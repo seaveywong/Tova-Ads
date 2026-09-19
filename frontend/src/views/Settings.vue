@@ -265,6 +265,22 @@ const cfAccountNs = computed(() => {
   const z = (cfOverview.value?.zones || []).find(x => (x.name_servers || []).length)
   return (z && z.name_servers) || (cfOnboardResult.value?.name_servers) || []
 })
+// 用量与限额（批CY-b）：各 zone 访问量 + 套餐 + 官方限额参考；缺 Analytics 权限时给指引
+const cfUsage = ref(null)
+const cfUsageLoading = ref(false)
+const fmtBytes = (b) => {
+  if (!b) return '0'
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0, v = b
+  while (v >= 1024 && i < 4) { v /= 1024; i++ }
+  return v.toFixed(v >= 100 || i === 0 ? 0 : 1) + ' ' + u[i]
+}
+const loadCfUsage = async () => {
+  cfUsageLoading.value = true
+  try { cfUsage.value = await GET('/cf-console/usage', 90000) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  cfUsageLoading.value = false
+}
 const loadCfOverview = async () => {
   cfLoading.value = true
   try { cfOverview.value = await GET('/cf-console/overview', 60000) }
@@ -613,6 +629,7 @@ const anchorGroups = computed(() => [
 // Tab 切换：点哪个显示哪个分区（Tab 模式，不再长页滚动 + IntersectionObserver）
 watch(activeSection, (id) => {
   if (id === 'sec-cf' && !cfOverview.value && !cfLoading.value) loadCfOverview()
+  if (id === 'sec-cf' && !cfUsage.value && !cfUsageLoading.value) loadCfUsage()
 })
 
 const switchSection = (id) => {
@@ -827,6 +844,28 @@ const runKeepaliveNow = async () => {
               <span class="cf-page-lp" :title="t('settings.cfLpLink')">{{ p.page_title ? ('📄 ' + p.page_title + '（' + p.page_status + '）') : '' }}</span>
               <span class="cf-page-date">{{ (p.created_on || '').slice(0, 10) }}</span>
             </div>
+          </div>
+        </div>
+
+        <div class="cf-panel">
+          <div class="cf-panel-hd">
+            <span>{{ t('settings.cfUsageTitle') }}</span>
+            <button class="btn sm" :disabled="cfUsageLoading" @click="loadCfUsage">{{ cfUsageLoading ? t('common.loading') : '⟳' }}</button>
+          </div>
+          <div class="cf-panel-bd" v-loading="cfUsageLoading">
+            <div class="cf-limits">{{ t('settings.cfLimitsLine', {
+              a: cfUsage?.limits?.pages_static || '-', b: cfUsage?.limits?.pages_bandwidth || '-',
+              c: cfUsage?.limits?.functions_per_day || '-', d: cfUsage?.limits?.builds_per_month || '-' }) }}</div>
+            <div v-if="cfUsage?.needs_permission" class="cf-perm-hint">{{ t('settings.cfPermHint') }}</div>
+            <template v-for="u in (cfUsage?.zones || [])" :key="u.zone">
+              <div class="cf-usage-row">
+                <span class="cf-zone-name">{{ u.zone }}</span>
+                <span class="cf-usage-plan">{{ u.plan }}</span>
+                <span class="cf-usage-cell" :title="t('settings.cfUvToday')">{{ t('settings.cfToday') }} <b>{{ u.today ? u.today.requests.toLocaleString() : (u.no_data ? '—' : 0) }}</b><i v-if="u.today"> · UV {{ u.today.uniques }}</i></span>
+                <span class="cf-usage-cell">7d <b>{{ u.d7.toLocaleString() }}</b></span>
+                <span class="cf-usage-cell">30d <b>{{ u.d30.toLocaleString() }}</b><i> · {{ fmtBytes(u.bytes30) }}</i></span>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -1305,4 +1344,12 @@ const runKeepaliveNow = async () => {
 .cf-page-domains { color: var(--t3); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .cf-page-lp { color: var(--t2); white-space: nowrap }
 .cf-page-date { font-size: 11px; color: var(--t3); margin-left: auto; white-space: nowrap }
+.cf-limits { font-size: 11px; color: var(--t3); padding: 4px 0 8px; border-bottom: 1px dashed var(--bd); margin-bottom: 4px }
+.cf-perm-hint { font-size: 12px; color: #ff9f0a; padding: 8px 10px; background: rgba(255,159,10,.08); border-radius: 6px; margin: 6px 0 }
+.cf-usage-row { display: flex; gap: 14px; align-items: baseline; padding: 7px 2px; border-bottom: 1px solid var(--bd); font-size: 12px }
+.cf-usage-row:last-child { border-bottom: none }
+.cf-usage-plan { font-size: 10px; color: var(--t3); min-width: 88px }
+.cf-usage-cell { color: var(--t3); white-space: nowrap }
+.cf-usage-cell b { color: var(--t1); font-weight: 600 }
+.cf-usage-cell i { font-style: normal; font-size: 10px; margin-left: 2px }
 </style>
