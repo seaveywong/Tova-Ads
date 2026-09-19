@@ -1126,9 +1126,12 @@ const runKeepaliveNow = async () => {
 .fixed-tag{font-size:10px;padding:1px 6px;background:var(--bg3);border-radius:4px;color:var(--t3);width:fit-content}
 .pwd-mismatch { color: var(--el-color-danger, #f56c6c); font-size: 12px; margin-top: 4px }
 .acct-sep{height:1px;background:var(--bd);margin:14px 0}
-.form-l{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.form-l{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.form-l > label{flex:0 0 132px}
+.form-l .input,.form-l .ep-input{flex:1;min-width:0}
+.form-l .field-hint,.form-l .pwd-mismatch{flex-basis:100%}
 /* 标签自适应宽度（曾固定 72px 右对齐——长标签「邮箱转发令牌」等挤压换行，排列烂） */
-.form-l > label{font-size:12px;color:var(--t3);white-space:nowrap;flex-shrink:0}
+.form-l > label{font-size:13px;color:var(--t2);white-space:normal;flex-shrink:0}
 .input{flex:1;min-width:0;padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit;box-sizing:border-box}
 .input:focus{border-color:var(--ac);outline:none}
 @media (max-width:600px){.form-l{flex-direction:column;align-items:stretch;gap:4px}}
@@ -1231,7 +1234,10 @@ const runKeepaliveNow = async () => {
 .em-domain{color:var(--t3);font-size:12px;flex-shrink:0}
 @media (max-width:768px){.em-add-row{flex-wrap:wrap}.em-alias-input{flex:1 1 100%;max-width:none}.em-domain{order:2}.em-add-row .el-select{order:3;flex:1 1 100%}}
 
-/* ── 设置页壳层重构（批CZ）：卡片标题排版 + CF NS 复制角标 ── */
+/* ── 设置页壳层重构（批CZ/DB）：卡片节奏 + 表单网格统一 ── */
+.card { padding: 18px 20px }
+.card > .d { font-size: 12px; color: var(--t3); line-height: 1.6 }
+.card .btn { margin-top: 4px }
 .card > .t { font-size: 15px; font-weight: 700; padding-bottom: 10px; border-bottom: 1px solid var(--bd); margin-bottom: 14px; letter-spacing: .2px }
 .card > .d { margin-top: -6px }
 .cf-copy-all { float: right; cursor: pointer; color: var(--t3); font-style: normal; padding: 0 4px }
