@@ -2682,3 +2682,25 @@ OK：/fb/accounts、/ads/list、/ads/spend-report、/landing/pages、/assets、/
 
 ### KpiConfig 说明（用户问"这是什么"）
 转化成效指标的解析优先级层之一：广告系列成效在 FB 里叫 OFFSITE_CONVERSIONS 等通用名，系统要把它翻译成"购买/表单提交"等具体口径——解析顺序 L0=KpiConfig 手动指定(无UI,历史遗留1行) → L1=转化映射页(有UI,现行主用) → L2=按系列目标自动推断。L0 从来没有管理界面，仅剩那 1 行历史数据在生效。处置：读链路保留(删了会改变那1行影响的账户解析)，死 CRUD 已删；将来要么给 L0 补 UI 要么迁移掉那 1 行后整层删除。
+
+## 批CY：CF 管控台一期（2026-09-19，本 commit）
+
+### 概述
+用户拍板：设置页做 CF 专属管理界面（含后续外部购买域名接入）。一期=只读总览+接入向导；二期（DNS 写操作/邮箱路由）待续。鉴权三层一致：API require_superadmin、导航超管分区、深链回落。
+
+### 变更
+| 端 | 内容 |
+|---|---|
+| cf_client | +create_zone（幂等 1061→返回现存）/delete_zone/list_project_domains |
+| cf_console.py（新） | 4 端点全超管闸：overview（zone 状态/NS/套餐 + Pages 项目关联落地页标题，30s 缓存）、POST zones（接入向导→返回 NS 指引）、zone DNS 记录、DELETE zone（?name= 双校验防误删） |
+| Settings sec-cf | 凭据表单保留 + 接入向导（NS 点击复制）+ zone 展开行（DNS 记录表）+ Pages 项目表 |
+
+### 测试（用户要求：复审+测试+不遗留）
+- **鉴权矩阵**：匿名 401×2、operator 403（GET×2+POST）、超管 200——铸真实 JWT 打线上端点
+- **真实数据断言**：7 zones（marketbriefnow.xyz=active 2NS）、10 Pages 项目（56 项目→「RH-Signals v2」页题+域名绑定）、13 条 DNS 记录（A/CNAME）
+- **zone 生命周期**（真实 CF API）：建测试 zone→pending+2NS、幂等重建→exists、错名删 400、正删→复查列表无残留
+- 前端 build ✓ + 线上 chunk 含端点与中英文案 ✓ + journal 零 Traceback ✓
+- i18n：10 新键 zh/en 成对（曾嵌套误配，复审自查拍平）
+
+### 发现的既有事实（管控台首次可见）
+tovaads-landing-56 项目上绑着 lp57y.marketbriefnow.xyz 域名（历史绑定残留）——二期 DNS 管理可清理。
