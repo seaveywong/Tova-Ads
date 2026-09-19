@@ -285,9 +285,6 @@ const toggleZoneDns = async (z) => {
     catch (e) { cfZoneDns.value[z.id] = []; ElMessage.error(e.message || t('common.opFail')) }
   }
 }
-watch(activeSection, (id) => {
-  if (id === 'sec-cf' && !cfOverview.value && !cfLoading.value) loadCfOverview()
-})
 // TG 通知绑定：用户级绑定/解绑/清单 UI 已组件化（TgManager，与仪表盘共用），这里只留 bot-info（超管验证区用）
 const tgBot = ref({ configured: false, bot_username: '' })
 const testTgLoading = ref(false)
@@ -609,6 +606,10 @@ const anchorGroups = computed(() => [
   { key: 'platform', label: t('settings.grpPlatform'), items: anchorSections.value.filter(s => !PERSONAL_SECTIONS.includes(s.id)) },
 ].filter(g => g.items.length))
 // Tab 切换：点哪个显示哪个分区（Tab 模式，不再长页滚动 + IntersectionObserver）
+watch(activeSection, (id) => {
+  if (id === 'sec-cf' && !cfOverview.value && !cfLoading.value) loadCfOverview()
+})
+
 const switchSection = (id) => {
   activeSection.value = id
   router.replace({ query: { ...route.query, sec: id } })   // 分区进 URL：可刷新还原/分享定位
