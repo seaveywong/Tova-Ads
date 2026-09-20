@@ -870,6 +870,13 @@ const applyClonedSettings = (s) => {
     age_min: s.audience_age_min || 18, age_max: s.audience_age_max || 65,
     gender: (s.audience_gender !== undefined && s.audience_gender !== 0) ? s.audience_gender : 0,
     countries: s.audience_countries || [], interests: s.audience_interests || [],
+    // 受众 1:1 批：源广告新维度一并克隆（排除/位置/语言/自定义受众——后端 _clone_ad_settings 已带）
+    behaviors: s.audience_behaviors || [], exclusions: s.audience_exclusions || [],
+    regions: s.audience_regions || [], cities: s.audience_cities || [], zips: s.audience_zips || [],
+    excluded_geo: s.audience_excluded_geo || { countries: [], regions: [], cities: [] },
+    languages: s.audience_languages || [],
+    custom_audiences: s.audience_custom_audiences || [],
+    excluded_custom_audiences: s.audience_excluded_custom_audiences || [],
   }
   const _posPlatforms = s.placement_platforms || []
   const _fbPositions = (s.facebook_positions || []).filter(p => PLATFORMS[0].positions.some(x => x.v === p))

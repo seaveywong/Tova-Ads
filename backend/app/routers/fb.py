@@ -839,6 +839,32 @@ def _clone_ad_settings(db: Session, tenant_id: int, post_id: str) -> dict:
         for it in (tg.get("interests") or []):
             ints.append({"id": str(it.get("id", "")), "name": it.get("name", "")})
         out["audience_interests"] = ints
+        # 受众 1:1 批（2026-09-20）：新维度一并克隆（原只克隆 国家/年龄/性别/兴趣——
+        # 源广告配了排除/位置/语言/自定义受众时被静默丢掉）
+        _idn = lambda arr: [{"id": str(x.get("id", "")), "name": x.get("name", "")}
+                            for x in (arr or []) if isinstance(x, dict) and x.get("id")]
+        _geo = lambda arr: [{"key": str(x.get("key", "")), "name": x.get("name", "")}
+                            for x in (arr or []) if isinstance(x, dict) and x.get("key")]
+        bhvs = []
+        for grp in (tg.get("flexible_spec") or []):
+            bhvs += _idn(grp.get("behaviors"))
+        out["audience_behaviors"] = bhvs
+        exl = []
+        for grp in (tg.get("exclusions") or []):
+            exl += [{"id": x["id"], "name": x.get("name", ""), "type": "behavior"} for x in _idn(grp.get("behaviors"))]
+            exl += [{"id": x["id"], "name": x.get("name", ""), "type": "interest"} for x in _idn(grp.get("interests"))]
+        out["audience_exclusions"] = exl
+        geo = tg.get("geo_locations") or {}
+        out["audience_regions"] = _geo(geo.get("regions"))
+        out["audience_cities"] = _geo(geo.get("cities"))
+        out["audience_zips"] = _geo(geo.get("zips"))
+        eg = tg.get("excluded_geo_locations") or {}
+        out["audience_excluded_geo"] = {"countries": eg.get("countries") or [],
+                                        "regions": _geo(eg.get("regions")),
+                                        "cities": _geo(eg.get("cities"))}
+        out["audience_languages"] = _idn(tg.get("languages"))
+        out["audience_custom_audiences"] = _idn(tg.get("custom_audiences"))
+        out["audience_excluded_custom_audiences"] = _idn(tg.get("excluded_custom_audiences"))
         pp = tg.get("publisher_platforms"); dp = tg.get("device_platforms"); fp = tg.get("facebook_positions")
         if pp or dp or fp:
             out["manual_placement"] = True

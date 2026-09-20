@@ -592,10 +592,16 @@ def build_adset(
     payload.setdefault("targeting", {})
     if isinstance(payload["targeting"], dict):
         _t = payload["targeting"]
+        # 非默认定向全集（受众 1:1 批补齐）：任何手动定向维度存在 → Advantage+ 必须=0
+        # （1870227 生产教训：非默认取向下显式 1 被拒）。旧列表漏 exclusions/excluded_geo/
+        # languages/地理细化——只配这些维度时曾会发 advantage=1+手动定向。
+        _geo = _t.get("geo_locations") or {}
         _non_default = bool(
-            _t.get("flexible_spec") or _t.get("excluded_connections")
+            _t.get("flexible_spec") or _t.get("exclusions")
+            or _t.get("excluded_connections")
             or _t.get("custom_audiences") or _t.get("excluded_custom_audiences")
-            or _t.get("behaviors") or _t.get("life_events")
+            or _t.get("languages") or _t.get("excluded_geo_locations")
+            or (_geo.get("regions") or _geo.get("cities") or _geo.get("zips"))   # 仅 countries=默认形状
             or _t.get("genders") not in (None, [], [0, 1, 2])   # []=build_targeting 全性别
             or _t.get("age_min") not in (None, 18)
             or _t.get("age_max") not in (None, 65))
