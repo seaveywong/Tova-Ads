@@ -8,6 +8,7 @@
 """
 import re
 import time
+import threading
 import httpx
 import logging
 
@@ -18,6 +19,7 @@ _API = "https://api.dynadot.com/api3.json"
 # 全局节流（扫描修 #6）：1 req/s 是账户级配额——实例级 self._last 在"每请求新建客户端"
 # 的调用形态下无效，并发查价必撞限流。模块级时间戳跨实例共享（平台单 Dynadot 账户）。
 _GLOBAL_LAST = [0.0]
+_GLOBAL_PACE_LOCK = threading.Lock()   # 复审 #8：读-睡-写须原子——并发双读旧值会同秒双发
 
 
 class DynadotError(Exception):
@@ -35,11 +37,13 @@ class DynadotClient:
         self.key = api_key
 
     def _call(self, command: str, **params) -> dict:
-        # Regular 账户 1 req/s（账户级）——跨实例全局节流，命令间至少隔 1.1s
-        wait = 1.1 - (time.time() - _GLOBAL_LAST[0])
-        if wait > 0 and _GLOBAL_LAST[0]:
-            time.sleep(wait)
-        _GLOBAL_LAST[0] = time.time()
+        # Regular 账户 1 req/s（账户级）——跨实例全局节流，命令间至少隔 1.1s。
+        # 锁内完成 读-睡-写（两个调用起始间隔≥1.1s，即 FB 的请求速率口径）；HTTP 在锁外。
+        with _GLOBAL_PACE_LOCK:
+            wait = 1.1 - (time.time() - _GLOBAL_LAST[0])
+            if wait > 0 and _GLOBAL_LAST[0]:
+                time.sleep(wait)
+            _GLOBAL_LAST[0] = time.time()
         q = {"key": self.key, "command": command}
         q.update({k: v for k, v in params.items() if v is not None})
         r = httpx.get(_API, params=q, timeout=30)

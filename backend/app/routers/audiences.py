@@ -114,6 +114,10 @@ def search_all(q: str, countries: str = "", limit: int = 8,
     fb = first_client(db, user.tenant_id)
     if not fb:
         raise HTTPException(400, "未绑定 FB 凭证")
+    if not hasattr(fb, "search_interests"):
+        # 复审 #5：纯 TT 租户 first_client 返 TtClient（无 search_*）——曾 AttributeError
+        # 被逐线程吞掉，统一搜索静默空结果
+        raise HTTPException(400, "定向搜索需要 FB 令牌（当前租户无可用 FB 令牌）")
     import json as _json
     from concurrent.futures import ThreadPoolExecutor
     cs = [c.strip().upper() for c in (countries or "").split(",") if c.strip()]
@@ -121,6 +125,8 @@ def search_all(q: str, countries: str = "", limit: int = 8,
     translated: list[str] = []
     base_q = q.strip()
     queries = [base_q]
+
+    _first_err: list = []   # 复审 #5：吞错改为收集——全线空结果且有错时 400 报因（曾静默空）
 
     def _run(kind: str, term: str):
         try:
@@ -132,7 +138,9 @@ def search_all(q: str, countries: str = "", limit: int = 8,
                 return fb.search_geo(term, cs or None, limit=5) or []
             if kind == "locale":
                 return fb.search_locales(term, limit=4) or []
-        except Exception:
+        except Exception as e:
+            if not _first_err:
+                _first_err.append(str(e)[:150])
             return []
         return []
 
@@ -175,6 +183,9 @@ def search_all(q: str, countries: str = "", limit: int = 8,
                 k = str(x.get("id") or x.get("name"))
                 if k and k not in seen_l:
                     seen_l.add(k); locs.append(x)
+    if not (ints or bhvs or geo or locs) and _first_err:
+        # 全线空且真有错（令牌过期/限流等）→ 报因，不再 200 空结果（复审 #5）
+        raise HTTPException(400, f"定向搜索失败：{_first_err[0]}")
     return {"interests": ints[:12], "behaviors": bhvs[:6], "geo": geo[:8],
             "locales": locs[:4], "translated": translated}
 

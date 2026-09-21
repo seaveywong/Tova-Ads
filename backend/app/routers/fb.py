@@ -866,6 +866,17 @@ def _clone_ad_settings(db: Session, tenant_id: int, post_id: str) -> dict:
                                         "regions": _geo(eg.get("regions")),
                                         "cities": _geo(eg.get("cities")),
                                         "zips": _geo(eg.get("zips"))}
+        # 位置匹配模式回传（2026-09-21 补：源广告 location_types 曾被丢弃——克隆出的定向静默变宽）
+        _lt = ((tg.get("geo_locations") or {}).get("location_types")) or []
+        _lt_set = {str(x) for x in _lt}
+        if _lt_set == {"home"}:
+            out["audience_geo_match"] = "home"
+        elif _lt_set == {"recent"}:
+            out["audience_geo_match"] = "recent"
+        elif _lt_set == {"travel_in"}:
+            out["audience_geo_match"] = "travel"
+        elif {"home", "recent"} <= _lt_set:
+            out["audience_geo_match"] = "home_recent"
         out["audience_languages"] = _idn(tg.get("languages"))
         out["audience_custom_audiences"] = _idn(tg.get("custom_audiences"))
         out["audience_excluded_custom_audiences"] = _idn(tg.get("excluded_custom_audiences"))
@@ -1016,8 +1027,10 @@ def _normalize_post_query(q: str) -> str:
         pu = urlparse(u)
         netloc = (pu.netloc or "").lower()
         path = pu.path or ""
-        is_short_host = netloc.startswith(("fb.watch", "fb.me", "www.fb.watch", "www.fb.me"))
-        is_share_path = netloc.endswith("facebook.com") and _re.search(r"^/(share/[pv]/|reel/|story\.php)", path)
+        # 复审 #3：精确域/点边界——startswith/endswith 裸用会把 fb.watch.evil.com /
+        # evilfacebook.com 放进来，服务端向任意主机发起请求（SSRF 面）
+        is_short_host = netloc in ("fb.watch", "www.fb.watch", "fb.me", "www.fb.me")
+        is_share_path = (netloc == "facebook.com" or netloc.endswith(".facebook.com"))             and _re.search(r"^/(share/[pv]/|reel/|story\.php)", path)
         if is_short_host or is_share_path:
             r = httpx.get(u, follow_redirects=True, timeout=8,
                           headers={"User-Agent": "Mozilla/5.0 (compatible; TovaAdsBot/1.0)"})

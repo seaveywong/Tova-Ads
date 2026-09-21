@@ -283,7 +283,8 @@ def build_targeting(
     # 位置匹配模式（受众 1:1 收口批）：FB 受众面板「居住在/最近到访/旅行至此」。
     # home=仅居住地 recent=仅最近到访 travel=旅行至此；空=省略键（FB 默认 居住或最近到访）。
     # 仅在带地区/城市/邮编细化时下发（countries-only 下 FB 忽略该键，不发省事）。
-    _gm = {"home": ["home"], "recent": ["recent"], "travel": ["travel"],
+    # travel 的 FB 枚举是 travel_in（复审 #1：曾发 ["travel"] → FB #100 拒收整组）
+    _gm = {"home": ["home"], "recent": ["recent"], "travel": ["travel_in"],
            "home_recent": ["home", "recent"]}.get((geo_match or "").strip().lower())
     if _gm and len(geo) > 1:
         geo["location_types"] = _gm

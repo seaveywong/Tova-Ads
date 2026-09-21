@@ -63,7 +63,11 @@ def _pricing(client, db) -> dict:
     reg = _reg_name(db)
     if (not _PRICING_CACHE or _PRICING_CACHE.get("reg") != reg
             or now - _PRICING_CACHE["at"] > _PRICING_TTL):
-        _PRICING_CACHE["pricing"] = client.pricing()
+        try:
+            _PRICING_CACHE["pricing"] = client.pricing()
+        except (DynadotError, PorkbunError) as e:
+            # 复审 #7：曾冒泡 500（_avail 400 化时漏了定价表这条同型路径）
+            raise HTTPException(400, f"注册商价格表拉取失败：{str(e)[:150]}")
         _PRICING_CACHE["at"] = now
         _PRICING_CACHE["reg"] = reg
     return _PRICING_CACHE["pricing"] or {}

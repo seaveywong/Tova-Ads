@@ -874,6 +874,7 @@ const applyClonedSettings = (s) => {
     behaviors: s.audience_behaviors || [], exclusions: s.audience_exclusions || [],
     regions: s.audience_regions || [], cities: s.audience_cities || [], zips: s.audience_zips || [],
     excluded_geo: s.audience_excluded_geo || { countries: [], regions: [], cities: [] },
+    geo_match: s.audience_geo_match || '',
     languages: s.audience_languages || [],
     custom_audiences: s.audience_custom_audiences || [],
     excluded_custom_audiences: s.audience_excluded_custom_audiences || [],
@@ -1062,7 +1063,7 @@ const _audFromJson = (j) => {
     const _geo = (arr) => (Array.isArray(arr) ? arr : []).map(g => ({ key: String(g.key ?? ''), name: g.name || '' })).filter(g => g.key)
     a.regions = _geo(p.regions); a.cities = _geo(p.cities); a.zips = _geo(p.zips)
     const eg = (p.excluded_geo && typeof p.excluded_geo === 'object') ? p.excluded_geo : {}
-    a.excluded_geo = { countries: Array.isArray(eg.countries) ? eg.countries : [], regions: _geo(eg.regions), cities: _geo(eg.cities) }
+    a.excluded_geo = { countries: Array.isArray(eg.countries) ? eg.countries : [], regions: _geo(eg.regions), cities: _geo(eg.cities), zips: _geo(eg.zips) }   // zips 回读（复审#2：曾重载即丢→再存永久丢）
     a.languages = (Array.isArray(p.languages) ? p.languages : []).map(l => ({ id: String(l.id ?? ''), name: l.name || '' })).filter(l => l.id)
     const _ca = (arr) => (Array.isArray(arr) ? arr : []).map(c => ({ id: String(c.id ?? ''), name: c.name || '' })).filter(c => c.id || c.name)
     a.custom_audiences = _ca(p.custom_audiences)
@@ -1326,30 +1327,43 @@ const GEO_TYPE_FIELD = { state: 'regions', city: 'cities', zip: 'zips' }
 const geoTypeLabel = (ty) => ({ state: t('launch.audGeoState'), city: t('launch.audGeoCity'), zip: t('launch.audGeoZip') }[ty] || ty)
 
 // ── 统一定向搜索（受众交互批 2026-09-21）：一词并行搜 兴趣/行为/位置/语言（后端聚合，
-//    中文自动 AI 英译双搜合并）；输入停 600ms 自动搜，替代三处分散搜索行 ──
+//    中文自动 AI 英译双搜合并）；输入停 600ms 自动搜，替代三处分散搜索行。
+//    复审#6：结果/加载态/序号/定时器全部按节点隔离——共享单份时 A 卡的迟到响应（中文词
+//    AI 翻译可达 20s）会覆写 B 卡正在显示的结果，点行即把错数据加进 B 的受众 ──
 const nodeUniQ = ref({})
-const uniResults = ref(null)   // {interests, behaviors, geo, locales, translated}
-const uniNodeKey = ref('')
-const uniSearching = ref(false)
-let _uniTimer = null
+const uniResultsBy = ref({})        // {nodeKey: {interests, behaviors, geo, locales, translated}}
+const uniLoadingKeys = ref(new Set())
+const uniSeqBy = ref({})            // {nodeKey: seq}——响应只认本节点最新序号
+const _uniTimers = {}
 const onUniInput = (s) => {
-  clearTimeout(_uniTimer)
+  clearTimeout(_uniTimers[s.key])
   const q = (nodeUniQ.value[s.key] || '').trim()
-  if (!q) { uniResults.value = null; uniNodeKey.value = ''; return }
-  _uniTimer = setTimeout(() => searchUnifiedForNode(s), 600)
+  if (!q) {   // 只清本节点的面板（曾清共享面板会灭掉别卡正显示的结果）
+    uniResultsBy.value = { ...uniResultsBy.value, [s.key]: null }
+    return
+  }
+  _uniTimers[s.key] = setTimeout(() => searchUnifiedForNode(s), 600)
 }
 const searchUnifiedForNode = async (s) => {
   const q = (nodeUniQ.value[s.key] || '').trim()
   if (!q) return
-  uniNodeKey.value = s.key
-  uniSearching.value = true
+  const seq = (uniSeqBy.value[s.key] || 0) + 1
+  uniSeqBy.value = { ...uniSeqBy.value, [s.key]: seq }
+  uniLoadingKeys.value = new Set([...uniLoadingKeys.value, s.key])
   try {
     const cs = (s.aud?.countries || []).join(',')
-    uniResults.value = await GET('/audiences/search-all?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : ''), 30000)
-  } catch (e) { showError(e, t('launch.interestSearchFail')); uniResults.value = null }
-  uniSearching.value = false
+    const r = await GET('/audiences/search-all?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : ''), 30000)
+    if (uniSeqBy.value[s.key] === seq) uniResultsBy.value = { ...uniResultsBy.value, [s.key]: r }
+  } catch (e) {
+    if (uniSeqBy.value[s.key] === seq) { showError(e, t('launch.interestSearchFail')); uniResultsBy.value = { ...uniResultsBy.value, [s.key]: null } }
+  }
+  const _ks = new Set(uniLoadingKeys.value); _ks.delete(s.key)
+  uniLoadingKeys.value = _ks
 }
-const clearUniSearch = (s) => { uniResults.value = null; uniNodeKey.value = ''; nodeUniQ.value = { ...nodeUniQ.value, [s.key]: '' } }
+const clearUniSearch = (s) => {
+  uniResultsBy.value = { ...uniResultsBy.value, [s.key]: null }
+  nodeUniQ.value = { ...nodeUniQ.value, [s.key]: '' }
+}
 const addGeoItem = (s, g, exclude = false) => {
   if (!s.aud) s.aud = blankNodeAud()
   const fld = GEO_TYPE_FIELD[g.type]
@@ -1789,6 +1803,7 @@ const objPickerContinue = async () => {
   snapshotForm()   // 目标弹窗带入值不标 dirty（objective watcher 默认填充在 nextTick 后落地）
   checkDraft()
 }
+let _editSessionSeq = 0   // openEdit 会话序号（复审#4：fire-and-forget 迟到响应丢弃判定）
 const openEdit = async (tpl) => {
   advantage_creative.value = true; performance_goal_cpa.value = 0   // 全库审查P1：无条件归零（原仅在有配置时恢复，缺失时残留上一模板）
   editing.value = tpl
@@ -1840,8 +1855,14 @@ const openEdit = async (tpl) => {
   }
   editingAsset.value = null
   // 性能批（2026-09-21）：素材详情/子码全部 fire-and-forget 并行——曾三层串行 await
-  // 挡在 editOpen 前（asset→模板级子码→树内每页 for-await），用户网络下 3×RTT 起步
-  if (tpl.asset_id) { GET('/assets/' + tpl.asset_id).then(r => { editingAsset.value = r }).catch(() => {}) }
+  // 挡在 editOpen 前（asset→模板级子码→树内每页 for-await），用户网络下 3×RTT 起步。
+  // 复审#4：带会话序号守卫——A 的迟到响应不得覆写 B 的编辑器（曾能顶掉 B 已选素材）
+  const _sess = ++_editSessionSeq
+  if (tpl.asset_id) {
+    GET('/assets/' + tpl.asset_id)
+      .then(r => { if (_sess === _editSessionSeq) editingAsset.value = r })
+      .catch(() => {})
+  }
   const _preloadSubcodes = (pids) => {
     for (const pid of [...new Set(pids.filter(Boolean))]) {
       GET(`/subcodes?page_id=${pid}&status=all`)
@@ -3027,14 +3048,14 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <button class="btn sm" :disabled="uniSearching" @click="searchUnifiedForNode(s)">{{ uniSearching ? '…' : t('common.search') }}</button>
                       </div>
 </div>
-                    <div v-if="uniSearching && uniNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
-                    <div v-else-if="uniNodeKey === s.key && uniResults && ((uniResults.interests||[]).length + (uniResults.behaviors||[]).length + (uniResults.geo||[]).length + (uniResults.locales||[]).length)" class="search-results">
+                    <div v-if="uniLoadingKeys.has(s.key)" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
+                    <div v-else-if="(uniResultsBy[s.key] || null) && ((uniResultsBy[s.key].interests||[]).length + (uniResultsBy[s.key].behaviors||[]).length + (uniResultsBy[s.key].geo||[]).length + (uniResultsBy[s.key].locales||[]).length)" class="search-results">
                       <div class="search-results-head">
-                        <span>{{ t('launch.audUniHint') }}<template v-if="uniResults.translated?.length"> · {{ t('launch.audUniTranslated', { en: uniResults.translated.join(' / ') }) }}</template></span>
+                        <span>{{ t('launch.audUniHint') }}<template v-if="uniResultsBy[s.key].translated?.length"> · {{ t('launch.audUniTranslated', { en: uniResultsBy[s.key].translated.join(' / ') }) }}</template></span>
                         <button class="clear-btn" @click="clearUniSearch(s)">{{ t('launch.clear') }} ✕</button>
                       </div>
                       <template v-if="!s.advantage_audience">
-                        <div v-for="r in uniResults.interests" :key="'i'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'interests', r.id) }]" @click="addNodeItem(s, r, 'interests')">
+                        <div v-for="r in uniResultsBy[s.key].interests" :key="'i'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'interests', r.id) }]" @click="addNodeItem(s, r, 'interests')">
                           <span class="tdm-badge">{{ t('launch.audInterestType') }}</span>
                           <span>{{ r.name }}</span>
                           <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
@@ -3042,7 +3063,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                           <span class="add" v-if="!nodeItemAdded(s, 'interests', r.id)">+</span>
                           <span class="added-mark" v-else>✓</span>
                         </div>
-                        <div v-for="r in uniResults.behaviors" :key="'b'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'behaviors', r.id) }]" @click="addNodeItem(s, r, 'behaviors')">
+                        <div v-for="r in uniResultsBy[s.key].behaviors" :key="'b'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'behaviors', r.id) }]" @click="addNodeItem(s, r, 'behaviors')">
                           <span class="tdm-badge behavior">{{ t('launch.audBehaviors') }}</span>
                           <span>{{ r.name }}</span>
                           <button class="ex-btn" :title="t('launch.audExclude')" @click.stop="addNodeItem(s, r, 'exclusions')">−</button>
@@ -3050,13 +3071,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                           <span class="added-mark" v-else>✓</span>
                         </div>
                       </template>
-                      <div v-for="g in uniResults.geo" :key="'g'+g.key" class="search-item" @click="addGeoItem(s, g)">
+                      <div v-for="g in uniResultsBy[s.key].geo" :key="'g'+g.key" class="search-item" @click="addGeoItem(s, g)">
                         <span class="tdm-badge geo">{{ geoTypeLabel(g.type) }}</span>
                         <span>{{ g.name }}<i v-if="g.region" style="font-style:normal;color:var(--t3);font-size:10px"> · {{ g.region }}</i></span>
                         <button class="ex-btn" :title="t('launch.audExcludeGeo')" @click.stop="addGeoItem(s, g, true)">−</button>
                         <span class="add">+</span>
                       </div>
-                      <div v-for="l in uniResults.locales" :key="'l'+l.id" :class="['search-item', { added: langAdded(s, l.id) }]" @click="!langAdded(s, l.id) && addLang(s, l)">
+                      <div v-for="l in uniResultsBy[s.key].locales" :key="'l'+l.id" :class="['search-item', { added: langAdded(s, l.id) }]" @click="!langAdded(s, l.id) && addLang(s, l)">
                         <span class="tdm-badge lang">{{ t('launch.audLangLabel') }}</span>
                         <span>{{ l.name }}</span>
                         <span class="add" v-if="!langAdded(s, l.id)">+</span>
