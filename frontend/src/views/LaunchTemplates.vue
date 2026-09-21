@@ -1324,6 +1324,32 @@ const searchGeoForNode = async (s) => {
 }
 const GEO_TYPE_FIELD = { state: 'regions', city: 'cities', zip: 'zips' }
 const geoTypeLabel = (ty) => ({ state: t('launch.audGeoState'), city: t('launch.audGeoCity'), zip: t('launch.audGeoZip') }[ty] || ty)
+
+// ── 统一定向搜索（受众交互批 2026-09-21）：一词并行搜 兴趣/行为/位置/语言（后端聚合，
+//    中文自动 AI 英译双搜合并）；输入停 600ms 自动搜，替代三处分散搜索行 ──
+const nodeUniQ = ref({})
+const uniResults = ref(null)   // {interests, behaviors, geo, locales, translated}
+const uniNodeKey = ref('')
+const uniSearching = ref(false)
+let _uniTimer = null
+const onUniInput = (s) => {
+  clearTimeout(_uniTimer)
+  const q = (nodeUniQ.value[s.key] || '').trim()
+  if (!q) { uniResults.value = null; uniNodeKey.value = ''; return }
+  _uniTimer = setTimeout(() => searchUnifiedForNode(s), 600)
+}
+const searchUnifiedForNode = async (s) => {
+  const q = (nodeUniQ.value[s.key] || '').trim()
+  if (!q) return
+  uniNodeKey.value = s.key
+  uniSearching.value = true
+  try {
+    const cs = (s.aud?.countries || []).join(',')
+    uniResults.value = await GET('/audiences/search-all?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : ''), 30000)
+  } catch (e) { showError(e, t('launch.interestSearchFail')); uniResults.value = null }
+  uniSearching.value = false
+}
+const clearUniSearch = (s) => { uniResults.value = null; uniNodeKey.value = ''; nodeUniQ.value = { ...nodeUniQ.value, [s.key]: '' } }
 const addGeoItem = (s, g, exclude = false) => {
   if (!s.aud) s.aud = blankNodeAud()
   const fld = GEO_TYPE_FIELD[g.type]
@@ -2995,21 +3021,48 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <el-option v-for="c in ALL_COUNTRIES" :key="c.code" :value="c.code" :label="c.label + ' (' + c.code + ')'" />
                       </el-select>
 </div>
-                    <!-- 地理细化（受众 1:1）：州/城市/邮编搜索 + 包含/排除（FB 广告组「地区」同构） -->
-                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audGeoLabel') }}</label>
+                    <!-- 统一定向搜索（受众交互批）：一词搜全部维度——兴趣/行为/位置/语言分组结果；
+                         中文自动英译双搜合并（后端），输入停顿自动搜；点行=加入，−=排除 -->
+                    <div v-show="!locIsMsg(s) && !hasSpecialCats" class="row"><label>{{ t('launch.audUniSearch') }}</label>
                       <div class="interest-search">
-                        <input v-model="nodeGeoQ[s.key]" class="inp" :placeholder="t('launch.audGeoPh')" @keyup.enter="searchGeoForNode(s)" />
-                        <button class="btn sm" :disabled="geoSearching" @click="searchGeoForNode(s)">{{ geoSearching ? '…' : t('common.search') }}</button>
+                        <input v-model="nodeUniQ[s.key]" class="inp" :placeholder="t('launch.audUniPh')" @input="onUniInput(s)" @keyup.enter="searchUnifiedForNode(s)" />
+                        <button class="btn sm" :disabled="uniSearching" @click="searchUnifiedForNode(s)">{{ uniSearching ? '…' : t('common.search') }}</button>
                       </div>
 </div>
-                    <div v-if="geoSearching && geoNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
-                    <div v-else-if="geoResults.length && geoNodeKey === s.key" class="search-results">
-                      <div class="search-results-head"><span>{{ t('launch.audGeoHint') }}</span></div>
-                      <div v-for="g in geoResults" :key="g.key" class="search-item" @click="addGeoItem(s, g)">
+                    <div v-if="uniSearching && uniNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
+                    <div v-else-if="uniNodeKey === s.key && uniResults && ((uniResults.interests||[]).length + (uniResults.behaviors||[]).length + (uniResults.geo||[]).length + (uniResults.locales||[]).length)" class="search-results">
+                      <div class="search-results-head">
+                        <span>{{ t('launch.audUniHint') }}<template v-if="uniResults.translated?.length"> · {{ t('launch.audUniTranslated', { en: uniResults.translated.join(' / ') }) }}</template></span>
+                        <button class="clear-btn" @click="clearUniSearch(s)">{{ t('launch.clear') }} ✕</button>
+                      </div>
+                      <template v-if="!s.advantage_audience">
+                        <div v-for="r in uniResults.interests" :key="'i'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'interests', r.id) }]" @click="addNodeItem(s, r, 'interests')">
+                          <span class="tdm-badge">{{ t('launch.audInterestType') }}</span>
+                          <span>{{ r.name }}</span>
+                          <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
+                          <button class="ex-btn" :title="t('launch.audExclude')" @click.stop="addNodeItem(s, r, 'exclusions')">−</button>
+                          <span class="add" v-if="!nodeItemAdded(s, 'interests', r.id)">+</span>
+                          <span class="added-mark" v-else>✓</span>
+                        </div>
+                        <div v-for="r in uniResults.behaviors" :key="'b'+r.id" :class="['search-item', { added: nodeItemAdded(s, 'behaviors', r.id) }]" @click="addNodeItem(s, r, 'behaviors')">
+                          <span class="tdm-badge behavior">{{ t('launch.audBehaviors') }}</span>
+                          <span>{{ r.name }}</span>
+                          <button class="ex-btn" :title="t('launch.audExclude')" @click.stop="addNodeItem(s, r, 'exclusions')">−</button>
+                          <span class="add" v-if="!nodeItemAdded(s, 'behaviors', r.id)">+</span>
+                          <span class="added-mark" v-else>✓</span>
+                        </div>
+                      </template>
+                      <div v-for="g in uniResults.geo" :key="'g'+g.key" class="search-item" @click="addGeoItem(s, g)">
                         <span class="tdm-badge geo">{{ geoTypeLabel(g.type) }}</span>
                         <span>{{ g.name }}<i v-if="g.region" style="font-style:normal;color:var(--t3);font-size:10px"> · {{ g.region }}</i></span>
                         <button class="ex-btn" :title="t('launch.audExcludeGeo')" @click.stop="addGeoItem(s, g, true)">−</button>
                         <span class="add">+</span>
+                      </div>
+                      <div v-for="l in uniResults.locales" :key="'l'+l.id" :class="['search-item', { added: langAdded(s, l.id) }]" @click="!langAdded(s, l.id) && addLang(s, l)">
+                        <span class="tdm-badge lang">{{ t('launch.audLangLabel') }}</span>
+                        <span>{{ l.name }}</span>
+                        <span class="add" v-if="!langAdded(s, l.id)">+</span>
+                        <span class="added-mark" v-else>✓</span>
                       </div>
 </div>
                     <!-- 位置匹配模式（FB「居住在/最近到访/旅行至此」；仅在细化了地区/城市/邮编时下发） -->
@@ -3032,21 +3085,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <span v-for="(g,i) in ((s.aud.excluded_geo||{}).regions||[])" :key="'er'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'regions', i, true)">✕</button></span>
                         <span v-for="(g,i) in ((s.aud.excluded_geo||{}).cities||[])" :key="'ec'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'cities', i, true)">✕</button></span>
                         <span v-for="(g,i) in ((s.aud.excluded_geo||{}).zips||[])" :key="'ez'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'zips', i, true)">✕</button></span>
-                      </div>
-</div>
-                    <!-- 语言多选（受众 1:1）：FB「语言」定向 -->
-                    <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.audLangLabel') }}</label>
-                      <div class="interest-search">
-                        <input v-model="nodeLangQ[s.key]" class="inp" :placeholder="t('launch.audLangPh')" @keyup.enter="searchLangForNode(s)" />
-                        <button class="btn sm" :disabled="langSearching" @click="searchLangForNode(s)">{{ langSearching ? '…' : t('common.search') }}</button>
-                      </div>
-</div>
-                    <div v-if="langSearching && langNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
-                    <div v-else-if="langResults.length && langNodeKey === s.key" class="search-results">
-                      <div v-for="l in langResults" :key="l.id" :class="['search-item', { added: langAdded(s, l.id) }]" @click="!langAdded(s, l.id) && addLang(s, l)">
-                        <span>{{ l.name }}</span>
-                        <span class="add" v-if="!langAdded(s, l.id)">+</span>
-                        <span class="added-mark" v-else>✓</span>
                       </div>
 </div>
                     <div v-if="(s.aud.languages||[]).length" class="row">
@@ -3074,26 +3112,6 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.age') }}</label><div class="age-row"><input v-model.number="s.aud.age_min" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /> — <input v-model.number="s.aud.age_max" type="number" min="13" max="65" class="inp sm" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" /></div></div>
                     <div v-show="!locIsMsg(s)" class="row"><label>{{ t('launch.gender') }}</label><div class="seg"><button :class="{on:s.aud.gender===0}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=0">{{ t('launch.genderAll') }}</button><button :class="{on:s.aud.gender===1}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=1">{{ t('launch.genderMale') }}</button><button :class="{on:s.aud.gender===2}" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="s.aud.gender=2">{{ t('launch.genderFemale') }}</button></div></div>
                     <div v-if="hasSpecialCats" class="hint" style="display:block;padding:0 0 4px">{{ t('launch.scatFieldIgnored') }}</div>
-                    <div v-show="!locIsMsg(s) && !s.advantage_audience" class="row"><label>{{ t('launch.interestLabel') }}</label>
-                      <div class="interest-search">
-                        <input v-model="nodeInterestQ[s.key]" class="inp" :disabled="hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" :placeholder="t('launch.interestPlaceholder')" @keyup.enter="searchInterestsForNode(s)" />
-                        <button class="btn sm" :disabled="interestSearching || hasSpecialCats" :title="hasSpecialCats ? t('launch.scatFieldIgnored') : ''" @click="searchInterestsForNode(s)">{{ interestSearching ? '…' : t('common.search') }}</button>
-</div>
-                      <div v-if="interestSearching && interestNodeKey === s.key" class="search-results"><div class="search-loading">{{ t('launch.searching') }}</div></div>
-                      <div v-else-if="interestResults.length && interestNodeKey === s.key" class="search-results">
-                        <div class="search-results-head"><span>{{ t('launch.searchResultsHint') }}</span><button class="clear-btn" @click="clearNodeInterestSearch(s)">{{ t('launch.clear') }} ✕</button></div>
-                        <div v-for="r in interestResults" :key="r._t + r.id"
-                             :class="['search-item', { added: nodeItemAdded(s, r._t === 'behavior' ? 'behaviors' : 'interests', r.id) }]"
-                             @click="addNodeItem(s, r, r._t === 'behavior' ? 'behaviors' : 'interests')">
-                          <span class="tdm-badge" :class="r._t">{{ r._t === 'behavior' ? t('launch.audBehaviors') : t('launch.audInterestType') }}</span>
-                          <span>{{ r.name }}</span>
-                          <span class="sz">{{ fmtSize(r.audience_size_lower_bound || r.audience_size) }}</span>
-                          <button class="ex-btn" :title="t('launch.audExclude')" @click.stop="addNodeItem(s, r, 'exclusions')">−</button>
-                          <span class="add" v-if="!nodeItemAdded(s, r._t === 'behavior' ? 'behaviors' : 'interests', r.id)">+</span>
-                          <span class="added-mark" v-else>✓</span>
-</div>
-</div>
-</div>
                     <div v-show="!locIsMsg(s) && !s.advantage_audience" class="row"><label>{{ t('launch.selectedInterests', { n: (s.aud.interests||[]).length }) }}</label>
                       <div class="interest-list">
                         <span v-for="(it,i) in (s.aud.interests||[])" :key="it.id" class="interest-chip">{{ it.name }} <button @click="removeNodeInterest(s, i)">✕</button></span>

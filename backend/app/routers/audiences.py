@@ -61,6 +61,124 @@ def geo_search(q: str, countries: str = "", limit: int = 20,
         raise HTTPException(400, f"地理搜索失败：{e.friendly}")
 
 
+_CJK_RE = None  # lazy re（顶部 import 保持最小）
+
+
+def _has_cjk(s: str) -> bool:
+    global _CJK_RE
+    if _CJK_RE is None:
+        import re
+        _CJK_RE = re.compile(r"[一-鿿]")
+    return bool(_CJK_RE.search(s or ""))
+
+
+_TRANSLATE_CACHE: dict = {}   # {词: (ts, [英译])}——翻译不变，1h 缓存砍重复词的 10-20s AI 延迟
+
+
+def _ai_translate_terms(q: str) -> list[str]:
+    """中文 → FB 英文搜索词（最多 3 个）。FB 兴趣/地理库英文为主——中文直搜结果显著
+    更少（实测：奥斯汀 1 条 vs Austin 5 条）。AI 未配/失败 → 空列表（降级原文直搜）。"""
+    import time as _t
+    _hit = _TRANSLATE_CACHE.get(q)
+    if _hit and _t.time() - _hit[0] < 3600:
+        return _hit[1]
+    try:
+        from ..core.ai_client import AiClient, AiError
+        cli = AiClient()
+        if not cli.is_configured():
+            return []
+        raw = cli.chat([
+            {"role": "system", "content": "你是 Facebook 广告定向关键词翻译器。把用户输入翻译成最多 3 个最可能命中 FB 兴趣库的英文搜索词。只输出英文词，逗号分隔，不要任何解释。"},
+            {"role": "user", "content": q},
+        ], temperature=0.1, max_tokens=60, timeout=25)
+        terms = [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
+        out = [t for t in terms if not _has_cjk(t)][:3]
+        if len(_TRANSLATE_CACHE) > 2000:
+            _TRANSLATE_CACHE.clear()
+        _TRANSLATE_CACHE[q] = (_t.time(), out)
+        return out
+    except Exception:
+        return []
+
+
+@router.get("/search-all")
+def search_all(q: str, countries: str = "", limit: int = 8,
+               user: CurrentUser = Depends(require_permission("ads.read")),
+               db: Session = Depends(get_db)):
+    """统一定向搜索（受众交互批 2026-09-21）：一个词并行搜 兴趣/行为/地理(州·城市·邮编)/语言，
+    中文自动 AI 英译双搜合并（原文+英译结果去重）。返
+    {interests, behaviors, geo, locales, translated}。地理 countries 限定已选国家内。"""
+    if not q or len(q.strip()) < 1:
+        raise HTTPException(400, "查询词 q 不能为空")
+    from ..core.fb_tokens import first_client
+    fb = first_client(db, user.tenant_id)
+    if not fb:
+        raise HTTPException(400, "未绑定 FB 凭证")
+    import json as _json
+    from concurrent.futures import ThreadPoolExecutor
+    cs = [c.strip().upper() for c in (countries or "").split(",") if c.strip()]
+
+    translated: list[str] = []
+    base_q = q.strip()
+    queries = [base_q]
+
+    def _run(kind: str, term: str):
+        try:
+            if kind == "interest":
+                return fb.search_interests(term, limit=limit) or []
+            if kind == "behavior":
+                return fb.search_behaviors(term, limit=limit) or []
+            if kind == "geo":
+                return fb.search_geo(term, cs or None, limit=5) or []
+            if kind == "locale":
+                return fb.search_locales(term, limit=4) or []
+        except Exception:
+            return []
+        return []
+
+    jobs = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        # 原文四类搜索 + AI 英译并行（AI 慢时原文结果已就绪——翻译只为补英文库覆盖）
+        for kind in ("interest", "behavior", "geo", "locale"):
+            jobs.append((kind, base_q, ex.submit(_run, kind, base_q)))
+        if _has_cjk(q):
+            translated = ex.submit(_ai_translate_terms, base_q).result() or []
+            queries += [t for t in translated if t.lower() not in q.lower()][:3]
+        queries = list(dict.fromkeys(queries))[:4]
+        for i, term in enumerate(queries[1:], 1):
+            jobs.append(("interest", term, ex.submit(_run, "interest", term)))
+            jobs.append(("behavior", term, ex.submit(_run, "behavior", term)))
+            if i == 1:   # 地理/语言第一个英译词足够（避免调用爆炸）
+                jobs.append(("geo", term, ex.submit(_run, "geo", term)))
+                jobs.append(("locale", term, ex.submit(_run, "locale", term)))
+
+    ints: list = []
+    bhvs: list = []
+    geo: list = []
+    locs: list = []
+    seen_i, seen_b, seen_g, seen_l = set(), set(), set(), set()
+    for kind, term, fut in jobs:
+        for x in fut.result() or []:
+            if kind == "interest":
+                k = str(x.get("id") or x.get("name"))
+                if k and k not in seen_i:
+                    seen_i.add(k); ints.append(x)
+            elif kind == "behavior":
+                k = str(x.get("id") or x.get("name"))
+                if k and k not in seen_b:
+                    seen_b.add(k); bhvs.append(x)
+            elif kind == "geo":
+                k = str(x.get("key") or x.get("name"))
+                if k and k not in seen_g:
+                    seen_g.add(k); geo.append(x)
+            else:
+                k = str(x.get("id") or x.get("name"))
+                if k and k not in seen_l:
+                    seen_l.add(k); locs.append(x)
+    return {"interests": ints[:12], "behaviors": bhvs[:6], "geo": geo[:8],
+            "locales": locs[:4], "translated": translated}
+
+
 @router.get("/custom-audiences")
 def list_custom_audiences(act_id: str,
                           user: CurrentUser = Depends(require_permission("ads.read")),
