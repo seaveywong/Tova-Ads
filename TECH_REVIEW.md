@@ -74,6 +74,41 @@ fb.py 单文件（commit b2918cb，已部署生产）。三层根因：①暗帖
 
 ---
 
+## 2026-09-21 — 全面逻辑扫描（/goal）：本会话累计 diff 复审——9 修复
+
+### 概述
+对本会话全部改动（b183cf8..190d692：Dynadot 切换/主页优先级/受众 1:1/跟帖识别/链路复审/令牌可用性）
+双路审查（自查 + Explore agent 全量 diff），共修 9 处（ef9e053 Dynadot 2 处 + c887573 agent 7 处），
+全部部署生产（后端 8 文件 + 前端 2 文件）。
+
+### 修复表
+| # | 严重度 | 位置 | 问题 → 修复 |
+|---|---|---|---|
+| D1 | 高 | dynadot_client | command.capitalize() 多词命令（account_info/tld_price/set_ns/get_account_balance）响应包名全错——成功路径必挂。改 snake→PascalCase |
+| D2 | 中 | domain_shop | tld_price 可能分页不全，缺 TLD 误报「暂不支持」。search 实时价兜底 |
+| 1 | P0 | launch_templates._resolve_targeting | 触发条件漏 exclusions/languages/excluded_geo——独配时整段受众静默丢（受众悄悄变宽，违反不静默铁律）。补全 |
+| 2 | 中 | ad_builder/fb.py/LaunchTemplates.vue | excluded_geo.zips 三层静默丢（保存后不可见不可删、部署照投）。三层补齐 |
+| 3 | 中 | Settings.vue | loadRg() 未挂 onMounted——注册商卡恒显默认假状态（选中态/徽章/掩码/测试对象全错）。挂并行加载 |
+| 4 | 中 | domain_shop | _PRICING_CACHE 不按注册商分键——切换后 ≤10min 旧家价格计价。按 reg 分键 |
+| 5 | 中 | fb.py | fb.watch/fb.me 重定向跟随条件永假（path 是 base62 不匹配分享正则）——watch 短链识别实为死代码。改 host 判定 |
+| 6 | 中 | domain_shop/dynadot_client | DynadotError 冒泡 500 + 实例级节流跨实例无效（并发查价必撞限流）。转 400 可读原因 + 模块级全局节流 |
+| 7 | 中 | ads_cache_sync | _classify_stall 混合态（expired+cooling）误判 cooldown——「无需重新授权」误导。全部不可用均为冷却才判临时 |
+
+### 验证
+ef9e053 冒烟 13 PASS（7 命令映射 + 官方形状 mock + 错误回归 + 节流）；c887573 冒烟 16 项实质全过
+（#1 四类独配生效 + 空受众回退回归；#6 真 Dynadot API 无效 key 现场 400 化验证；#7 三分支矩阵）；
+journal 零 Traceback；agent 复核确认无问题项：build_targeting 调用点全关键字传参/CA 缓存无串扰/
+dedup-emit 配对/i18n 键成对/_resolve_ad_page 链一致。
+
+### commits
+- ef9e053 fix(domains): Dynadot wrap 命令名映射 bug + tld_price 分页兜底
+- c887573 fix(scan): 全面逻辑扫描 7 修复
+
+### 关联 memory
+[[token-system-audit-2026-09]] · [[notify-routing-audit]] · [[bare-except-silent-failure]]
+
+---
+
 ## 2026-09-08 — 批次 III：P2/清理与低频补齐（细分版位/redirect fire 像素/TT event_id/last-wins/死块清理/spend_cap 汇率统一）
 
 ### 概述
