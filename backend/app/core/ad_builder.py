@@ -248,6 +248,7 @@ def build_targeting(
     cities: list[dict] | None = None,
     zips: list[dict] | None = None,
     excluded_geo: dict | None = None,
+    geo_match: str = "",
     age_min: int = 18,
     age_max: int = 65,
     gender: int = 0,
@@ -262,6 +263,7 @@ def build_targeting(
     exclusions: [{"type":"interest"|"behavior","id","name"}] → targeting.exclusions（细分排除）
     regions/cities/zips: [{"key","name"}]（adgeolocation 搜索）→ geo_locations 细化（与 countries 并存）
     excluded_geo: {"countries":[], "regions":[], "cities":[]} → excluded_geo_locations
+    geo_match: home|recent|travel|home_recent → geo_locations.location_types（空=FB 默认）
     languages: [{"id"}]（adlocale 搜索）多语
     custom_audiences/excluded_custom_audiences: [{"id"|"name"}]（账户级；部署链按账户解析 id）
     strategy:
@@ -278,6 +280,13 @@ def build_targeting(
         geo["cities"] = _by_key(cities)
     if _by_key(zips):
         geo["zips"] = _by_key(zips)
+    # 位置匹配模式（受众 1:1 收口批）：FB 受众面板「居住在/最近到访/旅行至此」。
+    # home=仅居住地 recent=仅最近到访 travel=旅行至此；空=省略键（FB 默认 居住或最近到访）。
+    # 仅在带地区/城市/邮编细化时下发（countries-only 下 FB 忽略该键，不发省事）。
+    _gm = {"home": ["home"], "recent": ["recent"], "travel": ["travel"],
+           "home_recent": ["home", "recent"]}.get((geo_match or "").strip().lower())
+    if _gm and len(geo) > 1:
+        geo["location_types"] = _gm
     targeting: dict[str, Any] = {
         "geo_locations": geo,
         "age_min": age_min,

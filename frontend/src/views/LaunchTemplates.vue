@@ -1049,7 +1049,7 @@ const hasSpecialCats = computed(() => specialCatsSel.value.length > 0)
 const blankNodeAud = () => ({ countries: [], interests: [], behaviors: [], exclusions: [],
   regions: [], cities: [], zips: [], excluded_geo: { countries: [], regions: [], cities: [] },
   age_min: 18, age_max: 65, gender: 0, languages: [],
-  custom_audiences: [], excluded_custom_audiences: [] })
+  custom_audiences: [], excluded_custom_audiences: [], geo_match: '' })
 const _audFromJson = (j) => {
   const a = blankNodeAud()
   try {
@@ -1070,6 +1070,7 @@ const _audFromJson = (j) => {
     a.age_min = p.age_min || 18
     a.age_max = p.age_max || 65
     a.gender = p.gender || 0
+    a.geo_match = ['home', 'recent', 'travel', 'home_recent'].includes(p.geo_match) ? p.geo_match : ''
   } catch {}
   return a
 }
@@ -1541,6 +1542,7 @@ const _cleanTreeForSave = () => tree.value.adsets.map(s => {
       custom_audiences: (aud?.custom_audiences || []),
       excluded_custom_audiences: (aud?.excluded_custom_audiences || []),
       age_min: (aud?.age_min || 18), age_max: (aud?.age_max || 65), gender: (aud?.gender || 0),
+      geo_match: aud?.geo_match || '',
     }),
     conv_location: s.conv_location || '',
     placement_mode: _manual ? 'manual' : '',
@@ -3010,6 +3012,17 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <span class="add">+</span>
                       </div>
 </div>
+                    <!-- 位置匹配模式（FB「居住在/最近到访/旅行至此」；仅在细化了地区/城市/邮编时下发） -->
+                    <div v-show="!locIsMsg(s) && geoItemsOf(s).length" class="row">
+                      <label>{{ t('launch.audGeoMatch') }}</label>
+                      <select v-model="s.aud.geo_match" class="inp" style="max-width:220px">
+                        <option value="">{{ t('launch.audGeoMatchDefault') }}</option>
+                        <option value="home">{{ t('launch.audGeoMatchHome') }}</option>
+                        <option value="recent">{{ t('launch.audGeoMatchRecent') }}</option>
+                        <option value="travel">{{ t('launch.audGeoMatchTravel') }}</option>
+                        <option value="home_recent">{{ t('launch.audGeoMatchHR') }}</option>
+                      </select>
+                    </div>
                     <div v-if="geoItemsOf(s).length || geoExcludedOf(s).length" class="row">
                       <label>{{ t('launch.audSelGeo') }}</label>
                       <div class="interest-list">

@@ -567,8 +567,8 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 "name": str(ad.get("name") or "").strip()[:100],
                 "enabled": bool(ad.get("enabled")),
                 "asset_ids": asset_ids,
-                "headline": str(ad.get("headline") or "")[:200],
-                "body": str(ad.get("body") or "")[:600],
+                "headline": str(ad.get("headline") or "")[:2000],
+                "body": str(ad.get("body") or "")[:9000],
                 "cta_type": str(ad.get("cta_type") or ""),
                 "ad_language": str(ad.get("ad_language") or ""),
                 "landing_page_id": int(ad.get("landing_page_id") or 0),
@@ -580,7 +580,7 @@ def _validate_structure(raw) -> tuple[dict, str]:
                 "page_id": str(ad.get("page_id") or "")[:64],   # 批O-2：FB 身份在广告层——节点级主页
                 "post_source": post_source,
                 "reuse_post_ref": reuse_ref,
-                "link_description": str(ad.get("link_description") or "")[:200],
+                "link_description": str(ad.get("link_description") or "")[:2000],
             })
         aud_id = adset.get("audience_id")
         # ── 批次I：转化位置 + 版位（组节点结构化字段；conv_location×objective 兼容在
@@ -1876,6 +1876,7 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
                     countries=countries, interests=resolved, behaviors=behaviors,
                     exclusions=exclusions, regions=regions, cities=cities, zips=zips,
                     excluded_geo=a.get("excluded_geo") if isinstance(a.get("excluded_geo"), dict) else None,
+                    geo_match=str(a.get("geo_match") or ""),
                     age_min=a.get("age_min") or 18, age_max=a.get("age_max") or 65,
                     gender=a.get("gender") or 0,
                     languages=[l for l in (a.get("languages") or []) if isinstance(l, dict) and l.get("id")],
