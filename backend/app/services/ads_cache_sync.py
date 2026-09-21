@@ -15,16 +15,19 @@ logger = logging.getLogger("toveads.ads_cache")
 
 def _classify_stall(creds: list, now=None) -> tuple:
     """租户停摆分级（2026-09-21 限流事件复盘）→ ("cooldown", eta) / ("stalled", None) / ("ok", None)。
-    cooldown=不可用全是限流冷却中（临时态，自动恢复）；stalled=真无可用令牌（无凭证/全
-    expired|disabled）；ok=尚有可用令牌（个别账户绑定问题，不是租户级停摆）。"""
+    cooldown=全部不可用令牌均为限流冷却（纯临时态，自动恢复）；stalled=混有永久不可用
+    （expired/disabled/无凭证——扫描修 #7：expired+cooling 并存曾误判 cooldown，
+    "无需重新授权"对 expired 部分是误导）；ok=尚有可用令牌。"""
     from ..core.fb_tokens import _is_cred_available
     from datetime import datetime, timezone
     now = now or datetime.now(timezone.utc)
     if any(_is_cred_available(c) for c in creds):
         return ("ok", None)
+    if not creds:
+        return ("stalled", None)
     cooling = [c for c in creds
                if c.status == "rate_limited" and c.cooldown_until and c.cooldown_until > now]
-    if cooling:
+    if len(cooling) == len(creds):   # 全部都在冷却（无一永久死）才判临时
         return ("cooldown", max(c.cooldown_until for c in cooling))
     return ("stalled", None)
 

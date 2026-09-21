@@ -15,6 +15,10 @@ logger = logging.getLogger("toveads.dynadot")
 
 _API = "https://api.dynadot.com/api3.json"
 
+# 全局节流（扫描修 #6）：1 req/s 是账户级配额——实例级 self._last 在"每请求新建客户端"
+# 的调用形态下无效，并发查价必撞限流。模块级时间戳跨实例共享（平台单 Dynadot 账户）。
+_GLOBAL_LAST = [0.0]
+
 
 class DynadotError(Exception):
     def __init__(self, message: str):
@@ -29,14 +33,13 @@ class DynadotNotConfigured(DynadotError):
 class DynadotClient:
     def __init__(self, api_key: str):
         self.key = api_key
-        self._last = 0.0
 
     def _call(self, command: str, **params) -> dict:
-        # Regular 账户 1 req/s——命令间至少隔 1.1s（上层查价已缓存，此处多为单发）
-        wait = 1.1 - (time.time() - self._last)
-        if wait > 0 and self._last:
+        # Regular 账户 1 req/s（账户级）——跨实例全局节流，命令间至少隔 1.1s
+        wait = 1.1 - (time.time() - _GLOBAL_LAST[0])
+        if wait > 0 and _GLOBAL_LAST[0]:
             time.sleep(wait)
-        self._last = time.time()
+        _GLOBAL_LAST[0] = time.time()
         q = {"key": self.key, "command": command}
         q.update({k: v for k, v in params.items() if v is not None})
         r = httpx.get(_API, params=q, timeout=30)

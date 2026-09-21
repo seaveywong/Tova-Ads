@@ -864,7 +864,8 @@ def _clone_ad_settings(db: Session, tenant_id: int, post_id: str) -> dict:
         eg = tg.get("excluded_geo_locations") or {}
         out["audience_excluded_geo"] = {"countries": eg.get("countries") or [],
                                         "regions": _geo(eg.get("regions")),
-                                        "cities": _geo(eg.get("cities"))}
+                                        "cities": _geo(eg.get("cities")),
+                                        "zips": _geo(eg.get("zips"))}
         out["audience_languages"] = _idn(tg.get("languages"))
         out["audience_custom_audiences"] = _idn(tg.get("custom_audiences"))
         out["audience_excluded_custom_audiences"] = _idn(tg.get("excluded_custom_audiences"))
@@ -1007,13 +1008,17 @@ def _normalize_post_query(q: str) -> str:
                 u = unquote(inner)
     except Exception:
         pass
-    # 短链形态跟随重定向（免登录；拿到最终 URL 即返回，不读内容）
+    # 短链形态跟随重定向（免登录；拿到最终 URL 即返回，不读内容）。
+    # fb.watch/fb.me 的 path 是 base62 token（扫描修 #5：曾要求 path 也匹配分享/视频正则
+    # ——条件永假，watch 短链识别实际未生效）
     import httpx
     try:
         pu = urlparse(u)
+        netloc = (pu.netloc or "").lower()
         path = pu.path or ""
-        if (pu.netloc or "").startswith(("fb.watch", "fb.me", "www.facebook.com", "m.facebook.com", "web.facebook.com", "business.facebook.com")) \
-           and _re.search(r"^/(share/[pv]/|reel/|story\.php)", path):
+        is_short_host = netloc.startswith(("fb.watch", "fb.me", "www.fb.watch", "www.fb.me"))
+        is_share_path = netloc.endswith("facebook.com") and _re.search(r"^/(share/[pv]/|reel/|story\.php)", path)
+        if is_short_host or is_share_path:
             r = httpx.get(u, follow_redirects=True, timeout=8,
                           headers={"User-Agent": "Mozilla/5.0 (compatible; TovaAdsBot/1.0)"})
             if r.url and str(r.url) != u:

@@ -284,7 +284,7 @@ def build_targeting(
         "age_max": age_max,
         "genders": [gender] if gender in (1, 2) else [],
     }
-    # excluded_geo_locations（同构）
+    # excluded_geo_locations（同构；含 zips——FB 支持，曾三层静默丢，扫描修 #2）
     eg = (excluded_geo or {})
     ex_geo: dict[str, Any] = {}
     if [c for c in (eg.get("countries") or []) if c]:
@@ -293,6 +293,8 @@ def build_targeting(
         ex_geo["regions"] = _by_key(eg.get("regions"))
     if _by_key(eg.get("cities")):
         ex_geo["cities"] = _by_key(eg.get("cities"))
+    if _by_key(eg.get("zips")):
+        ex_geo["zips"] = _by_key(eg.get("zips"))
     if ex_geo:
         targeting["excluded_geo_locations"] = ex_geo
     # 细分（兴趣+行为 单子句 OR；v1 单子句对齐 FB「详细定位」搜索框行为）

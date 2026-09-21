@@ -18,6 +18,7 @@ from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.log_utils import write_log, new_trace_id
 from ..core.porkbun_client import PorkbunClient, porkbun_configured
 from ..core.dynadot_client import DynadotClient, DynadotError
+from ..core.porkbun_client import PorkbunError
 from ..models.landing_lib import LandingDomain
 
 router = APIRouter(prefix="/domains-shop", tags=["domains-shop"])
@@ -55,22 +56,30 @@ def _registrar_client(db):
 
 
 def _pricing(client, db) -> dict:
-    """{tld: {registration, renewal}}（10min 缓存；两注册商客户端已统一此形状）。"""
+    """{tld: {registration, renewal}}（10min 缓存；两注册商客户端已统一此形状）。
+    缓存按注册商分键（扫描修 #4）：切换注册商后旧表 10min 内误计价。"""
     import time as _t
     now = _t.time()
-    if not _PRICING_CACHE or now - _PRICING_CACHE["at"] > _PRICING_TTL:
+    reg = _reg_name(db)
+    if (not _PRICING_CACHE or _PRICING_CACHE.get("reg") != reg
+            or now - _PRICING_CACHE["at"] > _PRICING_TTL):
         _PRICING_CACHE["pricing"] = client.pricing()
         _PRICING_CACHE["at"] = now
+        _PRICING_CACHE["reg"] = reg
     return _PRICING_CACHE["pricing"] or {}
 
 
 def _avail(client, d: str) -> dict:
-    """可注册性 + 实时价：Dynadot search 一步到位；Porkbun check。"""
-    if isinstance(client, DynadotClient):
-        r = client.search(d)
-        return {"available": r["available"], "price": r.get("price_usd")}
-    chk = client.check(d)
-    return {"available": str(chk.get("porkbunAvailable")) == "yes", "price": None}
+    """可注册性 + 实时价：Dynadot search 一步到位；Porkbun check。
+    注册商错误统一转 400（扫描修 #6：曾冒泡 500——key 无效/限流/SearchError 用户只见服务器错误）。"""
+    try:
+        if isinstance(client, DynadotClient):
+            r = client.search(d)
+            return {"available": r["available"], "price": r.get("price_usd")}
+        chk = client.check(d)
+        return {"available": str(chk.get("porkbunAvailable")) == "yes", "price": None}
+    except (DynadotError, PorkbunError) as e:
+        raise HTTPException(400, f"注册商查询失败：{str(e)[:150]}")
 
 
 def _fee(db) -> float:

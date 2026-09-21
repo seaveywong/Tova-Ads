@@ -1339,7 +1339,7 @@ const removeGeoItem = (s, fld, i, exclude = false) => {
   else (s.aud[fld] || []).splice(i, 1)
 }
 const geoItemsOf = (s) => [...(s.aud?.regions || []), ...(s.aud?.cities || []), ...(s.aud?.zips || [])]
-const geoExcludedOf = (s) => [...(((s.aud?.excluded_geo) || {}).regions || []), ...(((s.aud?.excluded_geo) || {}).cities || [])]
+const geoExcludedOf = (s) => [...(((s.aud?.excluded_geo) || {}).regions || []), ...(((s.aud?.excluded_geo) || {}).cities || []), ...(((s.aud?.excluded_geo) || {}).zips || [])]
 // ── 语言搜索（adlocale，多选，受众 1:1 批）──
 const nodeLangQ = ref({})
 const langResults = ref([])
@@ -3018,6 +3018,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
                         <span v-for="(g,i) in (s.aud.zips||[])" :key="'z'+g.key" class="interest-chip geo">{{ g.name }} <button @click="removeGeoItem(s, 'zips', i)">✕</button></span>
                         <span v-for="(g,i) in ((s.aud.excluded_geo||{}).regions||[])" :key="'er'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'regions', i, true)">✕</button></span>
                         <span v-for="(g,i) in ((s.aud.excluded_geo||{}).cities||[])" :key="'ec'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'cities', i, true)">✕</button></span>
+                        <span v-for="(g,i) in ((s.aud.excluded_geo||{}).zips||[])" :key="'ez'+g.key" class="interest-chip excl">{{ g.name }} <button @click="removeGeoItem(s, 'zips', i, true)">✕</button></span>
                       </div>
 </div>
                     <!-- 语言多选（受众 1:1）：FB「语言」定向 -->

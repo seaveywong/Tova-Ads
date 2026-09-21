@@ -1862,7 +1862,16 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
                    if isinstance(x, dict) and (x.get("id") or x.get("name"))]
             ecas = [x for x in (a.get("excluded_custom_audiences") or [])
                     if isinstance(x, dict) and (x.get("id") or x.get("name"))]
-            if countries or resolved or behaviors or regions or cities or zips or cas or ecas:
+            # 触发条件必须含全部维度（2026-09-21 扫描修 #1）：只配 排除/语言/排除地区
+            # 也会进 build_targeting——曾漏判三类，独配时静默落 FB 默认定向（受众悄悄变宽）
+            _eg = a.get("excluded_geo") if isinstance(a.get("excluded_geo"), dict) else {}
+            _eg_any = bool(_eg.get("countries")
+                           or [x for x in (_eg.get("regions") or []) if isinstance(x, dict) and x.get("key")]
+                           or [x for x in (_eg.get("cities") or []) if isinstance(x, dict) and x.get("key")]
+                           or [x for x in (_eg.get("zips") or []) if isinstance(x, dict) and x.get("key")])
+            _langs = [l for l in (a.get("languages") or []) if isinstance(l, dict) and l.get("id")]
+            if (countries or resolved or behaviors or exclusions or regions or cities or zips
+                    or _langs or _eg_any or cas or ecas):
                 return build_targeting(
                     countries=countries, interests=resolved, behaviors=behaviors,
                     exclusions=exclusions, regions=regions, cities=cities, zips=zips,
