@@ -1839,15 +1839,19 @@ const openEdit = async (tpl) => {
     reusePostPreview.value = null
   }
   editingAsset.value = null
-  if (tpl.asset_id) { try { editingAsset.value = await GET('/assets/' + tpl.asset_id) } catch {} }
-  // 已绑落地页 → 预拉子码（填充子码下拉）
-  if (f.landing_page_id) {
-    try {
-      const r = await GET(`/subcodes?page_id=${f.landing_page_id}&status=all`)
-      const others = allSubcodes.value.filter(s => s.page_id !== f.landing_page_id)
-      allSubcodes.value = [...others, ...(r.items || [])]
-    } catch {}
+  // 性能批（2026-09-21）：素材详情/子码全部 fire-and-forget 并行——曾三层串行 await
+  // 挡在 editOpen 前（asset→模板级子码→树内每页 for-await），用户网络下 3×RTT 起步
+  if (tpl.asset_id) { GET('/assets/' + tpl.asset_id).then(r => { editingAsset.value = r }).catch(() => {}) }
+  const _preloadSubcodes = (pids) => {
+    for (const pid of [...new Set(pids.filter(Boolean))]) {
+      GET(`/subcodes?page_id=${pid}&status=all`)
+        .then(r => {
+          const others = allSubcodes.value.filter(s => s.page_id !== pid)
+          allSubcodes.value = [...others, ...(r.items || [])]
+        }).catch(() => {})
+    }
   }
+  if (f.landing_page_id) _preloadSubcodes([f.landing_page_id])
   // 结构模式模板：structure（JSON 串）→ 解析进树 + 进结构模式（TT 模板不支持结构，强制平铺）
   tree.value = { adsets: [] }; expandedTreeKeys.value = new Set(); selectTreeNode('campaign')
   expandedAdKeys.value = new Set(); nodeReuseInputs.value = {}; bidOpenKeys.value = new Set()
@@ -1868,14 +1872,8 @@ const openEdit = async (tpl) => {
         editMode.value = 'tree'
         expandAllTree(); ensureTreeAssets()
         expandedAdKeys.value = new Set(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.key)))
-        // 预拉各广告节点绑定落地页的子码（填充节点子码下拉）
-        for (const pid of [...new Set(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.landing_page_id).filter(Boolean)))]) {
-          try {
-            const r = await GET(`/subcodes?page_id=${pid}&status=all`)
-            const others = allSubcodes.value.filter(s => s.page_id !== pid)
-            allSubcodes.value = [...others, ...(r.items || [])]
-          } catch {}
-        }
+        // 预拉各广告节点绑定落地页的子码（填充节点子码下拉）——并行不阻塞（曾 for-await 串行）
+        _preloadSubcodes(tree.value.adsets.flatMap(s => (s.ads || []).map(a => a.landing_page_id)))
         // 跟帖节点内容预览（卡内展示用；本地缓存优先，取不到不阻断）
         for (const n of tree.value.adsets.flatMap(s => (s.ads || []))) {
           if (n.post_source === 'reuse' && n.reuse_post_ref) fetchNodePostPreview(n)
