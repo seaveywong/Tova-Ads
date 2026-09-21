@@ -44,8 +44,10 @@ class DynadotClient:
             data = r.json()
         except Exception:
             raise DynadotError(f"Dynadot 返回非 JSON（HTTP {r.status_code}）")
-        # 响应包名 = command 首字母大写 + "Response"
-        wrap = command.capitalize() + "Response"
+        # 响应包名 = command snake_case → PascalCase + "Response"（官方映射：
+        # account_info→AccountInfoResponse / tld_price→TldPriceResponse / set_ns→SetNsResponse；
+        # str.capitalize() 会得 Account_info——多词命令全解析失败，2026-09-21 全面扫描修复）
+        wrap = "".join(w.capitalize() for w in command.split("_")) + "Response"
         body = data.get(wrap) or data
         code = str(body.get("ResponseCode", body.get("SuccessCode", "-1")))
         if code != "0":

@@ -100,13 +100,14 @@ def check_domain(domain: str = "", user: CurrentUser = Depends(require_permissio
     d = _norm_domain(domain)
     tld = d.rsplit(".", 1)[-1]
     client = _registrar_client(db)
-    price = _pricing(client, db).get(tld)
-    if not price or price.get("registration") is None:
-        raise HTTPException(400, f"暂不支持 .{tld} 后缀")
+    price = _pricing(client, db).get(tld) or {}
     av = _avail(client, d)
     fee = _fee(db)
-    # Dynadot search 自带实时价（premium 域与表价不同），有则优先
-    cost = av.get("price") if av.get("price") is not None else price["registration"]
+    # Dynadot search 自带实时价（premium 域与表价不同），有则优先；tld_price 表可能分页不全
+    # （缺的 TLD 不再误报「暂不支持」——search 价兜底，续费价缺则前端显 —）
+    cost = av.get("price") if av.get("price") is not None else price.get("registration")
+    if cost is None:
+        raise HTTPException(400, f"暂不支持 .{tld} 后缀")
     return {"domain": d, "available": av["available"], "tld": tld,
             "cost_usd": cost, "fee_usd": fee, "total_usd": round(cost + fee, 2),
             "renewal_usd": price.get("renewal")}
@@ -126,13 +127,13 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
         raise HTTPException(400, "年限 1-10")
     client = _registrar_client(db)
     tld = d.rsplit(".", 1)[-1]
-    price = _pricing(client, db).get(tld)
-    if not price or price.get("registration") is None:
-        raise HTTPException(400, f"暂不支持 .{tld} 后缀")
+    price = _pricing(client, db).get(tld) or {}
     av = _avail(client, d)
     if not av["available"]:
         raise HTTPException(400, "该域名不可注册（已被占用或不支持）")
-    unit = av.get("price") if av.get("price") is not None else price["registration"]
+    unit = av.get("price") if av.get("price") is not None else price.get("registration")
+    if unit is None:
+        raise HTTPException(400, f"暂不支持 .{tld} 后缀")
     cost = round(unit * body.years, 2)
     fee = _fee(db)
     from ..models.system import SystemSetting  # noqa: F401（表已 import 路径一致）
