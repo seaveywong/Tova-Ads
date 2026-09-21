@@ -13,6 +13,22 @@ from ..models.fb import Account
 logger = logging.getLogger("toveads.ads_cache")
 
 
+def _classify_stall(creds: list, now=None) -> tuple:
+    """租户停摆分级（2026-09-21 限流事件复盘）→ ("cooldown", eta) / ("stalled", None) / ("ok", None)。
+    cooldown=不可用全是限流冷却中（临时态，自动恢复）；stalled=真无可用令牌（无凭证/全
+    expired|disabled）；ok=尚有可用令牌（个别账户绑定问题，不是租户级停摆）。"""
+    from ..core.fb_tokens import _is_cred_available
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    if any(_is_cred_available(c) for c in creds):
+        return ("ok", None)
+    cooling = [c for c in creds
+               if c.status == "rate_limited" and c.cooldown_until and c.cooldown_until > now]
+    if cooling:
+        return ("cooldown", max(c.cooldown_until for c in cooling))
+    return ("stalled", None)
+
+
 def run_ads_cache_sync():
     """定时拉 TT 账户 campaigns/adsets/ads（全状态）→ upsert ads_cache。
     FB 广告层由巡检独家回写（下方 platform != tt 跳过）；本任务只兜 TT（含三层恒拉）。"""
@@ -22,6 +38,9 @@ def run_ads_cache_sync():
         db.close()
         return {"skipped": "already running"}
     try:
+        # 可用性视图 heal（2026-09-21）：冷却到期的 rate_limited 翻回 active（与巡检同口径）
+        from ..core.fb_tokens import heal_rate_limited as _heal_rl
+        _heal_rl(db)
         from ..routers.ads import _sync_one, _acc_platform  # 同一实现（FB/TT 分发），避免映射两份 drift
         accounts = db.query(Account).filter(
             Account.is_managed == True,  # noqa: E712
@@ -60,7 +79,29 @@ def run_ads_cache_sync():
         if _no_token:
             from ..core.notify_utils import emit_notification, dedup_recent
             from ..core.i18n import notify_text, tenant_locale
+            from ..models.fb import FbCredential as _FC
+            from datetime import timezone
             for tid, n in _no_token.items():
+                # 停摆分级（2026-09-21 限流事件复盘）：临时冷却降 warning+ETA（"重新授权"
+                # 指引是误导）；真无可用令牌才 critical
+                _lvl, _eta = _classify_stall(db.query(_FC).filter(_FC.tenant_id == tid).all())
+                if _lvl == "cooldown":
+                    # 全令牌冷却中：warning + ETA，2h 去重（临时状态不该 24h critical 轰炸）
+                    if dedup_recent(db, tid, "sync_cooldown", "ads_cache", 120):
+                        continue
+                    _loc = tenant_locale(db, tid)
+                    _title, _body = notify_text(_loc, "sync_cooldown",
+                                                n=n, eta=_eta.astimezone(timezone.utc).strftime("%H:%M UTC"))
+                    emit_notification(db, tenant_id=tid, level="warning",
+                                      event_type="sync_cooldown",
+                                      title=_title, body=_body)
+                    from ..core.log_utils import write_log, new_trace_id
+                    write_log(db, tenant_id=tid, trace_id=new_trace_id(),
+                              actor_type="system", target_type="sync", target_id="ads_cache",
+                              action_type="sync_cooldown", source="ads_cache_sync",
+                              result="fail", trigger_detail=f"cooling accounts: {n}")
+                    db.commit()
+                    continue
                 if dedup_recent(db, tid, "sync_stalled", "ads_cache", 24 * 60):   # 参数是分钟——曾写 24*3600=60 天，critical 发一条静默俩月（复审A P2）
                     continue
                 _loc = tenant_locale(db, tid)

@@ -86,6 +86,14 @@ NOTIFY = {
             "en": "{n} managed accounts have no usable ad token — stop-loss is inactive and ads keep spending.\nRe-authorize in Token Management; data resumes automatically.",
         },
     },
+    # 限流冷却分级（2026-09-21）：全令牌冷却中=临时态，warning + 自动恢复时间（非"重新授权"）
+    "sync_cooldown": {
+        "title": {"zh": "⏳ 令牌限流冷却中 · 同步暂停", "en": "⏳ Token Cooling · Sync Paused"},
+        "body": {
+            "zh": "{n} 个账户的令牌正在限流冷却，{eta} 自动恢复——无需重新授权。\n冷却期间止损暂不覆盖这些账户，恢复后自动补齐。",
+            "en": "{n} accounts' tokens are rate-limit cooling; auto-resume at {eta} — no re-auth needed.\nStop-loss pauses for these accounts during cooldown and catches up after.",
+        },
+    },
     # 无主主页自动清理（每日 cron：换号/弃号后的旧主页数据完全移除，删到东西才发）
     "stale_pages_cleaned": {
         "title": {"zh": "🧹 已自动清理无主主页数据", "en": "🧹 Stale Page Data Cleaned"},

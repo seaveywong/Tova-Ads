@@ -444,6 +444,9 @@ def _visible_cred_ids(db, user) -> set[int] | None:
 def list_credentials(user: CurrentUser = Depends(require_permission("ads.read")), db: Session = Depends(get_db)):
     """列出令牌（完整字段 + 关联账户数，供前端令牌管理页面）。
     operator 只看绑着自己名下账户的令牌（2026-09-16 用户拍板：不能像 owner 看全团队）。"""
+    # 可用性视图 heal（2026-09-21）：冷却到期的 rate_limited 即时翻回——令牌页不再恒显"限流中"
+    from ..core.fb_tokens import heal_rate_limited
+    heal_rate_limited(db, user.tenant_id)
     q = db.query(FbCredential).filter(FbCredential.tenant_id == user.tenant_id)
     _vis = _visible_cred_ids(db, user)
     if _vis is not None:

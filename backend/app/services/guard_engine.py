@@ -123,6 +123,32 @@ DEFAULT_LEARNING_HOURS = 0.0
 DEFAULT_CONCURRENCY = 4
 
 
+def _emit_account_routed(db, tenant_id: int, *, act_ids: list, level: str, event_type: str,
+                         title: str, body: str, trace_id=None, platform: str = "fb") -> None:
+    """账户派生聚合告警按 owner 路由（2026-09-17 审计铁律：必传 act_id；2026-09-21 落地）。
+    有主账户 → user_id=owner + target 账户（owner 各看各的，低噪不串台——gl 的巡检跳过
+    曾广播全租户让超管误以为是自己账户的事）；无主账户 → 租户广播兜底（无人覆盖=全无感）。
+    多 owner 逐个发；全部无主发一条租户级。"""
+    if not act_ids:
+        emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
+                          title=title, body=body, trace_id=trace_id, platform=platform)
+        return
+    _Acc = Account
+    owners: dict = {}
+    for act in act_ids:
+        a = db.query(_Acc).filter(_Acc.tenant_id == tenant_id, _Acc.act_id == str(act)).first()
+        owners.setdefault(a.owner_user_id if a else None, []).append(str(act))
+    for oid, acts in owners.items():
+        if oid is None:
+            continue
+        emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
+                          title=title, body=body, trace_id=trace_id, platform=platform,
+                          user_id=oid, target_type="account", target_id=acts[0])
+    if None in owners:
+        emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
+                          title=title, body=body, trace_id=trace_id, platform=platform)
+
+
 def _sys_float(db, key: str, default: float) -> float:
     """system_settings 全局数值（value 存 JSON）。缺省/脏值 → default。"""
     try:
@@ -1978,6 +2004,12 @@ def run_inspection(force: bool = False):
     scale_details = []   # [{act_id, ad_id, ad_name, level, target, old_usd, new_usd}]
 
     try:
+        # 可用性视图 heal（2026-09-21）：冷却到期的 rate_limited 翻回 active——status 字段
+        # 恒显"限流中"曾让令牌页/直查路径把恢复的令牌当死（cred#33 卡 21h 实证）
+        from ..core.fb_tokens import heal_rate_limited as _heal_rl
+        _healed = _heal_rl(db)
+        if _healed:
+            logger.info(f"[Guard] 令牌冷却到期恢复 active: {_healed} 个")
         learning_hours = _sys_float(db, "guard_learning_hours", DEFAULT_LEARNING_HOURS)
         # 取所有有可用 FB 凭证的租户（不只 guard_rules——租户无规则也巡检快照留痕；
         # 兜底止血规则已拆除（2026-09-17 用户拍板）：零覆盖=零干预），
@@ -2235,9 +2267,13 @@ def run_inspection(force: bool = False):
             if len(_sk_list) > 5:
                 _lines.append(f"… 共 {len(_sk_list)} 个")
             _b_ik = _b_ik + "\n" + "\n".join(_lines)
-            emit_notification(db, tenant_id=_tid, level="warning",
-                              event_type="inspection_skipped", trace_id=trace_id,
-                              title=_t_ik, body=_b_ik, platform="fb")
+            # owner 路由（2026-09-21）：名单格式「名(act_id): 原因」——解析 act_id 按归属分发，
+            # gl 的账户跳过不再广播全租户（超管误收=「是不是我的」困惑来源）
+            import re as _re
+            _sk_acts = [m for s in _sk_list for m in [_re.search(r"\((\d{5,})\)", s)] if m]
+            _emit_account_routed(db, _tid, act_ids=[m.group(1) for m in _sk_acts],
+                                 level="warning", event_type="inspection_skipped",
+                                 title=_t_ik, body=_b_ik, trace_id=trace_id, platform="fb")
         # ── KPI/评估口径异常聚合告警（复审R1：静默降级必须发声）──
         for _tid, _ke_n in _tenant_kpi_issues.items():
             if _ke_n <= 0 or dedup_recent(db, _tid, "kpi_resolve_error", "*", 360):
@@ -2715,6 +2751,7 @@ def run_watchdog():
                 or_(Account.created_at.is_(None), Account.created_at < _grace_cutoff),
             ).all()
             _stale_by_tenant: dict = {}
+            _stale_acts_by_tenant: dict = {}   # owner 路由用（act_id 并行名单）
             # B3（2026-09-12）：行内带最近原因——只列账户名看不出为什么没巡检（用户要去日志中心猜）。
             # 原因优先级：近期权限告警 → 权限不足；绑定令牌限流冷却中 → 令牌限流；否则 未巡检
             _perm_acts: set = set()
@@ -2741,6 +2778,7 @@ def run_watchdog():
                     _why = "未巡检"
                 _stale_by_tenant.setdefault(_a.tenant_id, []).append(
                     f"{_a.name or _a.act_id}（{_why}）")
+                _stale_acts_by_tenant.setdefault(_a.tenant_id, []).append(_a.act_id)
             # 同因抑制（2026-09-08 用户决策"维持两条"）：租户 FB+TT 活跃凭证全为 0 时，账户
             # 不进巡检是必然（主循环按活跃凭证建任务），该场景由 sync_stalled（critical，
             # ads_cache_sync 同源发现）接棒——stale 是"有心跳但漏巡"的盲检兜底，不该为已知
@@ -2775,9 +2813,10 @@ def run_watchdog():
                 if len(_names) > 5:
                     _lines.append(f"… 共 {len(_names)} 个")
                 _b_sa = _b_sa + "\n" + "\n".join(_lines)
-                emit_notification(db, tenant_id=_tid, level="critical",
-                                  event_type="inspection_stale_accounts", trace_id=trace_id,
-                                  title=_t_sa, body=_b_sa, platform="fb")
+                # owner 路由（2026-09-21）：账户派生告警按归属分发（超管只收自己名下的）
+                _emit_account_routed(db, _tid, act_ids=_stale_acts_by_tenant.get(_tid) or [],
+                                     level="critical", event_type="inspection_stale_accounts",
+                                     title=_t_sa, body=_b_sa, trace_id=trace_id, platform="fb")
                 alerts["inspection_stale_accounts"] += 1
             if _stale_by_tenant:
                 db.commit()

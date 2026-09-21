@@ -47,11 +47,13 @@ def _iter_tt_creds(db: Session, tenant_id: int) -> list:
 
 
 def iter_tenant_clients(db: Session, tenant_id: int) -> list:
-    """租户的所有 active token → [(cred, client), ...]。聚合操作用（合并多 token 的资产）。
+    """租户的所有可用 token → [(cred, client), ...]。聚合操作用（合并多 token 的资产）。
+    可用性口径同 _is_cred_available（冷却中的令牌不进池——拿它调 FB 只会再撞限流）。
     FB 在前（存量调用序不变），TT 凭证并入候选池尾部（TtClient 合入后自动生效）。"""
-    creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-    ).all()
+    creds = [c for c in db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited"))).all()
+        if _is_cred_available(c)]
     pairs = [(c, FbClient(decrypt(c.access_token_enc))) for c in creds]
     TtClient = _tt_client_cls()
     if TtClient is not None:
@@ -61,14 +63,41 @@ def iter_tenant_clients(db: Session, tenant_id: int) -> list:
     return pairs
 
 
+def heal_rate_limited(db: Session, tenant_id: int | None = None) -> int:
+    """冷却到期的 rate_limited 令牌翻回 active（2026-09-21 可用性视图重构）。
+
+    恢复此前是隐式时间判定（_is_cred_available）——status 字段永不停在 rate_limited
+    翻不回来：cred#33 曾卡 21h，令牌页恒显"限流中"、所有直查 status=="active" 的路径
+    （搜索/潜客/资产计数/孤儿重绑）永久把它当死。集中翻回，入口（巡检/看门狗/同步/令牌页）调用。"""
+    from datetime import datetime, timezone
+    from sqlalchemy import or_ as _or
+    q = db.query(FbCredential).filter(
+        FbCredential.status == "rate_limited",
+        _or(FbCredential.cooldown_until.is_(None),
+            FbCredential.cooldown_until <= datetime.now(timezone.utc)))
+    if tenant_id:
+        q = q.filter(FbCredential.tenant_id == tenant_id)
+    n = 0
+    for c in q.all():
+        c.status = "active"
+        c.cooldown_until = None
+        n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def first_client(db: Session, tenant_id: int) -> Optional[object]:
-    """任一 active token（token 无关操作，如兴趣搜索）。无则 None。
+    """任一可用 token（token 无关操作，如兴趣搜索）。无则 None。
+    可用=active 或 冷却已过的 rate_limited（cred#33 卡死事件后统一走可用性口径）。
     FB 优先（存量租户必有 FB 时行为不变）；租户只有 TT 凭证时返 TtClient。"""
     creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
     ).order_by(FbCredential.id).all()
-    if creds:
-        return FbClient(decrypt(creds[0].access_token_enc))
+    for c in creds:
+        if _is_cred_available(c):
+            return FbClient(decrypt(c.access_token_enc))
     TtClient = _tt_client_cls()
     if TtClient is not None:
         for tc in _iter_tt_creds(db, tenant_id):
@@ -398,9 +427,10 @@ def reassociate_orphan_accounts(db: Session, tenant_id: int) -> dict:
     本函数拉每个 active cred 的 adaccounts，把孤儿账户重绑到覆盖它的 cred。
     token-add 时 + 定时（watchdog）调，实现自愈。返回 {checked, rebound}。
     """
-    creds = db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id, FbCredential.status == "active"
-    ).all()
+    creds = [c for c in db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited"))).all()
+        if _is_cred_available(c)]   # 可用性口径（限流已恢复的令牌照常参与重绑——曾 active-only 永久漏它）
     if not creds:
         return {"checked": 0, "rebound": 0}
     # 建 account_id(裸数字) -> [覆盖它的 cred_id 列表]（多 token 共管：一个账户可被多个 cred 覆盖，
