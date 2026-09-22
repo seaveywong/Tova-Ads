@@ -1194,9 +1194,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
     </div>
 
     <!-- KPI 层：8 张统一规格卡（2 行 × 4 列；核心卡带迷你趋势线，全部同视觉语言，点击=账户明细表切到该指标视角）-->
-    <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
-      <!-- 今日健康 hero（直观性批 09-22）：状态灯一眼定调 → 三大数 → 要处理 chips 可点直达 -->
-      <div v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
+    <!-- 今日健康 hero（直观性批 09-22；布局批提出容器=整行大卡定调） -->
+    <div v-show="mainTab === 'data'" v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
         <div class="bf-light"><span class="bf-dot"></span><span class="bf-word">{{ todayBriefing.word }}</span></div>
         <div class="bf-nums">
           <div class="bf-num"><em>{{ todayBriefing.spend }}</em><span>{{ t('dashboard.bfSpend') }}</span></div>
@@ -1211,7 +1210,9 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           </template>
           <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>
         </div>
-      </div>
+    </div>
+
+    <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
       <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
@@ -1678,11 +1679,15 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-.alert-center { order: 1; grid-column: 1; }
+/* 布局批 09-22：hero 整行定调 → KPI(60%)与守护/待办(40%)并排（主卡不再被整行拉稀宽）
+   → 告警中心恢复整行 → 账户明细 → 趋势收尾 */
+.bf-hero { order: 0; }
+.kpi-zone { order: 1; grid-column: 1; }
 .guard-col { order: 2; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.accounts-card { order: 3; }
-.trend-main:not(.landing-trend) { order: 4; }
-@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
+.alert-center { order: 3; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
+.accounts-card { order: 4; grid-column: 1 / -1; }
+.trend-main:not(.landing-trend) { order: 5; }
+@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
@@ -1788,7 +1793,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
 /* ── 晨报卡：hero 区顶部一句话（绿色=安心 / 黄色=需关注）── */
 /* 今日健康 hero（直观性批 09-22）：状态灯定调 → 三大数 → 要处理 chips */
-.bf-hero { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-radius: 12px; margin-bottom: 12px; flex-wrap: wrap; background: var(--bg2); border: 1px solid var(--bd); }
+.bf-hero { display: flex; align-items: center; gap: 22px; padding: 18px 26px; border-radius: 14px; margin-bottom: 2px; flex-wrap: wrap; background: var(--bg2); border: 1px solid var(--bd); box-shadow: var(--shadow-card); }
 .bf-hero.ok { border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.05) }
 .bf-hero.warn { border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.05) }
 .bf-hero.crit { border-color: rgba(255,69,58,.45); background: rgba(255,69,58,.05) }
@@ -1800,7 +1805,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-word { font-size: 15px; font-weight: 700; color: var(--t1) }
 .bf-nums { display: flex; gap: 26px; margin-left: 4px }
 .bf-num { display: flex; flex-direction: column; min-width: 72px }
-.bf-num em { font-style: normal; font-size: 21px; font-weight: 700; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15 }
+.bf-num em { font-style: normal; font-size: 26px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em }
 .bf-num span { font-size: 11px; color: var(--t3) }
 .bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
 .bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
@@ -2147,6 +2152,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .main-split, .side-stack, .guard-col { display: contents; }   /* guard-col 桌面捆右列，移动拆开参与排序 */
   .ac-items { grid-template-columns: 1fr; }   /* 告警卡移动端单列 */
   .alert-center .table-tools { flex-wrap: wrap; }
+  .bf-hero { order: 0; }
   .kpi-zone { order: 1; }
   .notif-card { order: 2; }
   .todo-card { order: 3; }
