@@ -509,6 +509,8 @@ const todayBriefing = computed(() => {
     pausedN: data.value.pause_count || 0,
     ok: level === 'ok',
     level, word, chips,
+    dodSpend: dodPct(data.value.total_spend, data.value.yesterday_spend),   // 较昨日全天
+    dodConv: dodPct(data.value.total_conversions, data.value.yesterday_conversions),
   }
 })
 const kpiCpaDisplay = computed(() => fmtUsd(data.value.total_cpa))
@@ -1198,9 +1200,14 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
     <div v-show="mainTab === 'data'" v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
         <div class="bf-light"><span class="bf-dot"></span><span class="bf-word">{{ todayBriefing.word }}</span></div>
         <div class="bf-nums">
-          <div class="bf-num"><em>{{ todayBriefing.spend }}</em><span>{{ t('dashboard.bfSpend') }}</span></div>
-          <div class="bf-num"><em>{{ todayBriefing.conversions }}</em><span>{{ t('dashboard.bfConv') }}</span></div>
-          <div class="bf-num"><em>{{ kpiCpaDisplay }}</em><span>{{ t('dashboard.kpiAvgCpa') }}</span></div>
+          <div class="bf-num go" @click="setAccountView('spend')" :title="t('dashboard.bfNumGo')">
+            <em>{{ todayBriefing.spend }}<i v-if="todayBriefing.dodSpend" class="bf-dod" :class="{ good: todayBriefing.dodSpend.startsWith('-'), bad: !todayBriefing.dodSpend.startsWith('-') }">{{ todayBriefing.dodSpend }}</i></em>
+            <span>{{ t('dashboard.bfSpend') }}</span></div>
+          <div class="bf-num go" @click="setAccountView('conv')" :title="t('dashboard.bfNumGo')">
+            <em>{{ todayBriefing.conversions }}<i v-if="todayBriefing.dodConv" class="bf-dod" :class="{ good: !todayBriefing.dodConv.startsWith('-'), bad: todayBriefing.dodConv.startsWith('-') }">{{ todayBriefing.dodConv }}</i></em>
+            <span>{{ t('dashboard.bfConv') }}</span></div>
+          <div class="bf-num go" @click="setAccountView('cpa')" :title="t('dashboard.bfNumGo')">
+            <em>{{ kpiCpaDisplay }}</em><span>{{ t('dashboard.kpiAvgCpa') }}</span></div>
         </div>
         <div class="bf-chips">
           <template v-if="todayBriefing.chips.length">
@@ -1213,7 +1220,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
     </div>
 
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
-      <div class="kpi-core-grid">
+      <!-- 三轮：今日预设的三大数由 hero 承载（可点带环比），主卡行只在非今日日期段显示——同屏不再双份 -->
+      <div v-if="datePreset !== 'today'" class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
             <span class="kpi-label">{{ card.label }}</span>
@@ -1805,7 +1813,12 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-word { font-size: 15px; font-weight: 700; color: var(--t1) }
 .bf-nums { display: flex; gap: 26px; margin-left: 4px }
 .bf-num { display: flex; flex-direction: column; min-width: 72px }
-.bf-num em { font-style: normal; font-size: 26px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em }
+.bf-num em { font-style: normal; font-size: 26px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
+.bf-num.go { cursor: pointer; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; transition: background .15s }
+.bf-num.go:hover { background: rgba(255,255,255,.05) }
+.bf-dod { font-style: normal; font-size: 12px; font-weight: 600 }
+.bf-dod.good { color: var(--success) }
+.bf-dod.bad { color: var(--error) }
 .bf-num span { font-size: 11px; color: var(--t3) }
 .bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
 .bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
@@ -1850,7 +1863,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .kpi-sub { font-size: 10px; color: var(--t3); }
 .kpi-spark { width: 100%; height: 24px; color: var(--ac); opacity: 0.5; margin-top: 4px; display: block; }
 /* 次要 4 指标：hero 大卡底部一行 inline 指标（无独立卡片），竖分隔线分列 */
-.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--bd); background: rgba(0,0,0,.12); }
+.kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid var(--bd); background: rgba(0,0,0,.12); }   /* 三轮修复：6 指标曾按 4 列换行错乱 */
+@media (max-width: 1024px) { .kpi-strip { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 640px) { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
 .strip-metric { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; min-width: 0; position: relative; border-right: 1px solid var(--bd); background: transparent; border-radius: 0; box-shadow: none; }
 .strip-metric:last-child { border-right: none; }
