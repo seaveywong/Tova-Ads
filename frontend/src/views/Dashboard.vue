@@ -459,16 +459,18 @@ const dodPct = (cur, yst) => {
   const pct = ((c - y) / y) * 100
   return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%'
 }
+// 直观性批 09-22：主卡收敛为 3（花了多少→换来什么→单个成本——一句话讲完一件事）；
+// ROAS/线索降级进次级条（有则显示，不是每日首要决策数）
 const coreCards = computed(() => [
   { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : ''), dod: dodPct(data.value.total_spend, data.value.yesterday_spend), dodGoodDown: true },
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dodPct(data.value.total_conversions, data.value.yesterday_conversions) },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
-  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas', spark: '' },  // 趋势接口无 ROAS 序列，不画
-  { label: t('dashboard.kpiLeads'), value: fmt(data.value.total_leads), mode: 'leads', sub: data.value.total_leads > 0 ? t('dashboard.kpiCpl') + ' ' + fmtUsd(data.value.total_cpl) : '' },
 ])
 const ctrDisplay = computed(() => data.value.total_impressions > 0 ? ((data.value.total_clicks / data.value.total_impressions) * 100).toFixed(2) + '%' : '—')
 const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
 const subCards = computed(() => [
+  { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas' },
+  { label: t('dashboard.kpiLeads'), value: fmt(data.value.total_leads) + (data.value.total_leads > 0 && data.value.total_cpl ? ` (${fmtUsd(data.value.total_cpl)})` : ''), mode: 'leads' },
   { label: t('dashboard.kpiImpressions'), value: fmt(data.value.total_impressions) },
   { label: t('dashboard.kpiClicks'), value: fmt(data.value.total_clicks) },
   { label: t('dashboard.kpiCtr'), value: ctrDisplay.value },
@@ -488,6 +490,14 @@ const todayBriefing = computed(() => {
   const criticals = unreads.filter(n => n.level === 'critical').length
   const warnings = unreads.filter(n => n.level === 'warning').length
   const lowBal = accs.filter(a => !a.removed && a.balance_kind === 'limited' && (a.balance || 0) <= 100)
+  // 直观性批：红绿灯三态 + 可点 chips（要处理的事一键直达对应面板）
+  const chips = []
+  if (criticals > 0) chips.push({ key: 'crit', lv: 'crit', n: criticals, label: t('dashboard.bfChipCrit'), go: () => { notifMode.value = 'all'; notifFilter.value = 'critical' } })
+  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => a.name || a.act_id).join('、'), go: () => setAccountView('spend') })
+  if (lowBal.length) chips.push({ key: 'low', lv: 'warn', n: lowBal.length, label: t('dashboard.bfLowBal'), go: () => setAccountView('balance') })
+  if (unreads.length - criticals > 0) chips.push({ key: 'warn', lv: 'warn', n: unreads.length - criticals, label: t('dashboard.bfAlerts'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
+  const level = criticals > 0 ? 'crit' : (chips.length ? 'warn' : 'ok')
+  const word = level === 'ok' ? t('dashboard.bfStatusOk') : level === 'crit' ? t('dashboard.bfStatusCrit') : t('dashboard.bfStatusWarn')
   return {
     spend: kpiSpendDisplay.value,
     conversions: fmt(data.value.total_conversions),
@@ -497,9 +507,11 @@ const todayBriefing = computed(() => {
     criticals, warnings,
     lowBalN: lowBal.length,
     pausedN: data.value.pause_count || 0,
-    ok: abnormal.length === 0 && criticals === 0 && lowBal.length === 0,
+    ok: level === 'ok',
+    level, word, chips,
   }
 })
+const kpiCpaDisplay = computed(() => fmtUsd(data.value.total_cpa))
 
 const guardCells = computed(() => [
   { mode: 'accstatus', label: t('dashboard.kpiAccStatus'), value: `${accStatusActive.value}/${accStatusActive.value + accStatusBad.value}`, danger: accStatusBad.value > 0 },
@@ -1183,18 +1195,22 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
     <!-- KPI 层：8 张统一规格卡（2 行 × 4 列；核心卡带迷你趋势线，全部同视觉语言，点击=账户明细表切到该指标视角）-->
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
-      <!-- 今日晨报：打开看板第一眼（消耗/异动/告警 一句话） -->
-      <div v-if="datePreset === 'today'" :class="['briefing', todayBriefing.ok ? 'ok' : 'warn']">
-        <span class="bf-icon">{{ todayBriefing.ok ? '✅' : '⚠️' }}</span>
-        <span class="bf-main">
-          <b>{{ todayBriefing.spend }}</b> {{ t('dashboard.bfSpend') }} ·
-          <b>{{ todayBriefing.conversions }}</b> {{ t('dashboard.bfConv') }}
-          <template v-if="todayBriefing.abnormalN > 0"> · <span class="bf-bad">{{ todayBriefing.abnormalN }} {{ t('dashboard.bfAbnormal') }}<em v-if="todayBriefing.abnormalNames">（{{ todayBriefing.abnormalNames }}）</em></span></template>
-          <template v-if="todayBriefing.alertsN > 0"> · <span :class="todayBriefing.criticals > 0 ? 'bf-bad' : 'bf-warn'">{{ todayBriefing.alertsN }} {{ t('dashboard.bfAlerts') }}<em v-if="todayBriefing.criticals > 0"> ({{ todayBriefing.criticals }} critical)</em></span></template>
-          <template v-if="todayBriefing.lowBalN > 0"> · <span class="bf-warn">{{ todayBriefing.lowBalN }} {{ t('dashboard.bfLowBal') }}</span></template>
-          <template v-if="todayBriefing.pausedN > 0"> · <span class="bf-warn">{{ todayBriefing.pausedN }} {{ t('dashboard.bfPaused') }}</span></template>
-          <template v-if="todayBriefing.ok"> · {{ t('dashboard.bfAllGood') }}</template>
-        </span>
+      <!-- 今日健康 hero（直观性批 09-22）：状态灯一眼定调 → 三大数 → 要处理 chips 可点直达 -->
+      <div v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
+        <div class="bf-light"><span class="bf-dot"></span><span class="bf-word">{{ todayBriefing.word }}</span></div>
+        <div class="bf-nums">
+          <div class="bf-num"><em>{{ todayBriefing.spend }}</em><span>{{ t('dashboard.bfSpend') }}</span></div>
+          <div class="bf-num"><em>{{ todayBriefing.conversions }}</em><span>{{ t('dashboard.bfConv') }}</span></div>
+          <div class="bf-num"><em>{{ kpiCpaDisplay }}</em><span>{{ t('dashboard.kpiAvgCpa') }}</span></div>
+        </div>
+        <div class="bf-chips">
+          <template v-if="todayBriefing.chips.length">
+            <button v-for="c in todayBriefing.chips" :key="c.key" :class="['bf-chip', c.lv]" @click="c.go && c.go()">
+              {{ c.n }} {{ c.label }}<em v-if="c.sub"> · {{ c.sub }}</em>
+            </button>
+          </template>
+          <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>
+        </div>
       </div>
       <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
@@ -1771,6 +1787,28 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
 /* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
 /* ── 晨报卡：hero 区顶部一句话（绿色=安心 / 黄色=需关注）── */
+/* 今日健康 hero（直观性批 09-22）：状态灯定调 → 三大数 → 要处理 chips */
+.bf-hero { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-radius: 12px; margin-bottom: 12px; flex-wrap: wrap; background: var(--bg2); border: 1px solid var(--bd); }
+.bf-hero.ok { border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.05) }
+.bf-hero.warn { border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.05) }
+.bf-hero.crit { border-color: rgba(255,69,58,.45); background: rgba(255,69,58,.05) }
+.bf-light { display: flex; align-items: center; gap: 8px; min-width: 96px }
+.bf-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0 }
+.bf-hero.ok .bf-dot { background: var(--success); box-shadow: 0 0 8px rgba(48,209,88,.5) }
+.bf-hero.warn .bf-dot { background: var(--warning); box-shadow: 0 0 8px rgba(255,159,10,.5) }
+.bf-hero.crit .bf-dot { background: var(--error); box-shadow: 0 0 8px rgba(255,69,58,.55); animation: stall-blink 1.4s ease-in-out infinite }
+.bf-word { font-size: 15px; font-weight: 700; color: var(--t1) }
+.bf-nums { display: flex; gap: 26px; margin-left: 4px }
+.bf-num { display: flex; flex-direction: column; min-width: 72px }
+.bf-num em { font-style: normal; font-size: 21px; font-weight: 700; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15 }
+.bf-num span { font-size: 11px; color: var(--t3) }
+.bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
+.bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
+.bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
+.bf-chip.warn { color: var(--warning); background: rgba(255,159,10,.1); border-color: rgba(255,159,10,.3) }
+.bf-chip.crit { color: #fff; background: var(--error); border-color: var(--error) }
+.bf-chip:hover { filter: brightness(1.08) }
+.bf-calm { font-size: 12px; color: var(--success) }
 .briefing { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 10px; margin-bottom: 10px; font-size: 13px; cursor: default; }
 .briefing.ok { background: rgba(48,209,88,.06); border: 1px solid rgba(48,209,88,.2) }
 .briefing.warn { background: rgba(255,159,10,.06); border: 1px solid rgba(255,159,10,.25) }
@@ -1783,9 +1821,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
 /* ── KPI hero 带：一张大卡内 5 核心 + 4 次要（取代 9 张独立卡的碎片感）── */
 .kpi-zone { display: flex; flex-direction: column; gap: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 0; margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-card); }
-.kpi-core-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
-@media (max-width: 1024px) { .kpi-core-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 640px) { .kpi-core-grid { grid-template-columns: repeat(2, 1fr); } }
+.kpi-core-grid { display: grid; grid-template-columns: repeat(3, 1fr); }   /* 直观性批：主卡 3——一句话讲完一件事 */
+@media (max-width: 768px) { .kpi-core-grid { grid-template-columns: repeat(1, 1fr); } }
 .kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .kpi-dod { font-size: 11px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
 .kpi-dod.good { color: var(--success, #34c759); }
