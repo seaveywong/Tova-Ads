@@ -72,13 +72,81 @@ def _has_cjk(s: str) -> bool:
     return bool(_CJK_RE.search(s or ""))
 
 
+# 常用定向词中→英词库（2026-09-21 提速批）：受众搜索高频词内置映射，命中即免 AI
+# （Grok 推理模型翻译一词 10-25s 是统一搜索慢的主因）。未命中走 AI + 缓存。
+_LOCAL_TERM_MAP = {
+    "美妆": ["Makeup", "Cosmetics", "Beauty"], "化妆": ["Makeup", "Cosmetics"],
+    "护肤": ["Skincare", "Skin care"], "美容": ["Beauty", "Cosmetics"],
+    "香水": ["Perfume", "Fragrance"], "口红": ["Lipstick"], "指甲": ["Nail art", "Manicure"],
+    "购物": ["Shopping", "Online shopping"], "网购": ["Online shopping", "E-commerce"],
+    "电商": ["E-commerce", "Online shopping"], "促销": ["Deals", "Discounts"],
+    "时尚": ["Fashion", "Style"], "服装": ["Fashion", "Clothing"], "衣服": ["Clothing", "Fashion"],
+    "鞋": ["Shoes", "Footwear"], "包": ["Handbags", "Bags"], "珠宝": ["Jewelry"],
+    "手表": ["Watches"], "奢侈品": ["Luxury goods", "Luxury brands"],
+    "健身": ["Fitness", "Gym", "Workout"], "减肥": ["Weight loss", "Fitness"],
+    "瑜伽": ["Yoga"], "跑步": ["Running", "Jogging"], "游泳": ["Swimming"],
+    "篮球": ["Basketball"], "足球": ["Soccer", "Football"], "高尔夫": ["Golf"],
+    "滑雪": ["Skiing", "Snowboarding"], "露营": ["Camping"], "钓鱼": ["Fishing"],
+    "户外": ["Outdoor recreation", "Hiking"], "登山": ["Hiking", "Mountaineering"],
+    "骑行": ["Cycling", "Bicycles"], "运动": ["Sports", "Exercise"],
+    "健康": ["Health", "Wellness"], "医疗": ["Healthcare", "Medical"],
+    "医美": ["Cosmetic surgery", "Medical aesthetics"], "牙科": ["Dentistry", "Dental care"],
+    "营养": ["Nutrition", "Supplements"], "维生素": ["Vitamins", "Supplements"],
+    "母婴": ["Baby products", "Parenting"], "育儿": ["Parenting", "Childcare"],
+    "儿童": ["Kids", "Children products"], "玩具": ["Toys"],
+    "宠物": ["Pet food", "Pet supplies", "Pets"], "狗": ["Dogs", "Dog food"],
+    "猫": ["Cats", "Cat food"], "养狗": ["Dogs", "Dog owners"], "养猫": ["Cats", "Cat owners"],
+    "旅游": ["Travel", "Vacation"], "旅行": ["Travel", "Tourism"], "度假": ["Vacation", "Travel"],
+    "酒店": ["Hotels", "Hospitality"], "机票": ["Air travel", "Flights"],
+    "美食": ["Food", "Gourmet"], "食品": ["Food", "Grocery"], "零食": ["Snacks", "Sweets"],
+    "咖啡": ["Coffee"], "茶": ["Tea"], "酒": ["Wine", "Alcoholic beverages"],
+    "烹饪": ["Cooking", "Recipes"], "烘焙": ["Baking"], "烧烤": ["Barbecue", "Grilling"],
+    "家居": ["Home decor", "Furniture"], "家具": ["Furniture"], "装修": ["Home improvement", "Interior design"],
+    "建材": ["Building materials", "Construction"], "园艺": ["Gardening"],
+    "清洁": ["Cleaning", "Home cleaning"], "洗衣": ["Laundry", "Laundry services"],
+    "科技": ["Technology", "Gadgets"], "数码": ["Consumer electronics", "Gadgets"],
+    "手机": ["Smartphones", "Mobile phones"], "电脑": ["Computers", "Laptops"],
+    "耳机": ["Headphones", "Earbuds"], "电视": ["Televisions", "TV"],
+    "游戏": ["Video games", "Gaming"], "电竞": ["Esports", "Gaming"],
+    "动漫": ["Anime", "Manga"], "摄影": ["Photography"], "音乐": ["Music"],
+    "电影": ["Movies", "Cinema"], "读书": ["Books", "Reading"], "阅读": ["Reading", "Books"],
+    "教育": ["Education", "Online education"], "学习": ["Learning", "Education"],
+    "英语学习": ["English learning", "Language learning"], "留学": ["Study abroad"],
+    "金融": ["Finance", "Personal finance"], "投资": ["Investing", "Investments"],
+    "理财": ["Personal finance", "Wealth management"], "股票": ["Stock market", "Stock trading"],
+    "加密货币": ["Cryptocurrency", "Bitcoin"], "保险": ["Insurance"],
+    "贷款": ["Loans", "Credit"], "信用卡": ["Credit cards"], "房贷": ["Mortgage", "Home loans"],
+    "汽车": ["Cars", "Automotive"], "电动车": ["Electric vehicles", "EV"],
+    "摩托车": ["Motorcycles"], "自行车": ["Bicycles", "Cycling"],
+    "房产": ["Real estate", "Property"], "租房": ["Renting", "Apartment rentals"],
+    "法律": ["Law", "Legal services"], "会计": ["Accounting", "Bookkeeping"],
+    "招聘": ["Recruitment", "Job hunting"], "求职": ["Job hunting", "Careers"],
+    "婚礼": ["Wedding", "Weddings"], "婚纱": ["Wedding dress", "Bridal"],
+    "纹身": ["Tattoos"], "美发": ["Hair salon", "Hair care"], "理发": ["Haircuts", "Hair salon"],
+    "太阳能": ["Solar energy", "Solar panels"], "新能源": ["Renewable energy", "Clean energy"],
+    "无人机": ["Drones"], "智能手表": ["Smartwatches", "Wearables"],
+    "礼品": ["Gifts", "Gift shopping"], "情人节": ["Valentines Day", "Romantic gifts"],
+    "圣诞": ["Christmas", "Holiday shopping"], "万圣节": ["Halloween"],
+    "感恩节": ["Thanksgiving"], "黑色星期五": ["Black Friday", "Shopping deals"],
+    "家具装饰": ["Home decor", "Interior decorating"], "床垫": ["Mattresses", "Bedding"],
+    "婴儿": ["Baby", "Baby products"], "孕妇": ["Pregnancy", "Maternity"],
+    "老年": ["Seniors", "Elderly care"], "退休": ["Retirement", "Seniors"],
+    "收藏": ["Collectibles", "Collecting"], "手工": ["Handmade crafts", "DIY crafts"],
+    "绘画": ["Drawing", "Painting"], "舞蹈": ["Dancing", "Dance classes"],
+    "唱歌": ["Singing", "Karaoke"], "乐器": ["Musical instruments"],
+    "手机配件": ["Phone accessories", "Phone cases"], "汽车配件": ["Auto parts", "Car accessories"],
+}
 _TRANSLATE_CACHE: dict = {}   # {词: (ts, [英译])}——翻译不变，1h 缓存砍重复词的 10-20s AI 延迟
 
 
 def _ai_translate_terms(q: str) -> list[str]:
     """中文 → FB 英文搜索词（最多 3 个）。FB 兴趣/地理库英文为主——中文直搜结果显著
-    更少（实测：奥斯汀 1 条 vs Austin 5 条）。AI 未配/失败 → 空列表（降级原文直搜）。"""
+    更少（实测：奥斯汀 1 条 vs Austin 5 条）。命中内置词库即返（秒回，免 AI 慢翻译）；
+    AI 未配/失败 → 空列表（降级原文直搜）。"""
     import time as _t
+    _local = _LOCAL_TERM_MAP.get(q.strip())
+    if _local:
+        return list(_local)
     _hit = _TRANSLATE_CACHE.get(q)
     if _hit and _t.time() - _hit[0] < 3600:
         return _hit[1]
@@ -101,13 +169,42 @@ def _ai_translate_terms(q: str) -> list[str]:
         return []
 
 
+_SEARCH_CACHE: dict = {}   # {(kind, term): (ts, rows)} 10min——同词搜索结果稳定
+
+
+def _fb_search_cached(fb, kind: str, term: str, limit: int):
+    import time as _t
+    ck_ = (kind, term.lower())
+    hit = _SEARCH_CACHE.get(ck_)
+    if hit and _t.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        if kind == "interest":
+            rows = fb.search_interests(term, limit=limit) or []
+        elif kind == "behavior":
+            rows = fb.search_behaviors(term, limit=limit) or []
+        elif kind == "geo":
+            rows = fb.search_geo(term, None, limit=5) or []
+        elif kind == "locale":
+            rows = fb.search_locales(term, limit=4) or []
+        else:
+            rows = []
+    except Exception as e:
+        raise
+    if len(_SEARCH_CACHE) > 4000:
+        _SEARCH_CACHE.clear()
+    _SEARCH_CACHE[ck_] = (_t.time(), rows)
+    return rows
+
+
 @router.get("/search-all")
-def search_all(q: str, countries: str = "", limit: int = 8,
+def search_all(q: str, countries: str = "", limit: int = 8, fast: int = 0,
                user: CurrentUser = Depends(require_permission("ads.read")),
                db: Session = Depends(get_db)):
-    """统一定向搜索（受众交互批 2026-09-21）：一个词并行搜 兴趣/行为/地理(州·城市·邮编)/语言，
-    中文自动 AI 英译双搜合并（原文+英译结果去重）。返
-    {interests, behaviors, geo, locales, translated}。地理 countries 限定已选国家内。"""
+    """统一定向搜索（受众交互批 2026-09-21；提速批 09-22 加 fast）：一个词并行搜
+    兴趣/行为/地理(州·城市·邮编)/语言，中文自动英译双搜合并。
+    fast=1（渐进一段）：中文且翻译未就绪时不等 AI——立即返原文结果 +
+    translated_pending=true（后台线程翻译落缓存，前端 2.5s 后原参重查即得全量合并）。"""
     if not q or len(q.strip()) < 1:
         raise HTTPException(400, "查询词 q 不能为空")
     from ..core.fb_tokens import first_client
@@ -130,19 +227,27 @@ def search_all(q: str, countries: str = "", limit: int = 8,
 
     def _run(kind: str, term: str):
         try:
-            if kind == "interest":
-                return fb.search_interests(term, limit=limit) or []
-            if kind == "behavior":
-                return fb.search_behaviors(term, limit=limit) or []
-            if kind == "geo":
-                return fb.search_geo(term, cs or None, limit=5) or []
-            if kind == "locale":
-                return fb.search_locales(term, limit=4) or []
+            return _fb_search_cached(fb, kind, term, limit, ) if kind != "geo" else _run_geo(term)
         except Exception as e:
             if not _first_err:
                 _first_err.append(str(e)[:150])
             return []
-        return []
+
+    def _run_geo(term: str):
+        # geo 带 countries 限定（限定不同结果不同）——缓存键并入
+        import time as _t
+        ck_ = ("geo", term.lower(), ",".join(cs))
+        hit = _SEARCH_CACHE.get(ck_)
+        if hit and _t.time() - hit[0] < 600:
+            return hit[1]
+        try:
+            rows = fb.search_geo(term, cs or None, limit=5) or []
+        except Exception as e:
+            if not _first_err:
+                _first_err.append(str(e)[:150])
+            return []
+        _SEARCH_CACHE[ck_] = (_t.time(), rows)
+        return rows
 
     jobs = []
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -150,8 +255,20 @@ def search_all(q: str, countries: str = "", limit: int = 8,
         for kind in ("interest", "behavior", "geo", "locale"):
             jobs.append((kind, base_q, ex.submit(_run, kind, base_q)))
         if _has_cjk(q):
-            translated = ex.submit(_ai_translate_terms, base_q).result() or []
-            queries += [t for t in translated if t.lower() not in q.lower()][:3]
+            if fast and not _LOCAL_TERM_MAP.get(base_q) and not _TRANSLATE_CACHE.get(base_q):
+                # 渐进一段：翻译不在词库/缓存 → 后台线程翻（落缓存），本请求立即返原文结果
+                import threading as _th
+                _pending = True
+
+                def _bg():
+                    try:
+                        _ai_translate_terms(base_q)
+                    except Exception:
+                        pass
+                _th.Thread(target=_bg, daemon=True).start()
+            else:
+                translated = ex.submit(_ai_translate_terms, base_q).result() or []
+                queries += [t for t in translated if t.lower() not in q.lower()][:3]
         queries = list(dict.fromkeys(queries))[:4]
         for i, term in enumerate(queries[1:], 1):
             jobs.append(("interest", term, ex.submit(_run, "interest", term)))
@@ -187,7 +304,8 @@ def search_all(q: str, countries: str = "", limit: int = 8,
         # 全线空且真有错（令牌过期/限流等）→ 报因，不再 200 空结果（复审 #5）
         raise HTTPException(400, f"定向搜索失败：{_first_err[0]}")
     return {"interests": ints[:12], "behaviors": bhvs[:6], "geo": geo[:8],
-            "locales": locs[:4], "translated": translated}
+            "locales": locs[:4], "translated": translated,
+            "translated_pending": locals().get("_pending", False)}
 
 
 @router.get("/custom-audiences")

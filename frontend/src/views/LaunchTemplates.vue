@@ -1342,7 +1342,7 @@ const onUniInput = (s) => {
     uniResultsBy.value = { ...uniResultsBy.value, [s.key]: null }
     return
   }
-  _uniTimers[s.key] = setTimeout(() => searchUnifiedForNode(s), 600)
+  _uniTimers[s.key] = setTimeout(() => searchUnifiedForNode(s), 400)
 }
 const searchUnifiedForNode = async (s) => {
   const q = (nodeUniQ.value[s.key] || '').trim()
@@ -1352,8 +1352,20 @@ const searchUnifiedForNode = async (s) => {
   uniLoadingKeys.value = new Set([...uniLoadingKeys.value, s.key])
   try {
     const cs = (s.aud?.countries || []).join(',')
-    const r = await GET('/audiences/search-all?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : ''), 30000)
+    const _url = '/audiences/search-all?q=' + encodeURIComponent(q) + (cs ? '&countries=' + encodeURIComponent(cs) : '')
+    // 提速批（09-22）：一段 fast——中文且翻译未就绪立即返原文结果（AI 翻译后台落缓存）；
+    // translated_pending → 2.5s 后原参重查（此时缓存命中，含英译合并结果）静默替换面板
+    const r = await GET(_url + '&fast=1', 30000)
     if (uniSeqBy.value[s.key] === seq) uniResultsBy.value = { ...uniResultsBy.value, [s.key]: r }
+    if (r.translated_pending) {
+      setTimeout(async () => {
+        if (uniSeqBy.value[s.key] !== seq) return   // 已发起新搜索/切节点——丢弃
+        try {
+          const r2 = await GET(_url, 30000)
+          if (uniSeqBy.value[s.key] === seq) uniResultsBy.value = { ...uniResultsBy.value, [s.key]: r2 }
+        } catch {}
+      }, 2500)
+    }
   } catch (e) {
     if (uniSeqBy.value[s.key] === seq) { showError(e, t('launch.interestSearchFail')); uniResultsBy.value = { ...uniResultsBy.value, [s.key]: null } }
   }
