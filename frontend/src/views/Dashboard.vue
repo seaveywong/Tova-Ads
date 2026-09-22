@@ -1195,9 +1195,10 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
       </div>
     </div>
 
-    <!-- KPI 层：8 张统一规格卡（2 行 × 4 列；核心卡带迷你趋势线，全部同视觉语言，点击=账户明细表切到该指标视角）-->
-    <!-- 今日健康 hero（直观性批 09-22；布局批提出容器=整行大卡定调） -->
-    <div v-show="mainTab === 'data'" v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
+    <!-- KPI 命令卡（视觉批 09-22）：晨报 hero 并入 kpi-zone 同一张卡——今日=状态头+三大数+次级条，
+         非今日=三大主卡+次级条；不再出现两条细棒卡片堆叠 -->
+    <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
+    <div v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
         <div class="bf-light"><span class="bf-dot"></span><span class="bf-word">{{ todayBriefing.word }}</span></div>
         <div class="bf-nums">
           <div class="bf-num go" @click="setAccountView('spend')" :title="t('dashboard.bfNumGo')">
@@ -1219,9 +1220,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         </div>
     </div>
 
-    <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
-      <!-- 三轮：今日预设的三大数由 hero 承载（可点带环比），主卡行只在非今日日期段显示——同屏不再双份 -->
-      <div v-if="datePreset !== 'today'" class="kpi-core-grid">
+      <!-- 非今日：三大主卡行（今日的三大数由上方 hero 头承载，同屏不双份） -->
+      <div v-else class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
             <span class="kpi-label">{{ card.label }}</span>
@@ -1687,15 +1687,14 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-/* 布局批 09-22：hero 整行定调 → KPI(60%)与守护/待办(40%)并排（主卡不再被整行拉稀宽）
-   → 告警中心恢复整行 → 账户明细 → 趋势收尾 */
-.bf-hero { order: 0; }
-.kpi-zone { order: 1; grid-column: 1; }
-.guard-col { order: 2; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.alert-center { order: 3; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
-.accounts-card { order: 4; grid-column: 1 / -1; }
+/* 布局定稿（视觉批 09-22）：KPI 命令卡整行定调 → 账户明细(60%)与守护/待办(40%)并排
+   → 告警中心整行 → 趋势收尾。命令卡含 hero 头+次级条，挤 60% 列会换行，整行才立得住 */
+.kpi-zone { order: 1; }
+.accounts-card { order: 2; grid-column: 1; }
+.guard-col { order: 3; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.alert-center { order: 4; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
 .trend-main:not(.landing-trend) { order: 5; }
-@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
+@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .accounts-card, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
@@ -1801,19 +1800,21 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
 /* ── 晨报卡：hero 区顶部一句话（绿色=安心 / 黄色=需关注）── */
 /* 今日健康 hero（直观性批 09-22）：状态灯定调 → 三大数 → 要处理 chips */
-.bf-hero { display: flex; align-items: center; gap: 22px; padding: 18px 26px; border-radius: 14px; margin-bottom: 2px; flex-wrap: wrap; background: var(--bg2); border: 1px solid var(--bd); box-shadow: var(--shadow-card); }
-.bf-hero.ok { border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.05) }
-.bf-hero.warn { border-color: rgba(255,159,10,.4); background: rgba(255,159,10,.05) }
-.bf-hero.crit { border-color: rgba(255,69,58,.45); background: rgba(255,69,58,.05) }
+/* 视觉批 09-22：hero 不再是独立卡——kpi-zone 顶部的区块（tint 底色+底部分隔线），
+   与下方次级指标条合成一张命令卡 */
+.bf-hero { display: flex; align-items: center; gap: 22px; padding: 18px 26px 15px; border-radius: 12px 12px 0 0; border-bottom: 1px solid var(--bd); flex-wrap: wrap; row-gap: 10px; }
+.bf-hero.ok { border-bottom-color: rgba(48,209,88,.25); background: rgba(48,209,88,.05) }
+.bf-hero.warn { border-bottom-color: rgba(255,159,10,.3); background: rgba(255,159,10,.05) }
+.bf-hero.crit { border-bottom-color: rgba(255,69,58,.35); background: rgba(255,69,58,.05) }
 .bf-light { display: flex; align-items: center; gap: 8px; min-width: 96px }
 .bf-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0 }
 .bf-hero.ok .bf-dot { background: var(--success); box-shadow: 0 0 8px rgba(48,209,88,.5) }
 .bf-hero.warn .bf-dot { background: var(--warning); box-shadow: 0 0 8px rgba(255,159,10,.5) }
 .bf-hero.crit .bf-dot { background: var(--error); box-shadow: 0 0 8px rgba(255,69,58,.55); animation: stall-blink 1.4s ease-in-out infinite }
 .bf-word { font-size: 15px; font-weight: 700; color: var(--t1) }
-.bf-nums { display: flex; gap: 26px; margin-left: 4px }
+.bf-nums { display: flex; gap: 34px; margin-left: 4px }
 .bf-num { display: flex; flex-direction: column; min-width: 72px }
-.bf-num em { font-style: normal; font-size: 26px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
+.bf-num em { font-style: normal; font-size: 28px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
 .bf-num.go { cursor: pointer; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; transition: background .15s }
 .bf-num.go:hover { background: rgba(255,255,255,.05) }
 .bf-dod { font-style: normal; font-size: 12px; font-weight: 600 }
@@ -1838,7 +1839,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-main em { font-style: normal; font-size: 11px; opacity: .8 }
 
 /* ── KPI hero 带：一张大卡内 5 核心 + 4 次要（取代 9 张独立卡的碎片感）── */
-.kpi-zone { display: flex; flex-direction: column; gap: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 0; margin-bottom: 14px; overflow: hidden; box-shadow: var(--shadow-card); }
+.kpi-zone { display: flex; flex-direction: column; gap: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 0; overflow: hidden; box-shadow: var(--shadow-card); }
 .kpi-core-grid { display: grid; grid-template-columns: repeat(3, 1fr); }   /* 直观性批：主卡 3——一句话讲完一件事 */
 @media (max-width: 768px) { .kpi-core-grid { grid-template-columns: repeat(1, 1fr); } }
 .kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -1901,19 +1902,20 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* 左列表格不裁剪：内容不足保持基线高度（与右列平衡），超出随内容自然长高 */
 .acc-scroll { min-height: 400px; }   /* 信息密集块给足高度；上方 KPI 单行+图降高后表格上移首屏 */
 
-/* 守护概览 3 格（自动止损/今日放行/巡检覆盖）；水平内边距与其他卡统一 16px */
-.guard-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 14px; }
+/* 守护概览（视觉批 09-22）：一行四格分隔线式——去盒中盒，与 KPI 指标条同一视觉语言 */
+.guard-grid { display: grid; grid-template-columns: repeat(4, 1fr); padding: 4px 10px; }
 .guard-cell {
-  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px;
-  background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px;
-  cursor: pointer; transition: all 0.15s; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 4px;
+  background: transparent; border: none; border-right: 1px solid var(--bd); border-radius: 0;
+  cursor: pointer; transition: background 0.15s; text-align: center;
 }
-.guard-cell:hover { border-color: var(--bd2); }
-.guard-cell.active { border-color: var(--ac); background: var(--acg); }
-.gc-value { font-size: 24px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
+.guard-cell:last-child { border-right: none; }
+.guard-cell:hover { background: rgba(255,255,255,.03); }
+.guard-cell.active { background: var(--acg); }
+.gc-value { font-size: 22px; font-weight: 600; color: var(--t1); font-variant-numeric: tabular-nums; }
 .guard-cell.danger .gc-value { color: var(--error); }
 .gc-label { font-size: 12px; color: var(--t3); white-space: nowrap; }
-.gc-sub { font-size: 10px; color: var(--t3); margin-top: 2px; }
+.gc-sub { font-size: 10px; color: var(--t3); margin-top: 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
 .guard-detail { margin: 0 16px 16px; }
 .task-detail { margin: 0 16px 16px; }
 
@@ -2154,7 +2156,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .block-detail .block-grid { grid-template-columns: 1fr; }
-  .kpi-zone { grid-template-columns: repeat(2, 1fr); }   /* 8 卡统一网格 → 2×4 */
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); }   /* 次级指标条 2×3 */
   .trend-main-canvas { height: 260px; }
   .main-tabs { width: 100%; }   /* 页头 tab 挤不下时换行 */
   /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 告警 → 待处理事项 → 账户明细 → 守护 → 趋势；
@@ -2166,7 +2168,9 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .main-split, .side-stack, .guard-col { display: contents; }   /* guard-col 桌面捆右列，移动拆开参与排序 */
   .ac-items { grid-template-columns: 1fr; }   /* 告警卡移动端单列 */
   .alert-center .table-tools { flex-wrap: wrap; }
-  .bf-hero { order: 0; }
+  .guard-grid { grid-template-columns: repeat(2, 1fr); }   /* 守护四格 → 2×2，分隔线重排 */
+  .guard-cell:nth-child(2n) { border-right: none; }
+  .guard-cell:nth-child(-n+2) { border-bottom: 1px solid var(--bd); }
   .kpi-zone { order: 1; }
   .notif-card { order: 2; }
   .todo-card { order: 3; }
