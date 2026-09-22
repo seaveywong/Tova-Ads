@@ -1649,9 +1649,12 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 </template>
 
 <style scoped>
-/* ── 复合网格布局（2026-09-15 重构）：宽屏"多块并排"消化宽度，视觉层次——
-   ①晨报+KPI hero 区  ②趋势大图（60%）+守护/告警右栏  ③账户明细整行  ④告警中心
-   dense 回填让 DOM 顺序不变也能把守护卡填进趋势旁边的空格 */
+/* ── 复合网格布局（2026-09-22 信息层级重构）：按决策紧急度排——
+   ①晨报+KPI hero 区（扫一眼知全局）
+   ②告警中心（60%）+守护/待办（40%）——要处理的紧跟 KPI
+   ③账户明细整行（工作列表）
+   ④趋势大图整行收尾（复盘分析，不着急的放最后）
+   dense 回填让 DOM 顺序不变也能正确落位；order 驱动层级 */
 .dashboard {
   display: grid;
   grid-template-columns: 60fr 40fr;
@@ -1659,9 +1662,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-.trend-main:not(.landing-trend) { grid-column: 1; }
-.guard-col { grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
+.alert-center { order: 1; grid-column: 1; }
+.guard-col { order: 2; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.accounts-card { order: 3; }
+.trend-main:not(.landing-trend) { order: 4; }
+@media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
@@ -2096,7 +2101,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .kpi-zone { grid-template-columns: repeat(2, 1fr); }   /* 8 卡统一网格 → 2×4 */
   .trend-main-canvas { height: 260px; }
   .main-tabs { width: 100%; }   /* 页头 tab 挤不下时换行 */
-  /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 待处理事项 → 趋势 → 账户明细 → 守护 → 告警；
+  /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 告警 → 待处理事项 → 账户明细 → 守护 → 趋势；
      落地页 Tab 指标 → 明细 → 趋势 → 子码 → 屏蔽明细（trend-main 两个 Tab 都排 3，互不干扰）。
      间距用 gap：margin-top 只命中 .dashboard 直接子级，main-split/side-stack 变 contents 后
      孙级卡拿不到 margin 曾零间距贴边（复审D P1） */
@@ -2106,11 +2111,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .ac-items { grid-template-columns: 1fr; }   /* 告警卡移动端单列 */
   .alert-center .table-tools { flex-wrap: wrap; }
   .kpi-zone { order: 1; }
-  .todo-card { order: 2; }
-  .trend-main { order: 3; }
+  .notif-card { order: 2; }
+  .todo-card { order: 3; }
   .accounts-card { order: 4; }
   .guard-card { order: 5; }
-  .notif-card { order: 6; }
+  .trend-main:not(.landing-trend) { order: 6; }   /* 特异性对齐桌面 :not 规则——曾低特异性被桌面 order:4 压过 */
   .stat-grid { order: 1; }
   .landing-detail { order: 2; }
   .landing-subcodes { order: 4; }
