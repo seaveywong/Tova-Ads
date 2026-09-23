@@ -664,7 +664,6 @@ def trend_data(
 
 
 
-@router.get("/landing")
 def _op_own_acts(db, user):
     """operator 名下账户集合（批AJ 抽出共用）；owner/超管返 None=不过滤。"""
     if getattr(user, "role", None) != "operator":
@@ -673,6 +672,7 @@ def _op_own_acts(db, user):
         Account.tenant_id == user.tenant_id), user).all()}
 
 
+@router.get("/landing")
 def landing_overview(
     date_preset: str = "today",
     date_from: str = "",
