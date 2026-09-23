@@ -309,8 +309,13 @@ def client_for_account(db: Session, tenant_id: int, act_id: str,
 
 def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
                               op_kind: str = "write") -> list[FbCredential]:
-    """账户的 op_kind 候选令牌，按优先级序（pool → bound → tenant-wide 兜底），去重。
-    主页感知选择扫描用（返全序，不止选一个）。"""
+    """账户的 op_kind 候选令牌，按优先级序（pool → bound），去重。
+    主页感知选择扫描用（返全序，不止选一个）。
+    2026-09-24 砍 tenant-wide 兜底尾（对齐批BY 写路径口径）：全租户令牌多数对该账户
+    无写权限——换页选择器曾把它们的主页也列出来（用户：无关令牌为什么出现），且
+    页面感知选中它们后 campaign 创建必失败。批AK 时代该尾从未真正生效
+    （_write_fb_with_fallback 的 FbClient NameError 被 bare-except 吞，列表恒 1 个），
+    无生产行为依赖。"""
     from ..models.fb import AccountFbCredential
     acc = db.query(Account).filter(
         Account.tenant_id == tenant_id, Account.act_id == act_id,
@@ -335,11 +340,6 @@ def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
             _add(c)
         if acc.fb_credential_id:
             _add(db.query(FbCredential).filter(FbCredential.id == acc.fb_credential_id).first())
-    for c in db.query(FbCredential).filter(
-        FbCredential.tenant_id == tenant_id,
-        FbCredential.status.in_(("active", "rate_limited")),
-    ).order_by(FbCredential.id).all():
-        _add(c)
     return ordered
 
 
