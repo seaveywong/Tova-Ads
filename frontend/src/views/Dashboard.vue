@@ -1828,7 +1828,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-hero.ok { background: rgba(48,209,88,.05) }
 .bf-hero.warn { background: rgba(255,159,10,.05) }
 .bf-hero.crit { background: rgba(255,69,58,.05) }
-.bf-nums { display: flex; gap: 34px; margin-left: 4px }
+.bf-nums { display: flex; flex-wrap: wrap; gap: 34px; margin-left: 4px }
 .bf-num { display: flex; flex-direction: column; min-width: 72px }
 .bf-num em { font-style: normal; font-size: 28px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
 .bf-num.go { cursor: pointer; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; transition: background .15s }
@@ -1837,6 +1837,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-dod.good { color: var(--success) }
 .bf-dod.bad { color: var(--error) }
 .bf-num span { font-size: 11px; color: var(--t3) }
+@media (max-width: 768px) { .bf-nums { gap: 18px 26px } }   /* 移动端三大数放不下时换行，不再被 .kpi-zone overflow:hidden 裁掉末位（$21.3 → $21.31） */
 .bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
 .bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
 .bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
