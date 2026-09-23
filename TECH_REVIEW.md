@@ -2885,3 +2885,6 @@ launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（
 ### 验证
 - 行为 smoke（服务器、restart 前）：模板级/部署分配/结构树节点=Dhir 三路径均选中 Minah；主页未定→∅ 走原选牌（零回归）；虚构主页→None 走清晰报错 ✓
 - 双门 + restart + health 1.3.5 ✓；/launch-templates/pages 线上 44 页并集（原 3 页），Dhir|via Minah|ADVERTISE ✓；前端 hash 匹配 ✓
+
+### 批FF 补（2026-09-24，2996e9e）：换页选择器收窄
+用户反馈换主页重试列表出现与账户无关的令牌主页——并集沿用的 `_account_write_candidates` 尾部带批AK tenant-wide 兜底，与批BY 写路径口径（已砍同款）不一致。全租户令牌对该账户多无写权限：列出误导 + 页面感知选中后 campaign 必败；且该尾因 FbClient NameError 被 bare-except 吞从未真正生效，无生产依赖。砍尾后 Roly-V21 列表 44 页 → 池内 4 页（Bd Hs×3 + Minah×1），`cred_for_account_page`（跟帖预过滤）/`_write_fb_with_fallback`/页面感知选牌/换页端点四处口径统一。smoke 复跑全绿。
