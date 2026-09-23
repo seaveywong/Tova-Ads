@@ -493,7 +493,7 @@ const todayBriefing = computed(() => {
   // 直观性批：红绿灯三态 + 可点 chips（要处理的事一键直达对应面板）
   const chips = []
   if (criticals > 0) chips.push({ key: 'crit', lv: 'crit', n: criticals, label: t('dashboard.bfChipCrit'), go: () => { notifMode.value = 'all'; notifFilter.value = 'critical' } })
-  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => a.name || a.act_id).join('、'), go: () => setAccountView('spend') })
+  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => a.name || a.act_id), go: () => setAccountView('spend') })
   if (lowBal.length) chips.push({ key: 'low', lv: 'warn', n: lowBal.length, label: t('dashboard.bfLowBal'), go: () => setAccountView('balance') })
   if (unreads.length - criticals > 0) chips.push({ key: 'warn', lv: 'warn', n: unreads.length - criticals, label: t('dashboard.bfAlerts'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
   const level = criticals > 0 ? 'crit' : (chips.length ? 'warn' : 'ok')
@@ -1215,10 +1215,10 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           <div class="bf-num go" @click="setAccountView('cpa')" :title="t('dashboard.bfNumGo')">
             <em>{{ kpiCpaDisplay }}</em><span>{{ t('dashboard.kpiAvgCpa') }}</span></div>
         </div>
-        <div class="bf-chips">
+        <div class="bf-chips" :class="{ calm: !todayBriefing.chips.length }">
           <template v-if="todayBriefing.chips.length">
             <button v-for="c in todayBriefing.chips" :key="c.key" :class="['bf-chip', c.lv]" @click="c.go && c.go()">
-              {{ c.n }} {{ c.label }}<em v-if="c.sub"> · {{ c.sub }}</em>
+              {{ c.n }} {{ c.label }}<em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">、</template></span></em>
             </button>
           </template>
           <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>
@@ -1830,10 +1830,12 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
 .bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
 .bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
+.bf-chip-id { white-space: nowrap; }   /* 账户 ID 含连字符不中途断行，只在「、」处换行 */
 .bf-chip.warn { color: var(--warning); background: rgba(255,159,10,.1); border-color: rgba(255,159,10,.3) }
 .bf-chip.crit { color: #fff; background: var(--error); border-color: var(--error) }
 .bf-chip:hover { filter: brightness(1.08) }
-.bf-calm { font-size: 12px; color: var(--success) }
+.bf-chips.calm { margin-left: 0; }   /* 平静态：全部正常 紧跟大数字，不顶到最右留 76% 死区 */
+.bf-calm { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--success); background: rgba(48,209,88,.1); border: 1px solid rgba(48,209,88,.3); }
 .briefing { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 10px; margin-bottom: 10px; font-size: 13px; cursor: default; }
 .briefing.ok { background: rgba(48,209,88,.06); border: 1px solid rgba(48,209,88,.2) }
 .briefing.warn { background: rgba(255,159,10,.06); border: 1px solid rgba(255,159,10,.25) }
@@ -2174,6 +2176,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .main-split, .side-stack, .guard-col { display: contents; }   /* guard-col 桌面捆右列，移动拆开参与排序 */
   .ac-items { grid-template-columns: 1fr; }   /* 告警卡移动端单列 */
   .alert-center .table-tools { flex-wrap: wrap; }
+  .ac-pend { flex-wrap: wrap; row-gap: 2px; }
+  .ac-pend-msg { flex: 1 1 calc(100% - 20px); white-space: normal; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .guard-grid { grid-template-columns: repeat(2, 1fr); }   /* 守护四格 → 2×2，分隔线重排 */
   .guard-cell:nth-child(2n) { border-right: none; }
   .guard-cell:nth-child(-n+2) { border-bottom: 1px solid var(--bd); }
