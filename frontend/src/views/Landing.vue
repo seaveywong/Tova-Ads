@@ -114,6 +114,7 @@ const SHOP_PRICE_OPTS = computed(() => [
 ])
 const shopResults = ref([])
 const shopSuggesting = ref(false)
+const shopSearchedOnce = ref(false)   // 区分初始引导 vs 搜过无结果
 const shopStats = ref({ searched: 0, taken: 0 })
 const suggestDomains = async () => {
   if (shopSuggesting.value) return
@@ -126,6 +127,7 @@ const suggestDomains = async () => {
     const r = await GET('/domains-shop/suggest?' + p.toString(), 90000)
     shopResults.value = r.results || []
     shopStats.value = { searched: r.searched || 0, taken: r.taken || 0 }
+    shopSearchedOnce.value = true
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   shopSuggesting.value = false
 }
@@ -1472,7 +1474,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <button class="ctrl-btn sm primary" :disabled="shopOrdering" @click="orderSuggested(r.domain)">{{ t('landing.shopOrderBtn') }}</button>
         </div>
         <div v-if="!shopSuggesting && shopResults.length" class="shop-stats">{{ t('landing.shopStats', { s: shopStats.searched, a: shopResults.length }) }}</div>
-        <div v-else-if="!shopSuggesting && !shopResults.length" class="shop-empty">{{ t('landing.shopEmpty') }}</div>
+        <div v-else-if="!shopSuggesting && !shopResults.length" class="shop-empty">{{ shopSearchedOnce ? t('landing.shopEmpty') : t('landing.shopIntro') }}</div>
       </div>
       <div style="margin-top:14px;font-size:13px;font-weight:600">{{ t('landing.shopOrders') }}</div>
       <div v-loading="shopLoadingOrders" style="max-height:260px;overflow:auto">
