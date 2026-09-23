@@ -451,12 +451,13 @@ const setAccountView = (mode) => {
   detailSearch.value = ''          // 切视角清空搜索（不同视角行集不同，残留会误过滤）
   selectedIds.value = new Set()    // 勾选是余额视角专用，残留会带出旧选择
 }
-// 核心卡迷你趋势线（SVG polyline，复用趋势接口序列；不足 2 点不画）
+// 核心卡迷你趋势线（SVG polyline，复用趋势接口序列；不足 2 点或全平不画）
 const sparkPoints = (arr) => {
   const a = (arr || []).filter(v => typeof v === 'number' && !isNaN(v))
   if (a.length < 2) return ''
   const w = 100, h = 26, pad = 3
   const min = Math.min(...a), max = Math.max(...a)
+  if (max === min) return ''   // 全平（含全 0）不画：无变化量的趋势线=一条分界线，且空态 0 会误导成「值是 0」
   const span = (max - min) || 1
   return a.map((v, i) => `${((i / (a.length - 1)) * w).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`).join(' ')
 }
@@ -471,11 +472,17 @@ const dodPct = (cur, yst) => {
 }
 // 直观性批 09-22：主卡收敛为 3（花了多少→换来什么→单个成本——一句话讲完一件事）；
 // ROAS/线索降级进次级条（有则显示，不是每日首要决策数）
-const coreCards = computed(() => [
-  { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : ''), dod: dodPct(data.value.total_spend, data.value.yesterday_spend), dodGoodDown: true },
-  { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dodPct(data.value.total_conversions, data.value.yesterday_conversions) },
-  { label: t('dashboard.kpiAvgCpa'), value: data.value.total_conversions > 0 ? fmtUsd(data.value.total_cpa) : '—', mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
-])
+const coreCards = computed(() => {
+  // 环比徽章只在「今日」显示：后端 yesterday_spend 恒为「字面昨日」(today-1)，只在今日预设下
+  // 才构成「今日 vs 昨日」的正确对比；昨日/7天/30天预设下该字段会错比（昨日=同天→恒0%、窗口总量 vs 单日），故不显示。
+  const isToday = datePreset.value === 'today'
+  const dod = (cur, yst) => isToday ? dodPct(cur, yst) : ''
+  return [
+    { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (isToday ? t('dashboard.todayLiveHint') : ''), dod: dod(data.value.total_spend, data.value.yesterday_spend), dodGoodDown: true },
+    { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dod(data.value.total_conversions, data.value.yesterday_conversions) },
+    { label: t('dashboard.kpiAvgCpa'), value: data.value.total_conversions > 0 ? fmtUsd(data.value.total_cpa) : '—', mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
+  ]
+})
 const cpmDisplay = computed(() => data.value.total_impressions > 0 ? fmtUsd((data.value.total_spend / data.value.total_impressions) * 1000) : '—')
 const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
 const subCards = computed(() => [
