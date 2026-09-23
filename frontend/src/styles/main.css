@@ -243,6 +243,15 @@ a { color: var(--ac); text-decoration: none; }
 .el-drawer__title { white-space: normal !important; line-height: 1.4; font-size: 15px; }
 .el-drawer__close-btn { color: var(--t3) !important; }
 .el-drawer__body { color: var(--t1); }
+/* el-dialog / el-message-box 全局暗色（UI审计补漏：el-drawer 已主题化，dialog/message-box 漏网 → 暗色下白底） */
+.el-dialog { background: var(--bg2) !important; border: 1px solid var(--bd) !important; }
+.el-dialog__title { color: var(--t1) !important; }
+.el-dialog__body { color: var(--t1); }
+.el-dialog__headerbtn .el-dialog__close { color: var(--t3) !important; }
+.el-message-box { background: var(--bg2) !important; border: 1px solid var(--bd) !important; }
+.el-message-box__title { color: var(--t1) !important; }
+.el-message-box__content { color: var(--t2) !important; }
+.el-message-box__headerbtn .el-message-box__close { color: var(--t3) !important; }
 /* el-select 全局主题化（UI审计补漏：此前 el-input/el-dropdown 已主题化，唯 el-select 漏网 → 暗色下白底） */
 .el-select__wrapper { background-color: var(--bg3) !important; box-shadow: 0 0 0 1px var(--bd) inset !important; }
 .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--ac) inset !important; }

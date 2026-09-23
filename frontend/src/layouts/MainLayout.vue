@@ -569,6 +569,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .lang-toggle {
   font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
   padding: 3px 8px; border-radius: var(--rs);
+  min-width: 30px; text-align: center;   /* EN/中 两态宽度对齐，避免切换时 pill 抖动 */
   background: var(--bg3); color: var(--t2); cursor: pointer;
   user-select: none; transition: background 0.15s, color 0.15s;
 }

@@ -1529,6 +1529,7 @@ const unsubscribeLeads = async () => {
 .stale-snapshot { color:var(--warning, #b87917) }
 /* 细分弹窗（年龄/性别/版位/转化位置维度表） */
 .bd-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px }
+.bd-table { min-width: 640px }
 .bd-table td { padding:8px 10px; font-size:12px }
 .bd-note { margin-top:8px; font-size:11px; color:var(--t3); line-height:1.5 }
 /* FB 顶栏式工具条：绿色创建按钮（同 FB Ads Manager 主操作位） */

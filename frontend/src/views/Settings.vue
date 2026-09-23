@@ -720,10 +720,11 @@ const runKeepaliveNow = async () => {
     <div v-if="activeSection==='sec-account'" id="sec-account" class="card">
       <div class="t">{{ t('settings.accountTitle') }}</div>
       <div class="d">{{ t('settings.accountDesc') }}</div>
+      <div class="grp-h">{{ t('settings.acctEmailTitle') }}</div>
       <div class="form-l"><label>{{ t('settings.username') }}</label><input v-model="acctEmail" class="input" :placeholder="t('settings.loginEmailPh')" /></div>
       <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="emailOldPwd" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>
       <button class="btn primary" :disabled="acctSaving" @click="saveEmail">{{ t('settings.saveUsername') }}</button>
-      <div class="acct-sep"></div>
+      <div class="grp-h">{{ t('settings.changePwdTitle') }}</div>
       <div class="form-l"><label>{{ t('settings.oldPwd') }}</label><el-input v-model="pwdForm.old" type="password" autocomplete="current-password" show-password class="ep-input" :placeholder="t('settings.currentPwdPh')" /></div>
       <div class="form-l"><label>{{ t('settings.newPwd') }}</label><el-input v-model="pwdForm.new" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="t('settings.pwdMin8Ph')" /></div>
       <div class="form-l"><label>{{ t('settings.confirm') }}</label><el-input v-model="pwdForm.confirm" type="password" autocomplete="new-password" show-password class="ep-input" :placeholder="t('settings.reenterNewPwdPh')" /><div v-if="pwdForm.new && pwdForm.confirm && pwdForm.new !== pwdForm.confirm" class="pwd-mismatch">{{ t('settings.pwdMismatch') }}</div></div>
@@ -1046,7 +1047,7 @@ const runKeepaliveNow = async () => {
         <div v-if="!faApps.length && !faLoading" class="cfg-empty">{{ t('settings.faEmpty') }}</div>
       </div>
       <button class="btn primary" @click="faOpenNew()">{{ t('settings.faAdd') }}</button>
-      <el-dialog v-model="faDialog" :title="faEditId ? t('common.edit') : t('settings.faAdd')" width="420px" append-to-body>
+      <el-dialog v-model="faDialog" :title="faEditId ? t('common.edit') : t('settings.faAddTitle')" width="420px" append-to-body>
         <div class="dlg-form">
           <div class="dlg-field"><label>{{ t('settings.faName') }}</label>
             <input v-model.trim="faForm.name" class="input" :placeholder="t('settings.faNamePh')" /></div>
@@ -1227,7 +1228,8 @@ const runKeepaliveNow = async () => {
 .fixed-tag{font-size:10px;padding:1px 6px;background:var(--bg3);border-radius:4px;color:var(--t3);width:fit-content}
 .pwd-mismatch { color: var(--el-color-danger, #f56c6c); font-size: 12px; margin-top: 4px }
 .acct-sep{height:1px;background:var(--bd);margin:14px 0}
-.form-l{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.grp-h{font-size:12px;font-weight:600;color:var(--t2);margin:6px 0 10px;letter-spacing:.02em}
+.form-l{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:14px}
 .form-l > label{flex:0 0 132px}
 .form-l .input,.form-l .ep-input{flex:1;min-width:0}
 .form-l .field-hint,.form-l .pwd-mismatch{flex-basis:100%}
@@ -1344,7 +1346,6 @@ const runKeepaliveNow = async () => {
 .cf-copy-all { float: right; cursor: pointer; color: var(--t3); font-style: normal; padding: 0 4px }
 .cf-copy-all:hover { color: var(--ac) }
 @media (max-width: 768px) { .anchor-strip { top: 48px } }
-</style>
 
 /* FB App 配置行 + 导入行为表单 */
 .fa-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px }
@@ -1370,7 +1371,6 @@ const runKeepaliveNow = async () => {
 .ib-cap-row { margin-top: 10px }
 .ib-cap { width: 90px; padding: 6px 8px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 6px; color: var(--t1); font-size: 13px; font-family: inherit; box-sizing: border-box }
 .ib-cap:focus { border-color: var(--ac); outline: none }
-<style scoped>
 /* CF 管控台（批CY）：面板化布局 */
 .cf-console { margin-top: 18px; display: flex; flex-direction: column; gap: 14px }
 .cf-panel { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; overflow: hidden }
