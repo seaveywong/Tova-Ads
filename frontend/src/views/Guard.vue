@@ -118,11 +118,20 @@ const ruleScopeTip = (r) => {
 }
 
 const isScaleType = (rt) => SCALE_TYPES.includes(rt)
-// 系统预置规则名翻译（DB 存中文名，按 rule_type 映射当前 locale；用户自建规则保留自定义名）
+// 默认规则名本地化：存量无创建人规则 + 用默认中文名建的标准规则 → 按 rule_type 显示当前 locale；用户自定义名原样
+const DEFAULT_RULES = {
+  bleed_abs: { key: 'adm.ruleBleedAbs', zh: '空耗止损' }, cpa_exceed: { key: 'adm.ruleCpaExceed', zh: 'CPA超标' },
+  consecutive_bad: { key: 'adm.ruleConsecutiveBad', zh: '连续恶化' }, click_no_conv: { key: 'adm.ruleClickNoConv', zh: '点击无转化' },
+  reach_no_conv: { key: 'adm.ruleReachNoConv', zh: '覆盖无转化' }, low_ctr_no_conv: { key: 'adm.ruleLowCtrNoConv', zh: '低CTR无转化' },
+  budget_burn_fast: { key: 'adm.ruleBudgetBurnFast', zh: '瞬烧制止' }, cpm_high: { key: 'adm.ruleCpmHigh', zh: 'CPM过高' },
+  cpc_high: { key: 'adm.ruleCpcHigh', zh: 'CPC过高' }, click_fraud: { key: 'adm.ruleClickFraud', zh: '刷量嫌疑' },
+  fast_scale: { key: 'adm.ruleFastScale', zh: '激进扩量' },
+}
 const ruleDisplayName = (r) => {
-  if (r.created_by) return r.name
-  const meta = RULE_TYPES.value[r.rule_type]
-  return meta ? meta.label : r.name
+  const d = DEFAULT_RULES[r.rule_type]
+  const isDefault = !r.created_by || (d && d.zh === r.name)
+  if (isDefault && d) return t(d.key)
+  return r.name
 }
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign'), scale: t('guard.action.scale') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
