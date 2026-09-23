@@ -1671,7 +1671,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
   .lp-name{grid-column:2}
   .lp-dom{grid-column:1 / -1}
   .lp-fb-empty{display:none}
-  .short-ops{flex-wrap:wrap;justify-content:flex-end}
+  .short-ops{grid-column:2 / -1;flex-wrap:wrap;justify-content:flex-end}
 }
 .short-ops{display:flex;gap:5px}
 .st-tag.err{background:rgba(255,69,58,.12);color:var(--error)}   /* subcodeStatus('deleted') 曾无样式渲染成裸文本 */

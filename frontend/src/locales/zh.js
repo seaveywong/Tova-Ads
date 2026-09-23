@@ -277,7 +277,7 @@ export default {
     logout: '退出登录',
     themeToLight: '切亮色',
     themeToDark: '切暗色',
-    langToEn: 'Switch to English',
+    langToEn: '切换到英文',
     langToZh: '切换到中文',
     notMember: '未加入团队',
   },
