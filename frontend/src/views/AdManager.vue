@@ -333,7 +333,8 @@ const verifyLive = async () => {
   liveVerifying.value = true
   let patched = 0
   let firstErr = null
-  for (const actId of todo) {
+  // 多账户并行（提速批：曾逐个串行 await，N 账户 = N 倍 RTT）
+  await Promise.all(todo.map(async (actId) => {
     _liveLastCall[actId] = Date.now()
     try {
       const r = await GET('/ads/live-status?act_id=' + encodeURIComponent(actId))
@@ -344,7 +345,7 @@ const verifyLive = async () => {
         if (st != null) { ad.effective_status = st; patched++ }
       }
     } catch (e) { if (!/not found/i.test(e.message || '')) firstErr = firstErr || e }
-  }
+  }))
   liveVerifying.value = false
   if (firstErr) { ElMessage.error(t('adm.liveVerifyFail') + '：' + (firstErr.message || '')); return }
   liveVerifiedAt.value = new Date().toLocaleTimeString(locale.value === 'en' ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -551,6 +552,66 @@ const saveBudget = async () => {
     } else ElMessage.error(r.error || t('common.opFail'))
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   opLoading.value = false
+}
+// ── 批量改预算（2026-09-24 提速批捎带）：批量选中后统一设日/总预算；逐项串行调
+// /ads/budget（写操作限流友好），结果沿用 batchResults 条，失败行保留勾选便于重试 ──
+const batchBudgetOpen = ref(false)
+const batchBudgetVal = ref('')
+const batchBudgetType = ref('daily')
+const batchBudgetBusy = ref(false)
+const batchBudgetTargets = computed(() => {
+  const out = []
+  for (const k of selected.value) {
+    const x = curList.value.find(y => entityKey(y) === k)
+    if (x && !accStateTag(x)) out.push(x)
+  }
+  return out
+})
+const batchBudgetCurs = computed(() => new Set(batchBudgetTargets.value.map(x => x.currency || 'USD')))
+const openBatchBudget = () => {
+  const items = batchBudgetTargets.value
+  if (!items.length) return ElMessage.warning(t('adm.selectRowsFirst'))
+  // 所选项全是 lifetime 型才默认总预算，否则日预算（混合时用户自己选）
+  batchBudgetType.value = items.every(x => x.daily_budget_amount == null && x.lifetime_budget_amount != null) ? 'lifetime' : 'daily'
+  batchBudgetVal.value = ''
+  batchBudgetOpen.value = true
+}
+const saveBatchBudget = async () => {
+  if (batchBudgetBusy.value) return
+  const v = Number(batchBudgetVal.value)
+  if (!v || v <= 0) return ElMessage.warning(t('adm.budgetGtZero'))
+  const items = batchBudgetTargets.value
+  if (!items.length) return ElMessage.warning(t('adm.selectRowsFirst'))
+  const bt = batchBudgetType.value
+  try {
+    await ElMessageBox.confirm(
+      t('adm.batchBudgetConfirm', { n: items.length, type: bt === 'lifetime' ? t('adm.batchBudgetLifetime') : t('adm.batchBudgetDaily'), v }),
+      t('adm.batchBudgetTitle'), { type: 'warning', confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel') })
+  } catch { return }
+  batchBudgetBusy.value = true
+  const results = []
+  let ok = 0
+  for (const it of items) {
+    try {
+      const payload = { act_id: it.act_id, node_id: it.id, level: curLevel(), budget_type: bt }
+      payload[bt === 'lifetime' ? 'lifetime_budget' : 'daily_budget'] = v
+      const r = await POST('/ads/budget', payload)
+      results.push({ node_id: String(it.id), act_id: it.act_id, success: !!r.success, warning: r.warning || '', error: r.error || '' })
+      if (r.success) {
+        ok++
+        if (bt === 'lifetime') it.lifetime_budget_amount = v
+        else it.daily_budget_amount = v
+      }
+    } catch (e) { results.push({ node_id: String(it.id), act_id: it.act_id, success: false, error: e.message || '' }) }
+  }
+  batchResults.value = results
+  batchBudgetBusy.value = false
+  batchBudgetOpen.value = false
+  if (ok === items.length) ElMessage.success(t('adm.batchResult', { ok, n: items.length }))
+  else ElMessage.warning(t('adm.batchResult', { ok, n: items.length }) + ' · ' + (results.find(r => !r.success)?.error || ''))
+  const failed = new Set()
+  for (let i = 0; i < items.length; i++) if (!results[i].success) failed.add(entityKey(items[i]))
+  selected.value = failed
 }
 const deleteItem = async (item) => {
   try {
@@ -1033,6 +1094,7 @@ const unsubscribeLeads = async () => {
         <button class="ctrl-btn sm" @click="selectAll">{{ t('adm.selectAll') }}</button>
         <button class="ctrl-btn sm" @click="batchStatus('ACTIVE')" :disabled="opLoading">{{ t('adm.batchActivate') }}</button>
         <button class="ctrl-btn sm" @click="batchStatus('PAUSED')" :disabled="opLoading">{{ t('adm.batchPause') }}</button>
+        <button class="ctrl-btn sm" @click="openBatchBudget" :disabled="opLoading">{{ t('adm.batchBudget') }}</button>
         <button class="ctrl-btn sm ghost" @click="selected = new Set()">{{ t('adm.clearSelection') }}</button>
       </div>
     </transition>
@@ -1149,6 +1211,28 @@ const unsubscribeLeads = async () => {
         <div v-if="!leads.length && !leadsLoading" class="empty">{{ t('adm.leadsEmpty') }}</div>
       </div>
     </div>
+    <!-- 批量改预算：统一设日/总预算（金额按各账户本币计；混合币种有提示） -->
+    <el-dialog v-model="batchBudgetOpen" :title="t('adm.batchBudgetTitle')" width="420px" :close-on-click-modal="false" append-to-body>
+      <div class="form-l">
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('adm.batchBudgetType') }}</span>
+          <el-select v-model="batchBudgetType" size="large" style="width:100%">
+            <el-option value="daily" :label="t('adm.batchBudgetDaily')" />
+            <el-option value="lifetime" :label="t('adm.batchBudgetLifetime')" />
+          </el-select>
+        </div>
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('adm.batchBudgetAmount') }}</span>
+          <el-input v-model="batchBudgetVal" type="number" :placeholder="t('adm.batchBudgetPh')" clearable />
+        </div>
+        <div v-if="batchBudgetCurs.size > 1" class="wl-note">{{ t('adm.batchBudgetMixedCur') }}</div>
+        <div class="wl-note">{{ t('adm.batchBudgetNote') }}</div>
+      </div>
+      <template #footer>
+        <button class="ctrl-btn" @click="batchBudgetOpen = false">{{ t('common.cancel') }}</button>
+        <button class="ctrl-btn primary" :disabled="!batchBudgetVal || batchBudgetBusy" @click="saveBatchBudget">{{ batchBudgetBusy ? t('common.loading') : t('common.save') }}</button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="pagesDlg" :title="t('adm.pagesPanelTitle')" width="640px" :destroy-on-close="true" append-to-body>
       <div v-loading="pagesLoading" class="pages-panel">
         <div class="pp-hint">{{ t('adm.pagesPanelHint') }}</div>

@@ -368,6 +368,26 @@ def patch_account_cache_status(db: Session, tenant_id: int, act_id: str, ad_id: 
     return changed
 
 
+def _slim_creative(cr) -> dict:
+    """裁剪 FB creative 到前端在用字段（/ads/list 载荷瘦身 2026-09-24：creative 全对象
+    曾占响应 47%/132KB）。保留：title/body/thumbnail_url + link_data 的 name/message/
+    call_to_action（AdManager 缩略图/标题/文案/CTA 读取面）。"""
+    if not isinstance(cr, dict):
+        return {}
+    out: dict = {}
+    for k in ("title", "body", "thumbnail_url"):
+        if cr.get(k) is not None:
+            out[k] = cr[k]
+    spec = cr.get("object_story_spec")
+    if isinstance(spec, dict):
+        ld = spec.get("link_data")
+        if isinstance(ld, dict):
+            keep = {k: ld[k] for k in ("name", "message", "call_to_action") if ld.get(k) is not None}
+            if keep:
+                out["object_story_spec"] = {"link_data": keep}
+    return out
+
+
 @router.get("/list")
 def list_ads(
     act_id: str = "",
@@ -401,7 +421,9 @@ def list_ads(
     q = db.query(AdsCache).filter(AdsCache.tenant_id == user.tenant_id)
     if act_id:
         q = q.filter(AdsCache.act_id == act_id)
-    caches = [c for c in q.all() if c.act_id in managed_ids]
+    # managed 过滤下推 SQL（提速批：原全量拉回再 Python 过滤）
+    q = q.filter(AdsCache.act_id.in_(managed_ids or ("__none__",)))
+    caches = q.all()
     # 账户名 + currency 映射（managed + 同归属口径，与上面同一查询结果）
     acc_map = {a.act_id: a.name for a in _acc_rows}
     cur_map = {a.act_id: (a.currency or "USD") for a in _acc_rows}
@@ -480,25 +502,54 @@ def list_ads(
                 _sid = (_cr["data"][0] or {}).get("effective_object_story_id") or ""
         ad["object_story_id"] = _sid
         ad["slug"] = _slug_map.get(str(ad.get("id"))) or ""
+        # 载荷瘦身（2026-09-24 提速批）：creative 全对象曾占响应 47%/132KB，前端只用
+        # title/body/thumbnail_url + link_data 的 name/message/call_to_action——裁到这 5 处
+        ad["creative"] = _slim_creative(_cr)
 
-    # 每账户读令牌可用性（纯 DB 查询 0 API）：false=数据源已断，前端对这类账户的状态标
+    # 每账户读令牌可用性（纯 DB，0 API）：false=数据源已断，前端对这类账户的状态标
     # 「快照」（cache 里的最后已知状态，非实时——令牌失效后 cache 停更，别误导"还在投放"）。
-    # 按 platform 分发：FB 走 cred_for_account_op；TT 走 tt_client_for_account（FB 版对
-    # platform='tt' 直接 raise，曾恒 True 漏标）。FB 无租户级兜底（9db0196 已砍）——
-    # 候选池/主绑定不可用 → None → 标「无令牌/冷却中」（与巡检同源判定自洽）。
-    from ..core.fb_tokens import cred_for_account_op as _cred_ok
+    # 批量化（2026-09-24 提速批）：FB 路径曾每账户 2-3 查询（N+1 × 20 账户），改两条 IN
+    # 查询拿全池+绑定凭证后内存判定（口径=cred_for_account_op read：池 active + 令牌
+    # active/rate_limited + _is_cred_available + _op_ok，无租户兜底）。TT 维持逐个
+    # （其选择器含 app_id/refresher 逻辑，账户数少收益小）。
+    from ..core.fb_tokens import _is_cred_available, _op_ok
+    from ..models.fb import AccountFbCredential, FbCredential
     _token_status = {}
+    _fb_accs = [a for a in _acc_rows if _acc_platform(a) != "tt"]
+    if _fb_accs:
+        _pool_rows = db.query(AccountFbCredential).filter(
+            AccountFbCredential.account_id.in_([a.id for a in _fb_accs]),
+            AccountFbCredential.status == "active",
+        ).all()
+        _pools: dict = {}
+        for r in _pool_rows:
+            _pools.setdefault(r.account_id, []).append(r.fb_credential_id)
+        _need_ids = {i for v in _pools.values() for i in v}
+        _need_ids |= {a.fb_credential_id for a in _fb_accs if a.fb_credential_id}
+        _cred_by_id = {c.id: c for c in (
+            db.query(FbCredential).filter(FbCredential.id.in_(_need_ids)).all()
+        )} if _need_ids else {}
+
+        def _fb_read_ok(a) -> bool:
+            ids = list(_pools.get(a.id, []))
+            if a.fb_credential_id:
+                ids.append(a.fb_credential_id)
+            for cid in ids:
+                c = _cred_by_id.get(cid)
+                if (c and c.status in ("active", "rate_limited")
+                        and _is_cred_available(c) and _op_ok(c, "read")):
+                    return True
+            return False
+        for _a in _fb_accs:
+            _token_status[_a.act_id] = _fb_read_ok(_a)
     for _a in _acc_rows:
-        try:
-            if _acc_platform(_a) == "tt":
+        if _acc_platform(_a) == "tt":
+            try:
                 from ..core.fb_tokens import tt_client_for_account
                 _token_status[_a.act_id] = bool(
                     tt_client_for_account(db, user.tenant_id, _a.act_id, "read")[0])
-            else:
-                _token_status[_a.act_id] = bool(
-                    _cred_ok(db, user.tenant_id, _a.act_id, "read"))
-        except Exception:
-            _token_status[_a.act_id] = True   # 查询失败按可用（不误标快照）
+            except Exception:
+                _token_status[_a.act_id] = True   # 查询失败按可用（不误标快照）
     # cached_at/last_sync/cache_ages 全按 ads 层时间戳（0086：ads_updated_at，回退 updated_at）——
     # 用户在管理器看的核心是广告行，结构层（campaigns/adsets 15min sync 刷 updated_at）的新鲜
     # 不该冒充广告层新鲜（令牌切换间隙曾「缓存不到1分钟」配陈旧广告数据误导）。

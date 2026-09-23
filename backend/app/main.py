@@ -77,6 +77,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-New-Token", "X-Import-Default-All", "X-Loadable-Degraded"],  # 滑动续期：前端读新 token；载入弹窗读降级令牌清单
 )
+# 传输压缩（2026-09-24 广告管理器提速批）：/ads/list 310KB 裸 JSON 在慢链路上拖 2s+
+# （端点内部仅 ~100ms）。gzip 后 ~50KB；CF 对 api 子域未自动压缩（实测无 content-encoding）。
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.middleware("http")

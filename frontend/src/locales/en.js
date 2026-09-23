@@ -981,7 +981,7 @@ export default {
     resetRedirectsMsg: 'Clear all ad redirect overrides? All ads will revert to the landing-page default redirect.', redirectsCleared: 'Cleared {n}',
     customRange: 'Custom', allAccounts: 'All accounts', searchNameId: 'Search ad name / ID',
     redirectLink: 'Redirect link', selectedCount: '{n} selected', selectAll: 'Select all / clear',
-    batchActivate: 'Batch Activate', batchPause: 'Batch Pause', clearSelection: 'Clear selection',
+    batchBudget: 'Batch Budget', batchBudgetTitle: 'Batch Update Budget', batchBudgetType: 'Budget type', batchBudgetDaily: 'Daily budget', batchBudgetLifetime: 'Lifetime budget', batchBudgetAmount: 'Amount', batchBudgetPh: 'Enter new budget amount', batchBudgetNote: 'Amount is in each account local currency; applies to all selected campaigns/ad sets.', batchBudgetMixedCur: 'Selection spans multiple currencies: the same number is set per local currency — double-check the intent.', batchBudgetConfirm: 'Set {type} of {n} items to {v}. Proceed?',batchActivate: 'Batch Activate', batchPause: 'Batch Pause', clearSelection: 'Clear selection',
     tabCampaign: 'Campaigns', tabAdset: 'Ad Sets', tabAd: 'Ads',
     colSeries: 'Campaign', colAdset: 'Ad Set', colObjective: 'Objective', colOptGoal: 'Optimization Goal', colPixel: 'Pixel',
     colBudget: 'Budget', colSpend: 'Spend', colConversion: 'Conv.', colReach: 'Reach', colFrequency: 'Frequency',

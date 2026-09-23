@@ -991,7 +991,7 @@ export default {
     resetRedirectsMsg: '清空所有广告跳转覆盖？所有广告将恢复落地页默认跳转。', redirectsCleared: '已清空 {n} 条',
     customRange: '自定义', allAccounts: '全部账户', searchNameId: '搜索广告名/ID',
     redirectLink: '跳转链接', selectedCount: '已选 {n} 条', selectAll: '全选/取消',
-    batchActivate: '批量开启', batchPause: '批量暂停', clearSelection: '取消选择',
+    batchBudget: '批量预算', batchBudgetTitle: '批量修改预算', batchBudgetType: '预算类型', batchBudgetDaily: '日预算', batchBudgetLifetime: '总预算(Lifetime)', batchBudgetAmount: '金额', batchBudgetPh: '输入新预算金额', batchBudgetNote: '金额按各账户本币计，将应用于全部所选系列/广告组。', batchBudgetMixedCur: '所选跨多个币种账户：同一数值按各自本币设置，请确认含义。', batchBudgetConfirm: '将把 {n} 项的{type}设为 {v}，确定？',batchActivate: '批量开启', batchPause: '批量暂停', clearSelection: '取消选择',
     tabCampaign: '广告系列', tabAdset: '广告组', tabAd: '广告',
     colSeries: '系列', colAdset: '广告组', colObjective: '目标', colOptGoal: '优化目标', colPixel: '转化像素',
     colBudget: '预算', colSpend: '消耗', colConversion: '转化', colReach: '覆盖', colFrequency: '频次',
