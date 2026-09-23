@@ -365,7 +365,7 @@ _ltThemeObserver.observe(document.documentElement, { attributes: true, attribute
 // 格式化：数字走中央 useFormat.fmtNum；金额保留 0→'—'（"该范围内无消耗"提示语义，真零≠无数据场景不适用于消耗列）
 import { fmtNum, fmtUsd as _fmtUsdRaw } from '../composables/useFormat'
 const fmt = fmtNum
-const fmtUsd = (n) => (n == null || n === 0) ? '—' : _fmtUsdRaw(n)
+const fmtUsd = (n) => (n == null) ? '—' : _fmtUsdRaw(n)   // 真零显示 $0.00（与 useFormat 中央约定一致：真零 ≠ 无数据），避免主卡「消耗 — / 转化 0」格式不一
 const fmtPct = (n) => n == null ? '—' : Number(n).toFixed(2) + '%'   // 0 是真信号（如通过率0%=全被屏蔽），只有 null 才是"无数据"
 const fmtSpendDual = (native, usd, cur) => {
   if (native == null) return { native: '—', usd: '—' }
@@ -469,7 +469,7 @@ const dodPct = (cur, yst) => {
 const coreCards = computed(() => [
   { label: t('dashboard.kpiTotalSpend'), value: kpiSpendDisplay.value, mode: 'spend', spark: sparkPoints(trendData.value.spend), unit: true, sub: spendUnit.value === 'native' && multiCurrency.value ? t('dashboard.multiCurHint') : (datePreset.value === 'today' ? t('dashboard.todayLiveHint') : ''), dod: dodPct(data.value.total_spend, data.value.yesterday_spend), dodGoodDown: true },
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dodPct(data.value.total_conversions, data.value.yesterday_conversions) },
-  { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
+  { label: t('dashboard.kpiAvgCpa'), value: data.value.total_conversions > 0 ? fmtUsd(data.value.total_cpa) : '—', mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
 ])
 const cpmDisplay = computed(() => data.value.total_impressions > 0 ? fmtUsd((data.value.total_spend / data.value.total_impressions) * 1000) : '—')
 const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
@@ -1183,6 +1183,9 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
             </span>
           </div>
           <span class="kpi-value">{{ card.value }}<span v-if="card.dod" class="kpi-dod" :class="{ good: card.dodGoodDown ? card.dod.startsWith('-') : !card.dod.startsWith('-'), bad: card.dodGoodDown ? !card.dod.startsWith('-') : card.dod.startsWith('-') }">{{ card.dod }}</span></span>
+          <svg v-if="card.spark" class="kpi-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">
+            <polyline :points="card.spark" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" />
+          </svg>
           <span v-if="card.sub" class="kpi-sub">{{ card.sub }}</span>
         </div>
       </div>
@@ -1760,7 +1763,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .kpi-core-grid { display: grid; grid-template-columns: repeat(3, 1fr); }   /* 直观性批：主卡 3——一句话讲完一件事 */
 @media (max-width: 768px) { .kpi-core-grid { grid-template-columns: repeat(1, 1fr); } }
 .kpi-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.kpi-dod { font-size: 11px; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+.kpi-dod { font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
 .kpi-dod.good { color: var(--success, #34c759); }
 .kpi-dod.bad { color: var(--error); }
 .kpi-card {
