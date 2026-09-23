@@ -1286,6 +1286,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
       <div v-else class="card accounts-card" v-loading="loading">
         <div class="card-header accounts-head">
           <span class="card-title">{{ t('dashboard.accountsTitle') }}</span>
+          <span class="acc-count" v-if="accStatusActive + accStatusBad">{{ t('dashboard.accCountSummary', { managed: accStatusActive + accStatusBad, active: accStatusActive }) }}</span>
           <div class="table-tools">
             <div class="status-tabs">
               <button v-for="v in VIEW_TABS" :key="v.mode" class="status-tab" :class="{ active: accountView === v.mode }" @click="setAccountView(v.mode)">{{ v.label }}</button>
@@ -1692,12 +1693,13 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-/* 布局定稿（一眼看全批 09-23）：KPI 命令卡整行 → 行动中心(告警)整行紧跟 → 账户明细(60%)与守护/待办(40%)并排
-   → 趋势折叠收尾。行动中心提到首屏：异常/待办/待充值第一时间可见，不再被账户表挤到折叠线以下 */
+/* 布局定稿（一眼看全批 09-23 二版）：KPI 命令卡整行 → 账户明细(60%)与守护/待办(40%)并排 → 告警中心整行
+   → 趋势折叠收尾。账户表提到首屏（曾 order:3 落在告警中心 424px 之下、折叠线以下）；
+   紧急/异常计数由 KPI hero 胶囊 + 铃铛承接，告警明细流下沉到账户表之后供细看 */
 .kpi-zone { order: 1; }
-.alert-center { order: 2; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
-.accounts-card { order: 3; grid-column: 1; }
-.guard-col { order: 4; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.accounts-card { order: 2; grid-column: 1; }
+.guard-col { order: 3; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.alert-center { order: 4; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
 .trend-main:not(.landing-trend) { order: 5; }
 @media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .accounts-card, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
 
@@ -2034,6 +2036,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .card { background: var(--bg2); border-radius: 12px; border: 1px solid var(--bd); overflow: hidden; box-shadow: var(--shadow-card); }
 .card-header { padding: 12px 18px; border-bottom: 1px solid var(--bd); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; row-gap: 8px; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--t1); white-space: nowrap; }
+.acc-count { font-size: 11px; color: var(--t3); font-weight: 400; white-space: nowrap; margin-left: 10px; }
 
 /* 表格工具栏（搜索 + 状态 tab）*/
 .table-tools { display: flex; gap: 8px; align-items: center; }
