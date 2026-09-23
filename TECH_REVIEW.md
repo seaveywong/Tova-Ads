@@ -2865,3 +2865,23 @@ operator 空分区=测试 JWT 过期（重铸即恢复）；CF 区 22px 输入=�
 
 ### 验证
 ✓ built 6.08s → CF master 部署 331f270e/5eb28ccc → 四区截图核对（命令卡成型/守护一行四格/告警摘要/趋势图/移动端堆叠 2×3 strip+2×2 守护）
+
+## 批FF：多令牌主页归属——新帖部署页面感知选令牌（2026-09-23，8f9f6d0 + 66b9603）
+
+### 根因（生产实证）
+用户案例：主页 Dhir Lutus Kasey（141992499005543）仅令牌 Minah（#36）可管；账户 Roly-V21（3845…8057）池内两令牌同 priority=0，决胜规则选 Bd Hs（#34）→ 新建帖链路拿不到主页 page token，建帖/创意被 FB 拒。**跟帖模式早有页面感知（client_for_account_page），新帖一直漏**；模板编辑器主页下拉来自 /fb/assets（全令牌并集）而换页选择器只列 priority 写令牌的页——多令牌下主页口径三处不一。
+
+### 变更
+| 处 | 前 | 后 |
+|---|---|---|
+| 选令牌（部署+重试） | 新帖=priority 最高写令牌（主页盲）；跟帖=页面感知 | 统一页面感知：`_effective_pages_for_item`（复用 _resolve_ad_page 口径：新帖=分配>节点>模板；跟帖=节点>帖源前缀>模板；树逐节点）→ `_page_aware_write_clients` 扫写令牌候选选能管全部主页的（priority 序保持，(cred,page) 探测跨 item 缓存）；覆盖不了→明确报错（调整授权/拆分部署） |
+| /launch-templates/pages | 仅 priority 写令牌的页 | 令牌池写令牌并集 + 每页 via_cred 归属标注（单令牌拉取失败不拖垮并集） |
+| 前端换页选择器 | — | 行内归属令牌 chip（launch.pagePickVia zh/en） |
+| 手动选令牌 | — | 明确不做（自动感知后人选多余且能选出错误组合） |
+
+### 连带挖出存量暗 bug
+launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（批AK 换牌兜底）裸用 `FbClient` → NameError 落进 except Exception → **兜底列表一直只有 first 一个令牌，从未真正多候选**。顶层导入补 FbClient（66b9603），两处同修。再次印证 bare-except+新功能=静默归零。
+
+### 验证
+- 行为 smoke（服务器、restart 前）：模板级/部署分配/结构树节点=Dhir 三路径均选中 Minah；主页未定→∅ 走原选牌（零回归）；虚构主页→None 走清晰报错 ✓
+- 双门 + restart + health 1.3.5 ✓；/launch-templates/pages 线上 44 页并集（原 3 页），Dhir|via Minah|ADVERTISE ✓；前端 hash 匹配 ✓
