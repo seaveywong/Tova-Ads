@@ -465,7 +465,9 @@ const dodPct = (cur, yst) => {
   const c = Number(cur) || 0, y = Number(yst) || 0
   if (!y || y <= 0 || !c || c <= 0) return ''
   const pct = ((c - y) / y) * 100
-  return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%'
+  const rounded = Math.round(pct)
+  if (rounded === 0) return ''   // 持平不显示：0% 无信息量，且着色逻辑会把 0 当涨/跌误标红绿（spend 红 / conv 绿）
+  return (rounded > 0 ? '+' : '') + rounded + '%'
 }
 // 直观性批 09-22：主卡收敛为 3（花了多少→换来什么→单个成本——一句话讲完一件事）；
 // ROAS/线索降级进次级条（有则显示，不是每日首要决策数）
