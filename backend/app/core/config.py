@@ -54,3 +54,19 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def env_val(key: str) -> str:
+    """.env 实时读（保存凭据后跨 worker 即时生效，无需 restart——2026-09-24 域名商店重做）。
+    settings 对象是进程级快照：gunicorn 4 worker 下 PUT /settings/registrar 写 .env 后，
+    其他 worker 内存里仍是旧值（测试连接时好时坏）。注册商凭据类读取走本函数兜底。"""
+    try:
+        from pathlib import Path
+        p = Path(__file__).resolve().parents[2] / ".env"
+        for line in p.read_text().splitlines():
+            s = line.strip()
+            if s.startswith(key + "="):
+                return s.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""

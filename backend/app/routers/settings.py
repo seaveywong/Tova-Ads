@@ -427,11 +427,11 @@ class RegistrarConfigIn(BaseModel):
 def get_registrar(user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
     from ..core.porkbun_client import porkbun_configured
-    from ..routers.domain_shop import _fee as _shop_fee
+    from ..routers.domain_shop import _fee as _shop_fee, _dynadot_key as _dd_key
     return {"registrar": _registrar_setting(db),
             "domain_shop_fee_usd": _shop_fee(db),
-            "dynadot": {"configured": bool(settings.dynadot_api_key),
-                        "key_masked": _mask(settings.dynadot_api_key or "")},
+            "dynadot": {"configured": bool(_dd_key()),
+                        "key_masked": _mask(_dd_key())},
             "porkbun": {"configured": porkbun_configured(settings),
                         "key_masked": _mask(settings.porkbun_api_key or "")}}
 
@@ -491,13 +491,14 @@ def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_s
 def test_registrar(user: CurrentUser = Depends(require_superadmin),
                    db: Session = Depends(get_db)):
     """测试当前选中注册商：Dynadot 返回账户+余额；Porkbun 返回账号名。"""
+    from ..routers.domain_shop import _dynadot_key as _dd_key
     reg = _registrar_setting(db)
     if reg == "dynadot":
-        if not settings.dynadot_api_key:
+        if not _dd_key():
             raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
         from ..core.dynadot_client import DynadotClient, DynadotError
         try:
-            info = DynadotClient(settings.dynadot_api_key).account_info()
+            info = DynadotClient(_dd_key()).account_info()
         except DynadotError as e:
             raise HTTPException(400, f"连接失败: {e}")
         balance = str(info.get("AccountBalance") or "")

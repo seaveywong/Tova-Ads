@@ -38,18 +38,24 @@ def _reg_name(db) -> str:
     return (row.value if row and row.value in ("dynadot", "porkbun") else "dynadot")
 
 
+def _dynadot_key() -> str:
+    """进程内 settings → .env 实时读（保存 key 后其他 worker 无需 restart 即生效）。"""
+    from ..core.config import env_val
+    return settings.dynadot_api_key or env_val("DYNADOT_API_KEY")
+
+
 def _reg_ready(db) -> bool:
     if _reg_name(db) == "dynadot":
-        return bool(settings.dynadot_api_key)
+        return bool(_dynadot_key())
     return porkbun_configured(settings)
 
 
 def _registrar_client(db):
     """按选择返回注册商客户端；未配置 400 引导。"""
     if _reg_name(db) == "dynadot":
-        if not settings.dynadot_api_key:
+        if not _dynadot_key():
             raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
-        return DynadotClient(settings.dynadot_api_key)
+        return DynadotClient(_dynadot_key())
     if not porkbun_configured(settings):
         raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
     return PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
@@ -360,7 +366,7 @@ def _fulfill(o, user, db) -> dict:
         # ② 注册商注册并把 NS 指到 CF——注册生效后 zone 自动转 active。
         #    Dynadot register 不带 NS 参数：注册→set_ns 两步（客户端内已限速 1.1s）。
         if _reg_name(db) == "dynadot":
-            dyna = DynadotClient(settings.dynadot_api_key)
+            dyna = DynadotClient(_dynadot_key())
             dyna.register(o.domain, o.years)
             dyna.set_ns(o.domain, ns)
         else:
