@@ -579,6 +579,8 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 /* 铃铛未读气泡：缩小并向外角偏移，避免盖住铃铛图标本体（UI审计#6）。
    气泡由 ElBadge 内部模板生成、不带 scope 属性，须用 :deep() 穿透（否则选择器匹配不上，规则失效） */
 .notif-wrapper :deep(.el-badge__content) { right: 5px; top: -4px; transform: translate(100%, -50%) scale(.8); }
+/* 侧栏安全守护开关 OFF 态：全局规则把未选中轨道压成 --bg3（#2a2a4a），在 --sidebar-bg（#15152a）上几乎不可见（对比 ~1.3:1）。此处在侧栏内提亮轨道 + 描边 */
+.guard-panel :deep(.el-switch:not(.is-checked) .el-switch__core) { background-color: #3a3a5e !important; border-color: #6a6a9a !important; }
 .notif-dropdown {
   position: absolute; right: 0; top: 36px;
   width: 340px;

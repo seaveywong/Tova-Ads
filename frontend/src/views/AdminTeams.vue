@@ -250,7 +250,7 @@ const submitMemberAdd = async () => {
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('teams.members')" width="68" align="center">
+        <el-table-column :label="t('teams.members')" width="88" align="center">
           <template #default="{ row }">
             <button :class="['num', 'num-btn', { zero: row.members === 0 }]" :title="t('teams.memberManageTitle', { name: row.name })" @click="openManage(row, 'members')">{{ row.members }}</button>
           </template>

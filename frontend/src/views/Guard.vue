@@ -556,7 +556,7 @@ const doInspect = async (force = false) => {
 .btn.btn-warn{color:var(--warning);border-color:rgba(255,159,10,.5);background:transparent}
 .btn.btn-warn:hover{background:rgba(255,159,10,.12);border-color:var(--warning)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
-.mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer}
+.mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap}
 .mb:hover{color:var(--ac);border-color:var(--ac)}
 .mb.danger:hover{color:var(--error);border-color:var(--error)}
 
@@ -583,7 +583,7 @@ const doInspect = async (force = false) => {
 .rule-hit.idle{opacity:.6}
 .rule-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
 .conv{font-size:11px;color:var(--t3)}
-.rule-ops{display:flex;gap:6px}
+.rule-ops{display:flex;gap:6px;flex-shrink:0}
 .empty{text-align:center;color:var(--t3);padding:32px;font-size:13px;line-height:1.6;background:var(--bg2);border:1px dashed var(--bd);border-radius:8px}
 .empty-cta{padding:50px 30px}
 .empty-title{font-size:15px;color:var(--t2);font-weight:600;margin-bottom:10px}
