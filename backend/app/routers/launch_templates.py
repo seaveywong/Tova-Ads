@@ -16,7 +16,7 @@ from ..core.database import get_db, SessionLocal, SuperSessionLocal, acquire_run
 from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.log_utils import write_log, new_trace_id
 from ..core.fb_tokens import client_for_account, client_for_account_page
-from ..core.fb_client import FbApiError
+from ..core.fb_client import FbApiError, FbClient
 from ..core.ad_builder import (build_targeting, build_campaign, build_adset, build_creative,
                                resolve_adset_destination, is_messaging_destination,
                                normalize_objective, CONV_LOCATIONS_BY_OBJECTIVE,
