@@ -1211,7 +1211,7 @@ def protection_test(
     return {"profiles": results, "blocked_count": blocked_count, "pass_count": len(results) - blocked_count}
 
 
-def _fb_scrape_once(fb, url: str):
+def _fb_scrape_once(fb, url: str, loc: str = "zh"):
     """单 URL 的 FB scrape 判定（纯读）。FbClient 无会话状态（每请求独立 httpx 调用），可跨线程。"""
     from ..core.fb_client import FbApiError
     try:
@@ -1222,29 +1222,29 @@ def _fb_scrape_once(fb, url: str):
             title = og.get("title") or ""
         if not title and isinstance(resp, dict):
             title = resp.get("title") or ""
-        return "pass", "FB 抓取正常（未封禁）" + (f"：{title[:40]}" if title else "")
+        return "pass", L(loc, "fb.scrapeOk") + (f": {title[:40]}" if title else "")
     except FbApiError as e:
         msg = ((e.raw or {}).get("message", "") or "").lower()
         cat = e.category
         if cat in ("token_expired", "permissions", "permission_denied"):
-            return "warn", f"令牌不可用：{e.friendly[:50]}"
+            return "warn", L(loc, "fb.scrapeTokenUnavailable", e=e.friendly[:50])
         if cat == "rate_limited":
-            return "warn", f"FB 限流：{e.friendly[:50]}"
+            return "warn", L(loc, "fb.scrapeRateLimited", e=e.friendly[:50])
         ban_kw = ("blocked", "spam", "malicious", "unsafe", "security",
                   "violat", "policy", "abusive", "blacklist", "forbidden", "banned")
         if any(k in msg for k in ban_kw):
-            return "fail", f"疑似被 FB 封禁：{e.friendly[:50]}"
+            return "fail", L(loc, "fb.scrapeBanned", e=e.friendly[:50])
         unreachable_kw = ("could not resolve", "could not retrieve", "could not be fetched",
                           "could not be crawled", "ssl", "certificate", "timeout", "connection",
                           "redirect", "failed to connect", "unreachable", "dns")
         if any(k in msg for k in unreachable_kw):
-            return "warn", f"FB 爬取失败（防护挡爬虫/SSL/DNS）：{e.friendly[:50]}"
-        return "warn", f"FB 返回异常：{e.friendly[:50]}"
+            return "warn", L(loc, "fb.scrapeFailed", e=e.friendly[:50])
+        return "warn", L(loc, "fb.scrapeError", e=e.friendly[:50])
     except Exception as e:
-        return "warn", f"检测异常：{str(e)[:50]}"
+        return "warn", L(loc, "fb.scrapeProbeError", e=str(e)[:50])
 
 
-def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0):
+def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0, loc: str = "zh"):
     """FB 封禁探测（单/批通用）：5 并发 + 单调用 10s 超时兜底（裸调 fb_client 会拖满其内置 30s）。
     单 URL 场景传 [url] 取 [0]。
 
@@ -1257,17 +1257,17 @@ def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_time
         return []
     fb = first_client(db, tenant_id)
     if fb is None:
-        return [("warn", "无可用 FB 令牌，跳过封禁检测") for _ in urls]
+        return [("warn", L(loc, "fb.banNoToken")) for _ in urls]
 
     def _one(u):
         # 单调用独立线程 + result(10s)：兜住 fb_client 内置 30s 超时（fb_client 不在本次改动范围）
         _ex = ThreadPoolExecutor(max_workers=1)
         try:
-            return _ex.submit(_fb_scrape_once, fb, u).result(timeout=per_call_timeout)
+            return _ex.submit(_fb_scrape_once, fb, u, loc).result(timeout=per_call_timeout)
         except _FutTimeout:
-            return "warn", f"FB 检测超时（{int(per_call_timeout)}s），已跳过"
+            return "warn", L(loc, "fb.banTimeout", s=int(per_call_timeout))
         except Exception as e:
-            return "warn", f"检测异常：{str(e)[:50]}"
+            return "warn", L(loc, "fb.scrapeProbeError", e=str(e)[:50])
         finally:
             _ex.shutdown(wait=False, cancel_futures=True)  # 不等慢调用：线程稍后自行结束
 
@@ -1515,7 +1515,7 @@ def _is_cf_error_page(resp) -> bool:
         return False
 
 
-def _cf_domain_diag(project_name: str, base_url: str) -> str:
+def _cf_domain_diag(project_name: str, base_url: str, loc: str = "zh") -> str:
     """自检域名/Worker 失败时的 CF 归因：根域 zone 非 active（NS 问题）/ Pages 域名验证 pending。
     best-effort——CF 查询失败返空串，不干扰原检查。"""
     try:
@@ -1526,12 +1526,12 @@ def _cf_domain_diag(project_name: str, base_url: str) -> str:
         zid = cf.get_zone_id(root)
         zst = (cf._get(f"/zones/{zid}").get("result") or {}).get("status") if zid else None
         if zst and zst != "active":
-            return f"根域 {root} 平台解析状态={zst}（域名 NS 未指向平台，新子域名无法激活）"
+            return L(loc, "landing.scDiagZoneInactive", root=root, st=zst)
         doms = cf._get(f"/accounts/{settings.cf_account_id}/pages/projects/{project_name}/domains"
                        ).get("result") or []
         st = next((d.get("status") for d in doms if d.get("name") == host), None)
         if st and st != "active":
-            return f"CF 域名验证 {st}（新绑定通常数分钟完成，稍后重检）"
+            return L(loc, "landing.scDiagDomainPending", st=st)
     except Exception:
         pass
     return ""
@@ -1578,26 +1578,26 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
             # worker 只会回 200(display)/302(redirect/屏蔽跳转)——4xx/5xx 一律是坏（CF 边缘
             # 错误页还会包成 409 空体/error code:1001，曾 <500 误判 pass）
             ok = resp.status_code < 400 and not _is_cf_error_page(resp)
-            _diag = "" if ok else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
+            _diag = "" if ok else _cf_domain_diag(f"tovaads-landing-{p.id}", base, loc=loc)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"),
                            "status": "pass" if ok else "fail",
                            "detail": f"HTTP {resp.status_code}" + (f" · {_diag}" if _diag else "")})
         except Exception as e:
-            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base)
+            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base, loc=loc)
             checks.append({"key": "domain", "label": L(loc, "landing.scDomain"), "status": "fail",
-                           "detail": f"不可达: {str(e)[:60]}" + (f" · {_diag}" if _diag else "")})
+                           "detail": L(loc, "landing.scDetailDomainUnreachable", e=str(e)[:60]) + (f" · {_diag}" if _diag else "")})
     # 4. Worker 存活（/__health 无条件 200）—— live_probe=False 时跳过（已被发布 smoke 门验过）
     if live_probe:
         try:
             resp = _probe_http("GET", base.rstrip("/") + "/__health", timeout=6, follow_redirects=False)
-            _diag = "" if resp.status_code == 200 else _cf_domain_diag(f"tovaads-landing-{p.id}", base)
+            _diag = "" if resp.status_code == 200 else _cf_domain_diag(f"tovaads-landing-{p.id}", base, loc=loc)
             checks.append({"key": "worker", "label": L(loc, "landing.scWorker"),
                            "status": "pass" if resp.status_code == 200 else "fail",
                            "detail": f"HTTP {resp.status_code}" + (f" · {_diag}" if _diag else "")})
         except Exception as e:
-            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base)
+            _diag = _cf_domain_diag(f"tovaads-landing-{p.id}", base, loc=loc)
             checks.append({"key": "worker", "label": L(loc, "landing.scWorker"), "status": "fail",
-                           "detail": f"无响应: {str(e)[:60]}" + (f" · {_diag}" if _diag else "")})
+                           "detail": L(loc, "landing.scDetailWorkerNoResponse", e=str(e)[:60]) + (f" · {_diag}" if _diag else "")})
     # 取一个真实绑的广告（测 route_next 全链路像素解析；无则用 __smoke__ 占位）
     sample_slug, sample_ad = "", ""
     try:
@@ -1621,16 +1621,16 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
     # 5. 像素（display 才查；redirect 模式设计上无像素=正常）
     if (p.redirect_mode or "display") == "redirect":
         checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "pass",
-                       "detail": "redirect 模式（无像素，正常）"})
+                       "detail": L(loc, "landing.scDetailPixelRedirect")})
     else:
         px = ((rd or {}).get("pixel_ids")) or []
         if px:
-            _samp = f"（以广告 {sample_ad} 为样本）" if sample_ad else ""
+            _samp = L(loc, "landing.scDetailPixelSample", ad=sample_ad) if sample_ad else ""
             checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "pass",
-                           "detail": f"{len(px)} 个{_samp}：{','.join(str(x) for x in px)[:50]}"})
+                           "detail": L(loc, "landing.scDetailPixelCount", n=len(px), samp=_samp, lst=",".join(str(x) for x in px)[:50])})
         else:
             checks.append({"key": "pixel", "label": L(loc, "landing.scPixel"), "status": "warn",
-                           "detail": "display 未解析到像素（页面不会 fire 转化；有意不带像素可忽略）"})
+                           "detail": L(loc, "landing.scDetailPixelNone")})
     # 5.5 转化事件（像素已配但转化事件空 → CTA 点击零转化上报；2026-09-17 $1k 0 转化事故根因）
     try:
         _pconf_px = _j.loads(p.pixel_ids) if p.pixel_ids else []
@@ -1643,17 +1643,17 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         _ce = []
     if not _eff_px:
         checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "pass",
-                       "detail": "无像素（无需转化事件）"})
+                       "detail": L(loc, "landing.scDetailConvNone")})
     elif _ce:
         checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "pass",
-                       "detail": "CTA 点击 fire：" + "、".join(str(e) for e in _ce[:4])})
+                       "detail": L(loc, "landing.scDetailConvFire") + "、".join(str(e) for e in _ce[:4])})
     else:
         checks.append({"key": "conv_events", "label": L(loc, "landing.scConvEvents"), "status": "warn",
-                       "detail": "已配像素但转化事件为空：CTA 点击不会向 FB 上报转化（优化 Purchase 的系列将计 0 转化）"})
+                       "detail": L(loc, "landing.scDetailConvEmpty")})
     # 6. 跳转目标（route_next 返回 + 可达性 HEAD）
     tgt = ((rd or {}).get("target_url")) or ""
     if not tgt:
-        checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "fail", "detail": "未配置目标 URL"})
+        checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "fail", "detail": L(loc, "landing.scDetailTargetNone")})
     else:
         try:
             tr = _probe_http("HEAD", tgt, timeout=5, follow_redirects=True)
@@ -1664,7 +1664,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
                            "detail": f"{tgt[:40]} · HTTP {tr.status_code}"})
         except Exception as e:
             checks.append({"key": "target", "label": L(loc, "landing.scTarget"), "status": "warn",
-                           "detail": f"{tgt[:40]} · 不可达: {str(e)[:30]}"})
+                           "detail": f"{tgt[:40]} · " + L(loc, "landing.scDetailTargetUnreachable", e=str(e)[:30])})
     # 7. 防护规则（数 worker 真评估/拦截的项；block_target=跳转目标不算，block_html=worker不渲染不算）
     if p.block_enabled:
         try:
@@ -1681,14 +1681,14 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
             n += 1
         checks.append({"key": "protection", "label": L(loc, "landing.scProtection"),
                        "status": "pass" if n else "warn",
-                       "detail": f"已开 · {n} 条规则" if n else "已开但无规则"})
+                       "detail": L(loc, "landing.scDetailProtectionOn", n=n) if n else L(loc, "landing.scDetailProtectionEmpty")})
     else:
-        checks.append({"key": "protection", "label": L(loc, "landing.scProtection"), "status": "warn", "detail": "未开启"})
+        checks.append({"key": "protection", "label": L(loc, "landing.scProtection"), "status": "warn", "detail": L(loc, "landing.scDetailProtectionOff")})
     # 8. FB 平台封禁（慢，发布时跳过）——域名级 + 子码级
     if include_fb:
         # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
         # 内置 30s 拖满，手动自检整体撞前端超时）
-        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base])[0]
+        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
         checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
         # 子码级 FB 封禁检测（扫描所有 active 子码）
         from ..models.launch import LandingAdLink
@@ -1699,27 +1699,27 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         if _active_links:
             # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
             _probe_res = _fb_ban_probe_batch(
-                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links])
+                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
             _blocked_slugs = [_link.slug for _link, (_st, _d)
                               in zip(_active_links, _probe_res) if _st == "fail"]
             if _blocked_slugs:
                 checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "fail",
-                               "detail": f"{len(_blocked_slugs)}/{len(_active_links)} 个子码被封：{','.join(_blocked_slugs[:5])}"})
+                               "detail": L(loc, "landing.scDetailFbSubcodeBlocked", n=len(_blocked_slugs), m=len(_active_links), lst=",".join(_blocked_slugs[:5]))})
             else:
                 checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "pass",
-                               "detail": f"{len(_active_links)} 个子码全部正常"})
+                               "detail": L(loc, "landing.scDetailFbSubcodeOk", n=len(_active_links))})
     # 9. 预览模式（关=正常运营 pass；开=提醒审核完关掉 warn，避免每页都黄）
     checks.append({"key": "preview", "label": L(loc, "landing.scPreview"),
                    "status": "warn" if p.preview_enabled else "pass",
-                   "detail": "已启用（审核/测试完记得关）" if p.preview_enabled else "未启用"})
+                   "detail": L(loc, "landing.scDetailPreviewOn") if p.preview_enabled else L(loc, "landing.scDetailPreviewOff")})
     # 聚合
     has_fail = any(c["status"] == "fail" for c in checks)
     has_warn = any(c["status"] == "warn" for c in checks)
     overall = "fail" if has_fail else ("warn" if has_warn else "pass")
     _non_pass = [c for c in checks if c["status"] != "pass"]
-    summary = (("；".join(c["label"] for c in _non_pass))[:100].rstrip("；")) if _non_pass else "全部检查通过"
+    summary = (("；".join(c["label"] for c in _non_pass))[:100].rstrip("；")) if _non_pass else L(loc, "landing.scSummaryAllPass")
     return {"overall": overall, "summary": summary, "checks": checks,
             "checked_at": _dt.now(_tz.utc).isoformat()}
 

@@ -846,6 +846,7 @@ export default {
     cfAccountNsTip: '注册商 NS 改为这两台（个别域名可能不同，以接入后返回为准）', cfPendingHint: 'NS 未生效，去注册商确认',
     cfUsageTitle: '用量与限额', cfToday: '今日', cfUvToday: '今日请求数 · 独立访客',
     cfLimitsLine: 'Free 档参考：静态请求 {a} · 带宽 {b} · Functions 调用 {c}/天 · 构建 {d}/月（付费档上调，以 zone 套餐为准）',
+    cfUnlimited: '不限', cf100k: '10万',
     cfPermHint: '访问量读取需 Token 增加「Zone Analytics Read」权限：CF 后台 → My Profile → API Tokens → 编辑当前 Token → Zone › Analytics › Read 保存后点刷新。',
     cfEmailTokenLabel: '邮箱管理 Token（可选）', cfEmailTokenPh: '用户级 API Token（cfat_ 开头的账户级不行）',
     cfEmailTokenHint: 'Email Routing 的目的地邮箱/转发规则管理只支持用户级 API Token。CF 后台 → My Profile → API Tokens → Create Token：Zone·tovaads.com 的 Email Routing Addresses·Edit + DNS·Edit + Zone·Read。只做启用/DNS 可不填。',

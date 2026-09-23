@@ -310,6 +310,12 @@ const fmtBytes = (b) => {
   while (v >= 1024 && i < 4) { v /= 1024; i++ }
   return v.toFixed(v >= 100 || i === 0 ? 0 : 1) + ' ' + u[i]
 }
+// CF 限额参考值：后端返回静态中文常量（不限/10万），前端按 locale 本地化
+const cfLimit = (v) => {
+  if (v === '不限') return t('settings.cfUnlimited')
+  if (v === '10万') return t('settings.cf100k')
+  return v || '-'
+}
 const loadCfUsage = async () => {
   cfUsageLoading.value = true
   try { cfUsage.value = await GET('/cf-console/usage', 90000) }
@@ -891,8 +897,8 @@ const runKeepaliveNow = async () => {
           </div>
           <div class="cf-panel-bd" v-loading="cfUsageLoading">
             <div class="cf-limits">{{ t('settings.cfLimitsLine', {
-              a: cfUsage?.limits?.pages_static || '-', b: cfUsage?.limits?.pages_bandwidth || '-',
-              c: cfUsage?.limits?.functions_per_day || '-', d: cfUsage?.limits?.builds_per_month || '-' }) }}</div>
+              a: cfLimit(cfUsage?.limits?.pages_static), b: cfLimit(cfUsage?.limits?.pages_bandwidth),
+              c: cfLimit(cfUsage?.limits?.functions_per_day), d: cfLimit(cfUsage?.limits?.builds_per_month) }) }}</div>
             <div v-if="cfUsage?.needs_permission" class="cf-perm-hint">{{ t('settings.cfPermHint') }}</div>
             <template v-for="u in (cfUsage?.zones || [])" :key="u.zone">
               <div class="cf-usage-row">

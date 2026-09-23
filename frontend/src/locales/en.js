@@ -835,6 +835,7 @@ export default {
     cfAccountNsTip: 'Set registrar NS to these two (a domain may differ — the onboarding result is authoritative)', cfPendingHint: 'NS not active yet — check your registrar',
     cfUsageTitle: 'Usage & limits', cfToday: 'Today', cfUvToday: 'Requests today · unique visitors',
     cfLimitsLine: 'Free tier reference: static requests {a} · bandwidth {b} · Functions invocations {c}/day · builds {d}/month (higher on paid plans, per zone plan)',
+    cfUnlimited: 'Unlimited', cf100k: '100K',
     cfPermHint: 'Reading usage needs the Zone Analytics Read permission: CF dashboard → My Profile → API Tokens → edit this token → Zone › Analytics › Read, save, then refresh here.',
     cfEmailTokenLabel: 'Email admin token (optional)', cfEmailTokenPh: 'User-level API token (cfat_ account tokens do not work)',
     cfEmailTokenHint: 'Email Routing address/rule management only supports user-level API tokens. CF dashboard -> My Profile -> API Tokens -> Create Token with Zone (tovaads.com): Email Routing Addresses Edit + DNS Edit + Zone Read. Leave empty if you only need enable/DNS.',
