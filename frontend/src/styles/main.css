@@ -307,5 +307,8 @@ a { color: var(--ac); text-decoration: none; }
 .el-switch.is-checked .el-switch__core { background-color: var(--ac) !important; border-color: var(--ac) !important; }
 .el-switch:not(.is-checked) .el-switch__core { background-color: var(--bg3) !important; border-color: var(--bd) !important; }
 .el-switch.is-disabled .el-switch__core { opacity: .45; }
+/* 开关文字标签对比度（UI审计#4）：active-text/inactive-text 默认蓝/灰在暗色下过淡，统一提亮 */
+.el-switch__label { color: var(--t2) !important; font-size: 12px; }
+.el-switch__label.is-active { color: var(--t1) !important; }
 /* 落地页 ⋯ 菜单「彻底删除」项（弹层 teleport 到 body，须全局） */
 .el-dropdown-menu__item.danger-item { color: var(--error) !important }

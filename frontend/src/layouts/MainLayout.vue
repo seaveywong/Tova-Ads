@@ -576,6 +576,8 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 
 /* 通知下拉 */
 .notif-wrapper { position: relative; }
+/* 铃铛未读气泡：缩小并向外角偏移，避免盖住铃铛图标本体（UI审计#6） */
+.notif-wrapper .el-badge__content { transform: translate(60%, -60%) scale(.8); }
 .notif-dropdown {
   position: absolute; right: 0; top: 36px;
   width: 340px;

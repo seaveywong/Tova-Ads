@@ -1910,6 +1910,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .inactive-bar.open { color: var(--t2); border-style: solid; }
 /* 左列表格不裁剪：内容不足保持基线高度（与右列平衡），超出随内容自然长高 */
 .acc-scroll { min-height: 400px; }   /* 信息密集块给足高度；上方 KPI 单行+图降高后表格上移首屏 */
+@media (max-width: 768px) { .acc-scroll { min-height: 0; } }   /* 移动端行少，去掉强制高度避免底部空白 */
 
 /* 守护概览（视觉批 09-22）：一行四格分隔线式——去盒中盒，与 KPI 指标条同一视觉语言 */
 .guard-grid { display: grid; grid-template-columns: repeat(4, 1fr); padding: 4px 10px; }
