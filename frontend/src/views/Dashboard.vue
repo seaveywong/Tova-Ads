@@ -1218,7 +1218,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <div class="bf-chips" :class="{ calm: !todayBriefing.chips.length }">
           <template v-if="todayBriefing.chips.length">
             <button v-for="c in todayBriefing.chips" :key="c.key" :class="['bf-chip', c.lv]" @click="c.go && c.go()">
-              {{ c.n }} {{ c.label }}<em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">、</template></span></em>
+              <span class="bf-chip-label">{{ c.n }} {{ c.label }}</span><em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">、</template></span></em>
             </button>
           </template>
           <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>
@@ -1830,6 +1830,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
 .bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
 .bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
+.bf-chip-label { white-space: nowrap; }  /* 前导标签（如「3 户异动」）也不断字，收缩压力不转嫁到标签 */
 .bf-chip-id { white-space: nowrap; }   /* 账户 ID 含连字符不中途断行，只在「、」处换行 */
 .bf-chip.warn { color: var(--warning); background: rgba(255,159,10,.1); border-color: rgba(255,159,10,.3) }
 .bf-chip.crit { color: #fff; background: var(--error); border-color: var(--error) }
