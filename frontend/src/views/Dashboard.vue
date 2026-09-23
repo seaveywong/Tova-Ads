@@ -454,10 +454,10 @@ const sparkPoints = (arr) => {
   const span = (max - min) || 1
   return a.map((v, i) => `${((i / (a.length - 1)) * w).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`).join(' ')
 }
-// 较昨日 ±%（今日 vs 昨日全天；昨日 0 时不显示箭头——除法无意义）
+// 较昨日 ±%（今日 vs 昨日全天；昨日或今日为 0/空时不显示——今日无数据≠跌了 100%，除法无意义）
 const dodPct = (cur, yst) => {
   const c = Number(cur) || 0, y = Number(yst) || 0
-  if (!y || y <= 0) return ''
+  if (!y || y <= 0 || !c || c <= 0) return ''
   const pct = ((c - y) / y) * 100
   return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%'
 }
@@ -495,7 +495,7 @@ const todayBriefing = computed(() => {
   if (criticals > 0) chips.push({ key: 'crit', lv: 'crit', n: criticals, label: t('dashboard.bfChipCrit'), go: () => { notifMode.value = 'all'; notifFilter.value = 'critical' } })
   if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => a.name || a.act_id), go: () => setAccountView('spend') })
   if (lowBal.length) chips.push({ key: 'low', lv: 'warn', n: lowBal.length, label: t('dashboard.bfLowBal'), go: () => setAccountView('balance') })
-  if (unreads.length - criticals > 0) chips.push({ key: 'warn', lv: 'warn', n: unreads.length - criticals, label: t('dashboard.bfAlerts'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
+  if (warnings > 0) chips.push({ key: 'warn', lv: 'warn', n: warnings, label: t('dashboard.bfChipWarn'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
   const level = criticals > 0 ? 'crit' : (chips.length ? 'warn' : 'ok')
   const word = level === 'ok' ? t('dashboard.bfStatusOk') : level === 'crit' ? t('dashboard.bfStatusCrit') : t('dashboard.bfStatusWarn')
   return {
