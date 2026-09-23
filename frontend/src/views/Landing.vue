@@ -90,34 +90,61 @@ const loadLib = async () => {
 // ── 域名商店（批DD 预埋：Porkbun 代购；凭据未配置时查价报引导）──
 const shopOpen = ref(false)
 const shopDomain = ref('')
-const shopChecking = ref(false)
-const shopQuote = ref(null)
 const shopOrdering = ref(false)
 const shopOrders = ref([])
 const shopLoadingOrders = ref(false)
+// ── 域名候选推送（2026-09-24 商店重做）：指定/智能/随机三模式 + 后缀多选 + 价格段 ──
+const shopMode = ref('smart')
+const SHOP_MODES = computed(() => [
+  { id: 'exact', label: t('landing.shopModeExact') },
+  { id: 'smart', label: t('landing.shopModeSmart') },
+  { id: 'random', label: t('landing.shopModeRandom') },
+])
+const SHOP_TLD_POOL = ['com', 'net', 'xyz', 'top', 'online', 'site', 'shop', 'store', 'icu', 'cfd', 'link', 'fun', 'rest', 'world', 'live', 'click']
+const shopTlds = ref(['com', 'net', 'xyz', 'top', 'online', 'site', 'shop', 'store'])
+const toggleTld = (tl) => {
+  const s = new Set(shopTlds.value)
+  s.has(tl) ? s.delete(tl) : s.add(tl)
+  shopTlds.value = [...s]
+}
+const shopPriceMax = ref(0)   // 0=不限
+const SHOP_PRICE_OPTS = computed(() => [
+  { v: 0, label: t('landing.shopPriceAny') },
+  { v: 2, label: '≤$2' }, { v: 5, label: '≤$5' }, { v: 10, label: '≤$10' }, { v: 20, label: '≤$20' },
+])
+const shopResults = ref([])
+const shopSuggesting = ref(false)
+const shopStats = ref({ searched: 0, taken: 0 })
+const suggestDomains = async () => {
+  if (shopSuggesting.value) return
+  if (shopMode.value !== 'random' && !shopDomain.value.trim()) return ElMessage.warning(t('landing.shopNeedWord'))
+  if (!shopTlds.value.length) return ElMessage.warning(t('landing.shopNeedTld'))
+  shopSuggesting.value = true; shopResults.value = []
+  try {
+    const p = new URLSearchParams({ q: shopDomain.value.trim(), mode: shopMode.value, tlds: shopTlds.value.join(','), limit: '30' })
+    if (shopPriceMax.value) p.set('price_max', String(shopPriceMax.value))
+    const r = await GET('/domains-shop/suggest?' + p.toString(), 90000)
+    shopResults.value = r.results || []
+    shopStats.value = { searched: r.searched || 0, taken: r.taken || 0 }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  shopSuggesting.value = false
+}
+const orderSuggested = async (d) => {
+  if (shopOrdering.value) return
+  shopOrdering.value = true
+  try {
+    await POST('/domains-shop/orders', { domain: d, years: 1 })
+    ElMessage.success(t('landing.shopOrdered'))
+    await loadShopOrders()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  shopOrdering.value = false
+}
 const shopStatusTxt = (st) => ({ pending_payment: t('landing.shStPending'), approved: t('landing.shStApproved'), registering: t('landing.shStReg'), registered: t('landing.shStRegd'), bound: t('landing.shStBound'), failed: t('landing.shStFailed'), cancelled: t('landing.shStCancel') }[st] || st)
 const openShop = async () => { shopOpen.value = true; await loadShopOrders() }
 const loadShopOrders = async () => {
   shopLoadingOrders.value = true
   try { shopOrders.value = await GET('/domains-shop/orders') } catch {}
   shopLoadingOrders.value = false
-}
-const checkShopDomain = async () => {
-  if (!shopDomain.value.trim()) return
-  shopChecking.value = true; shopQuote.value = null
-  try { shopQuote.value = await GET('/domains-shop/check?domain=' + encodeURIComponent(shopDomain.value.trim()), 30000) }
-  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  shopChecking.value = false
-}
-const placeOrder = async () => {
-  shopOrdering.value = true
-  try {
-    await POST('/domains-shop/orders', { domain: shopDomain.value.trim(), years: 1 })
-    ElMessage.success(t('landing.shopOrdered'))
-    shopQuote.value = null
-    await loadShopOrders()
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  shopOrdering.value = false
 }
 const cancelOrder = async (o) => {
   try {
@@ -1421,18 +1448,31 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </div>
     <LandingLogs v-if="tab === 'logs'" />
 
-    <el-dialog v-model="shopOpen" :title="t('landing.shopTitle')" width="620px" append-to-body>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input v-model="shopDomain" class="ctrl-btn" style="flex:1;padding:6px 12px" :placeholder="t('landing.shopPh')" @keyup.enter="checkShopDomain" />
-        <button class="ctrl-btn" :disabled="shopChecking" @click="checkShopDomain">{{ shopChecking ? t('common.loading') : t('landing.shopCheck') }}</button>
+    <el-dialog v-model="shopOpen" :title="t('landing.shopTitle')" width="720px" append-to-body>
+      <div class="shop-search">
+        <input v-model="shopDomain" class="shop-input" :placeholder="t('landing.shopPh')" @keyup.enter="suggestDomains" />
+        <button class="ctrl-btn primary" :disabled="shopSuggesting" @click="suggestDomains">{{ shopSuggesting ? t('common.loading') : t('landing.shopSearch') }}</button>
       </div>
-      <div v-if="shopQuote" class="shop-quote">
-        <div><b>{{ shopQuote.domain }}</b> · {{ shopQuote.available ? t('landing.shopAvail') : t('landing.shopTaken') }}</div>
-        <div v-if="shopQuote.available" class="shop-price">
-          {{ t('landing.shopCost') }} ${{ shopQuote.cost_usd }} + {{ t('landing.shopFee') }} ${{ shopQuote.fee_usd }} =
-          <b>${{ shopQuote.total_usd }}</b><i>（{{ t('landing.shopRenew') }} ${{ shopQuote.renewal_usd }}/yr）</i>
+      <div class="shop-filters">
+        <div class="seg-bar sm">
+          <button v-for="m in SHOP_MODES" :key="m.id" :class="['seg-btn', { on: shopMode === m.id }]" @click="shopMode = m.id">{{ m.label }}</button>
         </div>
-        <button v-if="shopQuote.available" class="ctrl-btn primary" style="margin-top:8px" :disabled="shopOrdering" @click="placeOrder">{{ t('landing.shopOrder') }}</button>
+        <div class="shop-tld-row">
+          <button v-for="tl in SHOP_TLD_POOL" :key="tl" :class="['tld-chip', { on: shopTlds.includes(tl) }]" @click="toggleTld(tl)">.{{ tl }}</button>
+        </div>
+        <div class="shop-tld-row">
+          <span class="sf-label">{{ t('landing.shopPrice') }}</span>
+          <button v-for="o in SHOP_PRICE_OPTS" :key="o.v" :class="['tld-chip', { on: shopPriceMax === o.v }]" @click="shopPriceMax = o.v">{{ o.label }}</button>
+        </div>
+      </div>
+      <div v-loading="shopSuggesting" class="shop-results">
+        <div v-for="r in shopResults" :key="r.domain" class="shop-row">
+          <span class="sr-dom">{{ r.domain }}</span>
+          <span class="sr-price">${{ r.cost_usd }} <i>+ ${{ r.fee_usd }}</i> = <b>${{ r.total_usd }}</b></span>
+          <button class="ctrl-btn sm primary" :disabled="shopOrdering" @click="orderSuggested(r.domain)">{{ t('landing.shopOrderBtn') }}</button>
+        </div>
+        <div v-if="!shopSuggesting && shopResults.length" class="shop-stats">{{ t('landing.shopStats', { s: shopStats.searched, a: shopResults.length }) }}</div>
+        <div v-else-if="!shopSuggesting && !shopResults.length" class="shop-empty">{{ t('landing.shopEmpty') }}</div>
       </div>
       <div style="margin-top:14px;font-size:13px;font-weight:600">{{ t('landing.shopOrders') }}</div>
       <div v-loading="shopLoadingOrders" style="max-height:260px;overflow:auto">
@@ -1700,6 +1740,25 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 
 /* 域名商店（批DD） */
 .shop-quote { margin-top: 10px; padding: 10px 14px; background: var(--bg2); border-radius: 8px; font-size: 13px }
+/* ── 域名候选推送（2026-09-24 商店重做）── */
+.shop-search { display: flex; gap: 8px; align-items: center }
+.shop-input { flex: 1; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 12px; font-size: 13px; font-family: var(--font) }
+.shop-input:focus { outline: none; border-color: var(--ac) }
+.shop-filters { margin-top: 10px; display: flex; flex-direction: column; gap: 7px }
+.shop-filters .seg-bar.sm { align-self: flex-start }
+.shop-tld-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center }
+.sf-label { font-size: 11px; color: var(--t3); margin-right: 3px }
+.tld-chip { padding: 2px 9px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 10px; font-size: 11px; cursor: pointer; font-family: inherit; transition: all .12s }
+.tld-chip:hover { color: var(--t1); border-color: var(--bd2) }
+.tld-chip.on { background: var(--acg); color: var(--ac); border-color: var(--ac) }
+.shop-results { margin-top: 10px; min-height: 60px; max-height: 300px; overflow-y: auto }
+.shop-row { display: flex; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--bd); font-size: 12px }
+.sr-dom { font-weight: 600; color: var(--t1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.sr-price { color: var(--t3); font-variant-numeric: tabular-nums }
+.sr-price i { font-style: normal; font-size: 11px }
+.sr-price b { color: var(--t1) }
+.shop-stats { padding: 8px 4px 2px; font-size: 11px; color: var(--t3) }
+.shop-empty { text-align: center; color: var(--t3); font-size: 12px; padding: 22px 10px }
 .shop-price { color: var(--t2); margin-top: 4px }
 .shop-price b { color: var(--t1) }
 .shop-price i { font-style: normal; font-size: 11px; color: var(--t3) }

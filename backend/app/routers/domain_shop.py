@@ -126,6 +126,129 @@ def check_domain(domain: str = "", user: CurrentUser = Depends(require_permissio
             "renewal_usd": price.get("renewal")}
 
 
+# ── 域名候选推送（2026-09-24 域名商店重做）：指定/智能/随机 三模式批量生成候选，
+#    Dynadot search_many 一次查 50 个可注册性+实时价，价格段过滤后按价排序推送 ──
+_DEFAULT_TLDS = ["com", "net", "xyz", "top", "online", "site", "shop", "store",
+                 "icu", "cfd", "link", "fun", "rest", "world", "live", "click"]
+_SMART_HEAD = ["", "get", "the", "go", "try", "my"]
+_SMART_TAIL = ["", "shop", "store", "app", "site", "hq", "hub", "now", "pro",
+               "vip", "labs", "web", "offer", "deal", "go", "bay"]
+# 随机模式的品牌词库（短、好读、无歧义；两词组合成品牌感域名）
+_RAND_WORDS = [
+    "nova", "flex", "pine", "jade", "echo", "apex", "orbit", "vivid", "zen", "flux",
+    "halo", "kite", "lunar", "mint", "onyx", "pixel", "quill", "raven", "sage",
+    "surge", "terra", "vega", "warp", "amber", "bolt", "cove", "drift", "ember",
+    "frost", "gleam", "haven", "iris", "luxe", "mesa", "oak", "prism", "quest",
+    "ridge", "sol", "tide", "vale", "wisp", "zenith", "lumen", "cascade", "delta",
+    "forge", "grove", "harbor", "indigo", "junction", "krypton", "lotus", "meteor",
+]
+
+
+def _suggest_candidates(q: str, mode: str, tlds: list) -> list:
+    """生成候选域名（去重、label 合法、cap 48——Dynadot search 一次查完）。"""
+    import random as _rand
+    raw = (q or "").strip().lower()
+    if "." in raw:            # 输入完整域名 → 抽词根
+        raw = raw.rsplit(".", 1)[0]
+    root = re.sub(r"[^a-z0-9]", "", raw)[:24]
+    tlds = [t for t in tlds if re.match(r"^[a-z]{2,10}$", t)][:12] or _DEFAULT_TLDS[:8]
+    cands: list = []
+
+    def _add(name: str):
+        if 1 <= len(name) <= 40 and re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", name):
+            cands.append(f"{name}.{t}")
+
+    if mode == "random":
+        rng = _rand.Random()
+        seen = set()
+        while len(cands) < 48 and len(seen) < 400:
+            t = rng.choice(tlds)
+            if root and rng.random() < 0.4:
+                name = root + rng.choice(_RAND_WORDS)
+            else:
+                name = rng.choice(_RAND_WORDS) + rng.choice(_RAND_WORDS)
+            if name in seen:
+                continue
+            seen.add(name)
+            _add(name)
+        return cands
+    if mode == "exact":
+        for t in tlds:
+            _add(root)
+        return cands
+    # smart：词根 × 前后缀修饰 × TLD（组合爆 → 随机采样到 cap）
+    combos = [(h, tl) for h in _SMART_HEAD for tl in _SMART_TAIL]
+    rng = _rand.Random()
+    rng.shuffle(combos)
+    for h, tl in combos:
+        for t in tlds:
+            name = f"{h}{root}{tl}"
+            if root and name not in cands:
+                _add(name)
+            if len(cands) >= 48:
+                return cands
+    return cands
+
+
+@router.get("/suggest")
+def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
+                    price_min: float = 0.0, price_max: float = 0.0, limit: int = 30,
+                    user: CurrentUser = Depends(require_permission("landing.manage")),
+                    db: Session = Depends(get_db)):
+    """域名候选推送：mode=exact（词根×选中后缀逐个查）/ smart（前后缀修饰组合）/
+    random（品牌词库随机，q 可作种子）。返回可注册候选（价格段过滤，价低在前）。
+    Dynadot 一次 API 查 ≤50 个（限流友好）；Porkbun 无批量接口逐个查（cap 20）。"""
+    if mode not in ("exact", "smart", "random"):
+        raise HTTPException(400, "mode 必须是 exact/smart/random")
+    if not (1 <= limit <= 50):
+        raise HTTPException(400, "limit 1-50")
+    if mode != "random" and not re.sub(r"[^a-z0-9]", "", (q or "").lower().rsplit(".", 1)[0]):
+        raise HTTPException(400, "请输入品牌词（例：mybrand）")
+    tld_list = [t.strip().lstrip(".").lower() for t in (tlds or "").split(",") if t.strip()]
+    client = _registrar_client(db)
+    pricing = _pricing(client, db)
+    cands = _suggest_candidates(q, mode, tld_list)
+    if not cands:
+        return {"results": [], "searched": 0, "taken": 0, "fee_usd": _fee(db)}
+
+    # 查可注册性 + 实时价
+    rows: list = []
+    if isinstance(client, DynadotClient):
+        try:
+            rows = client.search_many(cands)
+        except DynadotError as e:
+            raise HTTPException(400, f"候选查询失败：{str(e)[:150]}")
+    else:
+        # Porkbun 无批量：截 20 逐个（check 无实时价 → 用价格表）
+        for d in cands[:20]:
+            tld = d.rsplit(".", 1)[-1]
+            av = _avail(client, d)
+            rows.append({"domain": d, "available": av["available"],
+                         "price_usd": (pricing.get(tld) or {}).get("registration")})
+
+    fee = _fee(db)
+    out = []
+    taken = 0
+    for r in rows:
+        if not r["available"]:
+            taken += 1
+            continue
+        tld = r["domain"].rsplit(".", 1)[-1]
+        cost = r["price_usd"]
+        if cost is None:
+            cost = (pricing.get(tld) or {}).get("registration")
+        if cost is None:
+            continue          # 查不到价的（罕见）不推
+        if price_min and cost < price_min:
+            continue
+        if price_max and cost > price_max:
+            continue
+        out.append({"domain": r["domain"], "tld": tld, "cost_usd": cost,
+                    "fee_usd": fee, "total_usd": round(cost + fee, 2)})
+    out.sort(key=lambda x: (x["cost_usd"], len(x["domain"])))
+    return {"results": out[:limit], "searched": len(rows), "taken": taken, "fee_usd": fee}
+
+
 class OrderIn(BaseModel):
     domain: str
     years: int = 1

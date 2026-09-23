@@ -84,6 +84,27 @@ class DynadotClient:
         return {"available": str(row.get("Available")).lower() == "yes",
                 "price_usd": round(float(m.group(1)), 2) if m else None}
 
+    def search_many(self, domains: list) -> list:
+        """批量可注册性 + 实时价（域名候选推送用，2026-09-24 域名商店重做）。
+        官方 search 支持 domain0..domainN 一次查多个；50/块（全局 1req/s 节流自动间隔，
+        超过 50 才会付第二次调用延迟）。返 [{domain, available, price_usd}]，去重不保序。
+        API 未返回的域名不出现（视为未查到）。"""
+        out, seen = [], set()
+        for i in range(0, len(domains), 50):
+            chunk = domains[i:i + 50]
+            params = {f"domain{j}": d for j, d in enumerate(chunk)}
+            body = self._call("search", show_price="1", currency="USD", **params)
+            for x in (body.get("SearchResults") or []):
+                d = str(x.get("DomainName") or "").lower()
+                if not d or d in seen:
+                    continue
+                seen.add(d)
+                m = re.match(r"([\d.]+)", str(x.get("Price") or ""))
+                out.append({"domain": d,
+                            "available": str(x.get("Available")).lower() == "yes",
+                            "price_usd": round(float(m.group(1)), 2) if m else None})
+        return out
+
     def pricing(self) -> dict:
         """全 TLD 价格表 → {tld: {registration, renewal}}（上层缓存）。"""
         body = self._call("tld_price", currency="USD")

@@ -420,13 +420,16 @@ class RegistrarConfigIn(BaseModel):
     dynadot_api_key: str = ""
     porkbun_api_key: str = ""
     porkbun_secret_key: str = ""
+    domain_shop_fee_usd: float = -1   # 域名代购手续费（<0=不改；域名商店重做 2026-09-24）
 
 
 @router.get("/registrar")
 def get_registrar(user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
     from ..core.porkbun_client import porkbun_configured
+    from ..routers.domain_shop import _fee as _shop_fee
     return {"registrar": _registrar_setting(db),
+            "domain_shop_fee_usd": _shop_fee(db),
             "dynadot": {"configured": bool(settings.dynadot_api_key),
                         "key_masked": _mask(settings.dynadot_api_key or "")},
             "porkbun": {"configured": porkbun_configured(settings),
@@ -436,8 +439,17 @@ def get_registrar(user: CurrentUser = Depends(require_superadmin),
 @router.put("/registrar")
 def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
-    """选择注册商（system_settings）+ 写凭据（.env 即时生效）。"""
+    """选择注册商（system_settings）+ 写凭据（.env 即时生效）+ 代购手续费。"""
     from ..models.system import SystemSetting
+    if body.domain_shop_fee_usd >= 0:
+        if body.domain_shop_fee_usd > 500:
+            raise HTTPException(400, "手续费上限 500")
+        row = db.query(SystemSetting).filter(SystemSetting.key == "domain_shop_fee_usd").first()
+        if not row:
+            row = SystemSetting(key="domain_shop_fee_usd")
+            db.add(row)
+        row.value = str(round(body.domain_shop_fee_usd, 2))
+        db.commit()
     if body.registrar:
         if body.registrar not in ("dynadot", "porkbun"):
             raise HTTPException(400, "registrar 仅支持 dynadot/porkbun")

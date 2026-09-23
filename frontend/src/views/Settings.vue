@@ -254,6 +254,7 @@ const saveCf = async () => {
 // ── 域名注册商（批DD Porkbun 预埋 → 2026-09-19 切 Dynadot 主力；选择器+双凭据一卡）──
 const rgCfg = ref({ registrar: 'dynadot', dynadot: { configured: false, key_masked: '' }, porkbun: { configured: false, key_masked: '' } })
 const rgForm = ref({ dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' })
+const rgFeeInput = ref('')   // 代购手续费（空=不改，占位显当前值）
 const rgSaving = ref(false)
 const rgTesting = ref(false)
 const loadRg = async () => { try { rgCfg.value = await GET('/settings/registrar') } catch {} }
@@ -271,9 +272,10 @@ const saveRg = async () => {
     if (rgForm.value.dynadot_api_key) body.dynadot_api_key = rgForm.value.dynadot_api_key
     if (rgForm.value.porkbun_api_key) body.porkbun_api_key = rgForm.value.porkbun_api_key
     if (rgForm.value.porkbun_secret_key) body.porkbun_secret_key = rgForm.value.porkbun_secret_key
+    if (rgFeeInput.value !== '' && Number(rgFeeInput.value) >= 0) body.domain_shop_fee_usd = Number(rgFeeInput.value)
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); rgSaving.value = false; return }
     await PUT('/settings/registrar', body)
-    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }
+    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }; rgFeeInput.value = ''
     await loadRg()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   rgSaving.value = false
@@ -933,6 +935,8 @@ const runKeepaliveNow = async () => {
         <div class="form-l"><label>API Key</label><input v-model="rgForm.porkbun_api_key" class="input" :placeholder="rgCfg.porkbun.configured ? rgCfg.porkbun.key_masked : 'pk1_...'" /></div>
         <div class="form-l"><label>Secret Key</label><input v-model="rgForm.porkbun_secret_key" class="input" type="password" :placeholder="rgCfg.porkbun.configured ? '********' : 'sk1_...'" /></div>
       </template>
+      <div class="form-l"><label>{{ t('settings.rgFee') }}</label><input v-model="rgFeeInput" class="input" type="number" min="0" step="0.5" :placeholder="t('settings.rgFeePh', { v: rgCfg.domain_shop_fee_usd ?? 5 })" /></div>
+      <div class="field-hint">{{ t('settings.rgFeeHint') }}</div>
       <div style="display:flex;gap:8px">
         <button class="btn primary" :disabled="rgSaving" @click="saveRg">{{ t('common.save') }}</button>
         <button class="btn" :disabled="rgTesting" @click="testRg">{{ t('settings.pbTest') }}</button>
