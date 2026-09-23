@@ -138,7 +138,7 @@ const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私�
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
 const mobileFilters = ref(false)  // 移动端：日期+筛选行折叠开关（桌面恒展开）
 const mainTab = ref('data')     // 数据看板 / 落地页数据 两个 Tab（用户点名）
-const trendOpen = ref(false)    // 趋势图默认折叠（一眼看全：复盘图收进底部，点开才画）
+const trendOpen = ref(true)    // 行业最佳实践：趋势图是看板主视觉，默认展开紧跟 KPI；点箭头可收起
 const toggleTrend = () => { trendOpen.value = !trendOpen.value; if (trendOpen.value) nextTick(renderTrendCharts) }
 const { platform } = usePlatform()
 // 分区范围 chip：平台≠all 时显示 "Facebook · N 账户"（后端已按平台过滤 accounts，直接取长度）
@@ -1680,11 +1680,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 </template>
 
 <style scoped>
-/* ── 复合网格布局（2026-09-22 信息层级重构）：按决策紧急度排——
-   ①晨报+KPI hero 区（扫一眼知全局）
-   ②告警中心（60%）+守护/待办（40%）——要处理的紧跟 KPI
-   ③账户明细整行（工作列表）
-   ④趋势大图整行收尾（复盘分析，不着急的放最后）
+/* ── 复合网格布局（行业最佳实践 09-23 三版）：视觉焦点 = 趋势大图——
+   ①KPI 概览整行（扫一眼知全局）
+   ②趋势大图整行（主视觉，默认展开）
+   ③账户明细(60%)+守护/待办(40%)（工作列表）
+   ④告警中心整行（行动项）
    dense 回填让 DOM 顺序不变也能正确落位；order 驱动层级 */
 .dashboard {
   display: grid;
@@ -1693,14 +1693,13 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-/* 布局定稿（一眼看全批 09-23 二版）：KPI 命令卡整行 → 账户明细(60%)与守护/待办(40%)并排 → 告警中心整行
-   → 趋势折叠收尾。账户表提到首屏（曾 order:3 落在告警中心 424px 之下、折叠线以下）；
-   紧急/异常计数由 KPI hero 胶囊 + 铃铛承接，告警明细流下沉到账户表之后供细看 */
+/* 布局定稿（行业最佳实践 09-23 三版）：KPI 概览 → 趋势大图（主视觉，默认展开）→ 账户明细(60%)+守护/待办(40%) → 告警中心。
+   趋势从收尾上移为第二屏主视觉——dashboard 须有图表焦点而非纯数字+表格；紧急计数仍由 KPI hero 胶囊+铃铛承接 */
 .kpi-zone { order: 1; }
-.accounts-card { order: 2; grid-column: 1; }
-.guard-col { order: 3; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.alert-center { order: 4; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
-.trend-main:not(.landing-trend) { order: 5; }
+.trend-main:not(.landing-trend) { order: 2; }
+.accounts-card { order: 3; grid-column: 1; }
+.guard-col { order: 4; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.alert-center { order: 5; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
 @media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .accounts-card, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
 
 /* 趋势折叠开关（一眼看全批）：标题行右侧小箭头，默认收起图表 */
@@ -2172,8 +2171,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }   /* 次级指标条 2×3 */
   .trend-main-canvas { height: 260px; }
   .main-tabs { width: 100%; }   /* 页头 tab 挤不下时换行 */
-  /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 告警 → 待处理事项 → 账户明细 → 守护 → 趋势；
-     落地页 Tab 指标 → 明细 → 趋势 → 子码 → 屏蔽明细（trend-main 两个 Tab 都排 3，互不干扰）。
+  /* 单列重排（堆叠是布局不是折叠）：数据 Tab KPI → 趋势 → 告警 → 待处理事项 → 账户明细 → 守护；
+     落地页 Tab 指标 → 明细 → 趋势 → 子码 → 屏蔽明细（trend-main 两个 Tab 都排 2，互不干扰）。
      间距用 gap：margin-top 只命中 .dashboard 直接子级，main-split/side-stack 变 contents 后
      孙级卡拿不到 margin 曾零间距贴边（复审D P1） */
   .dashboard { display: flex; flex-direction: column; gap: 16px; }
@@ -2187,11 +2186,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .guard-cell:nth-child(2n) { border-right: none; }
   .guard-cell:nth-child(-n+2) { border-bottom: 1px solid var(--bd); }
   .kpi-zone { order: 1; }
-  .notif-card { order: 2; }
-  .todo-card { order: 3; }
-  .accounts-card { order: 4; }
-  .guard-card { order: 5; }
-  .trend-main:not(.landing-trend) { order: 6; }   /* 特异性对齐桌面 :not 规则——曾低特异性被桌面 order:4 压过 */
+  .trend-main:not(.landing-trend) { order: 2; }   /* 特异性对齐桌面 :not 规则——曾低特异性被桌面 order 压过 */
+  .notif-card { order: 3; }
+  .todo-card { order: 4; }
+  .accounts-card { order: 5; }
+  .guard-card { order: 6; }
   .stat-grid { order: 1; }
   .landing-detail { order: 2; }
   .landing-subcodes { order: 4; }
