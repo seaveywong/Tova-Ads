@@ -110,12 +110,15 @@ const renderTrendCharts = () => {
     if (yData) datasets.push({ label: t('dashboard.trendYesterday'), data: yData,
       borderColor: textColor, borderDash: [5, 4], borderWidth: 1.5,
       pointRadius: 0, fill: false, tension: 0.4 })
+    // 全 0 时（今日尚无数据）钳 Y 到 [0,1]，避免 Chart.js 自动缩放出 $-0.2/0/0.2 这类负值刻度（消耗/转化/CPA 不可能为负）
+    const combined = yData ? data.concat(yData) : data
+    const allZero = !combined.length || combined.every(v => v === 0 || v == null)
     _charts.push(new Chart(canvas, {
       type: 'line',
       data: { labels, datasets },
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        scales: { y: { grid: { color: gridColor },
+        scales: { y: { grid: { color: gridColor }, min: allZero ? 0 : undefined, max: allZero ? 1 : undefined,
                      ticks: { color: textColor, font: { size: 12 }, callback: (v) => trendUnit + v } },
                   x: { grid: { display: false }, ticks: { color: textColor, font: { size: 12 }, maxRotation: 45 } } },
         plugins: { legend: { display: true, position: 'bottom',
