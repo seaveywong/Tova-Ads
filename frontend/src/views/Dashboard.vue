@@ -534,6 +534,7 @@ const submitAllowance = async () => {
 const _stCol = () => ({ key: 'st', label: t('common.status'), fmt: (v, a) => accountStatus(a.account_status).label })
 const VIEW_TABS = computed(() => [
   { mode: 'spend', label: t('dashboard.viewSpend') },
+  { mode: 'delivery', label: t('dashboard.viewDelivery') },
   { mode: 'conv', label: t('dashboard.viewConv') },
   { mode: 'cpa', label: t('dashboard.viewCpa') },
   { mode: 'leads', label: t('dashboard.viewLeads') },
@@ -545,6 +546,7 @@ const accountsTable = computed(() => {
   // balance 是账户属性不依赖快照（看全部）；性能视角只看无异常账户（error 账户去守护格看）
   let accs = mode === 'balance' ? [...(data.value.accounts || [])] : (data.value.accounts || []).filter(a => !a.error)
   if (mode === 'spend') accs.sort((a, b) => (b.spend_usd || 0) - (a.spend_usd || 0))
+  else if (mode === 'delivery') accs.sort((a, b) => (b.impressions || 0) - (a.impressions || 0))  // 高在上（曝光量最大的账户一眼可见）
   else if (mode === 'conv') accs.sort((a, b) => (a.conversions || 0) - (b.conversions || 0))  // 低在上（无转化需关注）
   else if (mode === 'cpa') accs.sort((a, b) => (b.cpa || 0) - (a.cpa || 0))  // 高在上（成本高需关注）
   else if (mode === 'leads') accs.sort((a, b) => (b.leads || 0) - (a.leads || 0))  // 高在上（出潜客的账户一眼可见）
@@ -561,6 +563,15 @@ const accountsTable = computed(() => {
   })
   const cols = mode === 'balance'
     ? [{ key: 'name', label: t('dashboard.colAccount'), left: true }, { key: 'balance', label: t('dashboard.colAvailable'), fmt: (v, a) => a.balance_kind === 'limited' ? fmtUsd(v) : t('dashboard.unlimited') }, { key: 'amount_spent_usd', label: t('dashboard.colUsed'), fmt: fmtUsd }, { key: 'spend_cap_usd', label: t('dashboard.colCap'), fmt: fmtUsd }, { key: 'urgency', label: t('dashboard.colUrgency'), fmt: (v, a) => urgencyLabel(a) }, _stCol()]
+    : mode === 'delivery'
+    ? [
+        { key: 'name', label: t('dashboard.colAccount'), left: true, bold: true },
+        { key: 'impressions', label: t('dashboard.colImpressions'), fmt: fmt, bold: true },
+        { key: 'clicks', label: t('dashboard.colClicks'), fmt: fmt },
+        { key: 'ctr', label: t('dashboard.colCtr'), fmt: (v, a) => (a.impressions > 0 && a.clicks != null) ? fmtPct(a.clicks / a.impressions * 100) : '—' },
+        { key: 'cpc', label: t('dashboard.colCpc'), fmt: (v, a) => (a.clicks > 0 && a.spend_usd != null) ? fmtUsd(a.spend_usd / a.clicks) : '—' },
+        _stCol(),
+      ]
     : mode === 'leads'
     ? [
         { key: 'name', label: t('dashboard.colAccount'), left: true, bold: true },
@@ -2119,6 +2130,17 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .block-detail { order: 5; }
   .card-header .search-input { width: 120px; }
   .ph-title { font-size: 18px; }
+  /* 账户明细表移动端：首列（账户名）横滑钉左 + 单元格收紧，多列横滑不丢上下文 */
+  .accounts-table { border-collapse: separate; border-spacing: 0; }
+  .accounts-table th.left, .accounts-table td.left { position: sticky; left: 0; background: var(--bg2); z-index: 2; box-shadow: 1px 0 0 var(--bd); }
+  .accounts-table thead th.left { z-index: 3; }
+  .accounts-table tbody tr:hover td.left { background: var(--bg3); }
+  .accounts-table tbody tr.selected-row td.left { background: var(--acg); }
+  .accounts-table tbody tr.removed-row td.left { background: var(--bg2); }
+  .accounts-table th, .accounts-table td { padding: 6px 10px; }
+  .accounts-table td { font-size: 12px; }
+  .status-tabs { flex-wrap: wrap; }
+  .accounts-card .table-tools { flex-wrap: wrap; }
 }
 </style>
 
