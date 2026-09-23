@@ -502,7 +502,7 @@ const todayBriefing = computed(() => {
     spend: kpiSpendDisplay.value,
     conversions: fmt(data.value.total_conversions),
     abnormalN: abnormal.length,
-    abnormalNames: abnormal.slice(0, 3).map(a => a.name || a.act_id).join('、'),
+    abnormalNames: abnormal.slice(0, 3).map(a => a.name || a.act_id).join(t('dashboard.nameSep')),
     alertsN: unreads.length,
     criticals, warnings,
     lowBalN: lowBal.length,
@@ -1218,7 +1218,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <div class="bf-chips" :class="{ calm: !todayBriefing.chips.length }">
           <template v-if="todayBriefing.chips.length">
             <button v-for="c in todayBriefing.chips" :key="c.key" :class="['bf-chip', c.lv]" @click="c.go && c.go()">
-              <span class="bf-chip-label">{{ c.n }} {{ c.label }}</span><em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">、</template></span></em>
+              <span class="bf-chip-label">{{ c.n }} {{ c.label }}</span><em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">{{ t('dashboard.nameSep') }}</template></span></em>
             </button>
           </template>
           <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>

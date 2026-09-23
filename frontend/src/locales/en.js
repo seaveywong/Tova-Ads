@@ -928,7 +928,7 @@ export default {
   teams: {
     title: 'Team Management',
     desc: 'All teams (tenants) on the platform. Creating a team automatically generates 3 system roles and lets you designate the first owner. Archived teams are hidden but their data is retained.',
-    summary: '{n} teams · {m} active · {d} domains',
+    summary: 'Teams {n} · Active {m} · Domains {d}',
     createTeam: 'Create Team', noTeams: 'No teams',
     teamName: 'Team Name', members: 'Members', adAccounts: 'Ad Accounts', createdAt: 'Created At',
     manage: 'Manage', manageTitle: 'Team Management · {name}', rename: 'Rename', suspend: 'Suspend', activate: 'Activate', archive: 'Archive', restore: 'Restore',

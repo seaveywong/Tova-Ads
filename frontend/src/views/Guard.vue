@@ -118,6 +118,12 @@ const ruleScopeTip = (r) => {
 }
 
 const isScaleType = (rt) => SCALE_TYPES.includes(rt)
+// 系统预置规则名翻译（DB 存中文名，按 rule_type 映射当前 locale；用户自建规则保留自定义名）
+const ruleDisplayName = (r) => {
+  if (r.created_by) return r.name
+  const meta = RULE_TYPES.value[r.rule_type]
+  return meta ? meta.label : r.name
+}
 const ACTIONS = computed(() => ({ observe: t('guard.action.observe'), pause: t('guard.action.pause'), default: t('guard.action.pause'), pause_adset: t('guard.action.pause_adset'), pause_campaign: t('guard.action.pause_campaign'), scale: t('guard.action.scale') }))
 const CONV_SRC = computed(() => ({ fb: t('guard.conv.fb'), either: t('guard.conv.either'), landing: t('guard.conv.landing') }))
 const LANDING_METRIC = computed(() => ({ pass: t('guard.lm.pass_short'), visit: t('guard.lm.visit_short') }))
@@ -405,7 +411,7 @@ const doInspect = async (force = false) => {
     <div v-else class="list" v-loading="loading">
       <div v-for="r in shownRules" :key="r.id" class="rule-card" :class="{ off: !r.enabled }">
         <div class="rule-head">
-          <span class="rule-name">{{ r.name }}</span>
+          <span class="rule-name">{{ ruleDisplayName(r) }}</span>
           <span :class="['owner-chip', { team: ruleIsTeam(r) }]" :title="ruleScopeTip(r)">{{ ruleScopeText(r) }}</span>
           <span class="cat-tag">{{ catLabel(r.category) }}</span>
           <el-switch v-model="r.enabled" @change="(val) => onToggle(r, val)" size="small" />
