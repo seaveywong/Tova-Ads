@@ -77,6 +77,7 @@ const renderTrendCharts = () => {
   const dark = document.documentElement.dataset.theme !== 'light'
   const gridColor = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)'
   const textColor = dark ? '#8e8e93' : '#6c6c70'
+  const trendUnit = trendMetric.value === 'conversions' ? '' : '$'   // Y 轴单位：转化无单位，消耗/CPA 为美元
   const mk = (canvas, label, data, color, s_key = '') => {
     if (!canvas) return
     // X 轴标签：后端返 UTC ISO 时间戳 → 前端用 fmtTime 按用户显示时区转
@@ -114,9 +115,11 @@ const renderTrendCharts = () => {
       data: { labels, datasets },
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        scales: { y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 12 } } },
+        scales: { y: { grid: { color: gridColor },
+                     ticks: { color: textColor, font: { size: 12 }, callback: (v) => trendUnit + v } },
                   x: { grid: { display: false }, ticks: { color: textColor, font: { size: 12 }, maxRotation: 45 } } },
-        plugins: { legend: { display: false } } },
+        plugins: { legend: { display: true, position: 'bottom',
+                     labels: { color: textColor, font: { size: 11 }, boxWidth: 20, boxHeight: 2, padding: 14 } } } },
     }))
   }
   const s = TREND_SERIES.value.find(x => x.key === trendMetric.value)
@@ -1833,6 +1836,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
 .bf-chip-label { white-space: nowrap; }  /* 前导标签（如「3 户异动」）也不断字，收缩压力不转嫁到标签 */
 .bf-chip-id { white-space: nowrap; }   /* 账户 ID 含连字符不中途断行，只在「、」处换行 */
+@media (max-width: 768px) {
+  .bf-chip { flex-wrap: wrap; }
+  .bf-chip em { flex: 1 1 100%; min-width: 0; }   /* ID 串独占一行，宽度=容器，可在分隔符处换行 */
+  .bf-chip-id { white-space: normal; }   /* 移动端长英文 ID 串在连字符/分隔符处换行，避免 .kpi-zone overflow:hidden 硬裁切（P1） */
+}
 .bf-chip.warn { color: var(--warning); background: rgba(255,159,10,.1); border-color: rgba(255,159,10,.3) }
 .bf-chip.crit { color: #fff; background: var(--error); border-color: var(--error) }
 .bf-chip:hover { filter: brightness(1.08) }
