@@ -5,8 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, setToken } from '../api'
 import { useTheme } from '../composables/useTheme'
 import { useLocale } from '../composables/useLocale'
-import { setUserTz, fmtTime } from '../composables/useTz'
-const fmtShort = (iso) => { try { return fmtTime(iso).split(' ')[0]?.slice(5) || '' } catch { return '' } }   // MM-DD（侧栏窄位摘要）
+import { setUserTz, userTz, fmtTime } from '../composables/useTz'
+const fmtShort = (iso) => { try { if (!iso || iso === 'None') return ''; let d = new Date(iso); if (isNaN(d) && typeof iso === 'string') { const hasTz = iso.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(iso); d = new Date(iso.replace(' ', 'T') + (hasTz ? '' : 'Z')) } if (isNaN(d)) return ''; const p = new Intl.DateTimeFormat('en-US', { timeZone: userTz.value, month: '2-digit', day: '2-digit' }).formatToParts(d); const g = t => (p.find(x => x.type === t) || {}).value || ''; return `${g('month')}-${g('day')}` } catch { return '' } }   // MM-DD（侧栏窄位摘要，locale 无关）
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 import PlatformSeg from '../components/PlatformSeg.vue'

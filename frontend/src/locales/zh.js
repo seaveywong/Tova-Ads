@@ -842,7 +842,7 @@ export default {
     cfOnboardNsHint: '到你的域名注册商 → DNS/Nameserver 设置 → 替换为以下 CF NS（点即复制）：',
     cfZonesTitle: '域名（zone）', cfPagesTitle: 'Pages 项目', cfNoZones: '暂无域名', cfNoRecords: '无 DNS 记录', cfLpLink: '关联的落地页',
     pbTitle: 'Porkbun 域名代购', pbDesc: '域名商店注册商凭据（porkbun.com → Account → API Access 创建）。', pbTest: '测试连接', pbTestOk: '连接成功（{a}）', pbHint: '配置后「落地页 → 购买域名」自动激活：查价/下单/注册/接入 CF 全自动。',
-    rgTitle: '域名注册商', rgDesc: '域名商店代购注册商：Dynadot（推荐，支持支付宝充值账户余额，API 从余额扣费）/ Porkbun（美元卡）。', rgSelect: '当前注册商', rgReady: '已配置', rgNoKey: '未配置凭据', rgDdHint: 'Dynadot → 账户 → Tools → API 生成 API Key（单 Key）。注册前需在 Dynadot 预存余额。', rgTestOk: '连接成功（{a}{b}）',
+    rgTitle: '域名注册商', rgDesc: '域名商店代购注册商：Dynadot（推荐，支持支付宝充值账户余额，API 从余额扣费）/ Porkbun（美元卡）。', rgSelect: '当前注册商', rgReady: '已配置', rgNoKey: '未配置凭据', rgDdHint: 'Dynadot → 账户 → Tools → API 生成 API Key（单 Key）。注册前需在 Dynadot 预存余额。', rgDynadotKeyPh: 'Tools → API 生成', rgTestOk: '连接成功（{a}{b}）',
     cfAccountNsTip: '注册商 NS 改为这两台（个别域名可能不同，以接入后返回为准）', cfPendingHint: 'NS 未生效，去注册商确认',
     cfUsageTitle: '用量与限额', cfToday: '今日', cfUvToday: '今日请求数 · 独立访客',
     cfLimitsLine: 'Free 档参考：静态请求 {a} · 带宽 {b} · Functions 调用 {c}/天 · 构建 {d}/月（付费档上调，以 zone 套餐为准）',
@@ -885,7 +885,7 @@ export default {
     emNoRoutes: '暂无映射',
     emDeleted: '已删除',
 
-    faTitle: '应用配置', faDesc: '平台 App 管理（Facebook OAuth / TikTok 连接）。', faFbSubTitle: 'Facebook 应用', ttSubTitle: 'TikTok 应用（令牌页 TT 分区发起连接）', ttAdd: '+ 新增 TikTok App', ttEmpty: '暂无 TikTok App', ttDefaultTag: '默认', ttFillBoth: '请填写 app_id 和 app_secret', ttDeleteConfirm: '删除 TikTok App「{name}」？使用它授权的令牌将失效。',
+    faTitle: '应用配置', faDesc: '平台 App 管理（Facebook OAuth / TikTok 连接）。', faFbSubTitle: 'Facebook 应用', ttSubTitle: 'TikTok 应用（令牌页 TT 分区发起连接）', ttAdd: '+ 新增 TikTok App', ttEmpty: '暂无 TikTok App', ttAppIdPh: 'TikTok Sandbox/正式 App ID', ttDefaultTag: '默认', ttFillBoth: '请填写 app_id 和 app_secret', ttDeleteConfirm: '删除 TikTok App「{name}」？使用它授权的令牌将失效。',
     faAdd: '+ 新建 App', faName: '名称', faNamePh: '如 Main App', faAppId: 'App ID', faSecret: 'App Secret',
     faSecretKeep: '留空 = 保持原 Secret 不变', faSystem: '系统级', faSystemOpt: '系统级 App（全团队共用，仅超管可建）',
     faFillBoth: 'App ID 和 Secret 必填', faDeleteConfirm: '删除 App {id}？使用它授权的令牌将无法续期，webhook 验签也将失效。', faEmpty: '暂无 App——点下方新建',

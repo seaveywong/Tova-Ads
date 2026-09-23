@@ -919,7 +919,7 @@ const runKeepaliveNow = async () => {
         <span v-else class="tag warn" style="margin-left:8px">{{ t('settings.rgNoKey') }}</span>
       </div>
       <template v-if="rgCfg.registrar === 'dynadot'">
-        <div class="form-l"><label>API Key</label><input v-model="rgForm.dynadot_api_key" class="input" :placeholder="rgCfg.dynadot.configured ? rgCfg.dynadot.key_masked : 'Tools → API 生成'" /></div>
+        <div class="form-l"><label>API Key</label><input v-model="rgForm.dynadot_api_key" class="input" :placeholder="rgCfg.dynadot.configured ? rgCfg.dynadot.key_masked : t('settings.rgDynadotKeyPh')" /></div>
         <div class="field-hint">{{ t('settings.rgDdHint') }}</div>
       </template>
       <template v-else>
@@ -1021,7 +1021,7 @@ const runKeepaliveNow = async () => {
           <div class="dlg-field"><label>{{ t('settings.faName') }}</label>
             <input v-model.trim="ttForm.name" class="input" :placeholder="t('settings.faNamePh')" /></div>
           <div class="dlg-field"><label>app_id</label>
-            <input v-model.trim="ttForm.app_id" class="input" placeholder="TikTok Sandbox/正式 App ID" /></div>
+            <input v-model.trim="ttForm.app_id" class="input" :placeholder="t('settings.ttAppIdPh')" /></div>
           <div class="dlg-field"><label>app_secret</label>
             <input v-model.trim="ttForm.app_secret" type="password" class="input" placeholder="app_secret" /></div>
         </div>
@@ -1235,7 +1235,7 @@ const runKeepaliveNow = async () => {
 .form-l > label{font-size:13px;color:var(--t2);white-space:normal;flex-shrink:0}
 .input{flex:1;min-width:0;padding:7px 10px;background:var(--bg3);border:1px solid var(--bd);border-radius:6px;color:var(--t1);font-size:13px;font-family:inherit;box-sizing:border-box}
 .input:focus{border-color:var(--ac);outline:none}
-@media (max-width:600px){.form-l{flex-direction:column;align-items:stretch;gap:4px}}
+@media (max-width:600px){.form-l{flex-direction:column;align-items:stretch;gap:4px}.form-l > label{flex:0 0 auto}}
 
 /* 数据保留 */
 .ret-head{display:grid;grid-template-columns:1fr 110px 1.2fr;gap:8px;padding:4px 12px;font-size:10px;color:var(--t3);text-transform:uppercase}
@@ -1249,7 +1249,7 @@ const runKeepaliveNow = async () => {
 .fx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
 @media (max-width: 768px) {
   .task-head,.task-row,.ret-head,.ret-row{grid-template-columns:1fr 1fr;row-gap:4px}
-  .anchor-strip{flex-wrap:wrap}
+  .anchor-strip{flex-wrap:nowrap;overflow-x:auto}
 }
 .fx-cell{display:flex;justify-content:space-between;padding:7px 11px;background:var(--bg3);border-radius:6px;font-size:12px}
 .fx-code{color:var(--t3);font-weight:600}

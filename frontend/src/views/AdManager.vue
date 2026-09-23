@@ -1104,7 +1104,7 @@ const unsubscribeLeads = async () => {
         </tbody>
         <tfoot v-if="curList.length"><tr><td></td><td></td><td>{{ totalLabel }}</td><td v-for="col in visibleColumns" :key="col.id">{{ sumMetric(col.id) }}</td><td></td></tr></tfoot>
       </table>
-      <div v-if="!curList.length && !loading && !loadError" class="empty">{{ t('adm.emptyAdsHint') }}<button class="btn primary" style="margin-top:10px" @click="router.push({ name: 'launch-templates' })">+ {{ t('launch.newTemplate') }}</button></div>
+      <div v-if="!curList.length && !loading && !loadError" class="empty"><span>{{ t('adm.emptyAdsHint') }}</span><button class="btn primary" @click="router.push({ name: 'launch-templates' })">+ {{ t('launch.newTemplate') }}</button></div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
       <div class="leads-bar">
@@ -1380,7 +1380,7 @@ const unsubscribeLeads = async () => {
 .budget-cell { cursor: default }
 .budget-cell.editable { cursor: pointer; color: var(--ac) }
 .budget-cell.editable:hover { text-decoration: underline; text-decoration-style: dotted }
-.empty { padding: 40px; text-align: center; color: var(--t3); font-size: 13px }
+.empty { padding: 40px; text-align: center; color: var(--t3); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 14px }
 .budget-form { display: flex; flex-direction: column; gap: 8px }
 .budget-form label { font-size: 12px; color: var(--t3) }
 .budget-input { width: 100%; padding: 8px 12px; font-size: 18px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 6px; box-sizing: border-box }

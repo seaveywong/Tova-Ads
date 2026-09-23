@@ -831,7 +831,7 @@ export default {
     cfOnboardNsHint: 'At your registrar → DNS/Nameserver settings → replace with these CF nameservers (click to copy):',
     cfZonesTitle: 'Domains (zones)', cfPagesTitle: 'Pages projects', cfNoZones: 'No domains', cfNoRecords: 'No DNS records', cfLpLink: 'Linked landing page',
     pbTitle: 'Porkbun domains', pbDesc: 'Domain shop registrar credentials (porkbun.com → Account → API Access).', pbTest: 'Test', pbTestOk: 'Connected ({a})', pbHint: 'Once configured, Landing → Buy domain activates: pricing/order/register/CF onboarding fully automated.',
-    rgTitle: 'Domain registrar', rgDesc: 'Registrar for the domain shop: Dynadot (recommended — Alipay top-up, API spends from account balance) / Porkbun (USD card).', rgSelect: 'Active registrar', rgReady: 'Configured', rgNoKey: 'No credentials', rgDdHint: 'Dynadot → account → Tools → API to generate the API Key (single key). Prepay balance before registering.', rgTestOk: 'Connected ({a}{b})',
+    rgTitle: 'Domain registrar', rgDesc: 'Registrar for the domain shop: Dynadot (recommended — Alipay top-up, API spends from account balance) / Porkbun (USD card).', rgSelect: 'Active registrar', rgReady: 'Configured', rgNoKey: 'No credentials', rgDdHint: 'Dynadot → account → Tools → API to generate the API Key (single key). Prepay balance before registering.', rgDynadotKeyPh: 'Tools → API', rgTestOk: 'Connected ({a}{b})',
     cfAccountNsTip: 'Set registrar NS to these two (a domain may differ — the onboarding result is authoritative)', cfPendingHint: 'NS not active yet — check your registrar',
     cfUsageTitle: 'Usage & limits', cfToday: 'Today', cfUvToday: 'Requests today · unique visitors',
     cfLimitsLine: 'Free tier reference: static requests {a} · bandwidth {b} · Functions invocations {c}/day · builds {d}/month (higher on paid plans, per zone plan)',
@@ -874,7 +874,7 @@ export default {
     emNoRoutes: 'No mappings yet',
     emDeleted: 'Deleted',
 
-    faTitle: 'App Config', faDesc: 'Platform app management (Facebook OAuth / TikTok connect).', faFbSubTitle: 'Facebook Apps', ttSubTitle: 'TikTok Apps (connect from the Tokens TT section)', ttAdd: '+ Add TikTok App', ttEmpty: 'No TikTok apps yet', ttDefaultTag: 'Default', ttFillBoth: 'app_id and app_secret are required', ttDeleteConfirm: 'Delete TikTok app "{name}"? Tokens authorized with it will stop working.',
+    faTitle: 'App Config', faDesc: 'Platform app management (Facebook OAuth / TikTok connect).', faFbSubTitle: 'Facebook Apps', ttSubTitle: 'TikTok Apps (connect from the Tokens TT section)', ttAdd: '+ Add TikTok App', ttEmpty: 'No TikTok apps yet', ttAppIdPh: 'TikTok Sandbox / Production App ID', ttDefaultTag: 'Default', ttFillBoth: 'app_id and app_secret are required', ttDeleteConfirm: 'Delete TikTok app "{name}"? Tokens authorized with it will stop working.',
     faAdd: '+ New App', faName: 'Name', faNamePh: 'e.g. Main App', faAppId: 'App ID', faSecret: 'App Secret',
     faSecretKeep: 'Leave empty to keep current secret', faSystem: 'System', faSystemOpt: 'System app (shared, superadmin only)',
     faFillBoth: 'App ID and Secret are required', faDeleteConfirm: 'Delete App {id}? Tokens authorized with it cannot renew, webhook verification breaks.', faEmpty: 'No apps yet — create one below',
