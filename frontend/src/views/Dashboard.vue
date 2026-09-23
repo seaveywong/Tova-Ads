@@ -138,6 +138,8 @@ const conversionCategory = ref('all')  // ① 转化分类（全部/购物/私�
 const selectedActs = ref([])  // ③ 账户多选（act_id 列表）
 const mobileFilters = ref(false)  // 移动端：日期+筛选行折叠开关（桌面恒展开）
 const mainTab = ref('data')     // 数据看板 / 落地页数据 两个 Tab（用户点名）
+const trendOpen = ref(false)    // 趋势图默认折叠（一眼看全：复盘图收进底部，点开才画）
+const toggleTrend = () => { trendOpen.value = !trendOpen.value; if (trendOpen.value) nextTick(renderTrendCharts) }
 const { platform } = usePlatform()
 // 分区范围 chip：平台≠all 时显示 "Facebook · N 账户"（后端已按平台过滤 accounts，直接取长度）
 const scopeChip = computed(() => {
@@ -466,14 +468,12 @@ const coreCards = computed(() => [
   { label: t('dashboard.kpiTotalConv'), value: fmt(data.value.total_conversions), mode: 'conv', spark: sparkPoints(trendData.value.conversions), dod: dodPct(data.value.total_conversions, data.value.yesterday_conversions) },
   { label: t('dashboard.kpiAvgCpa'), value: fmtUsd(data.value.total_cpa), mode: 'cpa', spark: sparkPoints(trendData.value.cpa) },
 ])
-const ctrDisplay = computed(() => data.value.total_impressions > 0 ? ((data.value.total_clicks / data.value.total_impressions) * 100).toFixed(2) + '%' : '—')
+const cpmDisplay = computed(() => data.value.total_impressions > 0 ? fmtUsd((data.value.total_spend / data.value.total_impressions) * 1000) : '—')
 const rechargeAlertCount = computed(() => (data.value.accounts || []).filter(a => a.balance_kind === 'limited' && !a.removed && (a.balance || 0) <= 100).length)
 const subCards = computed(() => [
   { label: t('dashboard.kpiAvgRoas'), value: data.value.total_roas ? data.value.total_roas + '×' : '—', mode: 'roas' },
   { label: t('dashboard.kpiLeads'), value: fmt(data.value.total_leads) + (data.value.total_leads > 0 && data.value.total_cpl ? ` (${fmtUsd(data.value.total_cpl)})` : ''), mode: 'leads' },
-  { label: t('dashboard.kpiImpressions'), value: fmt(data.value.total_impressions) },
-  { label: t('dashboard.kpiClicks'), value: fmt(data.value.total_clicks) },
-  { label: t('dashboard.kpiCtr'), value: ctrDisplay.value },
+  { label: t('dashboard.kpiCpm'), value: cpmDisplay.value },
   { label: t('dashboard.kpiBalance'), value: fmtUsd(data.value.total_balance), mode: 'balance', alert: rechargeAlertCount.value },
 ])
 
@@ -1199,7 +1199,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
          非今日=三大主卡+次级条；不再出现两条细棒卡片堆叠 -->
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
     <div v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
-        <div class="bf-light"><span class="bf-dot"></span><span class="bf-word">{{ todayBriefing.word }}</span></div>
         <div class="bf-nums">
           <div class="bf-num go" @click="setAccountView('spend')" :title="t('dashboard.bfNumGo')">
             <em>{{ todayBriefing.spend }}<i v-if="todayBriefing.dodSpend" class="bf-dod" :class="{ good: todayBriefing.dodSpend.startsWith('-'), bad: !todayBriefing.dodSpend.startsWith('-') }">{{ todayBriefing.dodSpend }}</i></em>
@@ -1232,9 +1231,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           </div>
           <span class="kpi-value">{{ card.value }}<span v-if="card.dod" class="kpi-dod" :class="{ good: card.dodGoodDown ? card.dod.startsWith('-') : !card.dod.startsWith('-'), bad: card.dodGoodDown ? !card.dod.startsWith('-') : card.dod.startsWith('-') }">{{ card.dod }}</span></span>
           <span v-if="card.sub" class="kpi-sub">{{ card.sub }}</span>
-          <svg v-if="card.spark" class="kpi-spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">
-            <polyline :points="card.spark" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
         </div>
       </div>
       <div class="kpi-strip">
@@ -1252,8 +1248,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <div class="tm-title-wrap">
           <span class="card-title">{{ t('dashboard.trend') }}</span>
           <span v-if="scopeChip" class="scope-chip">{{ scopeChip }}</span>
+          <button class="trend-toggle" :class="{ open: trendOpen }" @click="toggleTrend" :aria-expanded="trendOpen">
+            <span class="trend-chevron">▾</span>
+          </button>
         </div>
-        <div class="tm-controls">
+        <div v-show="trendOpen" class="tm-controls">
           <div class="status-tabs">
             <button v-for="s in TREND_SERIES" :key="s.key" class="status-tab" :class="{ active: trendMetric === s.key }" @click="trendMetric = s.key">{{ s.label }}</button>
           </div>
@@ -1262,8 +1261,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           </div>
         </div>
       </div>
-      <div v-if="trendData.labels?.length" class="trend-main-canvas"><canvas ref="trendCanvas"></canvas></div>
-      <div v-else class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
+      <div v-if="trendOpen && trendData.labels?.length" class="trend-main-canvas"><canvas ref="trendCanvas"></canvas></div>
+      <div v-else-if="trendOpen" class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
     </div>
 
     <div v-show="mainTab === 'data'" class="main-split" :class="{ 'no-accs': !hasManagedAccs }">
@@ -1687,14 +1686,20 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   grid-auto-flow: dense;
 }
 .dashboard > * { grid-column: 1 / -1; min-width: 0; }
-/* 布局定稿（视觉批 09-22）：KPI 命令卡整行定调 → 账户明细(60%)与守护/待办(40%)并排
-   → 告警中心整行 → 趋势收尾。命令卡含 hero 头+次级条，挤 60% 列会换行，整行才立得住 */
+/* 布局定稿（一眼看全批 09-23）：KPI 命令卡整行 → 行动中心(告警)整行紧跟 → 账户明细(60%)与守护/待办(40%)并排
+   → 趋势折叠收尾。行动中心提到首屏：异常/待办/待充值第一时间可见，不再被账户表挤到折叠线以下 */
 .kpi-zone { order: 1; }
-.accounts-card { order: 2; grid-column: 1; }
-.guard-col { order: 3; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.alert-center { order: 4; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
+.alert-center { order: 2; grid-column: 1 / -1; }   /* display:contents 晋级的孙级拿不到 >* 整行规则——显式整行（曾与账户卡被 dense 回填并排） */
+.accounts-card { order: 3; grid-column: 1; }
+.guard-col { order: 4; grid-column: 2; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .trend-main:not(.landing-trend) { order: 5; }
 @media (max-width: 1024px) { .dashboard { grid-template-columns: 1fr; } .kpi-zone, .accounts-card, .alert-center, .trend-main:not(.landing-trend), .guard-col { grid-column: 1 / -1; } }
+
+/* 趋势折叠开关（一眼看全批）：标题行右侧小箭头，默认收起图表 */
+.trend-toggle { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 6px; cursor: pointer; color: var(--t3); transition: all .15s; flex-shrink: 0; }
+.trend-toggle:hover { color: var(--ac); border-color: var(--ac); }
+.trend-chevron { font-size: 11px; line-height: 1; transition: transform .18s; }
+.trend-toggle.open .trend-chevron { transform: rotate(180deg); }
 
 /* ── 页头（非 sticky）：标题 + 数据新鲜度 ｜ 巡检倒计时 + 动作按钮 ── */
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; flex-wrap: wrap; }
@@ -1864,8 +1869,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .kpi-sub { font-size: 10px; color: var(--t3); }
 .kpi-spark { width: 100%; height: 24px; color: var(--ac); opacity: 0.5; margin-top: 4px; display: block; }
 /* 次要 4 指标：hero 大卡底部一行 inline 指标（无独立卡片），竖分隔线分列 */
-.kpi-strip { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid var(--bd); background: rgba(0,0,0,.12); }   /* 三轮修复：6 指标曾按 4 列换行错乱 */
-@media (max-width: 1024px) { .kpi-strip { grid-template-columns: repeat(3, 1fr); } }
+.kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--bd); background: rgba(0,0,0,.12); }   /* 一眼看全批：次级指标 6→4（去曝光/点击/CTR，加 CPM），一行放下不再换行 */
+@media (max-width: 1024px) { .kpi-strip { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 640px) { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
 .strip-metric { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; min-width: 0; position: relative; border-right: 1px solid var(--bd); background: transparent; border-radius: 0; box-shadow: none; }
 .strip-metric:last-child { border-right: none; }
