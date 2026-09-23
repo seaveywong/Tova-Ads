@@ -220,6 +220,7 @@ export default {
     lpDraft: 'Draft',
     lpArchived: 'Archived',
     tenantActive: 'Active',
+    tenantMustChangePwd: 'Password reset required',
     tenantInvited: 'Invited',
     tenantSuspended: 'Suspended',
     tenantArchived: 'Archived',

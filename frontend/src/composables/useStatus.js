@@ -159,6 +159,7 @@ export const lpStatus = (s) => {
 // 租户 / 成员状态
 export const TENANT_STATUS = {
   active:    { key: 'status.tenantActive',    cls: 'ok' },
+  'must_change_password': { key: 'status.tenantMustChangePwd', cls: 'warn' },
   invited:   { key: 'status.tenantInvited',   cls: 'warn' },
   suspended: { key: 'status.tenantSuspended', cls: 'off' },
   archived:  { key: 'status.tenantArchived',  cls: 'off' },

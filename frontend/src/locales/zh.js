@@ -229,6 +229,7 @@ export default {
     lpArchived: '已归档',
     // 租户/成员
     tenantActive: '正常',
+    tenantMustChangePwd: '待重设密码',
     tenantInvited: '已邀请',
     tenantSuspended: '已停用',
     tenantArchived: '已归档',

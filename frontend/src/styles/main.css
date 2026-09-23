@@ -243,6 +243,16 @@ a { color: var(--ac); text-decoration: none; }
 .el-drawer__title { white-space: normal !important; line-height: 1.4; font-size: 15px; }
 .el-drawer__close-btn { color: var(--t3) !important; }
 .el-drawer__body { color: var(--t1); }
+/* el-select 全局主题化（UI审计补漏：此前 el-input/el-dropdown 已主题化，唯 el-select 漏网 → 暗色下白底） */
+.el-select__wrapper { background-color: var(--bg3) !important; box-shadow: 0 0 0 1px var(--bd) inset !important; }
+.el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--ac) inset !important; }
+.el-select__wrapper .el-select__placeholder, .el-select__wrapper .el-select__selected-item { color: var(--t2) !important; }
+.el-select-dropdown__item { color: var(--t1) !important; }
+.el-select-dropdown__item.is-hovering, .el-select-dropdown__item:hover { background: var(--bg3) !important; }
+.el-select-dropdown__item.is-selected { color: var(--ac) !important; }
+.el-select-dropdown__item.is-disabled { color: var(--t3) !important; opacity: .5; }
+.el-select .el-tag { background: var(--bg3) !important; border-color: var(--bd2) !important; color: var(--t2) !important; }
+.el-select .el-tag .el-tag__close { color: var(--t3) !important; }
 
 /* ── 移动端响应式（全局）── 一处规则修好所有页的水平表单行 + el-drawer 撑满 */
 @media (max-width: 768px) {
