@@ -485,45 +485,6 @@ const kpiMode = ref(null)  // pause / allowance / coverage
 const coverageText = computed(() => { const m = (data.value.accounts || []).filter(a => a.is_managed !== false); return `${m.filter(a => !a.error || a.error === 'cross_tz').length}/${m.length}` })
 const accStatusActive = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status === 1).length)
 const accStatusBad = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status !== 1).length)
-// 账户异常原因：优先用 FB 禁用原因（政策封禁/支付失败等，更具体），无则回退账户状态标签（禁用/未结算等）
-const abnReason = (a) => {
-  const dr = disableReason(a.disable_reason)
-  if (dr) return dr.label
-  return accountStatus(a.account_status).label
-}
-// ── 今日晨报（便捷性批 2026-09-15）：打开看板第一眼知全局 ──
-const todayBriefing = computed(() => {
-  const accs = data.value.accounts || []
-  const abnormal = (data.value.status_changes_today || []).filter(c => !c.recovered)   // 今日新异常（事件驱动），非「当前所有异常」快照
-  const unreads = (recentNotifs.value || []).filter(n => !n.read)
-  const criticals = unreads.filter(n => n.level === 'critical').length
-  const warnings = unreads.filter(n => n.level === 'warning').length
-  const lowBal = accs.filter(a => !a.removed && a.balance_kind === 'limited' && (a.balance || 0) <= 100)
-  // 直观性批：红绿灯三态 + 可点 chips（要处理的事一键直达对应面板）
-  const chips = []
-  if (criticals > 0) chips.push({ key: 'crit', lv: 'crit', n: criticals, label: t('dashboard.bfChipCrit'), go: () => { notifMode.value = 'all'; notifFilter.value = 'critical' } })
-  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => `${a.name || a.act_id}（${abnReason(a)}）`), go: () => setAccountView('spend') })
-  if (lowBal.length) chips.push({ key: 'low', lv: 'warn', n: lowBal.length, label: t('dashboard.bfLowBal'), go: () => setAccountView('balance') })
-  if (warnings > 0) chips.push({ key: 'warn', lv: 'warn', n: warnings, label: t('dashboard.bfChipWarn'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
-  const level = criticals > 0 ? 'crit' : (chips.length ? 'warn' : 'ok')
-  const word = level === 'ok' ? t('dashboard.bfStatusOk') : level === 'crit' ? t('dashboard.bfStatusCrit') : t('dashboard.bfStatusWarn')
-  return {
-    spend: kpiSpendDisplay.value,
-    conversions: fmt(data.value.total_conversions),
-    abnormalN: abnormal.length,
-    abnormalNames: abnormal.slice(0, 3).map(a => a.name || a.act_id).join(t('dashboard.nameSep')),
-    alertsN: unreads.length,
-    criticals, warnings,
-    lowBalN: lowBal.length,
-    pausedN: data.value.pause_count || 0,
-    ok: level === 'ok',
-    level, word, chips,
-    dodSpend: dodPct(data.value.total_spend, data.value.yesterday_spend),   // 较昨日全天
-    dodConv: dodPct(data.value.total_conversions, data.value.yesterday_conversions),
-  }
-})
-const kpiCpaDisplay = computed(() => fmtUsd(data.value.total_cpa))
-
 const guardCells = computed(() => [
   { mode: 'accstatus', label: t('dashboard.kpiAccStatus'), value: `${accStatusActive.value}/${accStatusActive.value + accStatusBad.value}`, danger: accStatusBad.value > 0 },
   { mode: 'pause', label: t('dashboard.kpiAutoPause'), value: fmt(data.value.pause_count), danger: data.value.pause_count > 0 },
@@ -1210,32 +1171,9 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
       </div>
     </div>
 
-    <!-- KPI 命令卡（视觉批 09-22）：晨报 hero 并入 kpi-zone 同一张卡——今日=状态头+三大数+次级条，
-         非今日=三大主卡+次级条；不再出现两条细棒卡片堆叠 -->
+    <!-- KPI 命令卡：三主卡（消耗/转化/CPA）+ 次级条（ROAS/线索/CPM/可用额度），今日与历史日期同一格式 -->
     <div v-show="mainTab === 'data'" class="kpi-zone" v-loading="loading">
-    <div v-if="datePreset === 'today'" :class="['bf-hero', todayBriefing.level]">
-        <div class="bf-nums">
-          <div class="bf-num go" @click="setAccountView('spend')" :title="t('dashboard.bfNumGo')">
-            <em>{{ todayBriefing.spend }}<i v-if="todayBriefing.dodSpend" class="bf-dod" :class="{ good: todayBriefing.dodSpend.startsWith('-'), bad: !todayBriefing.dodSpend.startsWith('-') }">{{ todayBriefing.dodSpend }}</i></em>
-            <span>{{ t('dashboard.bfSpend') }}</span></div>
-          <div class="bf-num go" @click="setAccountView('conv')" :title="t('dashboard.bfNumGo')">
-            <em>{{ todayBriefing.conversions }}<i v-if="todayBriefing.dodConv" class="bf-dod" :class="{ good: !todayBriefing.dodConv.startsWith('-'), bad: todayBriefing.dodConv.startsWith('-') }">{{ todayBriefing.dodConv }}</i></em>
-            <span>{{ t('dashboard.bfConv') }}</span></div>
-          <div class="bf-num go" @click="setAccountView('cpa')" :title="t('dashboard.bfNumGo')">
-            <em>{{ kpiCpaDisplay }}</em><span>{{ t('dashboard.kpiAvgCpa') }}</span></div>
-        </div>
-        <div class="bf-chips" :class="{ calm: !todayBriefing.chips.length }">
-          <template v-if="todayBriefing.chips.length">
-            <button v-for="c in todayBriefing.chips" :key="c.key" :class="['bf-chip', c.lv]" @click="c.go && c.go()">
-              <span class="bf-chip-label">{{ c.n }} {{ c.label }}</span><em v-if="c.sub && c.sub.length"> · <span v-for="(s, i) in c.sub" :key="i" class="bf-chip-id">{{ s }}<template v-if="i < c.sub.length - 1">{{ t('dashboard.nameSep') }}</template></span></em>
-            </button>
-          </template>
-          <span v-else class="bf-calm">{{ t('dashboard.bfAllGood') }}</span>
-        </div>
-    </div>
-
-      <!-- 非今日：三大主卡行（今日的三大数由上方 hero 头承载，同屏不双份） -->
-      <div v-else class="kpi-core-grid">
+      <div class="kpi-core-grid">
         <div v-for="card in coreCards" :key="card.mode" class="kpi-card" :class="{ active: accountView === card.mode }" @click="setAccountView(card.mode)">
           <div class="kpi-card-top">
             <span class="kpi-label">{{ card.label }}</span>
@@ -1817,53 +1755,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .detail-search:focus { outline: none; border-color: var(--ac); }
 .detail-search::placeholder { color: var(--t3); }
 
-/* ── KPI 分层：核心 4 大卡 + 次要 4 小卡 ── */
-/* KPI 记分卡：核心 5 + 次要 4 = 9 卡。≥1400 宽屏 5 列（核心行+次要行），<1400 回 3 列，≤768 2 列 */
-/* ── 晨报卡：hero 区顶部一句话（绿色=安心 / 黄色=需关注）── */
-/* 今日健康 hero（直观性批 09-22）：状态灯定调 → 三大数 → 要处理 chips */
-/* 视觉批 09-22：hero 不再是独立卡——kpi-zone 顶部的区块（tint 底色+底部分隔线），
-   与下方次级指标条合成一张命令卡 */
-.bf-hero { display: flex; align-items: center; gap: 22px; padding: 18px 26px 15px; border-radius: 12px 12px 0 0; border-bottom: 1px solid var(--bd); flex-wrap: wrap; row-gap: 10px; }
-/* 一眼看全批：状态灯已砍，hero 底线回归中性（原 crit/warn 会把底线染红/橙，灯没了后像 bug） */
-.bf-hero.ok { background: rgba(48,209,88,.05) }
-.bf-hero.warn { background: rgba(255,159,10,.05) }
-.bf-hero.crit { background: rgba(255,69,58,.05) }
-.bf-nums { display: flex; flex-wrap: wrap; gap: 34px; margin-left: 4px }
-.bf-num { display: flex; flex-direction: column; min-width: 72px }
-.bf-num em { font-style: normal; font-size: 28px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
-.bf-num.go { cursor: pointer; padding: 4px 8px; margin: -4px -8px; border-radius: 8px; transition: background .15s }
-.bf-num.go:hover { background: rgba(255,255,255,.05) }
-.bf-dod { font-style: normal; font-size: 12px; font-weight: 600 }
-.bf-dod.good { color: var(--success) }
-.bf-dod.bad { color: var(--error) }
-.bf-num span { font-size: 11px; color: var(--t3) }
-@media (max-width: 768px) { .bf-nums { gap: 18px 26px } }   /* 移动端三大数放不下时换行，不再被 .kpi-zone overflow:hidden 裁掉末位（$21.3 → $21.31） */
-.bf-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto }
-.bf-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; background: none; font-family: inherit }
-.bf-chip em { font-style: normal; font-weight: 400; opacity: .75; font-size: 11px }
-.bf-chip-label { white-space: nowrap; }  /* 前导标签（如「3 户异动」）也不断字，收缩压力不转嫁到标签 */
-.bf-chip-id { white-space: nowrap; }   /* 账户 ID 含连字符不中途断行，只在「、」处换行 */
-@media (max-width: 768px) {
-  .bf-chip { flex-wrap: wrap; }
-  .bf-chip em { flex: 1 1 100%; min-width: 0; }   /* ID 串独占一行，宽度=容器，可在分隔符处换行 */
-  .bf-chip-id { white-space: normal; }   /* 移动端长英文 ID 串在连字符/分隔符处换行，避免 .kpi-zone overflow:hidden 硬裁切（P1） */
-}
-.bf-chip.warn { color: var(--warning); background: rgba(255,159,10,.1); border-color: rgba(255,159,10,.3) }
-.bf-chip.crit { color: #fff; background: var(--error); border-color: var(--error) }
-.bf-chip:hover { filter: brightness(1.08) }
-.bf-chips.calm { margin-left: 0; }   /* 平静态：全部正常 紧跟大数字，不顶到最右留 76% 死区 */
-.bf-calm { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--success); background: rgba(48,209,88,.1); border: 1px solid rgba(48,209,88,.3); }
-.briefing { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 10px; margin-bottom: 10px; font-size: 13px; cursor: default; }
-.briefing.ok { background: rgba(48,209,88,.06); border: 1px solid rgba(48,209,88,.2) }
-.briefing.warn { background: rgba(255,159,10,.06); border: 1px solid rgba(255,159,10,.25) }
-.bf-icon { font-size: 16px; flex: none }
-.bf-main { color: var(--t2); line-height: 1.6 }
-.bf-main b { color: var(--t1); font-size: 15px; font-variant-numeric: tabular-nums }
-.bf-bad { color: var(--error); font-weight: 600 }
-.bf-warn { color: var(--warning); font-weight: 500 }
-.bf-main em { font-style: normal; font-size: 11px; opacity: .8 }
-
-/* ── KPI hero 带：一张大卡内 5 核心 + 4 次要（取代 9 张独立卡的碎片感）── */
+/* ── KPI hero 带：一张大卡内 3 核心 + 4 次要（取代 9 张独立卡的碎片感）── */
 .kpi-zone { display: flex; flex-direction: column; gap: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; padding: 0; overflow: hidden; box-shadow: var(--shadow-card); }
 .kpi-core-grid { display: grid; grid-template-columns: repeat(3, 1fr); }   /* 直观性批：主卡 3——一句话讲完一件事 */
 @media (max-width: 768px) { .kpi-core-grid { grid-template-columns: repeat(1, 1fr); } }
