@@ -18,7 +18,23 @@ const load = async () => {
 }
 onMounted(load)
 
-const FIELD_LABEL = (f) => mapping.value?.field_labels?.[f] || f
+// 字段 key → i18n key（field_labels 存的是中文，按稳定 key 本地化；自定义标签回退原值）
+const FIELD_I18N = {
+  'offsite_conversion.fb_pixel_purchase': 'kpi.fieldPurchase', 'purchase': 'kpi.fieldPurchase', 'omni_purchase': 'kpi.fieldPurchase',
+  'offsite_conversion.fb_pixel_lead': 'kpi.fieldLead', 'onsite_conversion.lead_grouped': 'kpi.fieldLead', 'lead': 'kpi.fieldLead',
+  'onsite_conversion.messaging_conversation_started_7d': 'kpi.fieldMessaging',
+  'app_install': 'kpi.fieldAppInstall', 'complete_registration': 'kpi.fieldRegistration',
+  'like': 'kpi.fieldPageLike', 'post_engagement': 'kpi.fieldPostEngagement', 'link_click': 'kpi.fieldLinkClick',
+  'landing_page_view': 'kpi.fieldLandingView', 'video_view': 'kpi.fieldVideoView', 'thruplay': 'kpi.fieldThruplay',
+  'offsite_conversion.fb_pixel_add_to_cart': 'kpi.fieldAddToCart',
+  'offsite_conversion.fb_pixel_initiate_checkout': 'kpi.fieldInitiateCheckout',
+  'tt.conversions': 'kpi.fieldTtConversion',
+}
+const FIELD_LABEL = (f) => {
+  const i18nKey = FIELD_I18N[f]
+  if (i18nKey) return t(i18nKey)
+  return mapping.value?.field_labels?.[f] || f
+}
 
 // 矩阵 → 按 objective 分组
 const matrixGrouped = ref({})
@@ -114,7 +130,7 @@ const resetDefault = async () => {
         <div v-for="(v, k) in mapping?.field_labels" :key="k" class="kv-readonly">
           <code class="kv-key">{{ k }}</code>
           <span class="arrow">→</span>
-          <span class="kv-label">{{ v }}</span>
+          <span class="kv-label">{{ FIELD_LABEL(k) }}</span>
         </div>
       </div>
     </div>
