@@ -313,6 +313,7 @@ a { color: var(--ac); text-decoration: none; }
 /* ── el-table 暗色主题化（UI审计：此前只主题化 th，td 沿用 EP 白底 → 暗色下整表白底、浅色文字不可读）── */
 .el-table { --el-table-bg-color: var(--bg2); --el-table-tr-bg-color: var(--bg2); --el-table-border-color: var(--bd); }
 .el-table td.el-table__cell { background-color: var(--bg2); color: var(--t1); }
+.el-table th.el-table__cell { white-space: nowrap; }
 .el-table .el-table__expanded-cell { background-color: var(--bg2); }
 /* 落地页 ⋯ 菜单「彻底删除」项（弹层 teleport 到 body，须全局） */
 .el-dropdown-menu__item.danger-item { color: var(--error) !important }

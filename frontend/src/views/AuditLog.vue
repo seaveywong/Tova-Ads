@@ -177,7 +177,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
         </div>
       </div>
 
-      <div class="tbl-wrap"><el-table :data="logs" v-loading="loading" style="width:100%" :empty-text="t('common.noData')" row-key="id" size="small"
+      <div class="tbl-wrap"><el-table :data="logs" v-loading="loading" style="width:100%;min-width:880px" :empty-text="t('common.noData')" row-key="id" size="small"
                 @expand-change="onExpandChange">
         <el-table-column type="expand">
           <template #default="{ row }">

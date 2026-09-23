@@ -240,7 +240,7 @@ const submitMemberAdd = async () => {
         <button class="btn primary" @click="openCreate"><span class="plus">+</span> {{ t('teams.createTeam') }}</button>
       </div>
     </header>
-    <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%" :empty-text="t('teams.noTeams')" row-key="id">
+    <div class="tbl-wrap"><el-table :data="teams" v-loading="loading" style="width:100%;min-width:920px" :empty-text="t('teams.noTeams')" row-key="id">
         <el-table-column prop="id" label="ID" width="52" align="center" />
         <el-table-column :label="t('teams.teamName')" min-width="220">
           <template #default="{ row }">
@@ -260,7 +260,7 @@ const submitMemberAdd = async () => {
             <button :class="['num', 'num-btn', { zero: row.domains === 0 }]" :title="t('teams.domainTitle', { name: row.name })" @click="openManage(row, 'domains')">{{ row.domains || 0 }}</button>
           </template>
         </el-table-column>
-        <el-table-column :label="t('teams.adAccounts')" width="88" align="center">
+        <el-table-column :label="t('teams.adAccounts')" width="100" align="center">
           <template #default="{ row }">
             <span :class="['num', { zero: row.accounts === 0 }]">{{ row.accounts }}</span>
           </template>
