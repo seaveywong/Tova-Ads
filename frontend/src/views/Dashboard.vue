@@ -878,6 +878,12 @@ const NOTIF_EVENT_LABEL_KEY = {
   sentinel_perm_denied: 'dashboard.evSentinelPermDenied',
   kpi_resolve_error: 'dashboard.evKpiError',
   ai_quota_exhausted: 'dashboard.evAiQuota',
+  // 补齐后端 emit_notification 全集（2026-09-23 漏 10 个 → 今日摘要 chip 裸显英文码）
+  sentinel_auto_armed: 'dashboard.evSentinelAutoArmed', sentinel_auto_arm_warning: 'dashboard.evSentinelCountdown',
+  inspection_stale_accounts: 'dashboard.evInspectStale', inspection_skipped: 'dashboard.evInspectSkipped',
+  live_fetch_degraded: 'dashboard.evFetchDegraded', endpoint_health_fail: 'dashboard.evEndpointFail',
+  keepalive_burnt: 'dashboard.evKeepaliveBurnt', sync_cooldown: 'dashboard.evSyncCooldown',
+  stale_pages_cleaned: 'dashboard.evStalePages', domain_order_fulfilled: 'dashboard.evDomainFulfilled',
 }
 const notifEventLabel = (et) => (NOTIF_EVENT_LABEL_KEY[et] ? t(NOTIF_EVENT_LABEL_KEY[et]) : '')
 const levelLabel = (lv) => ({ critical: t('dashboard.levelCritical'), warning: t('dashboard.levelWarning'), info: t('dashboard.levelInfo') }[lv] || t('dashboard.levelNotice'))
@@ -1808,15 +1814,10 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 /* 视觉批 09-22：hero 不再是独立卡——kpi-zone 顶部的区块（tint 底色+底部分隔线），
    与下方次级指标条合成一张命令卡 */
 .bf-hero { display: flex; align-items: center; gap: 22px; padding: 18px 26px 15px; border-radius: 12px 12px 0 0; border-bottom: 1px solid var(--bd); flex-wrap: wrap; row-gap: 10px; }
-.bf-hero.ok { border-bottom-color: rgba(48,209,88,.25); background: rgba(48,209,88,.05) }
-.bf-hero.warn { border-bottom-color: rgba(255,159,10,.3); background: rgba(255,159,10,.05) }
-.bf-hero.crit { border-bottom-color: rgba(255,69,58,.35); background: rgba(255,69,58,.05) }
-.bf-light { display: flex; align-items: center; gap: 8px; min-width: 96px }
-.bf-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0 }
-.bf-hero.ok .bf-dot { background: var(--success); box-shadow: 0 0 8px rgba(48,209,88,.5) }
-.bf-hero.warn .bf-dot { background: var(--warning); box-shadow: 0 0 8px rgba(255,159,10,.5) }
-.bf-hero.crit .bf-dot { background: var(--error); box-shadow: 0 0 8px rgba(255,69,58,.55); animation: stall-blink 1.4s ease-in-out infinite }
-.bf-word { font-size: 15px; font-weight: 700; color: var(--t1) }
+/* 一眼看全批：状态灯已砍，hero 底线回归中性（原 crit/warn 会把底线染红/橙，灯没了后像 bug） */
+.bf-hero.ok { background: rgba(48,209,88,.05) }
+.bf-hero.warn { background: rgba(255,159,10,.05) }
+.bf-hero.crit { background: rgba(255,69,58,.05) }
 .bf-nums { display: flex; gap: 34px; margin-left: 4px }
 .bf-num { display: flex; flex-direction: column; min-width: 72px }
 .bf-num em { font-style: normal; font-size: 28px; font-weight: 750; color: var(--t1); font-variant-numeric: tabular-nums; line-height: 1.15; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 6px }
@@ -1872,7 +1873,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .kpi-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--bd); background: rgba(0,0,0,.12); }   /* 一眼看全批：次级指标 6→4（去曝光/点击/CTR，加 CPM），一行放下不再换行 */
 @media (max-width: 1024px) { .kpi-strip { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 640px) { .kpi-strip { grid-template-columns: repeat(2, 1fr); } }
-.strip-metric { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; min-width: 0; position: relative; border-right: 1px solid var(--bd); background: transparent; border-radius: 0; box-shadow: none; }
+.strip-metric { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; min-width: 0; position: relative; border-right: 1px solid var(--bd); background: transparent; border-radius: 0; box-shadow: none; flex-wrap: wrap; }   /* flex-wrap：移动端 2×2 时「可用额度+待充值徽标」放不下则徽标换行，不再溢出屏幕 */
 .strip-metric:last-child { border-right: none; }
 .strip-metric.clickable { cursor: pointer; transition: background 0.15s; }
 .strip-metric.clickable:hover { background: rgba(255,255,255,.04); }
