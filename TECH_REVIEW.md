@@ -2906,3 +2906,23 @@ launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（
 
 ### 验证
 线上 /ads/list **310KB→18.7KB（-94%）/ 2.3s→1.2s**（余量为 TLS+RTT 物理延迟）；Content-Encoding: gzip ✓；creative 裁剪后字段与前端读取面一一对应（缩略图 38/38 可取）✓；批量预算 Playwright 实测（勾行→批量条→弹窗截图核对）✓；双门+restart+health ✓；中途 6 账户消失为用户实时移除纳管（DB is_managed=f 实证），与本批无关。
+
+## 批HH：域名商店重做——候选推送三模式 + 手续费设置 + 凭据即时生效（2026-09-24，48244c9/ee04eff/e46a295）
+
+### 用户诉求
+只支持 100% 精确匹配难找域名；应有指定/模糊/随机推/价格段筛选的一堆候选 + API 设置做好。
+
+### 变更
+| 处 | 内容 |
+|---|---|
+| dynadot_client.search_many | 官方 search domain0..domainN 批量（50/调用，全局限速自动间隔） |
+| GET /domains-shop/suggest | 三模式生成候选：exact=词根×选中后缀；smart=前后缀修饰组合（get/the/…×shop/hq/…）随机采样 cap48；random=56 品牌词两词组合（q 作种子）。批量查可注册+实时价 → 价格段过滤 → 价低在前；Porkbun 无批量降级逐个（cap20） |
+| Landing 购买弹窗 | 重做：模式 seg + 16 后缀 chips 多选 + 价格段 chips（不限/≤2/≤5/≤10/≤20）+ 结果行（价+手续费+总价+购买）+ 查询统计 + 初始引导/无结果两态 |
+| Settings 注册商卡 | 补代购手续费输入（domain_shop_fee_usd，原只能改 DB）；GET/PUT 透出 |
+| config.env_val | .env 实时读：PUT 保存 Dynadot key 后跨 gunicorn worker 即时生效（原进程级快照，保存后测试连接时好时坏） |
+
+### 验证
+生成器 smoke 三模式 PASS（exact=词根×TLD/smart 48 组/random 品牌组合）；HTTP 直跑：参数校验（空 q/mode 白名单）✓、无 key 引导 400 DYNADOT_NOT_CONFIGURED ✓、fee GET/PUT/回读 ✓；UI Playwright 实测：三模式切换/后缀 chip 增减/初始引导文案 ✓（截图 _vis_shop_*.png）。
+
+### ⚠️ 待用户一步
+**Dynadot API Key 实际未配置**（.env 无任何注册商键——此前「已配置」说法不成立）。操作：设置→域名注册商→API Key（Dynadot→账户→Tools→API 生成）→保存→测试连接（显账户+余额）。保存即全链可用（实时读已验，无需 restart）。search_many 的真实批量返回形状待首搜验证（代码按返回行数鲁棒处理）。
