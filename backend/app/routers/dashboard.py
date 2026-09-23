@@ -14,6 +14,7 @@ from ..models.fb import Account
 from ..models.perf import PerfSnapshot
 from ..models.log import ActionLog
 from ..models.guard import GuardAllowance
+from ..models.notify import Notification
 from ..core.landing_source import crawler_not_sql
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -455,6 +456,35 @@ def dashboard(
         "next_inspection_in": "约5分钟（定时巡检）",
         "accounts": account_details,
     }
+
+    # 今日账户状态变化（异动）：只报今天实际发生的状态变化，区别于「当前所有异常」快照
+    # （历史封禁老账户不再每天刷存在感——2026-09-23 用户反馈「PW 老账户为什么还出现」）。
+    # 纯查询（不动表结构），复用 notifications 表的 account_status_change/recovered 事件。
+    try:
+        _today_start = datetime.now(BUSINESS_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        _chg_q = db.query(Notification).filter(
+            Notification.tenant_id == user.tenant_id,
+            Notification.event_type.in_(["account_status_change", "account_status_recovered"]),
+            Notification.created_at >= _today_start,
+        )
+        if _pf_on:
+            _chg_q = _chg_q.filter(Notification.platform == platform)
+        _chg_rows = _chg_q.order_by(Notification.created_at.desc()).all()
+        _status_list = []
+        for _c in _chg_rows:
+            _acc = acc_map.get(_c.target_id)
+            _status_list.append({
+                "act_id": _c.target_id,
+                "name": _acc.name if _acc else (_c.target_id or ""),
+                "recovered": _c.event_type == "account_status_recovered",
+                "account_status": _acc.account_status if _acc else None,
+                "disable_reason": _acc.disable_reason if _acc else None,
+                "at": str(_c.created_at),
+            })
+        result["status_changes_today"] = _status_list
+    except Exception:
+        result["status_changes_today"] = []
+
     # 令牌健康红卡数据（FBInsider 对标：失效令牌=首页最高优先级卡）——
     # expired/disabled 的令牌会让其覆盖账户全部失明（巡检/止损/看板），必须一眼可见
     try:

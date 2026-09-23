@@ -494,7 +494,7 @@ const abnReason = (a) => {
 // ── 今日晨报（便捷性批 2026-09-15）：打开看板第一眼知全局 ──
 const todayBriefing = computed(() => {
   const accs = data.value.accounts || []
-  const abnormal = accs.filter(a => a.is_managed !== false && !a.removed && a.account_status && a.account_status !== 1)
+  const abnormal = (data.value.status_changes_today || []).filter(c => !c.recovered)   // 今日新异常（事件驱动），非「当前所有异常」快照
   const unreads = (recentNotifs.value || []).filter(n => !n.read)
   const criticals = unreads.filter(n => n.level === 'critical').length
   const warnings = unreads.filter(n => n.level === 'warning').length
