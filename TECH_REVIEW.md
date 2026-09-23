@@ -2888,3 +2888,21 @@ launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（
 
 ### 批FF 补（2026-09-24，2996e9e）：换页选择器收窄
 用户反馈换主页重试列表出现与账户无关的令牌主页——并集沿用的 `_account_write_candidates` 尾部带批AK tenant-wide 兜底，与批BY 写路径口径（已砍同款）不一致。全租户令牌对该账户多无写权限：列出误导 + 页面感知选中后 campaign 必败；且该尾因 FbClient NameError 被 bare-except 吞从未真正生效，无生产依赖。砍尾后 Roly-V21 列表 44 页 → 池内 4 页（Bd Hs×3 + Minah×1），`cred_for_account_page`（跟帖预过滤）/`_write_fb_with_fallback`/页面感知选牌/换页端点四处口径统一。smoke 复跑全绿。
+
+## 批GG：广告管理器提速 + 批量预算（2026-09-24，4e006c2）
+
+### 实测诊断（分段计时+载荷分析）
+/ads/list 服务端内部仅 ~100ms（20账户/27系列/66组/61广告，DB 合计 147ms）——瓶颈是 **310KB 响应无压缩裸传**（中国→CF 链路 2.3-2.5s）；载荷里 creative 全对象占 47%/132KB 而前端只用 5 字段。/fb/accounts 端点 21ms（已批量化，纯网络延迟无需修）。
+
+### 变更
+| 项 | 前 | 后 |
+|---|---|---|
+| 传输压缩 | 无（CF 对 api 子域不自动压缩，实测无 content-encoding） | GZipMiddleware(minimum_size=1KB)，全站 API 受益 |
+| /ads/list 载荷 | 310KB（creative 132KB） | creative 服务端裁剪（title/body/thumbnail_url+link_data 三件），解压后 142KB |
+| token_status | N+1：每账户 2-3 查询 × 20 账户 | FB 路径两条 IN 查询内存判定；TT 维持逐个 |
+| AdsCache 查询 | 全量拉回 Python 过滤 managed | act_id.in_() 下推 SQL |
+| verifyLive | 逐账户串行 await | Promise.all 并行 |
+| 批量预算 | 只有批量启停 | 批量条新增「批量预算」：日/总预算统一设置（按各账户本币计、混合币种提示），逐项串行写（限流友好），结果沿用 batchResults，失败行保留勾选 |
+
+### 验证
+线上 /ads/list **310KB→18.7KB（-94%）/ 2.3s→1.2s**（余量为 TLS+RTT 物理延迟）；Content-Encoding: gzip ✓；creative 裁剪后字段与前端读取面一一对应（缩略图 38/38 可取）✓；批量预算 Playwright 实测（勾行→批量条→弹窗截图核对）✓；双门+restart+health ✓；中途 6 账户消失为用户实时移除纳管（DB is_managed=f 实证），与本批无关。
