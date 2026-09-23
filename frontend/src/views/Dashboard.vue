@@ -485,10 +485,16 @@ const kpiMode = ref(null)  // pause / allowance / coverage
 const coverageText = computed(() => { const m = (data.value.accounts || []).filter(a => a.is_managed !== false); return `${m.filter(a => !a.error || a.error === 'cross_tz').length}/${m.length}` })
 const accStatusActive = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status === 1).length)
 const accStatusBad = computed(() => (data.value.accounts || []).filter(a => a.is_managed !== false && a.account_status !== 1).length)
+// 账户异常原因：优先用 FB 禁用原因（政策封禁/支付失败等，更具体），无则回退账户状态标签（禁用/未结算等）
+const abnReason = (a) => {
+  const dr = disableReason(a.disable_reason)
+  if (dr) return dr.label
+  return accountStatus(a.account_status).label
+}
 // ── 今日晨报（便捷性批 2026-09-15）：打开看板第一眼知全局 ──
 const todayBriefing = computed(() => {
   const accs = data.value.accounts || []
-  const abnormal = accs.filter(a => !a.removed && a.account_status && a.account_status !== 1)
+  const abnormal = accs.filter(a => a.is_managed !== false && !a.removed && a.account_status && a.account_status !== 1)
   const unreads = (recentNotifs.value || []).filter(n => !n.read)
   const criticals = unreads.filter(n => n.level === 'critical').length
   const warnings = unreads.filter(n => n.level === 'warning').length
@@ -496,7 +502,7 @@ const todayBriefing = computed(() => {
   // 直观性批：红绿灯三态 + 可点 chips（要处理的事一键直达对应面板）
   const chips = []
   if (criticals > 0) chips.push({ key: 'crit', lv: 'crit', n: criticals, label: t('dashboard.bfChipCrit'), go: () => { notifMode.value = 'all'; notifFilter.value = 'critical' } })
-  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => a.name || a.act_id), go: () => setAccountView('spend') })
+  if (abnormal.length) chips.push({ key: 'abn', lv: 'warn', n: abnormal.length, label: t('dashboard.bfAbnormal'), sub: abnormal.slice(0, 2).map(a => `${a.name || a.act_id}（${abnReason(a)}）`), go: () => setAccountView('spend') })
   if (lowBal.length) chips.push({ key: 'low', lv: 'warn', n: lowBal.length, label: t('dashboard.bfLowBal'), go: () => setAccountView('balance') })
   if (warnings > 0) chips.push({ key: 'warn', lv: 'warn', n: warnings, label: t('dashboard.bfChipWarn'), go: () => { notifMode.value = 'all'; notifFilter.value = 'warning' } })
   const level = criticals > 0 ? 'crit' : (chips.length ? 'warn' : 'ok')
