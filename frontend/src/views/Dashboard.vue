@@ -119,7 +119,7 @@ const renderTrendCharts = () => {
       options: { responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: { y: { grid: { color: gridColor }, min: allZero ? 0 : undefined, max: allZero ? 1 : undefined,
-                     ticks: { color: textColor, font: { size: 12 }, callback: (v) => trendUnit + v } },
+                     ticks: { color: textColor, font: { size: 12 }, callback: (v) => trendUnit + v, maxTicksLimit: allZero ? 3 : undefined } },
                   x: { grid: { display: false }, ticks: { color: textColor, font: { size: 12 }, maxRotation: 45 } } },
         plugins: { legend: { display: true, position: 'bottom',
                      labels: { color: textColor, font: { size: 11 }, boxWidth: 20, boxHeight: 2, padding: 14 } } } },
