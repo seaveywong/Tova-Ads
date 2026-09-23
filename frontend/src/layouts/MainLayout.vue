@@ -481,7 +481,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
 .nav { flex: 1; overflow-y: auto; padding: 4px 12px; }
 .nav-sec-title {
   font-size: 11px; color: var(--t3); text-transform: uppercase;
-  letter-spacing: 0.05em; padding: 16px 12px 6px;
+  letter-spacing: 0.05em; padding: 12px 12px 6px;
 }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
