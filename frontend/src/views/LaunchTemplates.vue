@@ -3945,6 +3945,7 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         <label v-for="p in pagePickPages" :key="p.id" :class="['pp-row', { on: pagePickSel === p.id }]">
           <input type="radio" name="pp-sel" :value="p.id" v-model="pagePickSel" />
           <span class="pp-name">{{ p.name }}</span>
+          <span v-if="p.via_cred" class="pp-via" :title="t('launch.pagePickVia')">{{ p.via_cred }}</span>
           <span :class="['pp-ad', p.can_advertise ? 'ok' : 'warn']">{{ p.can_advertise ? t('launch.pagePickAdOk') : t('launch.pagePickAdNo') }}</span>
           <span class="pp-fans">{{ p.fan_count || 0 }} {{ t('launch.pagePickFans') }}</span>
         </label>
@@ -4482,6 +4483,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pp-ad{font-size:10px;padding:1px 7px;border-radius:9px;flex-shrink:0}
 .pp-ad.ok{color:var(--success);background:rgba(52,199,89,.13)}
 .pp-ad.warn{color:var(--warning);background:rgba(255,159,10,.13)}
+.pp-via{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:4px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
 .pp-fans{font-size:11px;color:var(--t3);flex-shrink:0}
 
 /* 部署加载 */

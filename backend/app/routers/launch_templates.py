@@ -64,6 +64,40 @@ def _resolve_ad_page(node_page: str, item_page: str, base_page: str, post_source
     return item_page or node_page or base_page
 
 
+def _effective_pages_for_item(tpl, item, tree_adsets) -> set:
+    """本 item 实际要用的主页全集（2026-09-23 多令牌主页归属修复，令牌选择用）。
+    口径复用 _resolve_ad_page：新帖=部署分配>节点>模板；跟帖=节点>帖源前缀>模板
+    （帖绑死主页，reuse_post_ref={page}_{post} 的前缀即权威主页）。结构树逐节点解析
+    （节点可各自指定主页/帖源），单模板/批量按模板级。空=主页未定（账户自动识别），
+    调用方维持原 priority 选牌。"""
+    post_source = tpl.post_source or "new"
+    base = tpl.page_id or ""
+    pages: set = set()
+    if tree_adsets:
+        for snode in tree_adsets:
+            for anode in (snode.get("ads") or []):
+                node_page = str(anode.get("page_id") or "").strip()
+                node_post = "reuse" if anode.get("post_source") == "reuse" else "new"
+                if node_post == "reuse":
+                    ref = str(anode.get("reuse_post_ref") or "")
+                    ref_page = ref.split("_", 1)[0] if "_" in ref else ""
+                    p = node_page or ref_page or base
+                else:
+                    p = _resolve_ad_page(node_page, item.page_id or "", base, "new")
+                if p:
+                    pages.add(p)
+    else:
+        if post_source == "reuse":
+            ref = str(tpl.reuse_post_ref or "")
+            ref_page = ref.split("_", 1)[0] if "_" in ref else ""
+            p = (item.page_id or "") or ref_page or base
+        else:
+            p = _resolve_ad_page("", item.page_id or "", base, "new")
+        if p:
+            pages.add(p)
+    return pages
+
+
 def _tpl_dict(t: LaunchTemplate) -> dict:
     return {
         "id": t.id, "name": t.name, "description": t.description or "",
@@ -1291,6 +1325,47 @@ def _write_fb_with_fallback(sdb, tenant_id: int, act_id: str):
             ids.add(tok)
             uniq.append(f)
     return uniq, cands
+
+
+def _page_aware_write_clients(sdb, tenant_id: int, act_id: str, pages: set,
+                              cache: dict):
+    """按主页选写令牌（2026-09-23 多令牌主页归属修复，Dhir Lutus Kasey 案）：
+    扫账户写令牌候选（priority 序，_account_write_candidates），返第一个能管
+    pages 全集的令牌。多令牌各管不同主页时 priority 最高的未必能管所选主页——
+    曾只有跟帖做了页面感知（client_for_account_page），新帖漏。
+    返 (FbClient|None, 覆盖全部主页的候选列表, cred|None)；列表供结构树裸
+    Invalid parameter 换牌重试。cache={(cred_id,page_id):bool} 跨 item 复用
+    （多账户共享令牌只查一次 FB get_page_access_token）。"""
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    chosen = None
+    covering: list = []
+    for c in _account_write_candidates(sdb, tenant_id, act_id, "write"):
+        ok = True
+        for pid in pages:
+            k = (c.id, pid)
+            manages = cache.get(k)
+            if manages is None:
+                try:
+                    manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(pid))
+                except Exception:
+                    manages = False
+                cache[k] = manages
+            if not manages:
+                ok = False
+                break
+        if not ok:
+            continue
+        if chosen is None:
+            chosen = c
+        try:
+            covering.append(FbClient(decrypt(c.access_token_enc)))
+        except Exception:
+            continue
+    if chosen is None:
+        return None, [], None
+    fb = covering[0] if covering else FbClient(decrypt(chosen.access_token_enc))
+    return fb, (covering or [fb]), chosen
 
 
 def _is_bare_invalid_param(e) -> bool:
@@ -3552,6 +3627,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 post_content = _fetch_post_content(sdb, tenant_id, tpl.reuse_post_ref) or {}
             except Exception:
                 post_content = {}
+        # 页面感知选令牌的 (cred,page) 探测缓存——跨 item 复用（多账户共享令牌只查一次 FB）
+        _page_token_cache: dict = {}
         for item in items:
             try:
                 # 心跳：每 item 开工时 touch job 创建时间——reap 按"无心跳超时"判孤儿，
@@ -3584,14 +3661,20 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     raise FbApiError("no_id", "账户已停用（FB 拒绝创建/编辑广告），跳过——恢复后重试")
                 if _acc3.account_status == 7:
                     raise FbApiError("no_id", "账户已被封禁，跳过——请在账户页查看详情")
-                # 跟帖(reuse)：选能管该帖主页的写令牌（多令牌场景扫候选池，不只 priority 最高）
-                is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
-                _page_for_token = (item.page_id or tpl.page_id or "") if is_reuse else ""
-                if is_reuse and _page_for_token:
-                    fb = client_for_account_page(sdb, tenant_id, item.act_id, _page_for_token, "write")
+                # 页面感知选写令牌（2026-09-23 Dhir Lutus Kasey 案）：新帖与跟帖统一——
+                # 多令牌各管不同主页时，priority 最高的写令牌未必能管所选主页，硬选=
+                # 建帖/创意被 FB 拒。按本 item 实际主页（_effective_pages_for_item 口径）
+                # 扫写令牌候选池选能管全部主页的；主页未定（自动识别）才走原 priority 选牌
+                tree_adsets = _parse_structure(tpl)   # 提前解析，下方结构分支复用
+                _pages_needed = _effective_pages_for_item(tpl, item, tree_adsets)
+                if _pages_needed:
+                    fb, _fb_list, _pg_cred = _page_aware_write_clients(
+                        sdb, tenant_id, item.act_id, _pages_needed, _page_token_cache)
                     if not fb:
-                        raise FbApiError("no_id", f"act_{item.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
-                    _fb_list = [fb]   # 跟帖分支也要给 _fb_list 赋值——下方结构树重试循环引用它，跟帖+结构组合曾 UnboundLocalError
+                        raise FbApiError(
+                            "no_id",
+                            f"act_{item.act_id} 无能同时管理主页 {','.join(sorted(_pages_needed))} 的写令牌"
+                            "（多令牌各管不同主页：调整令牌主页授权，或按主页拆分部署）")
                 else:
                     _fb_list, _fb_list_creds = _write_fb_with_fallback(sdb, tenant_id, item.act_id)
                     if not _fb_list:
@@ -3609,7 +3692,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     continue
                 # 结构模式（0088）：1 系列 → N 组 → M 广告（整树克隆到该账户；
                 # 素材组节点逐素材展开。上方 batch_assets/单模板分支都不适用）
-                tree_adsets = _parse_structure(tpl)
+                # tree_adsets 已在选令牌处解析（2026-09-23 提前），此处直接用
                 if tree_adsets:
                     # 批AK：裸 Invalid parameter 换下一写令牌候选整树重试（跨App令牌伪装错）
                     _tree_err = None
@@ -3800,10 +3883,12 @@ class RetryIn(BaseModel):
 @router.get("/pages")
 def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ads.create")),
                  db: Session = Depends(get_db)):
-    """账户写令牌可访问的主页列表（失败重试换主页选择器用；ADVERTISE 权限标注）。
+    """账户令牌池各写令牌可访问主页的并集（失败重试换主页选择器用；标注归属令牌+ADVERTISE）。
     与 retry 的 body.page_id → item.page_id 配套——强绑主页账户部署失败（可推广对象
-    不匹配）时换账户实际绑定的主页重试。guard/keepalive/pages 同款逻辑但权限面不同
-    （ads.create vs ads.pause），不共用。"""
+    不匹配）时换账户实际绑定的主页重试。
+    2026-09-23 多令牌统一：曾只列 priority 最高写令牌的页——其他令牌独占的主页在
+    换页选择器里根本选不到（部署链已页面感知选令牌，此类主页现在可正常部署）。
+    guard/keepalive/pages 同款逻辑但权限面不同（ads.create vs ads.pause），不共用。"""
     acc = db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
     if not acc:
@@ -3811,16 +3896,31 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
     from ..core.deps import account_operable
     if not account_operable(user, acc):   # 2026-09-18 审计：原漏闸——operator 可对任意租户账户拉主页
         raise HTTPException(404, "账户不存在")
-    fb = client_for_account(db, user.tenant_id, act_id, "write")
-    if not fb:
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    from ..core.fb_client import FbClient as _FbC
+    cands = _account_write_candidates(db, user.tenant_id, act_id, "write")
+    if not cands:
         raise HTTPException(400, "该账户无可用写令牌——无法拉取主页列表")
-    try:
-        pages = fb.get_pages()
-    except FbApiError as e:
-        raise HTTPException(400, e.friendly)
-    return [{"id": p.get("id", ""), "name": p.get("name", ""),
-             "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
-             "fan_count": p.get("fan_count", 0)} for p in pages]
+    out, seen, first_err = [], set(), None
+    for c in cands:
+        try:
+            pages = _FbC(decrypt(c.access_token_enc)).get_pages() or []
+        except FbApiError as e:
+            first_err = first_err or e.friendly   # 单令牌拉取失败不拖垮并集（其他令牌的页仍可选）
+            continue
+        for p in pages:
+            pid = p.get("id", "")
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            out.append({"id": pid, "name": p.get("name", ""),
+                        "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
+                        "fan_count": p.get("fan_count", 0),
+                        "via_cred": (c.alias or f"#{c.id}")})
+    if not out and first_err:
+        raise HTTPException(400, first_err)
+    return out
 
 
 @router.post("/jobs/{job_id}/retry/{item_id}")
@@ -4038,13 +4138,17 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             ).first()
             if not _acc2:
                 raise FbApiError("no_id", "该账户已移除纳管，跳过重试")
-            # 跟帖(reuse)：选能管该帖主页的写令牌（与 _run_deploy_job 一致）
-            is_reuse = (tpl.post_source or "new") == "reuse" and bool(tpl.reuse_post_ref)
-            _page_for_token = (it.page_id or tpl.page_id or "") if is_reuse else ""
-            if is_reuse and _page_for_token:
-                fb = client_for_account_page(sdb, tenant_id, it.act_id, _page_for_token, "write")
+            # 页面感知选写令牌（与 _run_deploy_job 一致，2026-09-23 多令牌主页归属修复）
+            tree_adsets = _parse_structure(tpl)   # 下方结构重试复用
+            _pages_needed = _effective_pages_for_item(tpl, it, tree_adsets)
+            if _pages_needed:
+                fb, _fb_list, _ = _page_aware_write_clients(
+                    sdb, tenant_id, it.act_id, _pages_needed, {})
                 if not fb:
-                    raise FbApiError("no_id", f"act_{it.act_id} 无访问主页 {_page_for_token} 的写令牌（跟帖模式）")
+                    raise FbApiError(
+                        "no_id",
+                        f"act_{it.act_id} 无能同时管理主页 {','.join(sorted(_pages_needed))} 的写令牌"
+                        "（多令牌各管不同主页：调整令牌主页授权，或按主页拆分部署）")
             else:
                 _fb_list, _ = _write_fb_with_fallback(sdb, tenant_id, it.act_id)
                 if not _fb_list:
@@ -4054,7 +4158,7 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             sdb.commit()
             # 结构模式重试（0088）：整树重跑（仅全败 item——部分成功在端点层已拒）；
             # 不走 _find_existing_campaign 幂等捷径（树有多组多名，同名命中无法确认归属）
-            tree_adsets = _parse_structure(tpl)
+            # tree_adsets 已在选令牌处解析，此处直接用
             if tree_adsets:
                 _deploy_item_fb_tree(sdb, job, it, tpl, tree_adsets, tenant_id, fb, is_retry=True)
                 _close_job_if_done(sdb, job_id)
