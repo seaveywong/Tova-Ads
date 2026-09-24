@@ -1253,6 +1253,10 @@ def credentials_assets_summary(
             out[c.id] = {"accounts": acct_count, "pages": len(pages),
                          "businesses": len(bms)}
         except FbApiError as e:
+            # token_expired（190 族含 checkpoint 459）→ 令牌判死：状态+通知（2026-09-24
+            # Minah 案：曾只回错误文案，令牌页「读取失败=已过期」但徽章仍显示可用）
+            from ..core.fb_tokens import mark_expired_on_auth_error
+            mark_expired_on_auth_error(db, c, e)
             out[c.id] = {"accounts": acct_count, "pages": None,
                          "businesses": None, "error": e.friendly}
     _ASSETS_SUMMARY_CACHE[user.tenant_id] = (_now, out, _sig)
@@ -1331,6 +1335,9 @@ def get_credential_assets(
                 for b in businesses:
                     b["role"] = b["role"] or "基本"
     except FbApiError as e:
+        # token_expired → 令牌判死（状态+通知）；其余错误只回文案（2026-09-24 Minah 案）
+        from ..core.fb_tokens import mark_expired_on_auth_error
+        mark_expired_on_auth_error(db, cred, e)
         error = e.friendly
     out = {"accounts": accounts, "pages": pages,
            "businesses": businesses, "error": error}
@@ -1424,8 +1431,12 @@ def get_assets(
             for p in fb.get_pages():
                 if p.get("id") and p["id"] not in seen_page:
                     seen_page.add(p["id"]); pages.append(p)
-        except (FbApiError, TtApiError):
-            # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合
+        except (FbApiError, TtApiError) as e:
+            # 混合池含 TT 凭证（iter_tenant_clients）——TT 错误不得炸 FB 聚合；
+            # FB token_expired → 该令牌判死（状态+通知，2026-09-24 Minah 案）后跳过
+            from ..core.fb_tokens import mark_expired_on_auth_error
+            if isinstance(e, FbApiError):
+                mark_expired_on_auth_error(db, _cred, e)
             continue
     out = {"ad_accounts": accounts, "pages": pages}
     _asset_cache_set(ck, out)

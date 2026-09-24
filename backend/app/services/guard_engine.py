@@ -2861,6 +2861,11 @@ def run_watchdog():
                 emit_notification(db, tenant_id=c.tenant_id, level="critical",
                                   event_type="token_invalid", trace_id=trace_id,
                                   title=_t_ti, body=_b_ti, platform="fb")
+                # 状态同步判死（2026-09-24 Minah 案）：曾只发通知不改状态——令牌页
+                # 「资产读取失败=已过期」但徽章仍显示可用。expired 即时退出各候选池。
+                if (c.status or "") != "expired":
+                    c.status = "expired"
+                    c.last_verified_at = datetime.now(timezone.utc)
                 write_log(db, tenant_id=c.tenant_id, trace_id=trace_id, actor_type="system",
                           target_type="fb_credential", target_id=str(c.id),
                           action_type="token_health_warn", source="watchdog", result="fail")
