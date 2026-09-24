@@ -213,6 +213,7 @@ def _start_scheduler():
     from .services.account_sync import run_account_status_sync
     from .services.ads_cache_sync import run_ads_cache_sync
     from .services.leads_poll import run_leads_poll   # 潜客轮询（并行 webhook 路径）
+    from .services.usdt_monitor import run_usdt_monitor   # USDT-TRC20 到账监听（域名商店收款）
     from .core.schedule_config import get_schedule_config, effective_intervals
     from .core.database import SessionLocal
     _db = SessionLocal()
@@ -230,6 +231,8 @@ def _start_scheduler():
     _scheduler.add_job(run_account_status_sync, "interval", minutes=_eff["account_sync"], id="account_status_sync")
     _scheduler.add_job(run_ads_cache_sync, "interval", minutes=15, id="ads_cache_sync")
     _scheduler.add_job(run_leads_poll, "interval", minutes=10, id="leads_poll")
+    # USDT-TRC20 到账监听（域名商店）：2min 轮询链上入账，尾数对号 → payment_detected
+    _scheduler.add_job(run_usdt_monitor, "interval", minutes=2, id="usdt_monitor")
     _scheduler.add_job(run_subcode_cleanup, "cron", hour=4, minute=17, id="subcode_cleanup")
     # 保活扫描：每日 2:17 查 warming 账户，3天无消耗→建$5 lifetime Page Like
     _scheduler.add_job(run_keepalive, "cron", hour=2, minute=17, id="keepalive_scan")

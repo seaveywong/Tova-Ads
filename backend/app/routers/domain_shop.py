@@ -310,8 +310,10 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
               action_type="create", source="domain_shop", result="success",
               trigger_detail=f"{d} x{body.years}y total={order.total_usd}")
     db.commit()
+    from ..services.usdt_monitor import pay_amount_for
     return {"id": order.id, "domain": d, "years": body.years, "total_usd": order.total_usd,
             "status": order.status, "payment_method": order.payment_method,
+            "pay_amount": pay_amount_for(order.total_usd, order.id),
             "payment": _payment_info(db)}
 
 
@@ -328,9 +330,12 @@ def list_orders(user: CurrentUser = Depends(require_permission("landing.manage")
         else:
             q = q.filter(DomainOrder.tenant_id == user.tenant_id)
     rows = q.order_by(DomainOrder.id.desc()).limit(100).all()
+    from ..services.usdt_monitor import pay_amount_for
     return {"orders": [{"id": r.id, "domain": r.domain, "years": r.years, "cost_usd": r.cost_usd,
                         "fee_usd": r.fee_usd, "total_usd": r.total_usd, "status": r.status,
                         "payment_method": r.payment_method or "usdt",
+                        "pay_amount": pay_amount_for(r.total_usd, r.id),
+                        "payment_txid": r.payment_txid or "", "paid_amount": r.paid_amount,
                         "error": r.error, "created_at": str(r.created_at or "")[:16]} for r in rows],
             "payment": _payment_info(db)}
 
@@ -362,7 +367,7 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
     o = db.query(DomainOrder).filter(DomainOrder.id == oid).first()
     if not o:
         raise HTTPException(404, "订单不存在")
-    if o.status not in ("pending_payment", "approved"):
+    if o.status not in ("pending_payment", "approved", "payment_detected"):
         raise HTTPException(400, f"状态 {o.status} 不可批准")
     if not _reg_ready(db):
         o.status = "approved"

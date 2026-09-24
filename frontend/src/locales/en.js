@@ -140,7 +140,7 @@ export default {
     usedBy: 'used by {n} pages', noMine: 'No team domains yet — buy one or bind your own', goBuy: 'Buy a domain',
     approve: 'Confirm payment', approveOk: '{d} payment confirmed — registering & connecting (will appear in My Domains)',
     takenNow: '{d} was just taken or unavailable — removed from the list, try another',
-    payTo: 'Send USDT to (note the domain):', payCopied: 'Payment address copied', listNote: 'Prices from the official price list (cheapest first) · availability & live price verified at checkout',
+    payTo: 'Send USDT to (note the domain):', payCopied: 'Payment address copied', stDetected: 'Paid · confirm', payAmt: 'Pay ${v}', payAmtTip: 'Includes order-tail cents for on-chain auto-matching; pay exactly this', orderedPay: 'Ordered — pay ${v} (USDT; address on the Orders tab)', listNote: 'Prices from the official price list (cheapest first) · availability & live price verified at checkout',
   },
     landing: 'Ad Links',
     guard: 'Rule Engine',

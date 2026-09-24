@@ -7,6 +7,7 @@ import { isSuperadminSync } from '../router'
 import { lpStatus, subcodeStatus } from '../composables/useStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
+import DomainShop from '../components/DomainShop.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -14,7 +15,7 @@ const route = useRoute()
 
 // 落地页 内部 tab：管理 / 日志（日志归纳进来，不再是独立侧栏项）
 const tab = ref(route.query.tab === 'logs' ? 'logs' : 'manage')
-watch(() => route.query.tab, (tv) => { if (tv === 'logs' || tv === 'manage') tab.value = tv })
+watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains'].includes(tv)) tab.value = tv })
 
 // ── 落地页列表 ──
 const pages = ref([])
@@ -489,7 +490,7 @@ const goSubLogs = (s) => {
 }
 const setTab = (tv) => {
   tab.value = tv
-  router.replace({ name: 'landing', query: tv === 'manage' ? {} : { tab: 'logs' } })
+  router.replace({ name: 'landing', query: tv === 'manage' ? {} : { tab: tv } })
 }
 const _copyRaw = async (txt) => {
   // clipboard 兜底（复审P1：非安全上下文/权限拒绝时曾「未复制却报成功」——广告链接贴错是真金白银）
@@ -801,6 +802,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     <div class="lp-tabs">
       <div :class="['lp-tab', { on: tab === 'manage' }]" @click="setTab('manage')">{{ t('landing.tabManage') }}</div>
       <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">{{ t('landing.tabLogs') }}</div>
+      <div :class="['lp-tab', { on: tab === 'domains' }]" @click="setTab('domains')">{{ t('landing.tabDomains') }}</div>
     </div>
     <div v-show="tab === 'manage'">
     <header class="page-head">
@@ -825,7 +827,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 
     <!-- 统一工具栏：模式筛选 + 创建人筛选（owner 看全团队时按人过滤）+ 计数 -->
     <div class="list-bar">
-      <button class="btn" @click="router.push('/domains')">{{ t('landing.shopBtn') }}</button>
+      <button class="btn" @click="setTab('domains')">{{ t('landing.shopBtn') }}</button>
       <div class="seg-bar">
         <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
@@ -1382,6 +1384,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </el-drawer>
     </div>
     <LandingLogs v-if="tab === 'logs'" />
+    <DomainShop v-if="tab === 'domains'" />
 
   </div>
 </template>
