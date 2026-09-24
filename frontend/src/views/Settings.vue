@@ -645,23 +645,22 @@ const anchorSections = computed(() => {
     { id: 'sec-tz', label: t('settings.tzTitle') },
   ]
   if (isSuper.value) {
+    // 平台分区按业务聚类：投放/守护 → AI → 集成（下拉里用 divider 分隔）
     secs.push({ id: 'sec-schedule', label: t('settings.scheduleTitle') })
     secs.push({ id: 'sec-guard-tuning', label: t('settings.gtTitle') })
+    secs.push({ id: 'sec-import', label: t('settings.ibTitle') })
+    secs.push({ id: 'sec-retention', label: t('settings.retentionTitle') })
+    secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
+    // 2026-09-16：保活配置仅超管可见（花钱功能，owner 不该能动）
+    secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
     secs.push({ id: 'sec-porkbun', label: t('settings.rgTitle') })
     secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
     secs.push({ id: 'sec-fbapps', label: t('settings.faTitle') })
-    secs.push({ id: 'sec-import', label: t('settings.ibTitle') })
-    secs.push({ id: 'sec-retention', label: t('settings.retentionTitle') })
-    secs.push({ id: 'sec-fx', label: t('settings.fxTitle') })
   }
   secs.push({ id: 'sec-tg', label: t('settings.tgTitle') })
-  // 2026-09-16：保活配置仅超管可见（花钱功能，owner 不该能动）
-  if (isSuper.value) {
-    secs.push({ id: 'sec-keepalive', label: t('settings.keepaliveTitle') })
-  }
   return secs
 })
 // 分组展示：个人（账户/时区/TG）vs 平台（其余超管/运营项）
@@ -721,7 +720,18 @@ const runKeepaliveNow = async () => {
       <template v-for="(g, gi) in anchorGroups" :key="g.key">
         <span v-if="gi > 0" class="anchor-sep"></span>
         <span class="anchor-group-label">{{ g.label }}</span>
-        <button v-for="s in g.items" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="switchSection(s.id)">{{ s.label }}</button>
+        <!-- 个人组：内联 pill；平台组：分区多，收进下拉防横向挤成一长行 -->
+        <template v-if="g.key === 'personal'">
+          <button v-for="s in g.items" :key="s.id" class="anchor-btn" :class="{ active: activeSection === s.id }" @click="switchSection(s.id)">{{ s.label }}</button>
+        </template>
+        <el-dropdown v-else trigger="click" @command="switchSection">
+          <button class="anchor-btn" :class="{ active: g.items.some(s => s.id === activeSection) }">{{ g.label }} ▾</button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="s in g.items" :key="s.id" :command="s.id" :divided="s.id === 'sec-ai' || s.id === 'sec-cf'">{{ s.label }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </template>
     </div>
 
