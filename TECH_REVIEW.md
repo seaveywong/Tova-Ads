@@ -2943,3 +2943,17 @@ launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（
 - 执行侧行为 smoke（Roly-81 真池）：指定 Minah→OK；指定 Bd Hs 管 Dhir→明确拒绝；指定池外 #25→明确拒绝 ✓
 - HTTP 三端点：creds=3 令牌池 / pages=9 页含 via_cred_id / coverage=Dhir×两账户均 ok via Minah ✓
 - Playwright UI 实测：主页下拉池并集+归属标注（截图 _vis_dd_pages.png）、令牌下拉（自动+池内令牌）、预检按钮与无主页提示 ✓；双门+restart+health ✓
+
+## 批JJ：令牌状态与实际失效联动——token_expired 即时判死（2026-09-24，bb8e743）
+
+### 根因（Minah 案）
+watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态；资产读取端点遇 190 族（含 checkpoint subcode 459）只回错误文案——令牌页显示「资产读取失败：Token已过期」但状态徽章仍「可用」。曾只有巡检 insights 一条路径标状态（RR 轮换没选中 Minah 就漏）。
+
+### 变更
+- `fb_tokens.mark_expired_on_auth_error(db, cred, exc)`：中央判死 helper（category=token_expired → status=expired + last_verified_at + emit_token_expired_if_due 带 dedup；已 expired/其他错不动）
+- 四路接线：/fb/assets 聚合、令牌抽屉 /credentials/{id}/assets、assets-summary、watchdog is_valid=False 补状态翻转（巡检 insights 原有保留）
+- expired 即时退出各候选池（写令牌/主页列表/页面感知）——死令牌不再被任何部署路径选中
+
+### 验证
+线上 curl /fb/credentials/36/assets → 459 → **#36 status 即时翻 expired（13:35 DB 实证）**；通知不重复（13:23 token_invalid 已发，dedup 生效）；md5 核对服务器=仓库 HEAD（含并行 DeepSeek 提交 f44c105，其 tt_client/ads 等改动已部署，无双头漂移）。
+附：Minah 真因 = FB checkpoint（459「需登录验证」）——重新绑定前需号主先过 FB 验证。
