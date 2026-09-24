@@ -3003,3 +3003,8 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 1. **P1**：usdt_monitor 同一笔链上入账可被同尾号两单重复匹配（内层 break 只跳单不消费 tx）→ `used_txids` 跨单排除，一笔款只标一单
 2. **P2**：domain_payment_detected / domain_order_fulfilled 未进 Dashboard 通知事件映射（今日摘要 chip 会裸显英文码）→ 补齐（evDomainPaid zh/en）
 记录项（不改码）：USDT≈USD 1:1 对账假设（业界惯例）；取消订单后支付面板状态不回写（用户自己刚取消，可关闭面板，P3）。
+
+### 批LL 追记·遗留清零交付（2026-09-25，9a91261）
+复审挂账全清：①Landing 整块旧 shop CSS 删除 + landing.js 14 死键清理；②deps.py 缺 tenant_id token 401 早拒（sentinel RLS 500 根因加固）；③支付面板终态全映射（取消/失败/交付不再误显等待）。
+终验：FE hash MATCH、payment/orders/dashboard 200、journal 干净、双门+health ✓。
+剩余待办均为用户侧或独立批（Dynadot key/USDT 地址配置；P0 钱包地基、域名月租 cron、TT sandbox 等既定挂账），无本会话技术遗留。
