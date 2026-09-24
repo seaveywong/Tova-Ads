@@ -152,6 +152,9 @@ def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[st
         return None
     cache_key = f"{_ai_retry_key(client)}|{(objective or '').upper()}|{(opt_goal or '').upper()}"
     now = time.time()
+    # 驱逐过期项（2026-09-24 补）：低基数但长期运行不驱逐会累积——每读一轮清一次过期
+    for _k in [k for k, v in _AI_KPI_CACHE.items() if now - v[1] >= 3600]:
+        _AI_KPI_CACHE.pop(_k, None)
     hit = _AI_KPI_CACHE.get(cache_key)
     if hit and now - hit[1] < 3600:
         return hit[0]

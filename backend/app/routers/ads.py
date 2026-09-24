@@ -1527,7 +1527,7 @@ def diagnose_ad(
         pass
 
     # 子码
-    link = db.query(LandingAdLink).filter(LandingAdLink.ad_id == _ad_short).first()
+    link = db.query(LandingAdLink).filter(LandingAdLink.tenant_id == user.tenant_id, LandingAdLink.ad_id == _ad_short).first()
     if link:
         result["subcode"] = link.slug
 
@@ -1575,6 +1575,7 @@ def diagnose_ad(
                 _hist_days = int(_params.get("param_days", 2))
                 _since = (datetime.now(tz) - timedelta(days=_hist_days)).strftime("%Y-%m-%d")
                 _history = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.tenant_id == user.tenant_id,
                     PerfSnapshot.ad_id == _ad_short,
                     PerfSnapshot.platform == _plat,
                     PerfSnapshot.snapshot_date >= _since,
@@ -1582,6 +1583,7 @@ def diagnose_ad(
                 ).order_by(PerfSnapshot.snapshot_date.desc()).all()
             if rule.rule_type == "budget_burn_fast":
                 _prev = db.query(PerfSnapshot).filter(
+                    PerfSnapshot.tenant_id == user.tenant_id,
                     PerfSnapshot.ad_id == _ad_short,
                     PerfSnapshot.platform == _plat,
                     PerfSnapshot.snapshot_date == acc_today,

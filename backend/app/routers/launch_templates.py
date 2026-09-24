@@ -2154,9 +2154,7 @@ def _resolve_budget_fb(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
     q = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2：SuperSession 绕 RLS 曾无租户过滤
-                                                Account.act_id == act_id)
-    if tenant_id:
-        q = q.filter(Account.tenant_id == tenant_id)
+                                  Account.act_id == act_id)
     acc = q.first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()
@@ -2194,9 +2192,7 @@ def _resolve_budget_tt(sdb, act_id: str, tpl: LaunchTemplate, tenant_id: int = 0
     if (tpl.budget_usd or 0) > _BUDGET_MAX_USD:
         raise ValueError(f"模板日预算 ${tpl.budget_usd:.0f} 超安全上限 ${_BUDGET_MAX_USD:.0f}/日，请调低后分步部署")
     q = sdb.query(Account).filter(Account.tenant_id == tenant_id,   # 全库审查 P2：SuperSession 绕 RLS 曾无租户过滤
-                                                Account.act_id == act_id)
-    if tenant_id:
-        q = q.filter(Account.tenant_id == tenant_id)
+                                  Account.act_id == act_id)
     acc = q.first()
     currency = (acc.currency if acc else "USD") or "USD"
     cr = sdb.query(CurrencyRate).filter(CurrencyRate.code == currency.upper()).first()

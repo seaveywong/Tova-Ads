@@ -600,7 +600,7 @@ class TtClient:
             adv = advertiser_id
         return self.post("adgroup/update/", {
             "advertiser_id": adv,
-            "adgroup_ids": [str(node_id)],
+            "adgroup_ids": [int(node_id)],   # int64 数组（与 update_status 同口径，曾字符串数组）
             "budget": int(budget),
             "budget_mode": budget_mode,
         })
@@ -617,7 +617,7 @@ class TtClient:
             adv = int(advertiser_id)
         except (TypeError, ValueError):
             adv = advertiser_id
-        return self.post(path, {"advertiser_id": adv, ids_key: [str(node_id)], name_key: name})
+        return self.post(path, {"advertiser_id": adv, ids_key: [int(node_id)], name_key: name})
 
     def delete_node(self, node_id: str, node_type: str = "ad", advertiser_id: str = "") -> dict:
         """删节点。TT 无 FB 式 DELETE /{id} 硬删端点——opt_status=DELETE 即 TT 的删除语义

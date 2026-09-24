@@ -395,6 +395,34 @@ def client_for_page(db: Session, tenant_id: int, page_id: str) -> Optional[FbCli
     return None
 
 
+def mark_expired_on_auth_error(db, cred, exc) -> bool:
+    """FB 调用遇 token_expired（code 190 家族，含 checkpoint 459）→ 令牌判死：
+    status=expired + 通知（emit_token_expired_if_due 自带 dedup）。任何调用点共用。
+    背景（2026-09-24 Minah 案）：曾只有巡检 insights 路径标状态——watchdog 只发通知
+    不改状态、资产读取端点只回错误文案，令牌页出现「资产读取失败=Token已过期」
+    但状态徽章仍显示可用。返 True=本次判死（已 expired/非过期错不动作）。"""
+    if not cred or getattr(exc, "category", "") != "token_expired":
+        return False
+    if (cred.status or "") == "expired":
+        return False
+    from datetime import datetime, timezone
+    try:
+        cred.status = "expired"
+        cred.last_verified_at = datetime.now(timezone.utc)
+        db.commit()
+    except Exception:
+        db.rollback()
+        return False
+    try:
+        from .notify_utils import emit_token_expired_if_due
+        emit_token_expired_if_due(db, cred.tenant_id, (cred.alias or f"#{cred.id}"),
+                                  cred_id=cred.id)
+        db.commit()
+    except Exception:
+        pass
+    return True
+
+
 def mark_cred_cooldown(db: Session, cred_id: int, minutes: int = 30,
                        status: str = "rate_limited") -> None:
     """标记 cred 冷却（巡检/操作遇限流时调，下轮 client_for_account 自动跳过）。"""
@@ -403,6 +431,7 @@ def mark_cred_cooldown(db: Session, cred_id: int, minutes: int = 30,
     if c:
         c.status = status
         c.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        db.commit()   # 自 commit（2026-09-24 补）：冷却须立即持久化，调用方漏 commit 即丢
 
 
 def cred_for_account(db: Session, tenant_id: int, act_id: str) -> Optional[FbCredential]:

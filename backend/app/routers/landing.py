@@ -14,7 +14,6 @@ from ..core.deps import CurrentUser, require_permission, require_owned as _ro
 from ..core.config import settings
 from ..core.i18n import req_locale, tenant_locale, L
 from ..core.log_utils import write_log, new_trace_id
-from pydantic import BaseModel
 
 router = APIRouter(prefix="/landing", tags=["landing"])
 
@@ -1388,7 +1387,7 @@ def delete_subdomain(pid: int, hostname: str,
     subs.remove(hostname)
     p.bound_subdomains = _json.dumps(subs)
     # 如果删的是 custom_domain，换到第一个
-    if p.custom_domain and hostname in p.custom_domain:
+    if p.custom_domain and hostname == p.custom_domain.split("://", 1)[-1].split("/")[0]:
         p.custom_domain = f"https://{subs[0]}" if subs else p.custom_domain
     db.commit()
     return {"ok": True, "bound_subdomains": subs}

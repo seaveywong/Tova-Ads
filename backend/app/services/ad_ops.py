@@ -20,7 +20,6 @@ from ..services.guard_engine import from_minor_units, to_usd
 logger = logging.getLogger("toveads.ad_ops")
 
 # 零小数货币：Meta 官方表，全仓唯一真相源在 core/ad_ops.ZERO_DECIMAL
-# （guard_engine._NO_DECIMAL_CURRENCIES / core/tt_client._TT_ZERO_DECIMAL 仍旧表，BE-1 待统一）
 from ..core.ad_ops import ZERO_DECIMAL as _NO_DECIMAL
 
 # 资金安全上限（set_budget）：日预算绝对上限（USD 等值）+ 单次调整步进上限（旧值倍数）
