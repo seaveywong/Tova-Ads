@@ -25,6 +25,7 @@ const importForm = ref({ access_token: '', alias: '', token_type: 'operate' })
 const importing = ref(false)
 const apps = ref([])
 const appLoading = ref(false)
+const appError = ref('')
 
 const drawerOpen = ref(false)
 const drawerToken = ref(null)
@@ -637,7 +638,7 @@ const confirmCloseTtLoad = async () => {
 }
 
 // App
-const loadApps = async () => { appLoading.value = true; try { apps.value = await GET('/fb/apps') } catch { apps.value = [] }; appLoading.value = false }
+const loadApps = async () => { appLoading.value = true; appError.value = ''; try { apps.value = await GET('/fb/apps') } catch (e) { appError.value = e.message || t('common.opFail'); apps.value = [] }; appLoading.value = false }
 const _oauthUrl = async (a) => {
   try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); return r.url || '' }
   catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return '' }
@@ -1083,7 +1084,13 @@ const deleteToken = async (tk) => {
         <div class="m-title">{{ t('tokens.connectFacebook') }}</div>
         <div class="m-tabs"><button class="mt-btn" :class="{on:importTab==='oauth'}" @click="importTab='oauth'">{{ t('tokens.tabOauth') }}</button><button class="mt-btn" :class="{on:importTab==='manual'}" @click="importTab='manual'">{{ t('tokens.tabManual') }}</button></div>
         <div v-if="importTab==='oauth'" class="m-body">
-          <div v-if="!apps.length" class="hint">{{ t('tokens.oauthHint') }}</div>
+          <div v-if="!apps.length" class="hint">
+            <template v-if="appError">
+              <span style="color:var(--error)">{{ appError }}</span>
+              <div><button class="btn sm" style="margin-top:8px" @click="loadApps">{{ t('common.retry') }}</button></div>
+            </template>
+            <template v-else>{{ t('tokens.oauthHint') }}</template>
+          </div>
           <div v-else>
             <div class="oauth-step">{{ t('tokens.oauthPickHint') }}</div>
             <div v-for="a in apps" :key="a.id" class="oauth-app">
