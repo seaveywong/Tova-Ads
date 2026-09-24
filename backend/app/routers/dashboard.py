@@ -750,6 +750,13 @@ def landing_overview(
     utc_end = datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ).astimezone(timezone.utc) + timedelta(days=1)
     tid = user.tenant_id
 
+    # 账户筛选（与广告区同口径）：act_ids 多选 → 事件侧也要同步收窄（#B）
+    _pf = _norm_platform(platform)
+    _sel = [x.strip() for x in act_ids.split(",") if x.strip()] if act_ids else []
+    if _own is not None and not _sel:
+        _sel = ["__none__"]   # 批AJ：operator 名下为空——落地页消耗聚合必须空（不能落入全租户）
+    _sel_set = set(_sel)
+
     # ① 落地事件按子码聚合（访问/通过/屏蔽）——真人口径，爬虫/审核机器人整行剔除
     #    访问 = visit + redirect（到达的有效访问，redirect 模式也算）
     #    通过 = redirect + click（到达目标：自动跳转 或 点了按钮）
@@ -773,12 +780,34 @@ def landing_overview(
         LIMIT 50
     """ % crawler_not_sql("e.")), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()
 
+    # ①b 账户反查 + 事件侧收窄到选中账户（#B：原只收窄消耗，visit/click 全租户→CPC/通过率失真）
+    #    事件 act_id 多为 {{account.id}} 字面量 → 用 ad_id 反查真实账户（与下方 ②b 同源）
+    from ..models.fb import Account as _Acc
+    from ..models.ads_cache import AdsCache as _AdsCache
+    from ..models.perf import PerfSnapshot as _Perf
+    import json as _json
+    acc_map = {a.act_id: a.name for a in db.query(_Acc.act_id, _Acc.name).filter(_Acc.tenant_id == tid).all()}
+    ad_act_map = {}
+    for _row in db.query(_AdsCache.act_id, _AdsCache.ads_json).filter(_AdsCache.tenant_id == tid).all():
+        try:
+            for _ad in _json.loads(_row.ads_json or "[]"):
+                if _ad.get("id"):
+                    ad_act_map[str(_ad["id"])] = _row.act_id
+        except Exception:
+            continue
+    # perf_snapshots 兜底：历史广告（含已删账户的）也有 act_id
+    for _r in db.query(_Perf.ad_id, _Perf.act_id).filter(_Perf.tenant_id == tid, _Perf.ad_id.isnot(None)).distinct().all():
+        if _r.ad_id:
+            ad_act_map.setdefault(str(_r.ad_id), _r.act_id)
+    def _resolve_acc(act_id, ad_id):
+        aid = act_id if (act_id and "{{" not in str(act_id)) else ad_act_map.get(str(ad_id) if ad_id else "")
+        return (aid or ""), (acc_map.get(aid, "") if aid else "")
+    if _sel_set:
+        event_rows = [r for r in event_rows if _resolve_acc(r.act_id, r.ad_id)[0] in _sel_set]
+    _sel_ad_ids = [aid for aid, act in ad_act_map.items() if act in _sel_set]
+
     # ② 广告消耗 by ad_id（业务日 snapshot_date 范围；perf_snapshots 是账户本地日）。
     #    platform 过滤：ad_id 跨平台可能撞号（fb/tt 各一行）——按 platform 列收窄
-    _pf = _norm_platform(platform)
-    _sel = [x.strip() for x in act_ids.split(",") if x.strip()] if act_ids else []
-    if _own is not None and not _sel:
-        _sel = ["__none__"]   # 批AJ：operator 名下为空——落地页消耗聚合必须空（不能落入全租户）
     _spend_sql = """
         SELECT ad_id, SUM(spend) AS spend, SUM(conversions) AS conv
         FROM perf_snapshots
@@ -798,41 +827,29 @@ def landing_overview(
     spend_rows = db.execute(_spend_stmt, _spend_params).fetchall()
     spend_map = {r.ad_id: (float(r.spend or 0), int(r.conv or 0)) for r in spend_rows}
 
-    # ②b 账户名（子码表现展示该子码对应广告所属账户）
-    #    事件带的 act_id 多是 FB 没填的字面量 {{account.id}} → 用 ad_id 反查真实 act_id：
-    #    ads_cache（当前在投广告）+ perf_snapshots（历史快照，覆盖已下架/已删账户的广告）
-    from ..models.fb import Account as _Acc
-    from ..models.ads_cache import AdsCache as _AdsCache
-    from ..models.perf import PerfSnapshot as _Perf
-    import json as _json
-    acc_map = {a.act_id: a.name for a in db.query(_Acc.act_id, _Acc.name).filter(_Acc.tenant_id == tid).all()}
-    ad_act_map = {}  # ad_id -> act_id
-    for _row in db.query(_AdsCache.act_id, _AdsCache.ads_json).filter(_AdsCache.tenant_id == tid).all():
-        try:
-            for _ad in _json.loads(_row.ads_json or "[]"):
-                if _ad.get("id"):
-                    ad_act_map[str(_ad["id"])] = _row.act_id
-        except Exception:
-            continue
-    # perf_snapshots 兜底：历史广告（含已删账户的）也有 act_id
-    for _r in db.query(_Perf.ad_id, _Perf.act_id).filter(_Perf.tenant_id == tid, _Perf.ad_id.isnot(None)).distinct().all():
-        if _r.ad_id:
-            ad_act_map.setdefault(str(_r.ad_id), _r.act_id)
-    def _resolve_acc(act_id, ad_id):
-        aid = act_id if (act_id and "{{" not in str(act_id)) else ad_act_map.get(str(ad_id) if ad_id else "")
-        return (aid or ""), (acc_map.get(aid, "") if aid else "")
+    # ②b 账户名（子码表现展示该子码对应广告所属账户）——账户反查已提前到 ①b 做（事件侧收窄共用）
 
     # ③ 屏蔽明细分布（reason / country / platform 各 top 8；field 为白名单硬编码，无注入）
     #    与上方 blocked 列同一真人口径（爬虫 block 剔除）——分布加总才能和 KPI 对上
     def _block_top(field: str):
-        return [{"key": r.k, "count": r.cnt} for r in db.execute(text(f"""
+        _acc_sql = ""
+        _binds = []
+        _params = {"tid": tid, "s": utc_start, "e": utc_end}
+        if _sel_set:
+            _acc_sql = " AND (act_id IN :ev_acts OR ad_id IN :ev_ads)"
+            _binds = [bindparam("ev_acts", expanding=True), bindparam("ev_ads", expanding=True)]
+            _params["ev_acts"] = _sel
+            _params["ev_ads"] = _sel_ad_ids or ["__none__"]
+        return [{"key": r.k, "count": r.cnt} for r in db.execute(
+            text(f"""
             SELECT COALESCE({field}, '未知') AS k, COUNT(*) AS cnt
             FROM landing_events
             WHERE tenant_id = :tid AND event_type = 'block'
               AND created_at >= :s AND created_at < :e
               AND {crawler_not_sql()}
+              {_acc_sql}
             GROUP BY k ORDER BY cnt DESC LIMIT 8
-        """), {"tid": tid, "s": utc_start, "e": utc_end}).fetchall()]
+            """).bindparams(*_binds), _params).fetchall()]
     block_detail = {
         "by_reason": _block_top("reason"),
         "by_country": _block_top("country"),

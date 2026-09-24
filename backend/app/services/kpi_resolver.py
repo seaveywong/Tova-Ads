@@ -189,6 +189,10 @@ def _ai_correct_kpi(objective: str, opt_goal: str, actions: list) -> Optional[st
                     _AI_KPI_CACHE[cache_key] = (hp, time.time())
                     return hp
             return None
+        # 防幻觉（2026-09-24 补）：AI 返回字段不在 actions 里 → _action_count 必 0，
+        # 会把非零转化报成 0（下游 click_no_conv 误停）——回退 None 让调用方用原 field/cnt
+        if field not in {a.get("action_type") for a in actions}:
+            return None
         _AI_KPI_CACHE[cache_key] = (field, time.time())
         return field
     except Exception as e:

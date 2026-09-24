@@ -1945,8 +1945,19 @@ def _resolve_targeting(sdb, audience_id: int, audience_json: str = "", sdb_tenan
                            or [x for x in (_eg.get("cities") or []) if isinstance(x, dict) and x.get("key")]
                            or [x for x in (_eg.get("zips") or []) if isinstance(x, dict) and x.get("key")])
             _langs = [l for l in (a.get("languages") or []) if isinstance(l, dict) and l.get("id")]
+            # 2026-09-24 补漏：触发条件此前没算 gender/age——只设性别或年龄、没设国家/兴趣的
+            # 内联受众会落到 SavedAudience/None（FB 默认定向）→ 受众静默变宽浪费钱
+            _gender = a.get("gender") or 0
+            _amin = a.get("age_min")
+            _amax = a.get("age_max")
+            try:
+                _gender_set = int(_gender) != 0
+                _age_set = (_amin not in (None, "") and int(_amin) != 18) or (_amax not in (None, "") and int(_amax) != 65)
+            except (TypeError, ValueError):
+                _gender_set = False
+                _age_set = False
             if (countries or resolved or behaviors or exclusions or regions or cities or zips
-                    or _langs or _eg_any or cas or ecas):
+                    or _langs or _eg_any or cas or ecas or _gender_set or _age_set):
                 return build_targeting(
                     countries=countries, interests=resolved, behaviors=behaviors,
                     exclusions=exclusions, regions=regions, cities=cities, zips=zips,
@@ -4215,9 +4226,17 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     video_thumb_hash = ensure_video_thumb_hash(fb, sdb, asset, it.act_id, filepath)
                 sdb.commit()
             _page_id = it.page_id or tpl.page_id
-            _px_id = it.pixel_id or tpl.pixel_id
+            # 批BR 对齐首投：重试也走组像素核权（显式像素无权自动换 + 回写落地页），
+            # 否则重试可能用错像素/漏回写 → 归因丢失
+            _px_id, _px_note = _pick_group_pixel(
+                sdb, tenant_id, it.act_id, it.pixel_id or tpl.pixel_id,
+                int(tpl.landing_page_id or 0), fb)
             if not _px_id:
-                _px_id = _ensure_account_pixel(sdb, tenant_id, it.act_id, fb)
+                raise FbApiError("no_id", "该账户无可用像素（BM 未分配且自动创建失败）——请先在 BM 给账户分配像素")
+            if _px_note:
+                _item_note(sdb, it, f"像素核对：{_px_note[:70]}")
+            if (tpl.landing_page_id or 0) and _px_id:
+                _bind_pixel_to_landing_page(sdb, tenant_id, int(tpl.landing_page_id), _px_id, it.act_id)
             # 与 _run_deploy_job 保持一致：表单模板 page-aware 解析 + AI 消息兜底（重试要等价于全新部署，否则 LEADS/ENGAGEMENT 重试拿到错误/缺失的 form/message）
             lead_form_id = ""
             if tpl.objective == "OUTCOME_LEADS" and _page_id:
