@@ -2962,3 +2962,10 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 用户拍板方案 A：域名商店独立成页 /domains（买域名/我的域名/订单三 Tab，侧栏「自动化」组入口，landing.manage 权限）；Landing 弹窗迁出（单一维护点）；后端零改动。
 **真 key 首搜更正**：Dynadot search 实测**一次只收一个域名**（too many domains entered）——批量假设推翻。/suggest 改**价目表驱动**（tld_price 缓存 0 API 秒回，live_check=false）；可注册性+实时价（premium）**下单时单域名核验**（前端先 /check，被占即移行提示；create_order 本就实时校验兜底）——Namecheap/FB 同款形态且免限流。
 **连环两修**：①`_dynadot_key` 优先级反转（.env 实时读优先——进程内旧密钥非空永远压过 .env 新值，4 worker 各存各的首次密钥，换 key 后间歇 invalid key）；②注册商凭据「已配置」→「已验证 ✓（时间戳）/已配置·未验证」黄标（test 通过才记 system_settings——用户两次贴无效 key 界面却显已配置）。
+
+### 批HH 追记二（2026-09-24 深夜，f3103b2/2e591f2）：手续费规则化 + USDT 轻量预留
+用户拍板：手续费支持比例/低于阈值统一价；支付全站暂统一 USDT、后续扩展。
+- `_fee_for(cost)` 费用计算唯一入口：{mode: fixed|percent, fixed, rate, floor}，percent = **max(floor, rate%×成本)**（便宜域走保底、贵域按比例，一条公式覆盖两种运营诉求）；旧键 domain_shop_fee_usd 兼容读取；check/suggest/create_order 全走规则
+- 迁移 0104：domain_orders.payment_method（默认 usdt；后续支付方式加枚举即可）
+- USDT 收款：system_settings payment_usdt{chain,address} 设置页配置；/orders 响应 {orders, payment}，订单 Tab 顶部打款地址可复制；完整钱包（余额/冻结/自动扣）留 P0 计费地基批
+- 坑（bare-except 第三实证）：_fee_rules/_payment_info 用 json.loads 但文件没 import json——NameError 被 except Exception 吞，读回恒默认值；HTTP 回读断言抓出。默认已重置 fixed $5。
