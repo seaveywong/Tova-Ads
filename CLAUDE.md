@@ -10,6 +10,7 @@
 4. **通知 emit_notification 必带 dedup_recent**（`notify-dedup-mandatory`，否则 spam）。
 5. 日期双基准不可混（`toveads-date-dual-basis`）；输入框不预填默认值。
 6. **is_managed 软删**：当前操作只算 managed=true 账户；历史数据（perf_snapshots）保留全部。
+7. **并行部署防护（多会话/多 AI 共仓时必做）**：① 前端 deploy 前 `git fetch && git pull --rebase`，确认无他人未提交/在途改动；② build 必须基于最新树（产物才包含他人 commit，不顶掉）；③ deploy 后 `curl -s https://app.tovaads.com/ | grep -oE 'index-[A-Za-z0-9_-]+\.js'` 比对 live hash == 本地 `dist/assets/index-*.js`，对不上 = 有人插队顶了你的部署，停下重收敛再 build+deploy，别盲目继续。后端同理：改前先 `git pull --rebase`，上传前确认目标文件未被他人动过。
 
 ## 查找纪律（省 token 核心）
 **贵的不是文件大小，是探索（grep→读错→再读）。杀探索=省钱。**
