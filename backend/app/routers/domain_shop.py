@@ -94,13 +94,51 @@ def _avail(client, d: str) -> dict:
         raise HTTPException(400, f"注册商查询失败：{str(e)[:150]}")
 
 
-def _fee(db) -> float:
+def _fee_rules(db) -> dict:
+    """手续费规则（2026-09-24 规则化）：system_settings['domain_shop_fee_rules'] JSON
+    {mode: fixed|percent, fixed, rate, floor}。percent 模式 = max(floor, rate%×成本)
+    （便宜域走保底统一价、贵域按比例——一条公式覆盖两种运营诉求）。
+    旧键 domain_shop_fee_usd（纯数字）= fixed 模式兼容读取。"""
     from ..models.system import SystemSetting
-    row = db.query(SystemSetting).filter(SystemSetting.key == _FEE_KEY).first()
+    row = db.query(SystemSetting).filter(SystemSetting.key == "domain_shop_fee_rules").first()
+    if row and row.value:
+        try:
+            r = json.loads(row.value)
+            if r.get("mode") in ("fixed", "percent"):
+                return {"mode": r["mode"], "fixed": float(r.get("fixed") or _DEFAULT_FEE),
+                        "rate": float(r.get("rate") or 5), "floor": float(r.get("floor") or 1)}
+        except Exception:
+            pass
+    old = db.query(SystemSetting).filter(SystemSetting.key == _FEE_KEY).first()
     try:
-        return float(row.value) if row else _DEFAULT_FEE
+        fx = float(old.value) if old else _DEFAULT_FEE
     except (TypeError, ValueError):
-        return _DEFAULT_FEE
+        fx = _DEFAULT_FEE
+    return {"mode": "fixed", "fixed": fx, "rate": 5, "floor": 1}
+
+
+def _fee_for(db, cost: float) -> float:
+    """按规则算单笔手续费（费用计算唯一入口——以后加阶梯/封顶都在这改）。"""
+    r = _fee_rules(db)
+    if r["mode"] == "percent":
+        return round(max(r["floor"], r["rate"] * float(cost or 0) / 100.0), 2)
+    return round(r["fixed"], 2)
+
+
+def _payment_info(db) -> dict:
+    """收款信息（USDT 轻量预留）：system_settings['payment_usdt'] {chain, address}。
+    配了地址才返回非空——订单页展示打款目标，超管核对收款有据。"""
+    from ..models.system import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
+    out = {"method": "usdt", "chain": "", "address": ""}
+    if row and row.value:
+        try:
+            j = json.loads(row.value)
+            out["chain"] = str(j.get("chain") or "")[:20]
+            out["address"] = str(j.get("address") or "")[:120]
+        except Exception:
+            pass
+    return out if out["address"] else {"method": "usdt", "chain": "", "address": ""}
 
 
 def _norm_domain(raw: str) -> str:
@@ -123,12 +161,12 @@ def check_domain(domain: str = "", user: CurrentUser = Depends(require_permissio
     client = _registrar_client(db)
     price = _pricing(client, db).get(tld) or {}
     av = _avail(client, d)
-    fee = _fee(db)
     # Dynadot search 自带实时价（premium 域与表价不同），有则优先；tld_price 表可能分页不全
     # （缺的 TLD 不再误报「暂不支持」——search 价兜底，续费价缺则前端显 —）
     cost = av.get("price") if av.get("price") is not None else price.get("registration")
     if cost is None:
         raise HTTPException(400, f"暂不支持 .{tld} 后缀")
+    fee = _fee_for(db, cost)
     return {"domain": d, "available": av["available"], "tld": tld,
             "cost_usd": cost, "fee_usd": fee, "total_usd": round(cost + fee, 2),
             "renewal_usd": price.get("renewal")}
@@ -218,7 +256,6 @@ def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
     client = _registrar_client(db)
     pricing = _pricing(client, db)
     cands = _suggest_candidates(q, mode, tld_list)
-    fee = _fee(db)
     out = []
     for d in cands:
         tld = d.rsplit(".", 1)[-1]
@@ -229,11 +266,12 @@ def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
             continue
         if price_max and cost > price_max:
             continue
+        fee = _fee_for(db, cost)
         out.append({"domain": d, "tld": tld, "cost_usd": cost,
                     "fee_usd": fee, "total_usd": round(cost + fee, 2)})
     out.sort(key=lambda x: (x["cost_usd"], len(x["domain"])))
     return {"results": out[:limit], "searched": len(cands), "taken": 0,
-            "fee_usd": fee, "live_check": False}
+            "live_check": False}
 
 
 class OrderIn(BaseModel):
@@ -258,7 +296,7 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
     if unit is None:
         raise HTTPException(400, f"暂不支持 .{tld} 后缀")
     cost = round(unit * body.years, 2)
-    fee = _fee(db)
+    fee = _fee_for(db, cost)
     from ..models.system import SystemSetting  # noqa: F401（表已 import 路径一致）
     from ..models.domain_shop import DomainOrder
     order = DomainOrder(tenant_id=user.tenant_id, created_by=user.id, domain=d,
@@ -272,7 +310,8 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
               trigger_detail=f"{d} x{body.years}y total={order.total_usd}")
     db.commit()
     return {"id": order.id, "domain": d, "years": body.years, "total_usd": order.total_usd,
-            "status": order.status}
+            "status": order.status, "payment_method": order.payment_method,
+            "payment": _payment_info(db)}
 
 
 @router.get("/orders")
@@ -288,9 +327,11 @@ def list_orders(user: CurrentUser = Depends(require_permission("landing.manage")
         else:
             q = q.filter(DomainOrder.tenant_id == user.tenant_id)
     rows = q.order_by(DomainOrder.id.desc()).limit(100).all()
-    return [{"id": r.id, "domain": r.domain, "years": r.years, "cost_usd": r.cost_usd,
-             "fee_usd": r.fee_usd, "total_usd": r.total_usd, "status": r.status,
-             "error": r.error, "created_at": str(r.created_at or "")[:16]} for r in rows]
+    return {"orders": [{"id": r.id, "domain": r.domain, "years": r.years, "cost_usd": r.cost_usd,
+                        "fee_usd": r.fee_usd, "total_usd": r.total_usd, "status": r.status,
+                        "payment_method": r.payment_method or "usdt",
+                        "error": r.error, "created_at": str(r.created_at or "")[:16]} for r in rows],
+            "payment": _payment_info(db)}
 
 
 @router.post("/orders/{oid}/cancel")

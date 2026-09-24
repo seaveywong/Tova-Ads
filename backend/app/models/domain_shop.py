@@ -14,6 +14,7 @@ class DomainOrder(Base):
     fee_usd = Column(Float, nullable=False, default=5)
     total_usd = Column(Float, nullable=False)
     status = Column(Text, nullable=False, default="pending_payment")
+    payment_method = Column(Text, nullable=False, default="usdt")   # 0104：暂统一 USDT，后续扩展枚举
     error = Column(Text)
     porkbun_order_id = Column(Text)
     cf_zone_id = Column(Text)

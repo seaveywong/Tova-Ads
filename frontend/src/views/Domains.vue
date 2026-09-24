@@ -84,10 +84,11 @@ const zoneTxt = (d) => d.cf_zone_status === 'active' ? t('domains.zoneActive')
 // ── 订单：状态机时间线 + 超管确认收款 + 取消 ──
 const orders = ref([])
 const ordersLoading = ref(false)
+const payInfo = ref({})   // 打款信息（USDT 链+地址，配了才显示）
 const orderBusy = ref(0)
 const loadOrders = async () => {
   ordersLoading.value = true
-  try { orders.value = await GET('/domains-shop/orders') } catch {}
+  try { const r = await GET('/domains-shop/orders'); orders.value = r.orders || []; payInfo.value = r.payment || {} } catch {}
   ordersLoading.value = false
 }
 const stLabel = (st) => ({ pending_payment: t('landing.shStPending'), approved: t('landing.shStApproved'), registering: t('landing.shStReg'), registered: t('landing.shStRegd'), bound: t('landing.shStBound'), failed: t('landing.shStFailed'), cancelled: t('landing.shStCancel') }[st] || st)
@@ -110,6 +111,10 @@ const approveOrder = async (o) => {
 }
 const pendingCount = computed(() => (orders.value || []).filter(o => o.status === 'pending_payment').length)
 
+const copyPay = () => {
+  navigator.clipboard?.writeText(payInfo.value.address || '')
+  ElMessage.success(t('domains.payCopied'))
+}
 onMounted(() => { loadOrders(); loadMyDomains() })
 </script>
 
@@ -165,6 +170,11 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 
     <!-- 订单 -->
     <div v-if="tab === 'orders'" class="card" v-loading="ordersLoading">
+      <div v-if="payInfo.address" class="pay-box">
+        <span class="pay-label">{{ t('domains.payTo') }}</span>
+        <span class="pay-addr mono" @click="copyPay">{{ payInfo.chain }} · {{ payInfo.address }}</span>
+        <button class="btn sm" @click="copyPay">{{ t('common.copy') }}</button>
+      </div>
       <div v-for="o in orders" :key="o.id" class="dom-row">
         <span class="dom-name">{{ o.domain }}</span>
         <span :class="['st-chip', stClass(o.status)]">{{ stLabel(o.status) }}</span>
@@ -224,6 +234,9 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .st-chip.failed { background: rgba(255,69,58,.13); color: var(--error); }
 .st-chip.wait { background: rgba(255,159,10,.13); color: var(--warning); }
 .dom-time { font-size: 11px; color: var(--t3); margin-left: auto; }
+.pay-box { display: flex; gap: 10px; align-items: center; padding: 8px 10px; margin-bottom: 10px; background: rgba(10,132,255,.06); border: 1px solid rgba(10,132,255,.25); border-radius: 8px; flex-wrap: wrap; }
+.pay-label { font-size: 12px; font-weight: 600; color: var(--t1); }
+.pay-addr { font-size: 12px; color: var(--ac); word-break: break-all; cursor: pointer; }
 .dom-err { color: var(--error); cursor: help; }
 .btn { padding: 6px 14px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t1); border-radius: 6px; font-size: 13px; cursor: pointer; white-space: nowrap; font-family: inherit; }
 .btn:hover { background: var(--bg3); }

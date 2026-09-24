@@ -1,6 +1,7 @@
 """系统设置路由：调度配置 + AI 配置。平台级，超管才能改。"""
 import json
 import os
+import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
@@ -420,19 +421,32 @@ class RegistrarConfigIn(BaseModel):
     dynadot_api_key: str = ""
     porkbun_api_key: str = ""
     porkbun_secret_key: str = ""
-    domain_shop_fee_usd: float = -1   # 域名代购手续费（<0=不改；域名商店重做 2026-09-24）
+    domain_shop_fee_usd: float = -1   # 旧：固定手续费（<0=不改；兼容保留）
+    # 手续费规则（2026-09-24 规则化）：{mode: fixed|percent, fixed, rate, floor}；
+    # percent = max(floor, rate%×成本)。空 dict=不改
+    fee_rules: dict = {}
+    # USDT 收款信息（轻量预留）：{chain, address}。空 dict=不改
+    payment_usdt: dict = {}
+
+
+def _upsert_setting(db, key: str, value: str) -> None:
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if not row:
+        row = SystemSetting(key=key)
+        db.add(row)
+    row.value = value
 
 
 @router.get("/registrar")
 def get_registrar(user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
     from ..core.porkbun_client import porkbun_configured
-    from ..routers.domain_shop import _fee as _shop_fee, _dynadot_key as _dd_key
-    from datetime import datetime as _dt
+    from ..routers.domain_shop import _fee_rules, _payment_info, _dynadot_key as _dd_key
     _vrow = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
     return {"registrar": _registrar_setting(db),
             "registrar_verified_at": (str(_vrow.value)[:16] if _vrow and _vrow.value else ""),
-            "domain_shop_fee_usd": _shop_fee(db),
+            "fee_rules": _fee_rules(db),
+            "payment_usdt": _payment_info(db),
             "dynadot": {"configured": bool(_dd_key()),
                         "key_masked": _mask(_dd_key())},
             "porkbun": {"configured": porkbun_configured(settings),
@@ -442,16 +456,36 @@ def get_registrar(user: CurrentUser = Depends(require_superadmin),
 @router.put("/registrar")
 def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
-    """选择注册商（system_settings）+ 写凭据（.env 即时生效）+ 代购手续费。"""
+    """选择注册商（system_settings）+ 写凭据（.env 即时生效）+ 手续费规则 + USDT 收款。"""
     from ..models.system import SystemSetting
     if body.domain_shop_fee_usd >= 0:
         if body.domain_shop_fee_usd > 500:
             raise HTTPException(400, "手续费上限 500")
-        row = db.query(SystemSetting).filter(SystemSetting.key == "domain_shop_fee_usd").first()
-        if not row:
-            row = SystemSetting(key="domain_shop_fee_usd")
-            db.add(row)
-        row.value = str(round(body.domain_shop_fee_usd, 2))
+        _upsert_setting(db, "domain_shop_fee_usd", str(round(body.domain_shop_fee_usd, 2)))
+        db.commit()
+    if body.fee_rules:
+        m = str(body.fee_rules.get("mode") or "")
+        if m not in ("fixed", "percent"):
+            raise HTTPException(400, "fee_rules.mode 必须是 fixed/percent")
+        try:
+            fx = float(body.fee_rules.get("fixed", 5))
+            rate = float(body.fee_rules.get("rate", 5))
+            floor = float(body.fee_rules.get("floor", 1))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "fee_rules 数值无效")
+        if not (0 <= fx <= 500 and 0 <= rate <= 100 and 0 <= floor <= 500):
+            raise HTTPException(400, "fee_rules 数值超出范围（固定 0-500 / 比例 0-100% / 保底 0-500）")
+        import json as _json
+        _upsert_setting(db, "domain_shop_fee_rules",
+                        _json.dumps({"mode": m, "fixed": fx, "rate": rate, "floor": floor}))
+        db.commit()
+    if body.payment_usdt:
+        chain = str(body.payment_usdt.get("chain") or "").strip()[:20]
+        addr = str(body.payment_usdt.get("address") or "").strip()[:120]
+        if addr and not re.match(r"^[A-Za-z0-9]{20,120}$", addr):
+            raise HTTPException(400, "USDT 地址格式不正确")
+        import json as _json
+        _upsert_setting(db, "payment_usdt", _json.dumps({"chain": chain, "address": addr}))
         db.commit()
     if body.registrar:
         if body.registrar not in ("dynadot", "porkbun"):
