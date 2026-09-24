@@ -1271,7 +1271,7 @@ const runKeepaliveNow = async () => {
 .fx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
 @media (max-width: 768px) {
   .task-head,.task-row,.ret-head,.ret-row{grid-template-columns:1fr 1fr;row-gap:4px}
-  .anchor-strip{flex-wrap:nowrap;overflow-x:auto}
+  .anchor-strip{flex-wrap:wrap;overflow-x:visible}
 }
 .fx-cell{display:flex;justify-content:space-between;padding:7px 11px;background:var(--bg3);border-radius:6px;font-size:12px}
 .fx-code{color:var(--t3);font-weight:600}
