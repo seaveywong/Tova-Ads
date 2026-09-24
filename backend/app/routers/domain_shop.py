@@ -7,6 +7,7 @@
 未配置：查价/批准返回明确引导，订单可先建。
 计费预埋：手续费 system_settings['domain_shop_fee_usd']（默认 5），钱包上线后换 pricing_rules。
 """
+import json
 import re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
