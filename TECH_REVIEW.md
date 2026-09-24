@@ -2969,3 +2969,13 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 - 迁移 0104：domain_orders.payment_method（默认 usdt；后续支付方式加枚举即可）
 - USDT 收款：system_settings payment_usdt{chain,address} 设置页配置；/orders 响应 {orders, payment}，订单 Tab 顶部打款地址可复制；完整钱包（余额/冻结/自动扣）留 P0 计费地基批
 - 坑（bare-except 第三实证）：_fee_rules/_payment_info 用 json.loads 但文件没 import json——NameError 被 except Exception 吞，读回恒默认值；HTTP 回读断言抓出。默认已重置 fixed $5。
+
+## 批KK：域名并入投放链接 Tab + USDT-TRC20 到账监听（2026-09-24，b37aae9）
+
+用户两点批评均成立并落地：①nav 新增一级入口不符合 IA（应沿用「日志归并进投放链接」先例）且 UI 是弹窗直接拉上来；②收款确认是盲的（自己开钱包肉眼核对）。
+
+- **IA 归位**：撤侧栏入口与 /domains 路由，views/Domains.vue → components/DomainShop.vue，投放链接第三 Tab（?tab=domains）；内部 seg（买域名/我的域名/订单）走全局 list-bar/seg-bar/card 设计系统
+- **USDT 监听**（链上直读，无第三方网关零抽成）：services/usdt_monitor.py 每 2min（锁 121）TronGrid 拉收款地址 TRC20 入账；**应付金额=总价+订单号尾两位美分**（TRC20 无 memo 的唯一化对账）+±10min 时间窗；命中→payment_detected（迁移 0105 存 TXID/实收）+通知带证据；approve 放行 detected，超管一键确认后注册；全自动模式留钱包批
+- 订单行：应付（尾号提示）/TXID tronscan 链/到账徽章/一键确认
+
+验证：cron 注册（journal 4 worker Added job）✓；alembic head=0105 ✓；Playwright 截图（三 Tab+组件设计系统）✓；双门+health ✓。
