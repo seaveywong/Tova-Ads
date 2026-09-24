@@ -425,8 +425,6 @@ class RegistrarConfigIn(BaseModel):
     # 手续费规则（2026-09-24 规则化）：{mode: fixed|percent, fixed, rate, floor}；
     # percent = max(floor, rate%×成本)。空 dict=不改
     fee_rules: dict = {}
-    # USDT 收款信息（轻量预留）：{chain, address}。空 dict=不改
-    payment_usdt: dict = {}
 
 
 def _upsert_setting(db, key: str, value: str) -> None:
@@ -478,14 +476,6 @@ def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_s
         import json as _json
         _upsert_setting(db, "domain_shop_fee_rules",
                         _json.dumps({"mode": m, "fixed": fx, "rate": rate, "floor": floor}))
-        db.commit()
-    if body.payment_usdt:
-        chain = str(body.payment_usdt.get("chain") or "").strip()[:20]
-        addr = str(body.payment_usdt.get("address") or "").strip()[:120]
-        if addr and not re.match(r"^[A-Za-z0-9]{20,120}$", addr):
-            raise HTTPException(400, "USDT 地址格式不正确")
-        import json as _json
-        _upsert_setting(db, "payment_usdt", _json.dumps({"chain": chain, "address": addr}))
         db.commit()
     if body.registrar:
         if body.registrar not in ("dynadot", "porkbun"):

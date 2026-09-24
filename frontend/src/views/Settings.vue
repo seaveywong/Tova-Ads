@@ -256,7 +256,6 @@ const rgCfg = ref({ registrar: 'dynadot', dynadot: { configured: false, key_mask
 const rgForm = ref({ dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' })
 const rgFeeInput = ref('')   // （旧固定值，兼容保留）
 const rgFeeForm = ref({ mode: 'fixed', fixed: '', rate: '', floor: '' })   // 规则化手续费（空=不改）
-const rgPayForm = ref({ chain: '', address: '' })   // USDT 收款（空=不改）
 const rgSaving = ref(false)
 const rgTesting = ref(false)
 const loadRg = async () => { try { rgCfg.value = await GET('/settings/registrar') } catch {} }
@@ -278,10 +277,9 @@ const saveRg = async () => {
     if (rgFeeForm.value.mode && rgFeeForm.value[rgFeeForm.value.mode === 'fixed' ? 'fixed' : 'rate'] !== '') {
       body.fee_rules = { mode: rgFeeForm.value.mode, fixed: Number(rgFeeForm.value.fixed || 5), rate: Number(rgFeeForm.value.rate || 5), floor: Number(rgFeeForm.value.floor || 1) }
     }
-    if (rgPayForm.value.address !== '' || rgPayForm.value.chain !== '') body.payment_usdt = { chain: rgPayForm.value.chain, address: rgPayForm.value.address }
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); rgSaving.value = false; return }
     await PUT('/settings/registrar', body)
-    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }; rgFeeInput.value = ''; rgFeeForm.value = { mode: rgCfg.value.fee_rules?.mode || 'fixed', fixed: '', rate: '', floor: '' }; rgPayForm.value = { chain: '', address: '' }
+    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }; rgFeeInput.value = ''; rgFeeForm.value = { mode: rgCfg.value.fee_rules?.mode || 'fixed', fixed: '', rate: '', floor: '' }
     await loadRg()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   rgSaving.value = false
@@ -984,10 +982,7 @@ const runKeepaliveNow = async () => {
         <div class="form-l"><label>{{ t('settings.rgFeeFloor') }}</label><input v-model="rgFeeForm.floor" class="input" type="number" min="0" step="0.5" :placeholder="t('settings.rgFeeFloorPh', { v: rgCfg.fee_rules?.floor ?? 1 })" /></div>
       </template>
       <div class="field-hint">{{ t('settings.rgFeeRuleHint') }}</div>
-      <div class="sub-t sub-t-gap">{{ t('settings.rgPayTitle') }}</div>
-      <div class="form-l"><label>{{ t('settings.rgPayChain') }}</label><input v-model="rgPayForm.chain" class="input" :placeholder="t('settings.rgPayChainPh')" /></div>
-      <div class="form-l"><label>{{ t('settings.rgPayAddr') }}</label><input v-model="rgPayForm.address" class="input" :placeholder="t('settings.rgPayAddrPh')" /></div>
-      <div class="field-hint">{{ t('settings.rgPayHint') }}</div>
+      <div class="field-hint">{{ t('settings.rgPayMoved') }}</div>
       <div style="display:flex;gap:8px">
         <button class="btn primary" :disabled="rgSaving" @click="saveRg">{{ t('common.save') }}</button>
         <button class="btn" :disabled="rgTesting" @click="testRg">{{ t('settings.pbTest') }}</button>
