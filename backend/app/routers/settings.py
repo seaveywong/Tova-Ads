@@ -500,6 +500,10 @@ def test_registrar(user: CurrentUser = Depends(require_superadmin),
         try:
             info = DynadotClient(_dd_key()).account_info()
         except DynadotError as e:
+            # invalid key 定向指引（2026-09-24 用户实例）：Dynadot 有「密钥」(测试)/
+            # 「生产密钥」两种——填错测试密钥对生产端点恒 invalid key
+            if "invalid key" in str(e).lower():
+                raise HTTPException(400, "连接失败: invalid key——请确认填的是 Dynadot【生产密钥】（Tools → API 里另有测试用「密钥」，两者不通用）")
             raise HTTPException(400, f"连接失败: {e}")
         balance = str(info.get("AccountBalance") or "")
         account = str(info.get("Username") or "")
