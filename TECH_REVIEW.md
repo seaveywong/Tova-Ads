@@ -2926,3 +2926,20 @@ launch_templates.py 顶层只导入 FbApiError——`_write_fb_with_fallback`（
 
 ### ⚠️ 待用户一步
 **Dynadot API Key 实际未配置**（.env 无任何注册商键——此前「已配置」说法不成立）。操作：设置→域名注册商→API Key（Dynadot→账户→Tools→API 生成）→保存→测试连接（显账户+余额）。保存即全链可用（实时读已验，无需 restart）。search_many 的真实批量返回形状待首搜验证（代码按返回行数鲁棒处理）。
+
+## 批II：多令牌×主页三层完善——部署抽屉池并集 + 指定令牌 + 权限预检（2026-09-24，1d8b855）
+
+### 根因（Roly-V21-81 案）
+部署抽屉 per-account 主页下拉（ensureAccConfig）只拉**绑定主令牌**（Bd Hs）的页——池内 Minah/Yến Chi 独占的主页选不到。三处主页口径（模板编辑器/换页重试/部署抽屉）的最后一个漏网点；结构性根因=「账户×主页×令牌」无统一服务层，各界面各自取数。
+
+### 三层方案（用户拍板全做）
+| 层 | 实现 |
+|---|---|
+| 1 数据统一 | ensureAccConfig 主页改 `/launch-templates/pages?act_id`（池+绑定并集；via_cred/via_cred_id 标注；无广告权限禁选）；随机分配主页池自动变全 |
+| 2 控制面 | per-account「令牌」下拉（默认自动=页面感知；指定→deploy items 带 cred_id，提交校验池内，执行侧 `_pinned_write_fb` 三层校验（池内/可用/能管全部主页）绑死，主页下拉过滤为该令牌的页）；cred_overrides 存 job metadata（batch_assets 同模式）+ retry 同口径；新端点 `/launch-templates/creds` |
+| 3 预检 | `/launch-templates/page-coverage`（模板主页×已选账户逐户判定，(cred,page) 探测缓存共享）+ 抽屉底部懒加载面板（新帖模式对标跟帖 /reuse-eligible） |
+
+### 验证
+- 执行侧行为 smoke（Roly-81 真池）：指定 Minah→OK；指定 Bd Hs 管 Dhir→明确拒绝；指定池外 #25→明确拒绝 ✓
+- HTTP 三端点：creds=3 令牌池 / pages=9 页含 via_cred_id / coverage=Dhir×两账户均 ok via Minah ✓
+- Playwright UI 实测：主页下拉池并集+归属标注（截图 _vis_dd_pages.png）、令牌下拉（自动+池内令牌）、预检按钮与无主页提示 ✓；双门+restart+health ✓
