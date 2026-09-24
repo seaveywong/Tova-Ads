@@ -2979,3 +2979,21 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 - 订单行：应付（尾号提示）/TXID tronscan 链/到账徽章/一键确认
 
 验证：cron 注册（journal 4 worker Added job）✓；alembic head=0105 ✓；Playwright 截图（三 Tab+组件设计系统）✓；双门+health ✓。
+
+## 批LL：全面复审（批FF→KK）+ 支付独立设置/扫码面板/TronGrid key（2026-09-24，ad3276a）
+
+### 复审发现与处置
+| # | 发现 | 级别 | 处置 |
+|---|---|---|---|
+| 1 | /guard/sentinel/disarm 12:03 一次 RLS 500：action_logs 策略 tenant_iso 要求 tenant_id=current_setting('app.tenant_id')，该上下文取自 JWT 声明——**缺 tenant_id 的 token**（set 空→策略恒 NULL→写即拒） | P2 边缘 | 根因已定（疑似手工铸测试 token）；正常登录 token 均带 tenant_id。挂账：写端点可加 tenant 早拒 |
+| 2 | usdt_monitor 同总额同尾号两单可能串：匹配序 desc（新单先吃） | P1 | 已修：asc 旧单优先（付款意图通常为先下的单） |
+| 3 | Landing 残留 2 处 shop CSS 死代码 | P2 | 无害挂账 |
+| 4 | en 零 CJK / 建议门（build+grep 双查）| — | 通过 |
+| 5 | 批GG 创意裁剪/批II cred_id 校验/RBAC（新端点 ads.create+account_operable）/迁移 0104-0105 GRANT/部署门 | — | 全通过 |
+
+### 支付批（用户点名：key 配置处/独立收款设置/扫码+复制/业界最佳实践）
+- **GET/PUT /settings/payment**（超管独立卡）：TRC20 链锁定（ERC20 后续）/收款地址/TronGrid API Key（可选——免 key 限流低；.env TRONGRID_API_KEY 实时读兜底）/打款说明
+- usdt_monitor 接 **TRON-PRO-API-KEY** header；_payment_info 透出 pay_note
+- **DomainShop 支付面板**（对齐 BTCPay/NOWPayments 发票模式）：下单即开——QR（`tron:地址?token=USDT&amount=应付`，TokenPocket/TronLink 扫码识别，qrcode 库本地生成）+ 复制地址/金额（尾号提示）+ 打款说明 + **8s 状态轮询**（到账自动变蓝+TXID tronscan 链）+ 订单行「去支付」重开
+- 业界对照：唯一金额尾号✓/发票面板✓/轮询确认✓/TXID 对账✓/0-conf 接受（TRC20 不可逆）✓/多地址轮换（后续）
+- 验证：payment GET/PUT/回读/重置 线上✓；设置卡截图✓；发票面板 E2E 被 Dynadot key 未配阻塞（建单依赖 _avail）——key 通后首单即验
