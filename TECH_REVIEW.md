@@ -3008,3 +3008,6 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 复审挂账全清：①Landing 整块旧 shop CSS 删除 + landing.js 14 死键清理；②deps.py 缺 tenant_id token 401 早拒（sentinel RLS 500 根因加固）；③支付面板终态全映射（取消/失败/交付不再误显等待）。
 终验：FE hash MATCH、payment/orders/dashboard 200、journal 干净、双门+health ✓。
 剩余待办均为用户侧或独立批（Dynadot key/USDT 地址配置；P0 钱包地基、域名月租 cron、TT sandbox 等既定挂账），无本会话技术遗留。
+
+### 批MM：支付入口去重 + 全站入口扫描（2026-09-25）
+用户「域名注册商还有收款怎么回事」查实：注册商卡残留旧 USDT 块与支付设置卡**双入口**，且 registrar PUT 的 payment_usdt 分支只写 chain+address → **抹掉支付卡的 trongrid_api_key/pay_note**（字段互踩）。修复：注册商卡删块+指引；后端删分支；支付唯一入口 /settings/payment。全站入口扫描（截图核验）：注册商（凭据+定价）/支付（收款）分域清晰相邻；Landing 域名 Tab+购买按钮同址；侧栏无多余入口；Dashboard 域名相关仅通知数据。
