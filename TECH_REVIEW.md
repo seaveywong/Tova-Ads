@@ -2997,3 +2997,9 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 - **DomainShop 支付面板**（对齐 BTCPay/NOWPayments 发票模式）：下单即开——QR（`tron:地址?token=USDT&amount=应付`，TokenPocket/TronLink 扫码识别，qrcode 库本地生成）+ 复制地址/金额（尾号提示）+ 打款说明 + **8s 状态轮询**（到账自动变蓝+TXID tronscan 链）+ 订单行「去支付」重开
 - 业界对照：唯一金额尾号✓/发票面板✓/轮询确认✓/TXID 对账✓/0-conf 接受（TRC20 不可逆）✓/多地址轮换（后续）
 - 验证：payment GET/PUT/回读/重置 线上✓；设置卡截图✓；发票面板 E2E 被 Dynadot key 未配阻塞（建单依赖 _avail）——key 通后首单即验
+
+### 批LL 追记·复审II（2026-09-25，162cc92）
+终态代码对抗细读 + 隔夜运行核查（服务器=仓库 HEAD md5 三文件全对、14h 零 Traceback、FE hash 一致、无外来提交）。发现并修复：
+1. **P1**：usdt_monitor 同一笔链上入账可被同尾号两单重复匹配（内层 break 只跳单不消费 tx）→ `used_txids` 跨单排除，一笔款只标一单
+2. **P2**：domain_payment_detected / domain_order_fulfilled 未进 Dashboard 通知事件映射（今日摘要 chip 会裸显英文码）→ 补齐（evDomainPaid zh/en）
+记录项（不改码）：USDT≈USD 1:1 对账假设（业界惯例）；取消订单后支付面板状态不回写（用户自己刚取消，可关闭面板，P3）。
