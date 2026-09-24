@@ -216,7 +216,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
             <span class="pay-addr mono" @click="copyPay">{{ payInfo.address }}</span>
             <button class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button></div>
           <div v-if="payInfo.pay_note" class="inv-note">{{ payInfo.pay_note }}</div>
-          <div class="inv-status" :class="payPanel.status">{{ payPanel.status === 'payment_detected' ? t('domains.stDetected') : t('domains.waitingPay') }}</div>
+          <div :class="['inv-status', stClass(payPanel.status)]">{{ ['pending_payment', 'payment_detected'].includes(payPanel.status) ? (payPanel.status === 'payment_detected' ? t('domains.stDetected') : t('domains.waitingPay')) : stLabel(payPanel.status) }}</div>
           <a v-if="payPanel.payment_txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + payPanel.payment_txid" target="_blank">TXID ↗</a>
           <div class="inv-note">{{ t('domains.payAutoDetect') }}</div>
           <button class="ctrl-btn sm" style="margin-top:6px" @click="payPanel = null">{{ t('common.close') }}</button>
@@ -292,4 +292,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .inv-note { font-size: 11px; color: var(--t3); }
 .inv-status { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 9px; align-self: flex-start; background: rgba(255,159,10,.13); color: var(--warning); }
 .inv-status.payment_detected { background: rgba(10,132,255,.15); color: var(--ac); }
+.inv-status.bound { background: rgba(48,209,88,.13); color: var(--success); }
+.inv-status.failed { background: rgba(255,69,58,.13); color: var(--error); }
+.inv-status.cancelled { background: var(--bg3); color: var(--t3); }
 </style>

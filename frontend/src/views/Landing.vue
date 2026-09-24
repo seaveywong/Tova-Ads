@@ -1638,33 +1638,4 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .sub-ad i{font-style:normal;color:var(--t3)}
 
 /* 域名商店（批DD） */
-.shop-quote { margin-top: 10px; padding: 10px 14px; background: var(--bg2); border-radius: 8px; font-size: 13px }
-/* ── 域名候选推送（2026-09-24 商店重做）── */
-.shop-search { display: flex; gap: 8px; align-items: center }
-.shop-input { flex: 1; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 12px; font-size: 13px; font-family: var(--font) }
-.shop-input:focus { outline: none; border-color: var(--ac) }
-.shop-filters { margin-top: 10px; display: flex; flex-direction: column; gap: 7px }
-.shop-filters .seg-bar.sm { align-self: flex-start }
-.shop-tld-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center }
-.sf-label { font-size: 11px; color: var(--t3); margin-right: 3px }
-.tld-chip { padding: 2px 9px; border: 1px solid var(--bd); background: var(--bg2); color: var(--t3); border-radius: 10px; font-size: 11px; cursor: pointer; font-family: inherit; transition: all .12s }
-.tld-chip:hover { color: var(--t1); border-color: var(--bd2) }
-.tld-chip.on { background: var(--acg); color: var(--ac); border-color: var(--ac) }
-.shop-results { margin-top: 10px; min-height: 60px; max-height: 300px; overflow-y: auto }
-.shop-row { display: flex; gap: 10px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--bd); font-size: 12px }
-.sr-dom { font-weight: 600; color: var(--t1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.sr-price { color: var(--t3); font-variant-numeric: tabular-nums }
-.sr-price i { font-style: normal; font-size: 11px }
-.sr-price b { color: var(--t1) }
-.shop-stats { padding: 8px 4px 2px; font-size: 11px; color: var(--t3) }
-.shop-empty { text-align: center; color: var(--t3); font-size: 12px; padding: 22px 10px }
-.shop-price { color: var(--t2); margin-top: 4px }
-.shop-price b { color: var(--t1) }
-.shop-price i { font-style: normal; font-size: 11px; color: var(--t3) }
-.shop-order-row { display: flex; gap: 10px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--bd); font-size: 12px }
-.shop-st { font-size: 10px; padding: 1px 7px; border-radius: 4px; background: rgba(128,128,140,.14); color: var(--t2) }
-.shop-st.bound { color: #30d158; background: rgba(48,209,88,.12) }
-.shop-st.pending_payment { color: #ff9f0a; background: rgba(255,159,10,.12) }
-.shop-st.failed { color: #ff453a; background: rgba(255,69,58,.12) }
-.shop-err { cursor: help }
 </style>

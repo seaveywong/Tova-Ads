@@ -104,6 +104,11 @@ def get_current_user(
 
     tenant_id = payload.get("tenant_id")
     is_super = bool(payload.get("is_superadmin", False))
+    # 缺租户上下文的 token 直接拒（复审II定案加固）：RLS 会话变量 set 空 → 策略恒 NULL，
+    # 任何租户行写入即 500（/guard/sentinel/disarm 实证）。正常登录/铸造的 token 都带
+    # tenant_id——缺它=手工造的异常 token，早拒给出清晰 401 而不是半路 RLS 炸。
+    if tenant_id is None:
+        raise HTTPException(401, "令牌缺少租户上下文，请重新登录")
 
     # 设 RLS 会话上下文。set_config(is_local=false)=会话级：请求中途 commit 后仍生效
     # （SET LOCAL 随事务结束蒸发 → commit 后同 session 查询静默 0 行，曾击穿批量写/紧急暂停/refresh）。
