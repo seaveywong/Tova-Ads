@@ -428,7 +428,10 @@ def get_registrar(user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
     from ..core.porkbun_client import porkbun_configured
     from ..routers.domain_shop import _fee as _shop_fee, _dynadot_key as _dd_key
+    from datetime import datetime as _dt
+    _vrow = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
     return {"registrar": _registrar_setting(db),
+            "registrar_verified_at": (str(_vrow.value)[:16] if _vrow and _vrow.value else ""),
             "domain_shop_fee_usd": _shop_fee(db),
             "dynadot": {"configured": bool(_dd_key()),
                         "key_masked": _mask(_dd_key())},
@@ -507,6 +510,12 @@ def test_registrar(user: CurrentUser = Depends(require_superadmin),
             raise HTTPException(400, f"连接失败: {e}")
         balance = str(info.get("AccountBalance") or "")
         account = str(info.get("Username") or "")
+        _v = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
+        if not _v:
+            _v = SystemSetting(key="domain_registrar_verified_at")
+            db.add(_v)
+        _v.value = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        db.commit()
         return {"ok": True, "registrar": "dynadot", "account": account[:60],
                 "balance": balance[:40] or None}
     # porkbun
@@ -517,6 +526,12 @@ def test_registrar(user: CurrentUser = Depends(require_superadmin),
         r = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key).ping()
     except PorkbunError as e:
         raise HTTPException(400, f"连接失败: {e}")
+    _v = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
+    if not _v:
+        _v = SystemSetting(key="domain_registrar_verified_at")
+        db.add(_v)
+    _v.value = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    db.commit()
     return {"ok": True, "registrar": "porkbun", "account": str(r.get("identity") or "")[:60]}
 
 

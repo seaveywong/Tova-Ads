@@ -934,7 +934,8 @@ const runKeepaliveNow = async () => {
           <el-radio-button value="dynadot">Dynadot</el-radio-button>
           <el-radio-button value="porkbun">Porkbun</el-radio-button>
         </el-radio-group>
-        <span v-if="rgCfg[rgCfg.registrar]?.configured" class="tag ok" style="margin-left:8px">{{ t('settings.rgReady') }}</span>
+        <span v-if="rgCfg[rgCfg.registrar]?.configured && rgCfg.registrar_verified_at" class="tag ok" style="margin-left:8px">{{ t('settings.rgVerified', { v: rgCfg.registrar_verified_at }) }}</span>
+        <span v-else-if="rgCfg[rgCfg.registrar]?.configured" class="tag warn" style="margin-left:8px">{{ t('settings.rgUnverified') }}</span>
         <span v-else class="tag warn" style="margin-left:8px">{{ t('settings.rgNoKey') }}</span>
       </div>
       <template v-if="rgCfg.registrar === 'dynadot'">
