@@ -2957,3 +2957,8 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 ### 验证
 线上 curl /fb/credentials/36/assets → 459 → **#36 status 即时翻 expired（13:35 DB 实证）**；通知不重复（13:23 token_invalid 已发，dedup 生效）；md5 核对服务器=仓库 HEAD（含并行 DeepSeek 提交 f44c105，其 tt_client/ads 等改动已部署，无双头漂移）。
 附：Minah 真因 = FB checkpoint（459「需登录验证」）——重新绑定前需号主先过 FB 验证。
+
+### 批HH 追记（2026-09-24 晚，acfa874→e2597e4）：独立域名页 + 真 key 实测两项更正
+用户拍板方案 A：域名商店独立成页 /domains（买域名/我的域名/订单三 Tab，侧栏「自动化」组入口，landing.manage 权限）；Landing 弹窗迁出（单一维护点）；后端零改动。
+**真 key 首搜更正**：Dynadot search 实测**一次只收一个域名**（too many domains entered）——批量假设推翻。/suggest 改**价目表驱动**（tld_price 缓存 0 API 秒回，live_check=false）；可注册性+实时价（premium）**下单时单域名核验**（前端先 /check，被占即移行提示；create_order 本就实时校验兜底）——Namecheap/FB 同款形态且免限流。
+**连环两修**：①`_dynadot_key` 优先级反转（.env 实时读优先——进程内旧密钥非空永远压过 .env 新值，4 worker 各存各的首次密钥，换 key 后间歇 invalid key）；②注册商凭据「已配置」→「已验证 ✓（时间戳）/已配置·未验证」黄标（test 通过才记 system_settings——用户两次贴无效 key 界面却显已配置）。
