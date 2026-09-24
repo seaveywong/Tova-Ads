@@ -873,7 +873,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     <header class="page-head">
       <div class="ph-left">
         <h1 class="ph-title">{{ t('landing.pageTitle') }}</h1>
-        <span class="ph-fresh">{{ t('landing.headMeta', { n: pages.length, blocked: pages.filter(p => p.last_fb_status === 'fail').length }) }}</span>
+        <span class="ph-fresh">{{ t('landing.headMeta', { n: visiblePages.length, blocked: visiblePages.filter(p => p.last_fb_status === 'fail').length }) }}</span>
       </div>
       <div class="ph-actions">
         <button class="head-btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
