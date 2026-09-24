@@ -71,11 +71,16 @@ def run_usdt_monitor():
             return
         txs = _fetch_incoming(addr, tg_key)
         hits = 0
+        used_txids: set = set()   # 复审II：同一笔入账只能消费一次——曾内层 break 只跳单不标 tx，
+        # 同尾号两单会被同一笔付款重复匹配（一笔款标两单 detected）
         for o in pend:
             want = pay_amount_for(o.total_usd, o.id)
             created_ts = (o.created_at or datetime.now(timezone.utc)).timestamp()
             for t in txs:
                 try:
+                    _txid = str(t.get("transaction_id") or "")
+                    if _txid in used_txids:
+                        continue
                     if (t.get("to") or "") != addr:
                         continue
                     amt = round(int(t.get("value", "0")) / 1e6, 2)
@@ -84,6 +89,7 @@ def run_usdt_monitor():
                     continue
                 if amt != want or ts + 600 < created_ts:
                     continue
+                used_txids.add(_txid)
                 o.status = "payment_detected"
                 o.payment_txid = str(t.get("transaction_id") or "")
                 o.paid_amount = amt

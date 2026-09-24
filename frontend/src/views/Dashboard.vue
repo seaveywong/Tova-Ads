@@ -871,6 +871,7 @@ const NOTIF_EVENT_LABEL_KEY = {
   sentinel_perm_denied: 'dashboard.evSentinelPermDenied',
   kpi_resolve_error: 'dashboard.evKpiError',
   ai_quota_exhausted: 'dashboard.evAiQuota',
+  domain_payment_detected: 'dashboard.evDomainPaid', domain_order_fulfilled: 'dashboard.evDomainPaid',
   // 补齐后端 emit_notification 全集（2026-09-23 漏 10 个 → 今日摘要 chip 裸显英文码）
   sentinel_auto_armed: 'dashboard.evSentinelAutoArmed', sentinel_auto_arm_warning: 'dashboard.evSentinelCountdown',
   inspection_stale_accounts: 'dashboard.evInspectStale', inspection_skipped: 'dashboard.evInspectSkipped',
