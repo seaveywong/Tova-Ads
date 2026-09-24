@@ -79,6 +79,11 @@ const aiDepth = ref(localStorage.getItem('tova_ai_depth') || 'standard')
 const aiStyle = ref(localStorage.getItem('tova_ai_style') || 'standard')
 const setDepth = (v) => { aiDepth.value = v; localStorage.setItem('tova_ai_depth', v) }
 const setStyle = (v) => { aiStyle.value = v; localStorage.setItem('tova_ai_style', v) }
+// 深度档 title：文案数 + （视频档）帧数，帧数空则不带尾巴
+const depthTitle = (d) => {
+  const frames = d.video_frames
+  return t('assets.depthTitle', { copy: d.copy_count, framePart: frames ? t('assets.depthFrames', { n: frames }) : '' })
+}
 // 投放目的展示（自由文本；兼容旧数据 custom: 前缀）
 const purposeText = (v) => {
   if (!v) return ''
@@ -111,6 +116,9 @@ const load = async () => {
     const r = await GET('/assets?' + params.toString())
     if (!isLatest()) return
     assets.value = r
+    // 剪枝：筛选/搜索后 selected 可能残留已不在当前列表的 id（批量打标签/删除会误伤）
+    const _ids = new Set(r.map(x => x.id))
+    selected.value = new Set([...selected.value].filter(id => _ids.has(id)))
   } catch (e) { if (isLatest()) ElMessage.error(e.message || t('common.opFail')) }
   if (isLatest()) loading.value = false
 }
@@ -198,6 +206,7 @@ const submitUpload = async () => {
 // 重命名（inline）
 const startRename = (a) => { editingId.value = a.id; editingName.value = a.name }
 const saveRename = async (a) => {
+  if (editingId.value !== a.id) return   // 回车触发的 blur 会二次进入，这里挡住重复 PUT
   const n = editingName.value.trim()
   editingId.value = 0
   if (!n || n === a.name) return
@@ -330,7 +339,8 @@ const saveBatchTag = async () => {
   for (const id of [...selected.value]) {
     try {
       const a = assets.value.find(x => x.id === id)
-      const merged = [...new Set([...(a?.tags || []), ...add])]  // 合并去重
+      if (!a) { fail++; continue }  // 素材已不在当前列表（筛选/删除后）——用空 tags 覆盖会清掉原标签（P1 数据丢失）
+      const merged = [...new Set([...(a.tags || []), ...add])]  // 合并去重
       await PUT('/assets/' + id, { tags: merged }); ok++
     } catch { fail++ }
   }
@@ -487,7 +497,7 @@ const countryLabel = (code) => {
         <span class="ai-field-label">{{ t('assets.depth') }}</span>
         <div class="seg-bar">
           <button v-for="d in aiOpts.depths" :key="d.value" :class="['seg-btn', { on: aiDepth === d.value }]"
-                  :title="t('assets.depthTitle', { copy: d.copy_count, frames: d.video_frames })"
+                  :title="depthTitle(d)"
                   @click="setDepth(d.value)">{{ d.label }}</button>
         </div>
       </div>

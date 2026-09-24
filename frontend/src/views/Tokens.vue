@@ -53,11 +53,13 @@ const isSuper = ref(isSuperadminSync())
 const healthOpen = ref(false)
 const healthLoading = ref(false)
 const health = ref(null)
+const healthError = ref('')
 const cleaning = ref(false)
 
 // ── TikTok 分区（TT 令牌：24h access 自动续期 + 365d refresh 授权寿命）──
 const platform = ref('fb')
 const ttLoading = ref(false)
+const ttError = ref('')
 const ttCreds = ref([])
 const ttApps = ref([])                      // App 卡片列表（照 FB apps 模式）
 const nowTick = ref(Date.now())
@@ -65,8 +67,9 @@ let ttTimer = null
 
 const loadTt = async () => {
   ttLoading.value = true
+  ttError.value = ''
   try { ttCreds.value = await GET('/tt/credentials') }
-  catch (e) { ElMessage.error(e.message || t('tokens.ttLoadFail')); ttCreds.value = [] }
+  catch (e) { ttError.value = e.message || t('tokens.ttLoadFail'); ttCreds.value = [] }
   ttLoading.value = false
 }
 const loadTtApps = async () => {
@@ -257,8 +260,9 @@ const sampleText = (s) => Object.entries(s || {}).map(([k, v]) => `${k}=${v}`).j
 const openHealth = async () => { popOverlay(); healthOpen.value = true; await fetchHealth() }
 const fetchHealth = async () => {
   healthLoading.value = true
+  healthError.value = ''
   try { health.value = await GET('/fb/credentials/data-health') }
-  catch (e) { ElMessage.error(e.message || t('tokens.healthLoadFail')); health.value = null }
+  catch (e) { healthError.value = e.message || t('tokens.healthLoadFail'); health.value = null }
   healthLoading.value = false
 }
 const runClean = async () => {
@@ -286,7 +290,7 @@ onUnmounted(() => { if (ttTimer) clearInterval(ttTimer) })
 const statusOrder = (t) => {
   const s = t.status, f = t.consecutive_fails || 0
   if (['expired','revoked','inactive'].includes(s)) return 0
-  if (['suspended','limited'].includes(s) || f >= 3) return 1
+  if (['suspended','limited','rate_limited'].includes(s) || f >= 3) return 1
   if (s === 'disabled') return 2
   return 3
 }
@@ -295,10 +299,10 @@ const sortedTokens = computed(() => [...tokens.value].sort((a, b) => statusOrder
 const statusMeta = (tk) => {
   const s = tk.status, f = tk.consecutive_fails || 0
   if (['expired','revoked','inactive'].includes(s)) return { dot: 'err', label: t('status.tokenInvalid') }
-  if (['limited'].includes(s) || f >= 3) return { dot: 'warn', label: t('status.tokenThrottled') + f }
+  if (['limited','rate_limited'].includes(s) || f >= 3) return { dot: 'warn', label: t('status.tokenThrottled') }
   if (s === 'suspended') return { dot: 'warn', label: t('status.tokenPending') }
   if (s === 'disabled') return { dot: 'off', label: t('common.disable') }
-  if (f > 0) return { dot: 'warn', label: t('tokens.abnormal') + f }
+  if (f > 0) return { dot: 'warn', label: t('tokens.abnormal') + ' ' + f }
   return { dot: 'ok', label: t('status.tokenValid') }
 }
 // 页头副信息：当前平台令牌 可用/停用 计数（可用=状态正常无异常，其余计入停用）
@@ -321,7 +325,7 @@ const typeMeta = (tk) => {
 const sourceLabel = (s) => ({ manual: t('tokens.sourceManual'), oauth: 'OAuth' }[s] || '—')
 const fmtTime = (s) => {
   if (!s || s === 'None') return '—'
-  const d = new Date(s.endsWith('Z') ? s : s.replace(' ', 'T') + 'Z')
+  const d = new Date(s.endsWith('Z') ? s : s.replace(' ', 'T'))
   if (isNaN(d)) return '—'
   const diff = (Date.now() - d.getTime()) / 60000
   if (diff < 1) return t('tokens.justNow')
@@ -768,9 +772,15 @@ const deleteToken = async (tk) => {
         </div>
       </div>
       <div v-else-if="!ttLoading" class="empty empty-cta">
-        <div class="empty-title">{{ t('tokens.ttEmptyTitle') }}</div>
-        <div class="empty-step">{{ t('tokens.ttEmptyHint') }}</div>
-        <button class="btn primary empty-cta-btn" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
+        <template v-if="ttError">
+          <div class="empty-title" style="color:var(--error)">{{ ttError }}</div>
+          <button class="btn primary empty-cta-btn" @click="loadTt">{{ t('common.retry') }}</button>
+        </template>
+        <template v-else>
+          <div class="empty-title">{{ t('tokens.ttEmptyTitle') }}</div>
+          <div class="empty-step">{{ t('tokens.ttEmptyHint') }}</div>
+          <button class="btn primary empty-cta-btn" @click="startTtOAuth()">{{ t('tokens.connectTikTok') }}</button>
+        </template>
       </div>
     </div>
 
@@ -1055,7 +1065,11 @@ const deleteToken = async (tk) => {
               </div>
             </div>
           </div>
-          <div v-else-if="!healthLoading" class="hint">{{ t('tokens.healthAllClean') }}</div>
+          <div v-else-if="!healthLoading" class="hint">
+            <span v-if="healthError" style="color:var(--error)">{{ healthError }}</span>
+            <span v-else>{{ t('tokens.healthAllClean') }}</span>
+            <div v-if="healthError"><button class="btn sm" style="margin-top:8px" @click="fetchHealth">{{ t('common.retry') }}</button></div>
+          </div>
         </div>
         <div class="m-foot">
           <button class="btn" @click="healthOpen=false">{{ t('common.close') }}</button>

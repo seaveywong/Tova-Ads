@@ -580,7 +580,7 @@ const copyText = async (txt, msg) => {
   if (ok) ElMessage.success(msg || t('common.copied'))
 }
 const randomPrefix = () => 'go' + Math.random().toString(36).slice(2, 7)
-const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : h }
+const rootOf = (d) => { const h = (d || '').replace(/^https?:\/\//, '').split('/')[0]; const p = h.split('.'); if (p.length < 2) return h; const t = p[p.length - 1]; return p.slice(-((t.length === 2 && p.length > 2) ? 3 : 2)).join('.') }
 // 子域名管理
 const newSubPrefix = ref('')
 const newSubRoot = ref('')
@@ -937,7 +937,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <span class="lp-subcount" :title="(p.pixel_ids||[]).length + ' ' + t('landing.pixelsUnit')">{{ p.subcode_count || 0 }}</span>
           <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
           <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%（累计）'">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%' + t('landing.stCumulative')">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
           <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-else-if="p.last_health_status" class="health-dot" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>

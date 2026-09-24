@@ -460,7 +460,7 @@ onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; po
 
 // #2 dirty-check：编辑抽屉关闭前确认（含结构模式树 + 模式本身——树编辑不写 form，须一并快照）
 let _formSnapshot = ''
-const _editSnapshot = () => JSON.stringify({ f: form.value, m: editMode.value, t: tree.value })
+const _editSnapshot = () => JSON.stringify({ f: form.value, m: editMode.value, t: tree.value, aa: advantage_audience.value, ac: advantage_creative.value, cpa: performance_goal_cpa.value })
 const snapshotForm = () => { _formSnapshot = _editSnapshot() }
 const isDirty = computed(() => _formSnapshot && _editSnapshot() !== _formSnapshot)
 const onEditBeforeClose = (done) => {
@@ -2253,10 +2253,10 @@ const deployTreeStats = computed(() => {
       m += n
       if (s.enabled && a.enabled) chains += n             // 整链开启才消耗
     }
-    if (!isCbo && s.enabled) aboTotal += Number(s.budget_usd || deployTpl.value.budget_usd || 0)
+    if (!isCbo && s.enabled) aboTotal += Number(s.budget_type === 'lifetime' ? (s.lifetime_budget_usd || 0) : (s.budget_usd || deployTpl.value.budget_usd || 0))
   }
   return { n: deployTree.value.length, m, chains, isCbo,
-           isLifetime: isCbo && (deployTpl.value.budget_type || 'daily') === 'lifetime',
+           isLifetime: isCbo ? (deployTpl.value.budget_type || 'daily') === 'lifetime' : deployTree.value.some(s => s.enabled && s.budget_type === 'lifetime'),
            perAcc: isCbo
              ? Number((deployTpl.value.budget_type === 'lifetime'
                  ? deployTpl.value.lifetime_budget_usd : deployTpl.value.budget_usd) || 0)
@@ -2543,8 +2543,12 @@ const startDeploy = async () => {
 }
 // 进度
 const onProgressClose = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
+const pollError = ref('')
+const activeJobId = ref('')
+let _pollFail = 0
 const openProgress = async (jobId) => {
-  progressOpen.value = true; activeJob.value = null
+  progressOpen.value = true; activeJob.value = null; pollError.value = ''; _pollFail = 0
+  activeJobId.value = jobId
   ensureAccNames()   // 账户名映射（不阻塞轮询）
   await pollJob(jobId)
   if (pollTimer) clearTimeout(pollTimer)
@@ -2561,8 +2565,15 @@ const startPoll = (jobId, n) => {
 const pollJob = async (jobId) => {
   try {
     activeJob.value = await GET('/launch-templates/jobs/' + jobId)
+    _pollFail = 0
     if (['completed','partial_failed','failed'].includes(activeJob.value.status)) { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
-  } catch {}
+  } catch (e) {
+    // 轮询失败可见化：连续 4 次失败（~1min）→ 停轮询 + 弹窗显示错误（否则永卡「加载中」+ 无限空转）
+    if (++_pollFail >= 4) {
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+      pollError.value = (e && e.message) || t('common.opFail')
+    }
+  }
 }
 const _postRetry = async (it, body) => {
   // partial（批量部分失败）重试确认（复审R2-P1）：批量重试=整个账户全部系列重跑，
@@ -3936,7 +3947,13 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
         </div>
         <div v-if="!(activeJob.items||[]).length" class="empty-sm">{{ t('launch.noJobItems') }}</div>
       </div>
-      <div v-else class="prog-loading">{{ t('launch.loadingJob') }}</div>
+      <div v-else class="prog-loading">
+        <template v-if="pollError">
+          <div class="prog-err">{{ pollError }}</div>
+          <button class="op primary sm" @click="openProgress(activeJobId)">{{ t('common.retry') }}</button>
+        </template>
+        <template v-else>{{ t('launch.loadingJob') }}</template>
+      </div>
     </el-dialog>
     <!-- 换主页重试弹窗：强绑主页账户「可推广对象不匹配」失败时选账户实际绑定主页再试 -->
     <el-dialog v-model="pagePickOpen" :title="t('launch.pagePickTitle')" width="460px" append-to-body>
@@ -4444,6 +4461,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pj-reason.note .pj-reason-txt{color:var(--t2)}
 .pj-ops{display:flex;justify-content:center;gap:4px;flex-wrap:nowrap;white-space:nowrap}
 .prog-loading{padding:40px;text-align:center;color:var(--t3);font-size:13px}
+.prog-err{color:var(--error);margin-bottom:12px;font-size:13px}
 
 /* 预检结构化 */
 .preflight{display:flex;flex-direction:column;gap:12px}
