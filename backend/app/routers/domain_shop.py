@@ -131,15 +131,16 @@ def _payment_info(db) -> dict:
     配了地址才返回非空——订单页展示打款目标，超管核对收款有据。"""
     from ..models.system import SystemSetting
     row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
-    out = {"method": "usdt", "chain": "", "address": ""}
+    out = {"method": "usdt", "chain": "", "address": "", "pay_note": ""}
     if row and row.value:
         try:
             j = json.loads(row.value)
             out["chain"] = str(j.get("chain") or "")[:20]
             out["address"] = str(j.get("address") or "")[:120]
+            out["pay_note"] = str(j.get("pay_note") or "")[:200]
         except Exception:
             pass
-    return out if out["address"] else {"method": "usdt", "chain": "", "address": ""}
+    return out if out["address"] else {"method": "usdt", "chain": "", "address": "", "pay_note": ""}
 
 
 def _norm_domain(raw: str) -> str:

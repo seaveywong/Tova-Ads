@@ -294,6 +294,23 @@ const testRg = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   rgTesting.value = false
 }
+// ── 支付设置（批LL：独立于注册商——收款是支付域；USDT-TRC20 + TronGrid 监听 key）──
+const payCfg = ref({ chain: '', address: '', trongrid_key_masked: '', trongrid_configured: false, pay_note: '' })
+const payForm = ref({ chain: 'TRC20', address: '', trongrid_api_key: '', pay_note: '' })
+const paySaving = ref(false)
+const loadPay = async () => { try { payCfg.value = await GET('/settings/payment'); payForm.value.chain = payCfg.value.chain || 'TRC20' } catch {} }
+const savePay = async () => {
+  paySaving.value = true
+  try {
+    const body = { chain: payForm.value.chain, address: payForm.value.address, pay_note: payForm.value.pay_note }
+    if (payForm.value.trongrid_api_key) body.trongrid_api_key = payForm.value.trongrid_api_key
+    await PUT('/settings/payment', body)
+    ElMessage.success(t('common.saved')); payForm.value = { chain: payCfg.value.chain || 'TRC20', address: '', trongrid_api_key: '', pay_note: '' }
+    await loadPay()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  paySaving.value = false
+}
+
 // ── CF 管控台（批CY 一期：zone 总览/接入向导/Pages 项目——超管专属，sec-cf 卡内）──
 const cfOverview = ref(null)
 const cfLoading = ref(false)
@@ -480,7 +497,7 @@ const delEmRoute = async (r) => {
   } catch (e) { ElMessage.error(e.message || t('common.fail')) }
 }
 
-onMounted(async () => { if (isSuper.value) { loadFaApps(); loadTtApps(); loadIb() } await Promise.all([loadSched(), loadAi(), loadCf(), loadRg(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
+onMounted(async () => { if (isSuper.value) { loadFaApps(); loadTtApps(); loadIb() } await Promise.all([loadSched(), loadAi(), loadCf(), loadRg(), loadPay(), loadWebhook(), loadRetention(), loadFx(), loadTg(), loadGuardTuning(), loadEmailRouting()]); applySectionFromUrl() })   // 并行——原 7 串行吃满 7 个 RTT；完成后按 URL ?sec= 定位分区
 
 // 汇率（超管）—— 止损 to_usd 用，每日自动刷新
 const fxRates = ref([])
@@ -662,6 +679,7 @@ const anchorSections = computed(() => {
     secs.push({ id: 'sec-ai', label: t('settings.aiTitle') })
     secs.push({ id: 'sec-cf', label: t('settings.cfTitle') })
     secs.push({ id: 'sec-porkbun', label: t('settings.rgTitle') })
+    secs.push({ id: 'sec-payment', label: t('settings.payTitle') })
     secs.push({ id: 'sec-email', label: t('settings.emTitle') })
     secs.push({ id: 'sec-webhook', label: t('settings.whTitle') })
     secs.push({ id: 'sec-fbapps', label: t('settings.faTitle') })
@@ -975,6 +993,24 @@ const runKeepaliveNow = async () => {
         <button class="btn" :disabled="rgTesting" @click="testRg">{{ t('settings.pbTest') }}</button>
       </div>
       <div class="field-hint">{{ t('settings.pbHint') }}</div>
+    </div>
+
+    <!-- 支付设置（超管，独立卡）：USDT 收款 + TronGrid 监听 key + 打款说明 -->
+    <div v-if="isSuper && activeSection==='sec-payment'" id="sec-payment" class="card">
+      <div class="t">{{ t('settings.payTitle') }}</div>
+      <div class="d">{{ t('settings.payDesc') }}</div>
+      <div class="form-l"><label>{{ t('settings.rgPayChain') }}</label>
+        <el-radio-group v-model="payForm.chain">
+          <el-radio-button value="TRC20">TRC20（Tron）</el-radio-button>
+        </el-radio-group>
+        <span :class="['tag', payCfg.address ? 'ok' : 'warn']" style="margin-left:8px">{{ payCfg.address ? t('settings.payReady') : t('settings.rgNoKey') }}</span>
+      </div>
+      <div class="form-l"><label>{{ t('settings.rgPayAddr') }}</label><input v-model="payForm.address" class="input" :placeholder="payCfg.address || t('settings.rgPayAddrPh')" /></div>
+      <div class="form-l"><label>TronGrid API Key</label><input v-model="payForm.trongrid_api_key" class="input" :placeholder="payCfg.trongrid_configured ? payCfg.trongrid_key_masked : t('settings.tgKeyPh')" /></div>
+      <div class="field-hint">{{ t('settings.tgKeyHint') }}</div>
+      <div class="form-l"><label>{{ t('settings.payNoteLabel') }}</label><input v-model="payForm.pay_note" class="input" :placeholder="payCfg.pay_note || t('settings.payNotePh')" /></div>
+      <div class="field-hint">{{ t('settings.rgPayHint') }}</div>
+      <button class="btn primary" :disabled="paySaving" @click="savePay">{{ t('common.save') }}</button>
     </div>
 
     <!-- 邮箱转发（超管）：状态行 + 目的地邮箱 + 别名映射 -->

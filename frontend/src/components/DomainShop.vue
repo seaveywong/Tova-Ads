@@ -1,11 +1,12 @@
 <script setup>
 // 域名商店（2026-09-24 并入投放链接页第三 Tab）：买域名 / 我的域名 / 订单。
 // 订单含 USDT 到账监听态（payment_detected：TronGrid 链上检测 → 超管一键确认 → 自动注册）。
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { GET, POST } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { isSuperadminSync } from '../router'
+import QRCode from 'qrcode'
 
 const isSuper = isSuperadminSync()
 const { t } = useI18n()
@@ -61,9 +62,11 @@ const orderDomain = async (d) => {
     }
     await ElMessageBox.confirm(t('landing.shopOrderConfirm', { d }), t('landing.shopOrderBtn'), { type: 'info', confirmButtonText: t('landing.shopOrderBtn'), cancelButtonText: t('common.cancel') })
     const r = await POST('/domains-shop/orders', { domain: d, years: 1 })
-    ElMessage.success(t('domains.orderedPay', { v: r.pay_amount || r.total_usd }))
     sec.value = 'orders'
     await loadOrders()
+    const no = (orders.value || []).find(x => x.id === r.id)
+    if (no) await openPayPanel(no)
+    else ElMessage.success(t('domains.orderedPay', { v: r.pay_amount || r.total_usd }))
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
   shopOrdering.value = ''
 }
@@ -108,6 +111,32 @@ const approveOrder = async (o) => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   orderBusy.value = 0
 }
+// ── 支付面板（业界发票模式：唯一金额+二维码+复制+状态轮询）──
+const payPanel = ref(null)   // { id, domain, pay_amount, txid, status }
+const payQr = ref('')
+const openPayPanel = async (o) => {
+  payPanel.value = { id: o.id, domain: o.domain, pay_amount: o.pay_amount, payment_txid: o.payment_txid, status: o.status }
+  // TRON URI（TokenPocket/TronLink 扫码识别）：tron:地址?token=USDT&amount=应付
+  const uri = `tron:${payInfo.value.address}?token=USDT&amount=${o.pay_amount}`
+  try { payQr.value = await QRCode.toDataURL(uri, { width: 190, margin: 1 }) } catch { payQr.value = '' }
+}
+const copyVal = (v, label) => {
+  navigator.clipboard?.writeText(String(v))
+  ElMessage.success(label)
+}
+let _payTimer = null
+const _armPoll = () => {   // 有待付/待确认单时 8s 轮询（到账监听 2min 一轮，前端更快感知）
+  const need = (orders.value || []).some(o => ['pending_payment', 'payment_detected'].includes(o.status))
+  if (need && !_payTimer) _payTimer = setInterval(loadOrders, 8000)
+  else if (!need && _payTimer) { clearInterval(_payTimer); _payTimer = null }
+}
+watch(orders, _armPoll, { deep: false })
+watch(orders, () => {   // 轮询刷新后同步面板状态（到账自动变绿）
+  if (!payPanel.value) return
+  const o = (orders.value || []).find(x => x.id === payPanel.value.id)
+  if (o) { payPanel.value.status = o.status; payPanel.value.pay_amount = o.pay_amount; payPanel.value.payment_txid = o.payment_txid }
+}, { deep: false })
+onUnmounted(() => { if (_payTimer) clearInterval(_payTimer) })
 const copyPay = () => {
   navigator.clipboard?.writeText(payInfo.value.address || '')
   ElMessage.success(t('domains.payCopied'))
@@ -169,10 +198,29 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 
     <!-- 订单 -->
     <div v-if="sec === 'orders'" class="card" v-loading="ordersLoading">
-      <div v-if="payInfo.address" class="pay-box">
+      <div v-if="payInfo.address && !payPanel" class="pay-box">
         <span class="pay-label">{{ t('domains.payTo') }}</span>
         <span class="pay-addr mono" @click="copyPay">{{ payInfo.chain }} · {{ payInfo.address }}</span>
         <button class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button>
+      </div>
+      <div v-if="payPanel" class="invoice">
+        <div class="inv-qr-wrap">
+          <img v-if="payQr" :src="payQr" class="inv-qr" alt="QR" />
+          <div class="inv-qr-hint">{{ t('domains.scanPay') }}</div>
+        </div>
+        <div class="inv-body">
+          <div class="inv-row"><span class="inv-k">{{ t('domains.payDomain') }}</span><b>{{ payPanel.domain }}</b></div>
+          <div class="inv-row"><span class="inv-k">{{ t('domains.payAmtLabel') }}</span>
+            <b class="inv-amt" @click="copyVal(payPanel.pay_amount, t('domains.amtCopied'))" :title="t('domains.payAmtTip')">${{ payPanel.pay_amount }} <i>⧉</i></b></div>
+          <div class="inv-row"><span class="inv-k">{{ t('settings.rgPayAddr') }}</span>
+            <span class="pay-addr mono" @click="copyPay">{{ payInfo.address }}</span>
+            <button class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button></div>
+          <div v-if="payInfo.pay_note" class="inv-note">{{ payInfo.pay_note }}</div>
+          <div class="inv-status" :class="payPanel.status">{{ payPanel.status === 'payment_detected' ? t('domains.stDetected') : t('domains.waitingPay') }}</div>
+          <a v-if="payPanel.payment_txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + payPanel.payment_txid" target="_blank">TXID ↗</a>
+          <div class="inv-note">{{ t('domains.payAutoDetect') }}</div>
+          <button class="ctrl-btn sm" style="margin-top:6px" @click="payPanel = null">{{ t('common.close') }}</button>
+        </div>
       </div>
       <div v-for="o in orders" :key="o.id" class="ds-row dom">
         <span class="ds-dom">{{ o.domain }}</span>
@@ -180,6 +228,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
         <span class="ds-pay" :title="t('domains.payAmtTip')">{{ ['pending_payment', 'payment_detected'].includes(o.status) ? t('domains.payAmt', { v: o.pay_amount }) : '$' + o.total_usd }}</span>
         <a v-if="o.payment_txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + o.payment_txid" target="_blank" :title="o.payment_txid">TXID ↗</a>
         <span class="ds-time">{{ o.created_at }}</span>
+        <button v-if="['pending_payment', 'payment_detected'].includes(o.status)" class="ctrl-btn sm" @click="openPayPanel(o); payPanel.status = o.status; payPanel.payment_txid = o.payment_txid">{{ t('domains.payBtn') }}</button>
         <button v-if="['pending_payment', 'payment_detected'].includes(o.status) && isSuper" class="ctrl-btn sm primary" :disabled="orderBusy === o.id" @click="approveOrder(o)">{{ orderBusy === o.id ? t('common.loading') : t('domains.approve') }}</button>
         <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
         <span v-if="o.status === 'failed' && o.error" class="ds-err" :title="o.error">⚠</span>
@@ -231,4 +280,16 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .pay-box { display: flex; gap: 10px; align-items: center; padding: 8px 10px; margin-bottom: 10px; background: rgba(10,132,255,.06); border: 1px solid rgba(10,132,255,.25); border-radius: 8px; flex-wrap: wrap; }
 .pay-label { font-size: 12px; font-weight: 600; color: var(--t1); }
 .pay-addr { font-size: 12px; color: var(--ac); word-break: break-all; cursor: pointer; }
+.invoice { display: flex; gap: 18px; padding: 14px; margin-bottom: 10px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 10px; flex-wrap: wrap; }
+.inv-qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.inv-qr { width: 190px; height: 190px; background: #fff; border-radius: 8px; padding: 6px; }
+.inv-qr-hint { font-size: 11px; color: var(--t3); }
+.inv-body { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+.inv-row { display: flex; gap: 10px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.inv-k { font-size: 12px; color: var(--t3); min-width: 64px; }
+.inv-amt { color: var(--t1); font-size: 18px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.inv-amt i { font-style: normal; font-size: 12px; color: var(--ac); }
+.inv-note { font-size: 11px; color: var(--t3); }
+.inv-status { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 9px; align-self: flex-start; background: rgba(255,159,10,.13); color: var(--warning); }
+.inv-status.payment_detected { background: rgba(10,132,255,.15); color: var(--ac); }
 </style>

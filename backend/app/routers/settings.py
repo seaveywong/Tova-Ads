@@ -569,6 +569,57 @@ def test_registrar(user: CurrentUser = Depends(require_superadmin),
     return {"ok": True, "registrar": "porkbun", "account": str(r.get("identity") or "")[:60]}
 
 
+# ── 支付设置（超管，2026-09-24 批LL：从注册商卡独立——收款是支付域不是注册商域）──
+# system_settings['payment_usdt'] {chain, address, trongrid_api_key, pay_note}
+def _payment_setting(db) -> dict:
+    row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
+    out = {"chain": "", "address": "", "trongrid_api_key": "", "pay_note": ""}
+    if row and row.value:
+        try:
+            import json as _json
+            j = _json.loads(row.value)
+            for k in out:
+                out[k] = str(j.get(k) or "").strip()
+        except Exception:
+            pass
+    return out
+
+
+class PaymentSettingIn(BaseModel):
+    chain: str = ""
+    address: str = ""
+    trongrid_api_key: str = ""
+    pay_note: str = ""
+
+
+@router.get("/payment")
+def get_payment(user: CurrentUser = Depends(require_superadmin), db: Session = Depends(get_db)):
+    from ..core.config import env_val
+    out = _payment_setting(db)
+    if not out["trongrid_api_key"]:
+        out["trongrid_api_key"] = env_val("TRONGRID_API_KEY")   # .env 兜底（实时读范式）
+    out["trongrid_configured"] = bool(out["trongrid_api_key"])
+    out["trongrid_key_masked"] = _mask(out.pop("trongrid_api_key") or "")
+    return out
+
+
+@router.put("/payment")
+def set_payment(body: PaymentSettingIn, user: CurrentUser = Depends(require_superadmin),
+                db: Session = Depends(get_db)):
+    chain = body.chain.strip()[:20]
+    addr = body.address.strip()[:120]
+    if addr and not re.match(r"^[A-Za-z0-9]{20,120}$", addr):
+        raise HTTPException(400, "USDT 地址格式不正确")
+    if addr and chain and "TRC" not in chain.upper():
+        raise HTTPException(400, "自动到账监听暂只支持 TRC20（ERC20 后续支持），请选 TRC20 或留空链")
+    _upsert_setting(db, "payment_usdt", __import__("json").dumps({
+        "chain": chain, "address": addr,
+        "trongrid_api_key": body.trongrid_api_key.strip()[:120],
+        "pay_note": body.pay_note.strip()[:200]}))
+    db.commit()
+    return {"saved": True}
+
+
 # ── 数据保留（超管）── 各表老数据保留天数，0=永久
 class RetentionIn(BaseModel):
     days: dict = {}  # {table: days}，缺省用默认
