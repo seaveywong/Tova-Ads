@@ -2306,11 +2306,12 @@ const fetchCredPages = (credId) => {
   if (!_credPagesReq[credId]) _credPagesReq[credId] = GET(`/fb/credentials/${credId}/pages`).catch(() => [])
   return _credPagesReq[credId]
 }
-// 选中账户后拉该账户可用的主页/像素（deployItems 填模板默认值）
+// 选中账户后拉该账户可用的主页/像素/令牌池（deployItems 填模板默认值）
+const accCreds = ref({})   // {act_id: [{id, alias, available}]}——「指定令牌」下拉（2026-09-24 控制面）
 const ensureAccConfig = async (id) => {
   // 默认值先行（accPages 早退在后）——openDeploy 每次重置 deployItems 但不清 accPages，
   // 二开抽屉再勾选已加载过主页的账户时若先早退，deployItems[id] 缺失 → 模板 v-model 直接崩
-  deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '' }
+  deployItems.value[id] = { page_id: deployTpl.value.page_id || '', pixel_id: deployTpl.value.pixel_id || '', cred_id: 0 }
   if (accPages.value[id]) return
   const acc = accounts.value.find(a => a.act_id === id)
   const credId = acc?.fb_credential_id
@@ -2321,13 +2322,14 @@ const ensureAccConfig = async (id) => {
   if (credId) {
     accLoadingConfig.value.add(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
     try {
-      // 像素带 act_id 单账户模式（1 次 FB 调用）；不带会遍历令牌全部账户逐户拉，
-      // 几百户令牌一次下拉 = 几百次 FB 调用（抽屉加载慢的主因）
-      const [pages, pixels] = await Promise.all([
-        fetchCredPages(credId),
+      // 主页走令牌池并集端点（2026-09-24 三层完善：曾只拉绑定主令牌的页——池内其他令牌
+      // 独占的主页在部署抽屉根本选不到，Roly-V21-81 案）；每页带 via_cred 归属标注
+      const [pages, pixels, creds] = await Promise.all([
+        GET('/launch-templates/pages?act_id=' + encodeURIComponent(id)).catch(() => []),
         GET('/fb/credentials/' + credId + '/pixels?act_id=' + encodeURIComponent(id)).catch(() => []),
+        GET('/launch-templates/creds?act_id=' + encodeURIComponent(id)).catch(() => []),
       ])
-      accPages.value[id] = pages; accPixels.value[id] = pixels
+      accPages.value[id] = pages; accPixels.value[id] = pixels; accCreds.value[id] = creds
       // 策略为「随机用账户像素」时，新加载池的账户立即随机填入（与已选账户保持同策略）
       if (pixelStrategy.value === 'random') {
         const pid = randomPixelFor(id)
@@ -2337,6 +2339,29 @@ const ensureAccConfig = async (id) => {
     accLoadingConfig.value.delete(id); accLoadingConfig.value = new Set(accLoadingConfig.value)
   }
 }
+// 指定令牌 → 主页下拉只显示该令牌能管的页（约束住「令牌×主页」错误组合）
+const pageOptsFor = (id) => {
+  const pages = accPages.value[id] || []
+  const pin = deployItems.value[id]?.cred_id || 0
+  return pin ? pages.filter(p => p.via_cred_id === pin) : pages
+}
+// 主页权限预检（第三层，懒加载手动触发）：模板主页 × 已选账户，逐账户判定池内有无令牌能管
+const covOpen = ref(false)
+const covLoading = ref(false)
+const covRows = ref([])
+const runCoverage = async () => {
+  covOpen.value = !covOpen.value
+  if (!covOpen.value) return
+  const pid = deployTpl.value?.page_id || ''
+  if (!pid || !selectedAccs.value.size) { covRows.value = []; return }
+  covLoading.value = true
+  try {
+    covRows.value = await GET('/launch-templates/page-coverage?page_id=' + encodeURIComponent(pid)
+      + '&act_ids=' + encodeURIComponent([...selectedAccs.value].join(',')), 60000)
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')); covOpen.value = false }
+  covLoading.value = false
+}
+const accNameOf = (id) => accounts.value.find(a => a.act_id === id)?.name || id
 const toggleAcc = async (id) => {
   const s = new Set(selectedAccs.value); s.has(id) ? s.delete(id) : s.add(id); selectedAccs.value = s
   if (s.has(id)) await ensureAccConfig(id)
@@ -2525,7 +2550,7 @@ const startDeploy = async () => {
     if (pixelStrategy.value === 'create' && (deployTpl.value?.platform || 'fb') !== 'tt') {
       await precreatePixels()
     }
-    const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '' }))
+    const items = [...selectedAccs.value].map(id => ({ act_id: id, page_id: deployItems.value[id]?.page_id || '', pixel_id: deployItems.value[id]?.pixel_id || '', cred_id: deployItems.value[id]?.cred_id || 0 }))
     const body = { items }
     // 仅批量模式带 asset_ids——不带/空数组 = 后端单模板旧行为（完全向后兼容）
     if (isBatch) body.asset_ids = [...batchAssetIds.value]
@@ -3855,7 +3880,15 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
               <label>{{ t('launch.page') }}</label>
               <el-select v-model="deployItems[a.act_id].page_id" size="small" filterable style="width:100%">
                 <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') })" />
-                <el-option v-for="p in (accPages[a.act_id]||[])" :key="p.id" :value="p.id" :label="p.name + ' (' + p.id + ')'" />
+                <el-option v-for="p in pageOptsFor(a.act_id)" :key="p.id" :value="p.id"
+                           :label="p.name + ' (' + p.id + ')' + (p.via_cred ? ' · ' + p.via_cred : '') + (p.can_advertise ? '' : ' · ' + t('launch.pgNoAd'))"
+                           :disabled="!p.can_advertise" />
+</el-select>
+              <label>{{ t('launch.credLabel') }}</label>
+              <el-select v-model="deployItems[a.act_id].cred_id" size="small" style="width:100%" :title="t('launch.credHint')">
+                <el-option :value="0" :label="t('launch.credAuto')" />
+                <el-option v-for="c in (accCreds[a.act_id]||[])" :key="c.id" :value="c.id"
+                           :label="c.alias + (c.available ? '' : ' · ' + t('launch.credCooling'))" :disabled="!c.available" />
 </el-select>
               <label>{{ t('launch.pixel') }}</label>
               <el-select v-model="deployItems[a.act_id].pixel_id" size="small" filterable style="width:100%">
@@ -3866,6 +3899,19 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 </div>
 </div>
 </div>
+      <!-- 主页权限预检（2026-09-24 第三层：新帖模式，懒加载手动触发——对标跟帖预过滤） -->
+      <div v-if="deployTpl && (deployTpl.platform||'fb')!=='tt' && (deployTpl.post_source||'new')!=='reuse'" class="cov-bar">
+        <button class="btn" :disabled="covLoading || !selectedAccs.size" @click="runCoverage">{{ covLoading ? t('common.loading') : t('launch.covBtn') }}</button>
+        <span v-if="!selectedAccs.size" class="cov-hint">{{ t('launch.covNeedAcc') }}</span>
+        <span v-else-if="!deployTpl.page_id" class="cov-hint">{{ t('launch.covNoPage') }}</span>
+      </div>
+      <div v-if="covOpen && covRows.length" class="cov-list" v-loading="covLoading">
+        <div v-for="r in covRows" :key="r.act_id" :class="['cov-row', r.ok ? 'ok' : 'bad']">
+          <span class="cov-mark">{{ r.ok ? '✓' : '✗' }}</span>
+          <span class="cov-acc">{{ accNameOf(r.act_id) }}</span>
+          <span class="cov-via">{{ r.ok ? t('launch.covVia', { v: r.via }) : r.reason }}</span>
+        </div>
+      </div>
       <template #footer>
         <span class="sel-count">{{ t('launch.selectedCount', { n: selectedAccs.size }) }}<template v-if="selectedAccs.size && deployTpl && deployMode==='single'"> · {{ singleIsLifetime ? t('launch.totalBudgetLifetimeHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) : t('launch.totalBudgetHint', { total: (selectedAccs.size * singlePerAcc).toFixed(0), per: singlePerAcc }) }}</template><template v-else-if="selectedAccs.size && deployTpl && deployMode==='batch' && batchAssetIds.size"> · {{ t('launch.batchBudgetHint', { total: (selectedAccs.size * batchAssetIds.size * Number(deployTpl.budget_usd || 0)).toFixed(0), n: selectedAccs.size, m: batchAssetIds.size, per: Number(deployTpl.budget_usd || 0) }) }}</template></span>
         <button class="btn" @click="deployOpen=false">{{ t('common.cancel') }}</button>
@@ -4374,7 +4420,20 @@ const adsLinkLabel = (plat) => plat === 'tt' ? t('launch.ttAds') : t('launch.fbA
 .deploy-search-row .inp{flex:1}
 .deploy-search-row .el-input{flex:1}
 /* 账户行内主页/像素配置：label 定宽对齐（FB 双下拉 / TT 单下拉共用） */
-.acc-config{padding:8px 12px;background:var(--bg3);display:grid;grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr);gap:6px 10px;align-items:center}
+.acc-config{padding:8px 12px;background:var(--bg3);display:grid;grid-template-columns:40px minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr);gap:6px 8px;align-items:center}
+/* 主页权限预检面板（2026-09-24 第三层） */
+.cov-bar{display:flex;gap:10px;align-items:center;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--bd)}
+.cov-hint{font-size:11px;color:var(--t3)}
+.cov-list{margin-top:8px;max-height:180px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;padding:4px 10px}
+.cov-row{display:flex;gap:8px;align-items:center;padding:5px 2px;border-bottom:1px solid var(--bd);font-size:12px}
+.cov-row:last-child{border-bottom:none}
+.cov-mark{flex:none;font-weight:700}
+.cov-row.ok .cov-mark{color:var(--success)}
+.cov-row.bad .cov-mark{color:var(--error)}
+.cov-acc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1)}
+.cov-via{font-size:11px;color:var(--t3)}
+.cov-row.bad .cov-via{color:var(--error)}
+
 .acc-config label{font-size:12px;color:var(--t3)}
 .sel-count{font-size:12px;color:var(--t3);margin-right:auto}
 /* 主页权限总览（部署抽屉折叠面板）+ 像素策略 */

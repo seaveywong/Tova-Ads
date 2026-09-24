@@ -1121,6 +1121,9 @@ class DeployItem(BaseModel):
     act_id: str
     page_id: str = ""
     pixel_id: str = ""
+    # 指定令牌（2026-09-24 三层完善·控制面）：0=自动（页面感知选牌）；>0=绑死该令牌部署。
+    # 端点校验：本租户 + 该账户写令牌候选池内；执行侧再校验能管本 item 全部主页
+    cred_id: int = 0
 
 
 class DeployIn(BaseModel):
@@ -1193,6 +1196,18 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
             if _ref_page and _item_page and _ref_page != _item_page:
                 raise HTTPException(400, f"账户 {it.act_id} 的部署主页 {_item_page} 与跟帖帖子主页 {_ref_page} 不一致（帖子不能跨主页引用）")
         clean_items.append(it)
+    # 指定令牌校验（控制面）：本租户 + 该账户写令牌候选池内（池外的直接 400——越权/错池
+    # 在提交前拦下，不让坏指定进 job 逐账户失败）
+    _cred_ovr: dict = {}
+    for it in clean_items:
+        if not it.cred_id:
+            continue
+        from ..core.fb_tokens import _account_write_candidates
+        cand = next((c for c in _account_write_candidates(db, user.tenant_id, it.act_id, "write")
+                     if c.id == it.cred_id), None)
+        if not cand:
+            raise HTTPException(400, f"账户 {it.act_id} 的指定令牌 #{it.cred_id} 不在其写令牌池内（在部署抽屉重新选择）")
+        _cred_ovr[it.act_id] = it.cred_id
     body.items = clean_items
     # 批量模式素材校验（deploy/preflight 共用口径）：失败 400 快失败——坏素材放进 job 会
     # 逐账户重复失败 N 次，浪费一整轮部署还污染进度列表
@@ -1233,7 +1248,8 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
                   # 改动范围），_run_deploy_job/_retry_one 用 _job_batch_assets 从这里回读
                   # （与 job 同事务写入，可靠；见其注释）
                   metadata={"template_id": t.id, "accounts": len(body.items),
-                            **({"asset_ids": [a.id for a in batch_assets]} if batch_assets else {})})
+                            **({"asset_ids": [a.id for a in batch_assets]} if batch_assets else {}),
+                            **({"cred_overrides": _cred_ovr} if _cred_ovr else {})})
         db.commit()
     finally:
         release_run_lock(_dlock, 115)
@@ -1325,6 +1341,49 @@ def _write_fb_with_fallback(sdb, tenant_id: int, act_id: str):
             ids.add(tok)
             uniq.append(f)
     return uniq, cands
+
+
+def _job_cred_overrides(sdb, job_id: int, tenant_id: int) -> dict:
+    """回读 job 的「指定令牌」映射 {act_id: cred_id}（与 _job_batch_assets 同模式：存
+    action_logs.metadata，target_id=job.id 定位）。空/查不到 = 全自动（旧 job 天然兼容）。"""
+    from ..models.log import ActionLog
+    try:
+        row = sdb.query(ActionLog).filter(
+            ActionLog.tenant_id == tenant_id, ActionLog.target_type == "launch_job",
+            ActionLog.target_id == str(job_id), ActionLog.action_type == "deploy",
+            ActionLog.result == "success",
+        ).order_by(ActionLog.id.desc()).first()
+        if not row or not row.metadata_:
+            return {}
+        ovr = json.loads(row.metadata_).get("cred_overrides") or {}
+        return {str(k): int(v) for k, v in ovr.items() if v}
+    except Exception:
+        return {}
+
+
+def _pinned_write_fb(sdb, tenant_id: int, act_id: str, cred_id: int, pages: set,
+                     cache: dict):
+    """用户指定令牌 → FbClient（控制面执行侧）。三层校验：在写候选池内（防越权/错池）、
+    令牌仍可用、能管本 item 全部主页——任一不过给明确原因（raise FbApiError）。
+    pages 为空（主页未定）时只做前两层。"""
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    cands = _account_write_candidates(sdb, tenant_id, act_id, "write")
+    cred = next((c for c in cands if c.id == cred_id), None)
+    if not cred:
+        raise FbApiError("no_id", f"act_{act_id} 指定令牌 #{cred_id} 不在写令牌池内（可能已移出/失效），请在部署抽屉改回自动或重选")
+    for pid in pages:
+        k = (cred.id, pid)
+        manages = cache.get(k)
+        if manages is None:
+            try:
+                manages = bool(FbClient(decrypt(cred.access_token_enc)).get_page_access_token(pid))
+            except Exception:
+                manages = False
+            cache[k] = manages
+        if not manages:
+            raise FbApiError("no_id", f"act_{act_id} 指定令牌 {cred.alias or cred.id} 无法管理主页 {pid}（换该令牌能管的主页，或改回自动）")
+    return FbClient(decrypt(cred.access_token_enc))
 
 
 def _page_aware_write_clients(sdb, tenant_id: int, act_id: str, pages: set,
@@ -3640,6 +3699,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 post_content = {}
         # 页面感知选令牌的 (cred,page) 探测缓存——跨 item 复用（多账户共享令牌只查一次 FB）
         _page_token_cache: dict = {}
+        # 用户指定令牌映射（控制面）：{act_id: cred_id}，0/空=自动
+        _cred_ovr = _job_cred_overrides(sdb, job_id, tenant_id)
         for item in items:
             try:
                 # 心跳：每 item 开工时 touch job 创建时间——reap 按"无心跳超时"判孤儿，
@@ -3678,7 +3739,13 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 # 扫写令牌候选池选能管全部主页的；主页未定（自动识别）才走原 priority 选牌
                 tree_adsets = _parse_structure(tpl)   # 提前解析，下方结构分支复用
                 _pages_needed = _effective_pages_for_item(tpl, item, tree_adsets)
-                if _pages_needed:
+                _pinned = _cred_ovr.get(item.act_id) or 0
+                if _pinned:
+                    # 用户指定令牌（控制面）：绑死部署，三层校验（池内/可用/能管全部主页）
+                    fb = _pinned_write_fb(sdb, tenant_id, item.act_id, _pinned,
+                                          _pages_needed, _page_token_cache)
+                    _fb_list = [fb]
+                elif _pages_needed:
                     fb, _fb_list, _pg_cred = _page_aware_write_clients(
                         sdb, tenant_id, item.act_id, _pages_needed, _page_token_cache)
                     if not fb:
@@ -3928,9 +3995,73 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
             out.append({"id": pid, "name": p.get("name", ""),
                         "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
                         "fan_count": p.get("fan_count", 0),
-                        "via_cred": (c.alias or f"#{c.id}")})
+                        "via_cred": (c.alias or f"#{c.id}"),
+                        "via_cred_id": c.id})
     if not out and first_err:
         raise HTTPException(400, first_err)
+    return out
+
+
+@router.get("/creds")
+def account_write_creds(act_id: str, user: CurrentUser = Depends(require_permission("ads.create")),
+                        db: Session = Depends(get_db)):
+    """账户写令牌池（2026-09-24 控制面：部署抽屉「指定令牌」下拉用）。
+    返 [{id, alias, available}]——available=false（冷却/失效）前端标警示。"""
+    acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == act_id).first()
+    if not acc:
+        raise HTTPException(404, "账户不存在")
+    from ..core.deps import account_operable
+    if not account_operable(user, acc):
+        raise HTTPException(404, "账户不存在")
+    from ..core.fb_tokens import _account_write_candidates, _is_cred_available
+    return [{"id": c.id, "alias": (c.alias or f"#{c.id}"),
+             "available": _is_cred_available(c)} for c in _account_write_candidates(db, user.tenant_id, act_id, "write")]
+
+
+@router.get("/page-coverage")
+def page_coverage(page_id: str, act_ids: str,
+                  user: CurrentUser = Depends(require_permission("ads.create")),
+                  db: Session = Depends(get_db)):
+    """主页权限预检（2026-09-24 第三层：新帖模式，对标跟帖 /reuse-eligible）：
+    给定主页 + 账户清单，逐账户判定池内有无写令牌能管该页。探测按 (cred,page) 缓存
+    ——多账户共享令牌只查一次 FB。返回 [{act_id, ok, via}]。"""
+    page_id = (page_id or "").strip()
+    if not page_id:
+        raise HTTPException(400, "缺少 page_id")
+    ids = [a.strip() for a in act_ids.split(",") if a.strip()][:50]
+    if not ids:
+        raise HTTPException(400, "缺少账户清单")
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    from ..core.deps import account_operable
+    cache: dict = {}
+    out = []
+    for aid in ids:
+        acc = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id, Account.act_id == aid).first()
+        if not acc or not account_operable(user, acc):
+            out.append({"act_id": aid, "ok": False, "via": "", "reason": "账户不存在/不可操作"})
+            continue
+        hit = ""
+        try:
+            for c in _account_write_candidates(db, user.tenant_id, aid, "write"):
+                k = (c.id, page_id)
+                manages = cache.get(k)
+                if manages is None:
+                    try:
+                        manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id))
+                    except Exception:
+                        manages = False
+                    cache[k] = manages
+                if manages:
+                    hit = c.alias or f"#{c.id}"
+                    break
+        except NotImplementedError:
+            out.append({"act_id": aid, "ok": False, "via": "", "reason": "TT 账户无主页概念"})
+            continue
+        out.append({"act_id": aid, "ok": bool(hit), "via": hit,
+                    "reason": "" if hit else "池内无令牌能管理该主页"})
     return out
 
 
@@ -4152,7 +4283,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             # 页面感知选写令牌（与 _run_deploy_job 一致，2026-09-23 多令牌主页归属修复）
             tree_adsets = _parse_structure(tpl)   # 下方结构重试复用
             _pages_needed = _effective_pages_for_item(tpl, it, tree_adsets)
-            if _pages_needed:
+            _pinned = _job_cred_overrides(sdb, job_id, tenant_id).get(it.act_id) or 0
+            if _pinned:
+                fb = _pinned_write_fb(sdb, tenant_id, it.act_id, _pinned, _pages_needed, {})
+                _fb_list = [fb]
+            elif _pages_needed:
                 fb, _fb_list, _ = _page_aware_write_clients(
                     sdb, tenant_id, it.act_id, _pages_needed, {})
                 if not fb:
