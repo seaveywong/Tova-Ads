@@ -139,6 +139,8 @@ export default {
     srcPurchased: 'Purchased', srcOwn: 'Own', zoneActive: 'DNS active', zonePending: 'DNS pending',
     usedBy: 'used by {n} pages', noMine: 'No team domains yet — buy one or bind your own', goBuy: 'Buy a domain',
     approve: 'Confirm payment', approveOk: '{d} payment confirmed — registering & connecting (will appear in My Domains)',
+    takenNow: '{d} was just taken or unavailable — removed from the list, try another',
+    listNote: 'Prices from the official price list (cheapest first) · availability & live price verified at checkout',
   },
     landing: 'Ad Links',
     guard: 'Rule Engine',

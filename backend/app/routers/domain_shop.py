@@ -201,9 +201,11 @@ def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
                     price_min: float = 0.0, price_max: float = 0.0, limit: int = 30,
                     user: CurrentUser = Depends(require_permission("landing.manage")),
                     db: Session = Depends(get_db)):
-    """域名候选推送：mode=exact（词根×选中后缀逐个查）/ smart（前后缀修饰组合）/
-    random（品牌词库随机，q 可作种子）。返回可注册候选（价格段过滤，价低在前）。
-    Dynadot 一次 API 查 ≤50 个（限流友好）；Porkbun 无批量接口逐个查（cap 20）。"""
+    """域名候选推送：mode=exact（词根×选中后缀）/ smart（前后缀修饰组合）/ random
+    （品牌词库随机，q 可作种子）。**价格取官方价目表（tld_price，10min 缓存）——0 API
+    秒回**；可注册性不做实时批量核验（Dynadot search 实测一次只收一个域名，
+    逐个查 48 候选=53s 限流灾难），下单时 /check+create_order 单域名实时校验兜底。
+    live_check=false 标记：列表价=价目表价，实时价/premium 以下单核验为准。"""
     if mode not in ("exact", "smart", "random"):
         raise HTTPException(400, "mode 必须是 exact/smart/random")
     if not (1 <= limit <= 50):
@@ -214,45 +216,22 @@ def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
     client = _registrar_client(db)
     pricing = _pricing(client, db)
     cands = _suggest_candidates(q, mode, tld_list)
-    if not cands:
-        return {"results": [], "searched": 0, "taken": 0, "fee_usd": _fee(db)}
-
-    # 查可注册性 + 实时价
-    rows: list = []
-    if isinstance(client, DynadotClient):
-        try:
-            rows = client.search_many(cands)
-        except DynadotError as e:
-            raise HTTPException(400, f"候选查询失败：{str(e)[:150]}")
-    else:
-        # Porkbun 无批量：截 20 逐个（check 无实时价 → 用价格表）
-        for d in cands[:20]:
-            tld = d.rsplit(".", 1)[-1]
-            av = _avail(client, d)
-            rows.append({"domain": d, "available": av["available"],
-                         "price_usd": (pricing.get(tld) or {}).get("registration")})
-
     fee = _fee(db)
     out = []
-    taken = 0
-    for r in rows:
-        if not r["available"]:
-            taken += 1
-            continue
-        tld = r["domain"].rsplit(".", 1)[-1]
-        cost = r["price_usd"]
+    for d in cands:
+        tld = d.rsplit(".", 1)[-1]
+        cost = (pricing.get(tld) or {}).get("registration")
         if cost is None:
-            cost = (pricing.get(tld) or {}).get("registration")
-        if cost is None:
-            continue          # 查不到价的（罕见）不推
+            continue          # 价目表没有的 TLD 不推（下单也会拒）
         if price_min and cost < price_min:
             continue
         if price_max and cost > price_max:
             continue
-        out.append({"domain": r["domain"], "tld": tld, "cost_usd": cost,
+        out.append({"domain": d, "tld": tld, "cost_usd": cost,
                     "fee_usd": fee, "total_usd": round(cost + fee, 2)})
     out.sort(key=lambda x: (x["cost_usd"], len(x["domain"])))
-    return {"results": out[:limit], "searched": len(rows), "taken": taken, "fee_usd": fee}
+    return {"results": out[:limit], "searched": len(cands), "taken": 0,
+            "fee_usd": fee, "live_check": False}
 
 
 class OrderIn(BaseModel):

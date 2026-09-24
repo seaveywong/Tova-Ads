@@ -51,16 +51,21 @@ const suggestDomains = async () => {
 }
 const orderDomain = async (d) => {
   if (shopOrdering.value) return
-  try {
-    await ElMessageBox.confirm(t('landing.shopOrderConfirm', { d, v: '' }), t('landing.shopOrderBtn'), { type: 'info', confirmButtonText: t('landing.shopOrderBtn'), cancelButtonText: t('common.cancel') })
-  } catch { return }
   shopOrdering.value = d
   try {
+    // 列表价=价目表价；下单前单域名实时核验（可注册性+实时价，premium 以此为准）
+    const q = await GET('/domains-shop/check?domain=' + encodeURIComponent(d), 30000)
+    if (!q.available) {
+      ElMessage.warning(t('domains.takenNow', { d }))
+      shopResults.value = shopResults.value.filter(r => r.domain !== d)
+      return
+    }
+    await ElMessageBox.confirm(t('landing.shopOrderConfirm', { d }), t('landing.shopOrderBtn'), { type: 'info', confirmButtonText: t('landing.shopOrderBtn'), cancelButtonText: t('common.cancel') })
     await POST('/domains-shop/orders', { domain: d, years: 1 })
     ElMessage.success(t('landing.shopOrdered'))
     tab.value = 'orders'
     await loadOrders()
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
   shopOrdering.value = ''
 }
 
@@ -141,7 +146,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
           <span class="sr-price">${{ r.cost_usd }} <i>+ ${{ r.fee_usd }}</i> = <b>${{ r.total_usd }}</b></span>
           <button class="btn sm primary" :disabled="shopOrdering === r.domain" @click="orderDomain(r.domain)">{{ shopOrdering === r.domain ? t('common.loading') : t('landing.shopOrderBtn') }}</button>
         </div>
-        <div v-if="!shopSuggesting && shopResults.length" class="shop-stats">{{ t('landing.shopStats', { s: shopStats.searched, a: shopResults.length }) }}</div>
+        <div v-if="!shopSuggesting && shopResults.length" class="shop-stats">{{ t('domains.listNote') }}</div>
         <div v-else-if="!shopSuggesting && !shopResults.length" class="shop-empty">{{ shopSearchedOnce ? t('landing.shopEmpty') : t('landing.shopIntro') }}</div>
       </div>
     </div>
