@@ -33,6 +33,7 @@ const routes = [
       { path: 'form-templates', name: 'form-templates', component: () => import('../views/FormTemplates.vue'), meta: { titleKey: 'nav.form-templates', icon: 'Document' } },
       { path: 'assets', name: 'assets', component: () => import('../views/Assets.vue'), meta: { titleKey: 'nav.assets', icon: 'Picture' } },
       { path: 'landing', name: 'landing', component: () => import('../views/Landing.vue'), meta: { titleKey: 'nav.landing', icon: 'Link' } },
+      { path: 'domains', name: 'domains', component: () => import('../views/Domains.vue'), meta: { titleKey: 'nav.domains', icon: 'Coin' } },
       { path: 'guard', name: 'guard', component: () => import('../views/Guard.vue'), meta: { titleKey: 'nav.guard', icon: 'SetUp' } },
       { path: 'kpi-mapping', name: 'kpi-mapping', component: () => import('../views/KpiMapping.vue'), meta: { titleKey: 'nav.kpi-mapping', icon: 'Histogram' } },
       { path: 'admin-teams', name: 'admin-teams', component: () => import('../views/AdminTeams.vue'), meta: { titleKey: 'nav.admin-teams', icon: 'OfficeBuilding' } },

@@ -135,6 +135,13 @@ export default {
     'launch-templates': '投放模板',
     'form-templates': '表单模板',
     assets: '素材库',
+    domains: '域名',
+  domains: {
+    tabBuy: '买域名', tabMine: '我的域名', tabOrders: '订单',
+    srcPurchased: '代购', srcOwn: '自有', zoneActive: 'DNS 已生效', zonePending: 'DNS 生效中',
+    usedBy: '{n} 个落地页在用', noMine: '还没有团队域名——买一个或绑定自有域名', goBuy: '去买域名',
+    approve: '确认收款', approveOk: '{d} 已确认收款，自动注册并接入中（完成入「我的域名」）',
+  },
     landing: '投放链接',
     guard: '规则引擎',
     tokens: '令牌',

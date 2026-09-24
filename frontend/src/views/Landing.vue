@@ -87,74 +87,7 @@ const loadLib = async () => {
   pixels.value = p; domains.value = d; templates.value = t
 }
 
-// ── 域名商店（批DD 预埋：Porkbun 代购；凭据未配置时查价报引导）──
-const shopOpen = ref(false)
-const shopDomain = ref('')
-const shopOrdering = ref(false)
-const shopOrders = ref([])
-const shopLoadingOrders = ref(false)
-// ── 域名候选推送（2026-09-24 商店重做）：指定/智能/随机三模式 + 后缀多选 + 价格段 ──
-const shopMode = ref('smart')
-const SHOP_MODES = computed(() => [
-  { id: 'exact', label: t('landing.shopModeExact') },
-  { id: 'smart', label: t('landing.shopModeSmart') },
-  { id: 'random', label: t('landing.shopModeRandom') },
-])
-const SHOP_TLD_POOL = ['com', 'net', 'xyz', 'top', 'online', 'site', 'shop', 'store', 'icu', 'cfd', 'link', 'fun', 'rest', 'world', 'live', 'click']
-const shopTlds = ref(['com', 'net', 'xyz', 'top', 'online', 'site', 'shop', 'store'])
-const toggleTld = (tl) => {
-  const s = new Set(shopTlds.value)
-  s.has(tl) ? s.delete(tl) : s.add(tl)
-  shopTlds.value = [...s]
-}
-const shopPriceMax = ref(0)   // 0=不限
-const SHOP_PRICE_OPTS = computed(() => [
-  { v: 0, label: t('landing.shopPriceAny') },
-  { v: 2, label: '≤$2' }, { v: 5, label: '≤$5' }, { v: 10, label: '≤$10' }, { v: 20, label: '≤$20' },
-])
-const shopResults = ref([])
-const shopSuggesting = ref(false)
-const shopSearchedOnce = ref(false)   // 区分初始引导 vs 搜过无结果
-const shopStats = ref({ searched: 0, taken: 0 })
-const suggestDomains = async () => {
-  if (shopSuggesting.value) return
-  if (shopMode.value !== 'random' && !shopDomain.value.trim()) return ElMessage.warning(t('landing.shopNeedWord'))
-  if (!shopTlds.value.length) return ElMessage.warning(t('landing.shopNeedTld'))
-  shopSuggesting.value = true; shopResults.value = []
-  try {
-    const p = new URLSearchParams({ q: shopDomain.value.trim(), mode: shopMode.value, tlds: shopTlds.value.join(','), limit: '30' })
-    if (shopPriceMax.value) p.set('price_max', String(shopPriceMax.value))
-    const r = await GET('/domains-shop/suggest?' + p.toString(), 90000)
-    shopResults.value = r.results || []
-    shopStats.value = { searched: r.searched || 0, taken: r.taken || 0 }
-    shopSearchedOnce.value = true
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  shopSuggesting.value = false
-}
-const orderSuggested = async (d) => {
-  if (shopOrdering.value) return
-  shopOrdering.value = true
-  try {
-    await POST('/domains-shop/orders', { domain: d, years: 1 })
-    ElMessage.success(t('landing.shopOrdered'))
-    await loadShopOrders()
-  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
-  shopOrdering.value = false
-}
-const shopStatusTxt = (st) => ({ pending_payment: t('landing.shStPending'), approved: t('landing.shStApproved'), registering: t('landing.shStReg'), registered: t('landing.shStRegd'), bound: t('landing.shStBound'), failed: t('landing.shStFailed'), cancelled: t('landing.shStCancel') }[st] || st)
-const openShop = async () => { shopOpen.value = true; await loadShopOrders() }
-const loadShopOrders = async () => {
-  shopLoadingOrders.value = true
-  try { shopOrders.value = await GET('/domains-shop/orders') } catch {}
-  shopLoadingOrders.value = false
-}
-const cancelOrder = async (o) => {
-  try {
-    await ElMessageBox.confirm(t('landing.shCancelConfirm', { d: o.domain }), t('common.confirm'), { type: 'warning' })
-    await POST('/domains-shop/orders/' + o.id + '/cancel', {})
-    await loadShopOrders()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
-}
+// 域名商店已迁独立页 /domains（2026-09-24）：买域名/我的域名/订单三 Tab
 
 // ── 发布/编辑抽屉 ──
 const drawerOpen = ref(false)
@@ -892,7 +825,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 
     <!-- 统一工具栏：模式筛选 + 创建人筛选（owner 看全团队时按人过滤）+ 计数 -->
     <div class="list-bar">
-      <button class="ctrl-btn" @click="openShop">{{ t('landing.shopBtn') }}</button>
+      <button class="btn" @click="router.push('/domains')">{{ t('landing.shopBtn') }}</button>
       <div class="seg-bar">
         <button class="seg-btn" :class="{ on: modeFilter === 'lp' }" @click="modeFilter = 'lp'">📄 {{ t('landing.tabLpOnly') }} <i class="seg-cnt">{{ cntLp }}</i></button>
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
@@ -1450,45 +1383,6 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </div>
     <LandingLogs v-if="tab === 'logs'" />
 
-    <el-dialog v-model="shopOpen" :title="t('landing.shopTitle')" width="720px" append-to-body>
-      <div class="shop-search">
-        <input v-model="shopDomain" class="shop-input" :placeholder="t('landing.shopPh')" @keyup.enter="suggestDomains" />
-        <button class="ctrl-btn primary" :disabled="shopSuggesting" @click="suggestDomains">{{ shopSuggesting ? t('common.loading') : t('landing.shopSearch') }}</button>
-      </div>
-      <div class="shop-filters">
-        <div class="seg-bar sm">
-          <button v-for="m in SHOP_MODES" :key="m.id" :class="['seg-btn', { on: shopMode === m.id }]" @click="shopMode = m.id">{{ m.label }}</button>
-        </div>
-        <div class="shop-tld-row">
-          <button v-for="tl in SHOP_TLD_POOL" :key="tl" :class="['tld-chip', { on: shopTlds.includes(tl) }]" @click="toggleTld(tl)">.{{ tl }}</button>
-        </div>
-        <div class="shop-tld-row">
-          <span class="sf-label">{{ t('landing.shopPrice') }}</span>
-          <button v-for="o in SHOP_PRICE_OPTS" :key="o.v" :class="['tld-chip', { on: shopPriceMax === o.v }]" @click="shopPriceMax = o.v">{{ o.label }}</button>
-        </div>
-      </div>
-      <div v-loading="shopSuggesting" class="shop-results">
-        <div v-for="r in shopResults" :key="r.domain" class="shop-row">
-          <span class="sr-dom">{{ r.domain }}</span>
-          <span class="sr-price">${{ r.cost_usd }} <i>+ ${{ r.fee_usd }}</i> = <b>${{ r.total_usd }}</b></span>
-          <button class="ctrl-btn sm primary" :disabled="shopOrdering" @click="orderSuggested(r.domain)">{{ t('landing.shopOrderBtn') }}</button>
-        </div>
-        <div v-if="!shopSuggesting && shopResults.length" class="shop-stats">{{ t('landing.shopStats', { s: shopStats.searched, a: shopResults.length }) }}</div>
-        <div v-else-if="!shopSuggesting && !shopResults.length" class="shop-empty">{{ shopSearchedOnce ? t('landing.shopEmpty') : t('landing.shopIntro') }}</div>
-      </div>
-      <div style="margin-top:14px;font-size:13px;font-weight:600">{{ t('landing.shopOrders') }}</div>
-      <div v-loading="shopLoadingOrders" style="max-height:260px;overflow:auto">
-        <div v-for="o in shopOrders" :key="o.id" class="shop-order-row">
-          <span style="font-weight:600">{{ o.domain }}</span>
-          <span class="shop-st" :class="o.status">{{ shopStatusTxt(o.status) }}</span>
-          <span style="color:var(--t3)">${{ o.total_usd }}</span>
-          <span style="color:var(--t3);font-size:11px">{{ o.created_at }}</span>
-          <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
-          <span v-if="o.status === 'failed' && o.error" class="shop-err" :title="o.error">&#9888;</span>
-        </div>
-        <div v-if="!shopOrders.length && !shopLoadingOrders" style="text-align:center;color:var(--t3);font-size:12px;padding:10px">{{ t('landing.shopNoOrders') }}</div>
-      </div>
-    </el-dialog>
   </div>
 </template>
 

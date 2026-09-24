@@ -48,7 +48,7 @@ const myPerms = ref([])
 // 导航 → 所需权限（同 router/ROUTE_PERMS）
 const NAV_PERMS = {
   dashboard: ['ads.read'], ads: ['ads.read'], 'ad-manager': ['ads.read'], 'launch-templates': ['ads.create'], 'form-templates': ['ads.create'],
-  landing: ['landing.manage'], guard: ['rules.read'],
+  landing: ['landing.manage'], domains: ['landing.manage'], guard: ['rules.read'],
   settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'], assets: ['assets.manage'],
 }
 
@@ -66,6 +66,7 @@ const allNavGroups = [
   ]},
   { titleKey: 'nav.groupAuto', items: [
     { name: 'landing', labelKey: 'nav.landing', icon: 'Link' },
+    { name: 'domains', labelKey: 'nav.domains', icon: 'Coin' },
     { name: 'guard', labelKey: 'nav.guard', icon: 'SetUp' },
   ]},
   { titleKey: 'nav.groupAuth', items: [

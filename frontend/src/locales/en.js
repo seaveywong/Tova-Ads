@@ -133,6 +133,13 @@ export default {
     'launch-templates': 'Launch Templates',
     'form-templates': 'Form Templates',
     assets: 'Asset Library',
+    domains: 'Domains',
+  domains: {
+    tabBuy: 'Buy Domains', tabMine: 'My Domains', tabOrders: 'Orders',
+    srcPurchased: 'Purchased', srcOwn: 'Own', zoneActive: 'DNS active', zonePending: 'DNS pending',
+    usedBy: 'used by {n} pages', noMine: 'No team domains yet — buy one or bind your own', goBuy: 'Buy a domain',
+    approve: 'Confirm payment', approveOk: '{d} payment confirmed — registering & connecting (will appear in My Domains)',
+  },
     landing: 'Ad Links',
     guard: 'Rule Engine',
     tokens: 'Tokens',
