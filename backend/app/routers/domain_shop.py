@@ -39,9 +39,11 @@ def _reg_name(db) -> str:
 
 
 def _dynadot_key() -> str:
-    """进程内 settings → .env 实时读（保存 key 后其他 worker 无需 restart 即生效）。"""
+    """.env 实时读优先（保存 key 的落点永远最新）→ 进程内 settings 兜底（本地无 .env）。
+    曾 settings 优先：4 worker 各自内存里存着首次保存的旧密钥，非空旧值永远压过
+    .env 新值——换 key 后部分 worker 仍用旧 key 报 invalid key（2026-09-24 实证）。"""
     from ..core.config import env_val
-    return settings.dynadot_api_key or env_val("DYNADOT_API_KEY")
+    return env_val("DYNADOT_API_KEY") or settings.dynadot_api_key
 
 
 def _reg_ready(db) -> bool:
