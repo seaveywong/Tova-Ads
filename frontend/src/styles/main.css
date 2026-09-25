@@ -278,7 +278,7 @@ a { color: var(--ac); text-decoration: none; }
   .more-btn, .dots-btn, .mb, .allow-btn { min-height: 32px; min-width: 36px; }
   /* 全局平台上下文条：移动端收窄（按钮文字保留） */
   .platform-context-bar { min-height: 40px; padding: 0 12px; gap: 8px; --plat-bar-h: 40px; }
-  .pc-scope { font-size: 11px; }
+  .pc-scope { display: none; }
 }
 
 /* ── 全站统一页头（源自 Dashboard，各业务页共用）：标题 + 副信息 ｜ 动作按钮 ── */
