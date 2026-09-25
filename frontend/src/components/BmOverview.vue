@@ -177,4 +177,11 @@ const doRemove = async (m) => {
 .lm-x { border: none; background: none; color: var(--t3); cursor: pointer; font-size: 12px; padding: 0 3px; }
 .lm-x:hover { color: var(--error); }
 .bm-sub-t { font-size: 11px; color: var(--t3); margin: 10px 0 2px; text-transform: uppercase; }
+.ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s; }
+.ctrl-btn:hover { color: var(--t1); border-color: var(--bd2); }
+.ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
+.ctrl-btn.primary:hover { filter: brightness(1.08); }
+.ctrl-btn.primary:disabled { opacity: .5; cursor: wait; }
+.ctrl-btn.sm { padding: 0 8px; font-size: 12px; }
+.ctrl-btn:disabled { opacity: .5; cursor: not-allowed; }
 </style>

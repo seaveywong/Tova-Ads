@@ -61,10 +61,10 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
     <div class="card" v-loading="loading">
       <div class="pg-row pg-head-row">
         <span class="pg-name">{{ t('pg.colPage') }}</span>
-        <span class="pg-col">{{ t('pg.colVia') }}</span>
+        <span class="pg-col via">{{ t('pg.colVia') }}</span>
         <span class="pg-col">{{ t('pg.colFans') }}</span>
         <span class="pg-col">{{ t('pg.colAds') }}</span>
-        <span class="pg-col">{{ t('pg.colTpl') }}</span>
+        <span class="pg-col pg-tpl">{{ t('pg.colTpl') }}</span>
         <span class="pg-ops"></span>
       </div>
       <div v-for="r in filtered" :key="r.id" class="pg-row">
@@ -78,7 +78,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
             <span class="pg-id mono" @click="copyId(r.id)" :title="t('pg.copyId')">{{ r.id }}</span>
           </template>
         </span>
-        <span class="pg-col"><span class="pg-via">{{ r.via_cred }}</span></span>
+        <span class="pg-col via"><span class="pg-via">{{ r.via_cred }}</span></span>
         <span class="pg-col tnum">{{ r.fan_count ? r.fan_count.toLocaleString() : '—' }}</span>
         <span class="pg-col tnum" :class="{ ok: r.live_ads > 0 }">{{ r.live_ads || '—' }}</span>
         <span class="pg-col pg-tpl" :title="(r.tpl_refs || []).join('、')">
@@ -104,14 +104,15 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 <style scoped>
 .pgov { display: flex; flex-direction: column; gap: 12px; }
 .card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; overflow-x: auto; }
-.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 760px; }
+.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 880px; }
 .pg-row:last-child { border-bottom: none; }
 .pg-head-row { color: var(--t3); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--bd); }
 .pg-name { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
 .pg-title { font-weight: 600; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
 .pg-id { font-size: 10px; color: var(--t3); }
 .pg-col { width: 110px; flex: none; color: var(--t2); }
-.pg-via { font-size: 11px; background: var(--bg3); padding: 1px 8px; border-radius: 4px; color: var(--t3); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+.pg-col.via { width: 150px; }
+.pg-via { font-size: 11px; background: var(--bg3); padding: 1px 8px; border-radius: 4px; color: var(--t3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .tnum { font-variant-numeric: tabular-nums; }
 .tnum.ok { color: var(--success); font-weight: 600; }
 .pg-tpl { width: 260px; font-size: 11px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -121,4 +122,11 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 .pg-ops { width: 40px; flex: none; text-align: right; }
 .dots-btn { border: none; background: transparent; color: var(--t3); font-size: 16px; cursor: pointer; padding: 0 6px; border-radius: 4px; line-height: 1; transition: .15s; }
 .dots-btn:hover { background: var(--bg3); color: var(--t1); }
+.ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s; }
+.ctrl-btn:hover { color: var(--t1); border-color: var(--bd2); }
+.ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
+.ctrl-btn.primary:hover { filter: brightness(1.08); }
+.ctrl-btn.primary:disabled { opacity: .5; cursor: wait; }
+.ctrl-btn.sm { padding: 0 8px; font-size: 12px; }
+.ctrl-btn:disabled { opacity: .5; cursor: not-allowed; }
 </style>
