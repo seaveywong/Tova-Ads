@@ -811,7 +811,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     <header class="page-head">
       <div class="ph-left">
         <h1 class="ph-title">{{ t('landing.pageTitle') }}</h1>
-        <span class="ph-fresh">{{ t('landing.headMeta', { n: visiblePages.length, blocked: visiblePages.filter(p => p.last_fb_status === 'fail').length }) }}</span>
+        <span class="ph-fresh">{{ t(visiblePages.length === 1 ? 'landing.headMeta' : 'landing.headMetaMany', { n: visiblePages.length, blocked: visiblePages.filter(p => p.last_fb_status === 'fail').length }) }}</span>
       </div>
       <div class="ph-actions">
         <button class="head-btn" @click="openPixels">{{ t('landing.pixelLib') }}</button>
@@ -1589,7 +1589,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .short-row{display:grid;grid-template-columns:70px minmax(110px,1fr) auto minmax(160px,1.5fr) 80px repeat(3,minmax(80px,.7fr)) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;padding:10px 14px;font-size:12px;transition:border-color .15s,box-shadow .15s}
 .short-row:hover{border-color:var(--bd2);box-shadow:var(--shadow-card)}
 .short-row.alert-fail{box-shadow:inset 3px 0 0 var(--error)}
-.short-title{font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.short-title{font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .short-url{color:var(--ac);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
 .short-url i{font-style:normal;color:var(--t3);margin-left:3px}
 .short-rot{color:var(--t3);font-size:11px;white-space:nowrap}
@@ -1604,12 +1604,12 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-dom-item{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .lp-dom-item:hover{text-decoration:underline}
 .lp-dom.muted{color:var(--t3);cursor:default}
-.lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:right;cursor:default}
+.lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:left;cursor:default}
 .lp-subcount i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 @media(min-width:901px){.short-stat i,.lp-subcount i{display:none}}
 .lp-fb-empty{display:inline-block;width:1px}
 .owner-cell{min-width:0;overflow:hidden}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右）；固定列宽保各行对齐 */
-.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-flex;align-items:center;line-height:1.2}
+.owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:1.2;flex-shrink:0}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
