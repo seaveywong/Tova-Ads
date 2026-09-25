@@ -966,7 +966,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       </div>
 
       <div class="form-l"><label>{{ form.redirect_mode === 'redirect' ? t('landing.fRedirectUrl') : t('landing.fTargetUrl') }}</label>
-        <el-select v-model="form.target_urls" multiple filterable allow-create default-first-option
+        <ListManager v-model="form.target_urls" type="url"
           :placeholder="form.redirect_mode === 'redirect' ? t('landing.fRedirectUrlPh') : t('landing.fTargetUrlPh')" style="flex:1" />
       </div>
       <div class="form-l"><label>{{ t('landing.fRotation') }}</label>
