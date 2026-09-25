@@ -14,7 +14,7 @@ const router = useRouter()
 const route = useRoute()
 
 // 落地页 内部 tab：管理 / 日志（日志归纳进来，不再是独立侧栏项）
-const tab = ref(route.query.tab === 'logs' ? 'logs' : 'manage')
+const tab = ref(['logs', 'domains'].includes(route.query.tab) ? route.query.tab : 'manage')
 watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains'].includes(tv)) tab.value = tv })
 
 // ── 落地页列表 ──
