@@ -54,7 +54,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 <template>
   <div class="pgov">
     <div class="list-bar">
-      <input v-model="search" class="bar-search" :placeholder="t('pg.searchPh')" />
+      <el-input v-model="search" :placeholder="t('pg.searchPh')" clearable size="small" class="bar-search" />
       <button class="ctrl-btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('common.refresh') }}</button>
       <span class="pg-count">{{ t('pg.total', { n: filtered.length }) }}</span>
     </div>
