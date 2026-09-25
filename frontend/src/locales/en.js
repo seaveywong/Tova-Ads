@@ -1096,6 +1096,11 @@ export default {
   launch: launch.en,
   formtpl: formtpl.en,
   assets: assets.en,
+  pg: {
+    searchPh: 'Search page / ID / token', total: '{n} pages',
+    colPage: 'Page', colVia: 'Owning token', colFans: 'Fans', colAds: 'Live ads', colTpl: 'Template refs',
+    tplN: '{n}', copyId: 'Click to copy ID', noMatch: 'No matching pages', none: 'No pages yet (no token or no managed pages)',
+  },
   domains: {
     tabBuy: 'Buy Domains', tabMine: 'My Domains', tabOrders: 'Orders',
     srcPurchased: 'Purchased', srcOwn: 'Own', zoneActive: 'DNS active', zonePending: 'DNS pending',

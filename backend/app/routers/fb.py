@@ -703,6 +703,90 @@ def list_credential_pages(
     return out
 
 
+@router.get("/pages-overview")
+def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
+                   db: Session = Depends(get_db)):
+    """统一主页总览（2026-09-25 批OO）：全租户主页一张表——归属令牌/粉丝/可投广告/
+    在投广告数（ads_cache 的 object_story_id 前缀=page_id）/被投放模板引用数。
+    曾分散在令牌抽屉/模板编辑/部署抽屉/权限总览四处，无处可全景管理。
+    operator 只看可见令牌的主页；聚合逐令牌拉 FB → 5min 进程缓存。"""
+    import time as _t
+    ck = f"pagesov:{user.tenant_id}"
+    if user.role == "operator":
+        ck = f"pagesov:{user.tenant_id}:{user.id}"
+    hit = _asset_cache_get(ck)
+    if hit is not None:
+        return hit
+    from ..core.fb_tokens import iter_tenant_clients
+    _vis = _visible_cred_ids(db, user) if user.role == "operator" else None
+    pairs = [(c, f) for c, f in iter_tenant_clients(db, user.tenant_id)
+             if _vis is None or c.id in _vis]
+    # 模板引用计数：page_id 直配 + structure 节点 + 跟帖 ref 前缀
+    from ..models.launch_template import LaunchTemplate
+    tpl_rows = db.query(LaunchTemplate.id, LaunchTemplate.name, LaunchTemplate.page_id,
+                        LaunchTemplate.structure, LaunchTemplate.reuse_post_ref,
+                        LaunchTemplate.post_source, LaunchTemplate.status).filter(
+        LaunchTemplate.tenant_id == user.tenant_id).all()
+    tpl_ref: dict = {}
+    for tid, tname, pid, structure, ref, psrc, st in tpl_rows:
+        if st == "archived":
+            continue
+        pids = set()
+        if pid:
+            pids.add(str(pid))
+        if structure:
+            try:
+                for sn in (json.loads(structure).get("adsets") or []):
+                    for an in (sn.get("ads") or []):
+                        _p = str(an.get("page_id") or "")
+                        if _p:
+                            pids.add(_p)
+            except Exception:
+                pass
+        if (psvc := psrc or "new") == "reuse" and ref and "_" in ref:
+            pids.add(ref.split("_", 1)[0])
+        for _p in pids:
+            tpl_ref.setdefault(_p, []).append(tname)
+    # 在投广告数：ads_cache 里 object_story_id 前缀 = page_id
+    from ..models.ads_cache import AdsCache
+    live_ads: dict = {}
+    for c in db.query(AdsCache).filter(AdsCache.tenant_id == user.tenant_id).all():
+        try:
+            for ad in json.loads(c.ads_json or "[]"):
+                _cr = ad.get("creative")
+                _sid = ""
+                if isinstance(_cr, dict):
+                    _sid = _cr.get("effective_object_story_id") or ""
+                    if not _sid and isinstance(_cr.get("data"), list) and _cr["data"]:
+                        _sid = (_cr["data"][0] or {}).get("effective_object_story_id") or ""
+                if _sid and "_" in _sid:
+                    live_ads[_sid.split("_", 1)[0]] = live_ads.get(_sid.split("_", 1)[0], 0) + 1
+        except Exception:
+            continue
+    out = []
+    for cred, fb in pairs:
+        try:
+            pages = fb.get_pages() or []
+        except (FbApiError, TtApiError):
+            continue
+        for pg in pages:
+            pid = str(pg.get("id") or "")
+            if not pid:
+                continue
+            out.append({
+                "id": pid, "name": pg.get("name") or "",
+                "fan_count": pg.get("fan_count", 0),
+                "can_advertise": "ADVERTISE" in (pg.get("tasks") or []),
+                "via_cred": cred.alias or f"#{cred.id}", "via_cred_id": cred.id,
+                "live_ads": live_ads.get(pid, 0),
+                "tpl_refs": tpl_ref.get(pid, [])[:5],
+                "tpl_ref_count": len(tpl_ref.get(pid, [])),
+            })
+    out.sort(key=lambda x: (-(x["live_ads"] or 0), -(x["fan_count"] or 0)))
+    _asset_cache_set(ck, out)
+    return out
+
+
 @router.get("/pages/{page_id}/posts")
 def list_page_posts(
     page_id: str,

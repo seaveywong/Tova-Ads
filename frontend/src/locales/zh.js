@@ -1106,6 +1106,11 @@ export default {
   launch: launch.zh,
   formtpl: formtpl.zh,
   assets: assets.zh,
+  pg: {
+    searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',
+    colPage: '主页', colVia: '归属令牌', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
+    tplN: '{n} 个', copyId: '点击复制 ID', noMatch: '无匹配主页', none: '暂无主页（令牌未配置或无可管主页）',
+  },
   domains: {
     tabBuy: '买域名', tabMine: '我的域名', tabOrders: '订单',
     srcPurchased: '代购', srcOwn: '自有', zoneActive: 'DNS 已生效', zonePending: 'DNS 生效中',

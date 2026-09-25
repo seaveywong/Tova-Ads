@@ -8,14 +8,15 @@ import { lpStatus, subcodeStatus } from '../composables/useStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 import DomainShop from '../components/DomainShop.vue'
+import PagesOverview from '../components/PagesOverview.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
 
 // 落地页 内部 tab：管理 / 日志（日志归纳进来，不再是独立侧栏项）
-const tab = ref(['logs', 'domains'].includes(route.query.tab) ? route.query.tab : 'manage')
-watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains'].includes(tv)) tab.value = tv })
+const tab = ref(['logs', 'domains', 'pages'].includes(route.query.tab) ? route.query.tab : 'manage')
+watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains', 'pages'].includes(tv)) tab.value = tv })
 
 // ── 落地页列表 ──
 const pages = ref([])
@@ -803,6 +804,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       <div :class="['lp-tab', { on: tab === 'manage' }]" @click="setTab('manage')">{{ t('landing.tabManage') }}</div>
       <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">{{ t('landing.tabLogs') }}</div>
       <div :class="['lp-tab', { on: tab === 'domains' }]" @click="setTab('domains')">{{ t('landing.tabDomains') }}</div>
+      <div :class="['lp-tab', { on: tab === 'pages' }]" @click="setTab('pages')">{{ t('landing.tabPages') }}</div>
     </div>
     <div v-show="tab === 'manage'">
     <header class="page-head">
@@ -1385,6 +1387,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </div>
     <LandingLogs v-if="tab === 'logs'" />
     <DomainShop v-if="tab === 'domains'" />
+    <PagesOverview v-if="tab === 'pages'" />
 
   </div>
 </template>
