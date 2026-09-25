@@ -130,8 +130,21 @@ def _domain_usage(db: Session, tenant_id: int, domain: str) -> dict:
         LandingPage.tenant_id == tenant_id,
         LandingPage.status != "archived",
     ).all() if _page_uses_domain(r, domain)]
+    # 子域级明细（域名工作台批TT）：该域下每个子域绑哪个页——展示+直达
+    subs = []
+    for r in rows:
+        if r.bound_subdomains:
+            try:
+                for h in _json.loads(r.bound_subdomains):
+                    if h and domain in h:
+                        subs.append({"host": h, "page_id": r.id, "page_title": r.title})
+            except Exception:
+                pass
+        if r.custom_domain and domain in r.custom_domain:
+            subs.append({"host": r.custom_domain, "page_id": r.id, "page_title": r.title})
     return {"usage_count": len(rows),
-            "used_by": [{"id": r.id, "title": r.title} for r in rows[:10]]}
+            "used_by": [{"id": r.id, "title": r.title} for r in rows[:10]],
+            "subdomains": subs}
 
 
 @router.get("/domains/stats")

@@ -1131,7 +1131,7 @@ export default {
   domains: {
     tabBuy: '买域名', tabMine: '我的域名', tabOrders: '订单',
     srcPurchased: '代购', srcOwn: '自有', zoneActive: 'DNS 已生效', zonePending: 'DNS 生效中',
-    usedBy: '{n} 个落地页在用', noMine: '还没有团队域名——买一个或绑定自有域名', goBuy: '去买域名',
+    usedBy: '{n} 个落地页在用', noUse: '此域暂无落地页在用', noMine: '还没有团队域名——买一个或绑定自有域名', goBuy: '去买域名',
     approve: '确认收款', approveOk: '{d} 已确认收款，自动注册并接入中（完成入「我的域名」）',
     takenNow: '域名 {d} 刚被占用或不可注册，已从列表移除——换一个试试',
     scanPay: '扫码支付（TokenPocket/TronLink）', payDomain: '订单域名', payAmtLabel: '应付金额', amtCopied: '金额已复制', waitingPay: '等待到账…', payAutoDetect: '链上自动检测到账（约 1-2 分钟）；到账后管理员确认即自动注册交付。', payBtn: '去支付', payTo: '请向以下地址转 USDT（订单备注域名）：', payCopied: '收款地址已复制', stDetected: '已到账·待确认', payAmt: '应付 ${v}', payAmtTip: '含订单尾号（用于链上自动对账），实付此金额', orderedPay: '已下单，应付 ${v}（USDT，订单页有收款地址）', listNote: '价格来自官方价目表（价低在前）· 实际可注册性与实时价以下单核验为准',

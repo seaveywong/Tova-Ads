@@ -80,6 +80,11 @@ const loadMyDomains = async () => {
   myLoading.value = false
 }
 const srcLabel = (s) => s === 'purchased' ? t('domains.srcPurchased') : t('domains.srcOwn')
+
+// ── 域名工作台（批TT）：域视角展开——子域清单×在用页×健康 ──
+const expandedDomain = ref('')
+const toggleDomain = (d) => { expandedDomain.value = expandedDomain.value === d.domain ? '' : d.domain }
+const hasSubs = (d) => (d.subdomains || []).length > 0
 const zoneTxt = (d) => d.cf_zone_status === 'active' ? t('domains.zoneActive')
   : d.cf_zone_status ? `${t('domains.zonePending')} (${d.cf_zone_status})` : '—'
 
@@ -184,14 +189,34 @@ onMounted(() => { loadOrders(); loadMyDomains() })
       </div>
     </div>
 
-    <!-- 我的域名 -->
+    <!-- 我的域名（域名工作台·域视角：每域展开看子域×页×健康） -->
     <div v-if="sec === 'mine'" class="card" v-loading="myLoading">
-      <div v-for="d in myDomains" :key="d.id" class="ds-row dom">
-        <span class="ds-dom">{{ d.domain }}</span>
-        <span :class="['src-tag', d.source]">{{ srcLabel(d.source) }}</span>
-        <span :class="['zone-chip', d.cf_zone_status === 'active' ? 'ok' : 'warn']">{{ zoneTxt(d) }}</span>
-        <span class="ds-usage">{{ t('domains.usedBy', { n: d.usage_count || 0 }) }}</span>
-        <span v-if="d.usage_count" class="ds-pages" :title="(d.used_by || []).map(u => u.title).join('、')">{{ (d.used_by || []).map(u => u.title).slice(0, 3).join('、') }}{{ (d.used_by || []).length > 3 ? '…' : '' }}</span>
+      <div v-for="d in myDomains" :key="d.id" class="dom-wb" :class="{ open: expandedDomain === d.domain }">
+        <div class="dom-wb-head" @click="toggleDomain(d)">
+          <span class="dw-caret">{{ expandedDomain === d.domain ? '▾' : '▸' }}</span>
+          <span class="ds-dom">{{ d.domain }}</span>
+          <span :class="['src-tag', d.source]">{{ srcLabel(d.source) }}</span>
+          <span :class="['zone-chip', d.cf_zone_status === 'active' ? 'ok' : 'warn']">{{ zoneTxt(d) }}</span>
+          <span v-if="d.blocked" class="zone-chip fb-block">FB 屏蔽</span>
+          <span class="ds-usage">{{ t('domains.usedBy', { n: d.usage_count || 0 }) }}</span>
+          <span v-if="hasSubs(d)" class="dw-sub-count">{{ (d.subdomains || []).length }} 子域</span>
+        </div>
+        <div v-if="expandedDomain === d.domain" class="dom-wb-body">
+          <div v-if="hasSubs(d)" class="dw-subs">
+            <div v-for="sub in d.subdomains" :key="sub.host" class="dw-sub-row" @click="$router.push({ name: 'landing', query: { edit: sub.page_id } })">
+              <span class="dw-host mono">{{ sub.host }}</span>
+              <span class="dw-arrow">→</span>
+              <span class="dw-page">{{ sub.page_title }}</span>
+            </div>
+          </div>
+          <div v-if="d.usage_count && !hasSubs(d)" class="dw-pages-fallback">
+            <span v-for="u in (d.used_by || [])" :key="u.id" class="ds-pages">{{ u.title }}</span>
+          </div>
+          <div v-if="!d.usage_count" class="dw-no-use">{{ t('domains.noUse') }}</div>
+          <div class="dw-actions">
+            <button class="ctrl-btn sm" @click.stop="sec = 'buy'">{{ t('domains.goBuy') }}</button>
+          </div>
+        </div>
       </div>
       <div v-if="!myDomains.length && !myLoading" class="ds-empty">{{ t('domains.noMine') }}<button class="ctrl-btn sm" style="margin-left:10px" @click="sec = 'buy'">{{ t('domains.goBuy') }}</button></div>
     </div>
@@ -279,6 +304,23 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .ds-err { color: var(--error); cursor: help; }
 .pay-box { display: flex; gap: 10px; align-items: center; padding: 8px 10px; margin-bottom: 10px; background: rgba(10,132,255,.06); border: 1px solid rgba(10,132,255,.25); border-radius: 8px; flex-wrap: wrap; }
 .pay-label { font-size: 12px; font-weight: 600; color: var(--t1); }
+.dom-wb { border-bottom: 1px solid var(--bd); }
+.dom-wb:last-child { border-bottom: none; }
+.dom-wb-head { display: flex; gap: 12px; align-items: center; padding: 10px 6px; cursor: pointer; flex-wrap: wrap; }
+.dom-wb-head:hover { background: var(--bg3); }
+.dw-caret { color: var(--t3); font-size: 11px; width: 14px; flex: none; }
+.dw-sub-count { font-size: 11px; color: var(--ac); }
+.dom-wb-body { padding: 0 6px 12px 28px; display: flex; flex-direction: column; gap: 8px; }
+.dw-subs { display: flex; flex-direction: column; gap: 2px; }
+.dw-sub-row { display: flex; gap: 10px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.dw-sub-row:hover { background: var(--acg); }
+.dw-host { color: var(--ac); min-width: 200px; }
+.dw-arrow { color: var(--t3); }
+.dw-page { color: var(--t1); }
+.dw-pages-fallback { display: flex; gap: 8px; flex-wrap: wrap; }
+.dw-no-use { font-size: 12px; color: var(--t3); }
+.dw-actions { display: flex; gap: 8px; }
+.zone-chip.fb-block { background: var(--error); color: #fff; }
 .pay-addr { font-size: 12px; color: var(--ac); word-break: break-all; cursor: pointer; }
 .invoice { display: flex; gap: 18px; padding: 14px; margin-bottom: 10px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 10px; flex-wrap: wrap; }
 .inv-qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
