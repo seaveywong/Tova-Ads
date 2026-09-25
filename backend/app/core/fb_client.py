@@ -285,6 +285,26 @@ class FbClient:
             "fields": "id,name,can_archive",
         })
 
+    def bm_invite_user(self, bm_id: str, email: str, role: str = "EMPLOYEE") -> dict:
+        """BM 邀请成员（邮箱+角色；business_management 范围已申请）。role 限 EMPLOYEE/ADMIN。"""
+        if role not in ("EMPLOYEE", "ADMIN"):
+            raise FbApiError("no_id", "role 仅支持 EMPLOYEE/ADMIN")
+        return self.post(f"{bm_id}/business_users", {"email": email, "role": role})
+
+    def bm_remove_user(self, bm_id: str, buid: str) -> dict:
+        """BM 移除成员（buid=business_users 的 business 作用域 id）。"""
+        import httpx as _hx
+        r = _hx.request("DELETE", f"{GRAPH_BASE}/{bm_id}/business_users/{buid}",
+                        params={"access_token": self.token}, timeout=30)
+        try:
+            data = r.json()
+        except Exception:
+            raise FbApiError("no_id", f"BM 移除成员返回非 JSON（HTTP {r.status_code}）")
+        if "error" in data or r.status_code >= 400:
+            _err = (data.get("error") or {}).get("message", str(data)[:150])
+            raise FbApiError("no_id", f"BM 移除成员失败：{_err}")
+        return data.get("success", data)
+
     def get_businesses(self) -> list[dict]:
         """拉取可管理的 BM（business）列表 + permitted_tasks（推导 基本/完全 权限）。"""
         return self.get_paged("me/businesses", {

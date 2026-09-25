@@ -1121,7 +1121,7 @@ export default {
     total: '共 {n} 个 BM', colBm: 'Business Manager', colVia: '归属令牌', colRole: '角色',
     tabMembers: '成员', tabAssets: '资产', colPage: '旗下主页',
     accCount: '广告账户 {n}', pgCount: '主页 {n}', noMembers: '暂无成员数据（或令牌无权限读取）',
-    noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）',
+    needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 拥有 BM 完全控制权（含移除你）——确认给这个权限？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）',
   },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',

@@ -1111,7 +1111,7 @@ export default {
     total: '{n} Business Managers', colBm: 'Business Manager', colVia: 'Owning token', colRole: 'Role',
     tabMembers: 'Members', tabAssets: 'Assets', colPage: 'Owned Pages',
     accCount: 'Ad accounts {n}', pgCount: 'Pages {n}', noMembers: 'No member data (or token lacks permission)',
-    noAssets: 'No asset data (or token lacks permission)', none: 'No Business Managers yet',
+    needEmail: 'Enter an email', invite: 'Invite', emailPh: 'Member email (Facebook account)', adminConfirm: 'ADMIN has full BM control (incl. removing you) - confirm?', removeConfirm: 'Remove member "{n}"? Their BM access ends immediately.', invited: 'Invitation sent', noAssets: 'No asset data (or token lacks permission)', none: 'No Business Managers yet',
   },
   pg: {
     searchPh: 'Search page / ID / token', total: '{n} pages',

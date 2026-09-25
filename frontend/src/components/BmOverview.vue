@@ -1,10 +1,16 @@
 <script setup>
 // 跨令牌 BM 总览（批QQ 资产中心）：BM 表 + 行点击懒加载成员/资产详情（复用令牌抽屉同款端点）
 import { ref, onMounted } from 'vue'
-import { GET } from '../api'
-import { ElMessage } from 'element-plus'
+import { GET, POST, DELETE } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { isSuperadminSync } from '../router'
+import { getToken } from '../api'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
+const isSuperSync = isSuperadminSync()
+const _role = (() => { try { return JSON.parse(atob((getToken() || '').split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/')).role || '' } catch { return '' } })()
+const isOwner = _role === 'owner'
+// 后端另有权威校验（_cred_manageable：超管/owner/created_by），此处仅控制 UI 显隐
 const rows = ref([])
 const loading = ref(true)
 const load = async () => {
@@ -33,6 +39,45 @@ const openDetail = async (r) => {
 }
 const roleClass = (r) => (r === '完全' || r === 'ADMIN' || String(r).toLowerCase().includes('admin')) ? 'full' : 'basic'
 const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('adm.copiedVal', { val: id })) }
+
+// ── 成员管理（owner+令牌创建者，批SS）：邀请（邮箱+角色，ADMIN 二次确认）/ 移除 ──
+const canManage = () => isSuperSync || isOwner
+const inviteForm = ref({ email: '', role: 'EMPLOYEE' })
+const inviting = ref(false)
+const doInvite = async () => {
+  const d = detail.value
+  if (!d?.row || inviting.value) return
+  if (!inviteForm.value.email.trim()) return ElMessage.warning(t('bm.needEmail'))
+  if (inviteForm.value.role === 'ADMIN') {
+    try { await ElMessageBox.confirm(t('bm.adminConfirm'), t('common.confirm'), { type: 'warning' }) }
+    catch { return }
+  }
+  inviting.value = true
+  try {
+    await POST(`/fb/credentials/${d.row.via_cred_id}/bm/${d.row.id}/members`, { email: inviteForm.value.email.trim(), role: inviteForm.value.role })
+    ElMessage.success(t('bm.invited'))
+    inviteForm.value = { email: '', role: 'EMPLOYEE' }
+    const m = await GET(`/fb/credentials/${d.row.via_cred_id}/bm/${d.row.id}/members`, 30000).catch(() => null)
+    detail.value.members = m
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  inviting.value = false
+}
+const removing = ref('')
+const doRemove = async (m) => {
+  const d = detail.value
+  if (!d?.row) return
+  try {
+    await ElMessageBox.confirm(t('bm.removeConfirm', { n: m.title || m.buid }), t('common.confirm'), { type: 'warning', confirmButtonClass: 'el-button--danger' })
+  } catch { return }
+  removing.value = m.buid
+  try {
+    await DELETE(`/fb/credentials/${d.row.via_cred_id}/bm/${d.row.id}/members/${m.buid}`)
+    ElMessage.success(t('common.done'))
+    const mm = await GET(`/fb/credentials/${d.row.via_cred_id}/bm/${d.row.id}/members`, 30000).catch(() => null)
+    detail.value.members = mm
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  removing.value = ''
+}
 </script>
 
 <template>
@@ -68,6 +113,15 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
           <div v-for="(m, i) in (Array.isArray(detail.members) ? detail.members : [])" :key="i" class="bm-member">
             <span class="bm-m-name">{{ m.title || m.buid }}</span>
             <span class="bm-m-role">{{ m.role || '' }}</span>
+            <button v-if="canManage()" class="lm-x" :disabled="removing === m.buid" @click="doRemove(m)" :title="t('common.delete')">✕</button>
+          </div>
+          <div v-if="canManage()" class="bm-invite">
+            <input v-model="inviteForm.email" class="bm-inv-email" :placeholder="t('bm.emailPh')" @keyup.enter="doInvite" />
+            <select v-model="inviteForm.role" class="bm-inv-role">
+              <option value="EMPLOYEE">EMPLOYEE</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+            <button class="ctrl-btn sm primary" :disabled="inviting" @click="doInvite">{{ inviting ? t('common.loading') : t('bm.invite') }}</button>
           </div>
           <div v-if="!(Array.isArray(detail.members) ? detail.members : []).length && !detailLoading" class="bm-empty">{{ t('bm.noMembers') }}</div>
         </template>
@@ -115,5 +169,11 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
 .bm-m-name { color: var(--t1); }
 .bm-m-role { color: var(--t3); font-size: 11px; }
 .bm-asset-sum { display: flex; gap: 16px; font-size: 12px; color: var(--t2); margin-bottom: 8px; }
+.bm-invite { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--bd); }
+.bm-inv-email { flex: 1; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-family: var(--font); }
+.bm-inv-email:focus { outline: none; border-color: var(--ac); }
+.bm-inv-role { background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 6px; padding: 5px 6px; font-size: 12px; }
+.lm-x { border: none; background: none; color: var(--t3); cursor: pointer; font-size: 12px; padding: 0 3px; }
+.lm-x:hover { color: var(--error); }
 .bm-sub-t { font-size: 11px; color: var(--t3); margin: 10px 0 2px; text-transform: uppercase; }
 </style>

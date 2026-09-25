@@ -347,6 +347,74 @@ def bm_members(
              "joined": u.get("created_time", "")} for u in users]
 
 
+def _cred_manageable(user, cred) -> bool:
+    """BM/主页资产写操作权限（2026-09-25 用户拍板口径）：超管 / owner（团队级）/
+    令牌创建者（谁绑的令牌谁管它的资产——operator 自建令牌可管理）。"""
+    if getattr(user, "is_superadmin", False):
+        return True
+    if (user.role or "") == "owner":
+        return True
+    return bool(cred.created_by and cred.created_by == user.id)
+
+
+class BmInviteIn(BaseModel):
+    email: str
+    role: str = "EMPLOYEE"   # EMPLOYEE | ADMIN（ADMIN 权限敞口大，前端二次确认）
+
+
+@router.post("/credentials/{cred_id}/bm/{bm_id}/members")
+def bm_invite(cred_id: int, bm_id: str, body: BmInviteIn,
+              user: CurrentUser = Depends(require_permission("ads.read")),
+              db: Session = Depends(get_db)):
+    """BM 邀请成员（邮箱+角色）。权限：超管/owner/令牌创建者；审计日志必记。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    if not _cred_manageable(user, cred):
+        raise HTTPException(403, "仅团队 owner 或该令牌的创建者可管理 BM 成员")
+    email = (body.email or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(400, "邮箱格式不正确")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    try:
+        r = fb.bm_invite_user(bm_id, email, body.role)
+    except FbApiError as e:
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="fb_credential", target_id=str(cred_id),
+              action_type="bm_invite", source="user", result="success",
+              trigger_detail=f"bm={bm_id} email={email} role={body.role}")
+    db.commit()
+    return {"ok": True, "email": email, "role": body.role, "raw": str(r)[:120]}
+
+
+@router.delete("/credentials/{cred_id}/bm/{bm_id}/members/{buid}")
+def bm_remove(cred_id: int, bm_id: str, buid: str,
+              user: CurrentUser = Depends(require_permission("ads.read")),
+              db: Session = Depends(get_db)):
+    """BM 移除成员。权限同邀请；审计日志必记。"""
+    cred = db.query(FbCredential).filter(
+        FbCredential.tenant_id == user.tenant_id, FbCredential.id == cred_id,
+    ).first()
+    if not cred:
+        raise HTTPException(404, "令牌不存在")
+    if not _cred_manageable(user, cred):
+        raise HTTPException(403, "仅团队 owner 或该令牌的创建者可管理 BM 成员")
+    fb = FbClient(decrypt(cred.access_token_enc))
+    try:
+        fb.bm_remove_user(bm_id, buid)
+    except FbApiError as e:
+        raise HTTPException(400, getattr(e, "friendly", str(e)))
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="fb_credential", target_id=str(cred_id),
+              action_type="bm_remove", source="user", result="success",
+              trigger_detail=f"bm={bm_id} buid={buid}")
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/credentials/{cred_id}/bm/{bm_id}/assets")
 def bm_assets(
     cred_id: int,
