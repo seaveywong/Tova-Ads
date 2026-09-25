@@ -1115,7 +1115,7 @@ export default {
   },
   pg: {
     searchPh: 'Search page / ID / token', total: '{n} pages',
-    colPage: 'Page', colVia: 'Owning token', colFans: 'Fans', colAds: 'Live ads', colTpl: 'Template refs',
+    colPage: 'Page', colVia: 'Owning token', colCat: 'Category', colFans: 'Fans', colAds: 'Live ads', colTpl: 'Template refs',
     tplN: '{n}', copyId: 'Click to copy ID', noMatch: 'No matching pages', none: 'No pages yet (no token or no managed pages)', renameBtn: 'Rename', categoryBtn: 'Change Category', pageRenamePrompt: 'New page name (renames the real Facebook page)', pageRenameLimit: 'Name must be 1-100 characters', pageRenamed: 'Page renamed', pageCategoryPrompt: 'New page category (e.g. "Internet Marketing Service"). Requires page manage permission.', pageCategoryLimit: '1-120 chars', pageCategorySaved: 'Page category updated',
   },
   domains: {

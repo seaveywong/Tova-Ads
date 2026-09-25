@@ -1125,7 +1125,7 @@ export default {
   },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',
-    colPage: '主页', colVia: '归属令牌', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
+    colPage: '主页', colVia: '归属令牌', colCat: '类型', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
     tplN: '{n} 个', copyId: '点击复制 ID', noMatch: '无匹配主页', none: '暂无主页（令牌未配置或无可管主页）', renameBtn: '改名', categoryBtn: '改类型', pageRenamePrompt: '新的主页名称（将真实修改 Facebook 主页名）', pageRenameLimit: '名称需 1-100 字符', pageRenamed: '主页已改名', pageCategoryPrompt: '新的主页类别（如 Internet Marketing Service，将真实修改 FB 主页类型；需主页管理权限）', pageCategoryLimit: '1-120 字符', pageCategorySaved: '主页类别已更新',
   },
   domains: {

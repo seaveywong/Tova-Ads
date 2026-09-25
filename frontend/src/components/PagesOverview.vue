@@ -62,6 +62,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
       <div class="pg-row pg-head-row">
         <span class="pg-name">{{ t('pg.colPage') }}</span>
         <span class="pg-col via">{{ t('pg.colVia') }}</span>
+        <span class="pg-col cat">{{ t('pg.colCat') }}</span>
         <span class="pg-col">{{ t('pg.colFans') }}</span>
         <span class="pg-col">{{ t('pg.colAds') }}</span>
         <span class="pg-col pg-tpl">{{ t('pg.colTpl') }}</span>
@@ -79,6 +80,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
           </template>
         </span>
         <span class="pg-col via"><span class="pg-via">{{ r.via_cred }}</span></span>
+        <span class="pg-col cat" :title="r.category">{{ r.category || '—' }}</span>
         <span class="pg-col tnum">{{ r.fan_count ? r.fan_count.toLocaleString() : '—' }}</span>
         <span class="pg-col tnum" :class="{ ok: r.live_ads > 0 }">{{ r.live_ads || '—' }}</span>
         <span class="pg-col pg-tpl" :title="(r.tpl_refs || []).join('、')">
@@ -104,7 +106,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 <style scoped>
 .pgov { display: flex; flex-direction: column; gap: 12px; }
 .card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; overflow-x: auto; }
-.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 880px; }
+.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 1040px; }
 .pg-row:last-child { border-bottom: none; }
 .pg-head-row { color: var(--t3); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--bd); }
 .pg-name { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
@@ -112,6 +114,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 .pg-id { font-size: 10px; color: var(--t3); }
 .pg-col { width: 110px; flex: none; color: var(--t2); }
 .pg-col.via { width: 150px; }
+.pg-col.cat { width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pg-via { font-size: 11px; background: var(--bg3); padding: 1px 8px; border-radius: 4px; color: var(--t3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
 .tnum { font-variant-numeric: tabular-nums; }
 .tnum.ok { color: var(--success); font-weight: 600; }

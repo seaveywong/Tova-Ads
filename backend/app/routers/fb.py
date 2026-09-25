@@ -846,6 +846,7 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
             row = merged.get(pid)
             if not row:
                 row = {"id": pid, "name": pg.get("name") or "",
+                       "category": pg.get("category", ""),
                        "fan_count": pg.get("fan_count", 0),
                        "can_advertise": "ADVERTISE" in (pg.get("tasks") or []),
                        "via_creds": [], "via_cred": "", "via_cred_id": 0,
@@ -867,6 +868,35 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
     out.sort(key=lambda x: (-(x["live_ads"] or 0), -(x["fan_count"] or 0)))
     _asset_cache_set(ck, out)
     return out
+
+
+def _resolve_bm_roles(fb, bms: list) -> dict:
+    """解析 token 用户在各 BM 的角色。FB /me/businesses 不返 role、permitted_tasks 实测恒空，
+    须 /me/business_users 拿本人 buid→role 集合，再 batch 各 BM business_users 认领。
+    返回 {bm_id: 'ADMIN'|'EMPLOYEE'}；解析失败/无权限的 BM 不在 dict 里（前端显示 —）。"""
+    if not bms:
+        return {}
+    roles: dict = {}
+    try:
+        my_buids: dict = {}
+        for bu in fb.get_paged("me/business_users", {"fields": "id,role"}):
+            if bu.get("id"):
+                my_buids[str(bu["id"])] = bu.get("role") or ""
+        if not my_buids:
+            return roles
+        urls = [f"{b['id']}/business_users?fields=id,role&limit=200" for b in bms]
+        for b, users in zip(bms, fb.batch_get(urls)):
+            me_role = ""
+            for u in (users or {}).get("data", []):
+                uid = str(u.get("id") or "")
+                if uid in my_buids:
+                    me_role = u.get("role") or my_buids[uid]
+                    break
+            if me_role:
+                roles[str(b["id"])] = "ADMIN" if me_role == "ADMIN" else "EMPLOYEE"
+    except (FbApiError, TtApiError):
+        pass
+    return roles
 
 
 @router.get("/bm-overview")
@@ -892,6 +922,7 @@ def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
             bms = fb.get_businesses() or []
         except (FbApiError, TtApiError):
             continue
+        roles = _resolve_bm_roles(fb, bms)
         for b in bms:
             bid = str(b.get("id") or "")
             if not bid:
@@ -900,9 +931,11 @@ def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
             _alias = cred.alias or f"#{cred.id}"
             if not row:
                 row = {"id": bid, "name": b.get("name") or "",
-                       "role": b.get("role") or "", "via_creds": [], "via_cred_id": 0}
+                       "role": roles.get(bid, ""), "via_creds": [], "via_cred_id": 0}
                 merged[bid] = row
                 order.append(bid)
+            elif not row["role"] and roles.get(bid):
+                row["role"] = roles[bid]   # 多令牌同 BM：首个能解析出角色的令牌补上
             if _alias not in row["via_creds"]:
                 row["via_creds"].append(_alias)
                 if not row["via_cred_id"]:
