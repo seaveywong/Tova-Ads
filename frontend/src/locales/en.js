@@ -1096,6 +1096,17 @@ export default {
   launch: launch.en,
   formtpl: formtpl.en,
   assets: assets.en,
+  lm: {
+    batchImport: 'Batch Import', addOne: 'Add One', count: '{n} items',
+    itemUrl: 'URL', itemDomain: 'Domain',
+    edit: 'Edit',
+    tipUrl: 'Paste one URL per line (lines starting with # are ignored). https:// is auto-prefixed when missing; duplicates skipped.',
+    tipDomain: 'Paste one domain per line (e.g. lp.example.com). Scheme/path stripped, lowercased; duplicates skipped.',
+    taPh: 'https://example.com/offer1 (one per line, paste many)',
+    recognize: 'Recognize', found: '{n} items recognized', dupSkipped: '{n} duplicates skipped',
+    invalidN: '{n} unrecognized:', badUrl: 'not a valid URL', badDomain: 'not a valid domain',
+    importBtn: 'Import {n}', imported: 'Imported {n} items',
+  },
   pg: {
     searchPh: 'Search page / ID / token', total: '{n} pages',
     colPage: 'Page', colVia: 'Owning token', colFans: 'Fans', colAds: 'Live ads', colTpl: 'Template refs',

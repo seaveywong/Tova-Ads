@@ -9,6 +9,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 import DomainShop from '../components/DomainShop.vue'
 import PagesOverview from '../components/PagesOverview.vue'
+import ListManager from '../components/ListManager.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -997,6 +998,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <el-option v-for="d in domains" :key="d.id" :value="d.domain" :disabled="d.blocked"
                      :label="d.domain + (d.label ? ' ('+d.label+')' : '') + (d.blocked ? ' ⛔' : '')" />
         </el-select>
+        <ListManager v-model="form.custom_domains" type="domain" button-only style="flex:none" />
       </div>
       <!-- 已绑定子域名列表（多域名管理） -->
       <div class="form-l" v-if="form.bound_subdomains && form.bound_subdomains.length">

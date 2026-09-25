@@ -1106,6 +1106,17 @@ export default {
   launch: launch.zh,
   formtpl: formtpl.zh,
   assets: assets.zh,
+  lm: {
+    batchImport: '批量导入', addOne: '添加一条', count: '共 {n} 条',
+    itemUrl: '链接', itemDomain: '域名',
+    edit: '编辑',
+    tipUrl: '粘贴链接，每行一条（# 开头的行忽略）。无 http(s) 前缀自动补 https://，重复自动跳过。',
+    tipDomain: '粘贴域名，每行一条（如 lp.example.com）。自动去前缀/路径、转小写，重复自动跳过。',
+    taPh: 'https://example.com/offer1（一行一条，可多行粘贴）',
+    recognize: '自动识别', found: '识别 {n} 条可导入', dupSkipped: '重复跳过 {n} 条',
+    invalidN: '无法识别 {n} 条：', badUrl: '不是有效链接', badDomain: '不是有效域名',
+    importBtn: '导入 {n} 条', imported: '已导入 {n} 条',
+  },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',
     colPage: '主页', colVia: '归属令牌', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
