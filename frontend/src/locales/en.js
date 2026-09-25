@@ -354,6 +354,7 @@ export default {
     refreshedSimple: 'Refreshed',
     imported: 'Imported {n} ({skipped} already existed skipped)',
     idCopied: 'ID copied: {id}',
+    copyFail: 'Copy failed, please select manually',
     syncing: 'Syncing {done}/{total}…',
     batchSyncResult: 'Success {ok} / Failed {fail}:\n\n{errs}',
     batchRemoveResult: 'Removed {ok} / Failed {fail}:\n\n{errs}',

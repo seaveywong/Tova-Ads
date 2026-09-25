@@ -207,7 +207,7 @@ const doImport = async () => {
   } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   importing.value = false
 }
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('ads.idCopied', { id })) }
+const copyId = async (id) => { if (!id) return; try { await navigator.clipboard.writeText(id); ElMessage.success(t('ads.idCopied', { id })) } catch { ElMessage.warning(t('ads.copyFail')) } }
 
 // ── 保活徽标按状态区分（曾清一色"保活"看不出实际情况）──
 // active_ad=保活广告在跑 / has_spend=近期有消耗免保活 / burnt=强绑主页熔断(手动可重试) /

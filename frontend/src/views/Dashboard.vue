@@ -411,8 +411,6 @@ const toggleCard = (i) => {
   const card = taskCards.value[i]
   if (card.toTokens) { router.push('/tokens'); return }   // 令牌失效卡 → 直达令牌页处理
   if (!card.detailAccounts?.length) return
-  // 切换展开面板时清空勾选——selectedIds 是各面板共享的，残留会让"复制选中"带出旧选择
-  if (expandedCard.value !== i) selectedIds.value = new Set()
   expandedCard.value = expandedCard.value === i ? null : i
 }
 const columnLabel = (col) => ({
@@ -449,7 +447,6 @@ const accountView = ref('spend')  // 账户明细表视角：spend/conv/cpa/roas
 const setAccountView = (mode) => {
   accountView.value = mode
   detailSearch.value = ''          // 切视角清空搜索（不同视角行集不同，残留会误过滤）
-  selectedIds.value = new Set()    // 勾选是余额视角专用，残留会带出旧选择
 }
 // 核心卡迷你趋势线（SVG polyline，复用趋势接口序列；不足 2 点或全平不画）
 const sparkPoints = (arr) => {
@@ -505,7 +502,7 @@ const guardCells = computed(() => [
 ])
 const toggleKpiMode = (mode) => {
   kpiMode.value = kpiMode.value === mode ? null : mode
-  if (kpiMode.value !== null) { selectedIds.value = new Set(); detailSearch.value = '' }  // 勾选/搜索各面板共享，切换时清空
+  if (kpiMode.value !== null) { detailSearch.value = '' }  // 搜索各面板共享，切换时清空
 }
 
 // ── 今日加白（守护概览入口；账户本地日，次日自动失效）──
@@ -734,14 +731,6 @@ const filteredCoverageAccs = computed(() => {
   }
   return accs
 })
-// KPI 明细面板复制当前显示的账户 ID（跟随搜索过滤——搜完再复制=复制筛选结果）
-const copyCoverageIds = () => {
-  const ids = filteredCoverageAccs.value.map(a => a.act_id)
-  if (!ids.length) return ElMessage.warning(t('dashboard.noSelection'))
-  navigator.clipboard?.writeText(ids.join('\n'))
-  ElMessage.success(t('dashboard.copiedSelected', { n: ids.length }))
-}
-
 // 告警详情改用抽屉（el-drawer）展示——彻底避开 sticky 顶条遮挡（之前 inline 展开被顶部条挡）
 const notifDrawerOpen = ref(false)
 const activeNotif = ref(null)
@@ -782,13 +771,6 @@ const urgencyLabel = (a) => {
   if (b <= 300) return '🟡 ' + t('dashboard.urgencyLow')
   return '🟢 ' + t('dashboard.urgencySufficient')
 }
-// 复制有消耗的账户 ID（当前日期范围）
-const copySpendActIds = () => {
-  const accs = (data.value.accounts || []).filter(a => (a.spend_usd || 0) > 0)
-  const ids = accs.map(a => a.act_id).filter(Boolean).join('\n')
-  if (!ids) { ElMessage.info(t('dashboard.noSpendAccounts')); return }
-  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(t('dashboard.copiedSpendIds', { n: accs.length }))).catch(() => {})
-}
 // CSV 导出（账户汇总/落地页子码，当前日期范围；列头语言走 X-Locale）
 const exporting = ref(false)
 const exportAccounts = async () => {
@@ -804,19 +786,6 @@ const exportLanding = async () => {
   try { await downloadFile(`/dashboard/export?source=landing&${rangeQuery()}`) }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   exportLandingBusy.value = false
-}
-// 复选框选中（充值/余额明细用：勾选账户 → 复制选中 ID）
-const selectedIds = ref(new Set())
-const toggleSelect = (act_id) => {
-  const s = new Set(selectedIds.value)
-  if (s.has(act_id)) s.delete(act_id)
-  else s.add(act_id)
-  selectedIds.value = s
-}
-const copySelected = () => {
-  const ids = [...selectedIds.value].filter(Boolean).join('\n')
-  if (!ids) { ElMessage.info(t('dashboard.noSelection')); return }
-  navigator.clipboard?.writeText(ids).then(() => ElMessage.success(t('dashboard.copiedSelected', { n: selectedIds.value.size }))).catch(() => {})
 }
 const localTime = (tz) => {
   if (!tz) return '—'
@@ -1095,8 +1064,8 @@ const _startTimers = () => {
   _timer = setInterval(updateCountdown, 1000)
   _refreshTimer = setInterval(() => {
     if (document.hidden) return
-    // 用户正在操作（展开明细/勾选账户）时跳过自动刷新，避免打断
-    if (selectedIds.value.size > 0 || kpiMode.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
+    // 用户正在操作（展开明细）时跳过自动刷新，避免打断
+    if (kpiMode.value !== null || expandedCard.value !== null || landingKpiExpanded.value !== null) return
     loadDashboard()
   }, 60000)
 }
@@ -1135,9 +1104,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <span class="sync-time countdown" :class="inspectState">{{ countdown }}</span>
         <button class="head-btn tg-mgr-btn" @click="openTgMgr" :title="t('dashboard.tgMgrTitle')">
           <el-icon><Bell /></el-icon><span v-if="tgUnbound" class="tg-dot"></span>
-        </button>
-        <button class="head-btn" @click="copySpendActIds" :title="t('dashboard.copySpendTitle')">
-          <el-icon><Document /></el-icon><span class="btn-txt">{{ t('dashboard.copySpendBtn') }}</span>
         </button>
         <button class="head-btn" :disabled="exporting" @click="exportAccounts" :title="t('common.exportCsv')">
           <el-icon><Download /></el-icon><span class="btn-txt">{{ exporting ? t('common.loading') : t('common.exportCsv') }}</span>
@@ -1266,7 +1232,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
               <button v-for="v in VIEW_TABS" :key="v.mode" class="status-tab" :class="{ active: accountView === v.mode }" @click="setAccountView(v.mode)">{{ v.label }}</button>
             </div>
             <input v-model="detailSearch" class="search-input" :placeholder="t('dashboard.searchPh')" />
-            <button v-if="accountView === 'balance'" class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button>
               <el-switch v-if="accountView !== 'balance'" :model-value="showRemoved" size="small" @update:model-value="v => showRemoved = v" :active-text="t('dashboard.showRemoved')" style="margin-left:10px" />
           </div>
         </div>
@@ -1274,7 +1239,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           <table class="detail-table accounts-table">
             <thead><tr><th v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'">{{ col.label }}</th></tr></thead>
             <tbody>
-              <tr v-for="acc in filteredAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id), 'removed-row': acc.removed }" @click="acc.removed ? null : (accountView === 'balance' ? toggleSelect(acc.act_id) : router.push({ name: 'ad-manager', query: { act: acc.act_id } }))">
+              <tr v-for="acc in filteredAccounts" :key="acc.act_id" :class="{ 'removed-row': acc.removed }" @click="acc.removed ? null : router.push({ name: 'ad-manager', query: { act: acc.act_id } })">
                 <td v-for="col in accountsTable.cols" :key="col.key" :class="col.left ? 'left' : 'right'" class="mono" :style="{ fontWeight: col.bold ? 600 : 400 }">
                   <template v-if="col.key === 'name'"><span v-if="platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span><span v-if="acc.group_label" class="grp-chip" :title="acc.group_label">{{ acc.group_label }}</span>{{ acc.removed ? `（${t('dashboard.removedTag')}）${acc.act_id}` : acc.name }}</template>
                   <template v-else-if="col.key === 'st'"><span :class="['acc-st', { bad: Number(acc.account_status) !== 1 }]" :title="stTitle(acc)">{{ accountStatus(acc.account_status).label }}</span></template>
@@ -1320,7 +1285,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
               <span>{{ kpiDetail.title }}</span>
               <div class="detail-tools">
                 <input v-if="kpiDetail.type === 'accounts'" v-model="detailSearch" class="detail-search" :placeholder="t('dashboard.searchPh')" />
-                <button v-if="kpiDetail.type === 'accounts'" class="copy-ids-btn" :title="t('dashboard.copySpendTitle')" @click="copyCoverageIds">{{ t('dashboard.copySelected') }} ({{ filteredCoverageAccs.length }})</button>
                 <el-icon class="detail-close" @click="kpiMode = null"><Close /></el-icon>
               </div>
             </div>
@@ -1369,11 +1333,11 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
             </div>
           </div>
           <div v-if="expandedCard !== null && taskCards[expandedCard]?.detailAccounts?.length" class="detail-panel task-detail">
-            <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · {{ t('dashboard.detailTitle') }}</span><div class="detail-tools"><button class="copy-ids-btn" @click="copySelected()">{{ t('dashboard.copySelected') }} ({{ selectedIds.size }})</button><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
+            <div class="detail-header"><span>{{ taskCards[expandedCard].title }} · {{ t('dashboard.detailTitle') }}</span><div class="detail-tools"><el-icon class="detail-close" @click="expandedCard = null"><Close /></el-icon></div></div>
             <table class="detail-table">
               <thead><tr><th v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'">{{ columnLabel(col) }}</th></tr></thead>
               <tbody>
-                <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id" :class="{ 'selected-row': selectedIds.has(acc.act_id) }" @click="toggleSelect(acc.act_id)">
+                <tr v-for="acc in taskCards[expandedCard].detailAccounts" :key="acc.act_id">
                   <td v-for="col in taskCards[expandedCard].detailColumns" :key="col" :class="col === 'name' ? 'left' : 'right'" class="mono"><span v-if="col === 'name' && platChip(acc)" :class="['plat-chip', platChip(acc)]">{{ platChip(acc) }}</span>{{ columnFmt(col, acc) }}</td>
                 </tr>
               </tbody>
@@ -1945,8 +1909,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .detail-table td.log-cell { max-width: 260px; white-space: normal; word-break: break-all; }
 .detail-table td.left { text-align: left; } .detail-table td.right { text-align: right; }
 .detail-table tbody tr:last-child td { border-bottom: none; }
-.detail-table tbody tr.selected-row { background: var(--acg); }
-.detail-table tbody tr.selected-row td { color: var(--ac); font-weight: 500; }
 
 /* 落地页流量：汇总卡复用 .stat-grid/.stat-card（和广告版 KPI 卡同款）*/
 .text-danger { color: var(--error) !important; }
@@ -2136,7 +2098,6 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
   .accounts-table th.left, .accounts-table td.left { position: sticky; left: 0; background: var(--bg2); z-index: 2; box-shadow: 1px 0 0 var(--bd); }
   .accounts-table thead th.left { z-index: 3; }
   .accounts-table tbody tr:hover td.left { background: var(--bg3); }
-  .accounts-table tbody tr.selected-row td.left { background: var(--acg); }
   .accounts-table tbody tr.removed-row td.left { background: var(--bg2); }
   .accounts-table th, .accounts-table td { padding: 6px 10px; }
   .accounts-table td { font-size: 12px; }

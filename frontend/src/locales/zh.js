@@ -365,6 +365,7 @@ export default {
     refreshedSimple: '已刷新',
     imported: '已导入 {n} 个（跳过已存在 {skipped}）',
     idCopied: 'ID 已复制：{id}',
+    copyFail: '复制失败，请手动选中',
     syncing: '同步 {done}/{total}…',
     batchSyncResult: '成功 {ok} / 失败 {fail}：\n\n{errs}',
     batchRemoveResult: '已移除 {ok} / 失败 {fail}：\n\n{errs}',
