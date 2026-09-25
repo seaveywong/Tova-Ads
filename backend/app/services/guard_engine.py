@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import random
 import time
 import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
