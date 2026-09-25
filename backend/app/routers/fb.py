@@ -763,7 +763,9 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
                     live_ads[_sid.split("_", 1)[0]] = live_ads.get(_sid.split("_", 1)[0], 0) + 1
         except Exception:
             continue
-    out = []
+    # 同主页可被多令牌管理——按 pid 去重，归属令牌合并展示（改名/分类操作用第一个令牌）
+    merged: dict = {}
+    order: list = []
     for cred, fb in pairs:
         try:
             pages = fb.get_pages() or []
@@ -773,15 +775,27 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
             pid = str(pg.get("id") or "")
             if not pid:
                 continue
-            out.append({
-                "id": pid, "name": pg.get("name") or "",
-                "fan_count": pg.get("fan_count", 0),
-                "can_advertise": "ADVERTISE" in (pg.get("tasks") or []),
-                "via_cred": cred.alias or f"#{cred.id}", "via_cred_id": cred.id,
-                "live_ads": live_ads.get(pid, 0),
-                "tpl_refs": tpl_ref.get(pid, [])[:5],
-                "tpl_ref_count": len(tpl_ref.get(pid, [])),
-            })
+            row = merged.get(pid)
+            if not row:
+                row = {"id": pid, "name": pg.get("name") or "",
+                       "fan_count": pg.get("fan_count", 0),
+                       "can_advertise": "ADVERTISE" in (pg.get("tasks") or []),
+                       "via_creds": [], "via_cred": "", "via_cred_id": 0,
+                       "live_ads": live_ads.get(pid, 0),
+                       "tpl_refs": tpl_ref.get(pid, [])[:5],
+                       "tpl_ref_count": len(tpl_ref.get(pid, []))}
+                merged[pid] = row
+                order.append(pid)
+            _alias = cred.alias or f"#{cred.id}"
+            if _alias not in row["via_creds"]:
+                row["via_creds"].append(_alias)
+                if not row["via_cred_id"]:
+                    row["via_cred_id"] = cred.id   # 改名/分类操作用首个可管令牌
+    out = []
+    for pid in order:
+        row = merged[pid]
+        row["via_cred"] = " / ".join(row.pop("via_creds"))
+        out.append(row)
     out.sort(key=lambda x: (-(x["live_ads"] or 0), -(x["fan_count"] or 0)))
     _asset_cache_set(ck, out)
     return out
