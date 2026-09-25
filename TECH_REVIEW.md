@@ -3025,3 +3025,7 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 用户痛点：目标 URL 是 el-select 手输标签框，量大难管。ListManager 通用组件：批量导入弹窗（换行分割/#注释行跳过/URL 型无 scheme 自动补 https://、域名型剥前缀转小写/去重/非法行报告+预览计数→合并导入）+ 列表视图（序号/行内编辑✎/删除✕/双击编辑/添加一条）。target_urls=完整版；custom_domains=保留下拉选项库+buttonOnly 旁挂导入。全站同款扫描：仅此两处自由输入列表（像素/受众/转化事件均选择型）。
 E2E 实测：域名型（识别/去重跳过/非法报告）+ URL 完整版（无 scheme 自动补全、导入列表化）双通过。
 坑：patch 脚本尾部混入 heredoc 结束符→Python 编译期错整脚本未跑但当时无报错核对→假成功；且第一轮 E2E 恰只命中域名型掩盖 URL 型未替换。修复后 grep 实例数=2 才收。教训：脚本改动以 grep 产物为准，不以脚本打印为准。
+
+## 批RR：资产中心重构——主页/BM 总览归令牌页（2026-09-25，9a8642c）
+用户质疑成立（主页此前在令牌、批OO 我放投放链接是图部署相邻的 IA 错位）：主页/BM 是令牌可访问的 FB 资产（广告域），域名才是落地页资产。令牌页升级资产中心：二级 seg 令牌|主页|BM（FB 平台；TT 切换自动回令牌）；主页=PagesOverview 迁入；BM=新 GET /fb/bm-overview（跨令牌聚合去重+归属合并）+ BmOverview 组件（行点击懒加载成员/资产弹层，复用现有端点）；投放链接恢复三 Tab。role 列空为已知坑（/me/businesses 不返角色，成员详情里可见）。
+E2E：seg 三键/主页 44 行/BM 43 行（首行 BM Đã Bên via Fama Bah）/令牌视图回归/Landing 三 Tab 全断言通过。坑：进程级 5min 缓存 per-worker——curl 暖不等于 UI 暖（冷 worker 首拉 11 令牌串行 ~15s，验证等待要给足）。
