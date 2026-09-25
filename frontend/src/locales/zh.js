@@ -378,7 +378,7 @@ export default {
     noMatch: '无匹配账户',
   },
   tokens: {
-    pageTitle: '令牌',
+    assetTokens: '令牌', assetPages: '主页', assetBm: 'BM 资产', pageTitle: '令牌',
     statusCount: '{ok} 可用 · {off} 停用',
     loadFail: '加载失败',
     openDetailTip: '点击查看令牌详情（账户 / 主页 / BM / 权限）',
@@ -1116,6 +1116,12 @@ export default {
     recognize: '自动识别', found: '识别 {n} 条可导入', dupSkipped: '重复跳过 {n} 条',
     invalidN: '无法识别 {n} 条：', badUrl: '不是有效链接', badDomain: '不是有效域名',
     importBtn: '导入 {n} 条', imported: '已导入 {n} 条',
+  },
+  bm: {
+    total: '共 {n} 个 BM', colBm: 'Business Manager', colVia: '归属令牌', colRole: '角色',
+    tabMembers: '成员', tabAssets: '资产', colPage: '旗下主页',
+    accCount: '广告账户 {n}', pgCount: '主页 {n}', noMembers: '暂无成员数据（或令牌无权限读取）',
+    noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）',
   },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',

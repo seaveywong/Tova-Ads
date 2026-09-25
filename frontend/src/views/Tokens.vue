@@ -6,6 +6,8 @@ import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox, useZIndex } from 'element-plus'
 import { accountStatus } from '../composables/useStatus'
 import { isSuperadminSync } from '../router'
+import PagesOverview from '../components/PagesOverview.vue'
+import BmOverview from '../components/BmOverview.vue'
 const { t, locale } = useI18n()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
@@ -59,6 +61,7 @@ const cleaning = ref(false)
 
 // ── TikTok 分区（TT 令牌：24h access 自动续期 + 365d refresh 授权寿命）──
 const platform = ref('fb')
+const assetTab = ref('tokens')   // 资产中心二级视图：tokens | pages | bm（批QQ）
 const ttLoading = ref(false)
 const ttError = ref('')
 const ttCreds = ref([])
@@ -77,6 +80,7 @@ const loadTtApps = async () => {
   try { ttApps.value = (await GET('/tt/apps')) || [] } catch { ttApps.value = [] }
 }
 const switchPlatform = (p) => {
+  assetTab.value = 'tokens'   // 切平台回令牌视图（TT 无主页/BM）
   platform.value = p
   if (p === 'tt') { loadTt(); loadTtApps() }
 }
@@ -715,6 +719,16 @@ const deleteToken = async (tk) => {
 
     <!-- FB/TT 分区面板：key 随分区切换重挂载，触发 .plat-pane 轻过渡 -->
     <div :key="platform" class="plat-pane">
+    <!-- 资产中心二级视图（批QQ：主页/BM 跨令牌总览归令牌页——资产的家是凭证，不是投放链接） -->
+    <div v-if="platform==='fb'" class="asset-seg">
+      <div class="seg-bar">
+        <button class="seg-btn" :class="{ on: assetTab === 'tokens' }" @click="assetTab = 'tokens'">{{ t('tokens.assetTokens') }}</button>
+        <button class="seg-btn" :class="{ on: assetTab === 'pages' }" @click="assetTab = 'pages'">{{ t('tokens.assetPages') }}</button>
+        <button class="seg-btn" :class="{ on: assetTab === 'bm' }" @click="assetTab = 'bm'">{{ t('tokens.assetBm') }}</button>
+      </div>
+    </div>
+    <PagesOverview v-if="platform==='fb' && assetTab==='pages'" />
+    <BmOverview v-if="platform==='fb' && assetTab==='bm'" />
     <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
       <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
       <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接）。
@@ -785,7 +799,7 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
-    <div v-if="platform==='fb' && atRiskAccounts.length" class="risk-banner" @click="atRiskOpen = !atRiskOpen">
+    <div v-if="platform==='fb' && assetTab==='tokens' && atRiskAccounts.length" class="risk-banner" @click="atRiskOpen = !atRiskOpen">
       <span>⚠ {{ t('tokens.atRiskSummary', { n: atRiskAccounts.length }) }}</span>
       <span class="risk-toggle">{{ atRiskOpen ? t('tokens.collapse') : t('tokens.viewDetail') }}</span>
     </div>
@@ -798,7 +812,7 @@ const deleteToken = async (tk) => {
       </div>
     </div>
 
-    <div v-if="platform==='fb'" class="tbl" v-loading="loading">
+    <div v-if="platform==='fb' && assetTab==='tokens'" class="tbl" v-loading="loading">
       <div class="row head">
         <span>{{ t('common.status') }}</span><span>{{ t('common.name') }}</span><span>{{ t('tokens.fbUser') }}</span><span>{{ t('tokens.createdBy') }}</span>
         <span class="num-h">{{ t('tokens.colAccounts') }}</span><span class="num-h">{{ t('tokens.colPages') }}</span><span class="num-h">BM</span>

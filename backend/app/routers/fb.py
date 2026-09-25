@@ -801,6 +801,50 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
     return out
 
 
+@router.get("/bm-overview")
+def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
+                db: Session = Depends(get_db)):
+    """跨令牌 BM 总览（批QQ 资产中心）：iter 令牌聚合 businesses，按 BM id 去重、
+    归属令牌合并（via_creds 数组，详情懒加载用第一个）。5min 缓存。"""
+    import time as _t
+    ck = f"bmov:{user.tenant_id}"
+    if user.role == "operator":
+        ck = f"bmov:{user.tenant_id}:{user.id}"
+    hit = _asset_cache_get(ck)
+    if hit is not None:
+        return hit
+    from ..core.fb_tokens import iter_tenant_clients
+    _vis = _visible_cred_ids(db, user) if user.role == "operator" else None
+    pairs = [(c, f) for c, f in iter_tenant_clients(db, user.tenant_id)
+             if _vis is None or c.id in _vis]
+    merged: dict = {}
+    order: list = []
+    for cred, fb in pairs:
+        try:
+            bms = fb.get_businesses() or []
+        except (FbApiError, TtApiError):
+            continue
+        for b in bms:
+            bid = str(b.get("id") or "")
+            if not bid:
+                continue
+            row = merged.get(bid)
+            _alias = cred.alias or f"#{cred.id}"
+            if not row:
+                row = {"id": bid, "name": b.get("name") or "",
+                       "role": b.get("role") or "", "via_creds": [], "via_cred_id": 0}
+                merged[bid] = row
+                order.append(bid)
+            if _alias not in row["via_creds"]:
+                row["via_creds"].append(_alias)
+                if not row["via_cred_id"]:
+                    row["via_cred_id"] = cred.id
+    out = [merged[b] for b in order]
+    out.sort(key=lambda x: x["name"].lower())
+    _asset_cache_set(ck, out)
+    return out
+
+
 @router.get("/pages/{page_id}/posts")
 def list_page_posts(
     page_id: str,

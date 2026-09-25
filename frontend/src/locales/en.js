@@ -367,7 +367,7 @@ export default {
     noMatch: 'No matching accounts',
   },
   tokens: {
-    pageTitle: 'Tokens',
+    assetTokens: 'Tokens', assetPages: 'Pages', assetBm: 'BM Assets', pageTitle: 'Tokens',
     statusCount: '{ok} active · {off} disabled',
     loadFail: 'Failed to load',
     openDetailTip: 'Click to view token details (accounts / pages / BM / permissions)',
@@ -1106,6 +1106,12 @@ export default {
     recognize: 'Recognize', found: '{n} items recognized', dupSkipped: '{n} duplicates skipped',
     invalidN: '{n} unrecognized:', badUrl: 'not a valid URL', badDomain: 'not a valid domain',
     importBtn: 'Import {n}', imported: 'Imported {n} items',
+  },
+  bm: {
+    total: '{n} Business Managers', colBm: 'Business Manager', colVia: 'Owning token', colRole: 'Role',
+    tabMembers: 'Members', tabAssets: 'Assets', colPage: 'Owned Pages',
+    accCount: 'Ad accounts {n}', pgCount: 'Pages {n}', noMembers: 'No member data (or token lacks permission)',
+    noAssets: 'No asset data (or token lacks permission)', none: 'No Business Managers yet',
   },
   pg: {
     searchPh: 'Search page / ID / token', total: '{n} pages',
