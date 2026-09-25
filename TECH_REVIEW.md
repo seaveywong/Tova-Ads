@@ -3020,3 +3020,8 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 - **主页总览**：GET /fb/pages-overview（归属令牌合并去重/粉丝/可投/在投广告数=object_story_id 前缀统计/模板引用=page_id+structure+跟帖ref；operator 可见令牌过滤；5min 缓存）+ PagesOverview 组件（搜索/双击改名/ID复制/在投降序）+ 投放链接第 4 Tab（?tab=pages）。首版同页多令牌重复行 → 去重合并「A / B」。线上 43 页零重复，文本断言+截图通过。
 - **权限审计**（277 端点，静态扫描 v2 嵌套/间接依赖解析 × 人工复核）：SUPER 57 / PERM 202 / LOGIN 11（auth 自服务合理）/ PUBLIC 7（OAuth 回调×2、TG webhook secret、landing_events×4 均 per-page secret）——**零真漏洞**。审计器 _audit_perms2.py 留存。v1 解析器两教训：嵌套括号截断把 PERM 误判 LOGIN、间接 helper 依赖漏识别把 SUPER 误判 PUBLIC——静态审计工具本身也要验证。
 - **AdManager owner 筛选**：已存在（2026-09-17），运行时验证选项 seavey/gl/lc 正常——单人团队隐藏属预期，非缺陷。
+
+## 批PP：目标URL/域名批量导入 + 列表化单条管理（ListManager，2026-09-25，79e2f72+补）
+用户痛点：目标 URL 是 el-select 手输标签框，量大难管。ListManager 通用组件：批量导入弹窗（换行分割/#注释行跳过/URL 型无 scheme 自动补 https://、域名型剥前缀转小写/去重/非法行报告+预览计数→合并导入）+ 列表视图（序号/行内编辑✎/删除✕/双击编辑/添加一条）。target_urls=完整版；custom_domains=保留下拉选项库+buttonOnly 旁挂导入。全站同款扫描：仅此两处自由输入列表（像素/受众/转化事件均选择型）。
+E2E 实测：域名型（识别/去重跳过/非法报告）+ URL 完整版（无 scheme 自动补全、导入列表化）双通过。
+坑：patch 脚本尾部混入 heredoc 结束符→Python 编译期错整脚本未跑但当时无报错核对→假成功；且第一轮 E2E 恰只命中域名型掩盖 URL 型未替换。修复后 grep 实例数=2 才收。教训：脚本改动以 grep 产物为准，不以脚本打印为准。
