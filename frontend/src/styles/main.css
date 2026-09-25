@@ -230,6 +230,7 @@ a { color: var(--ac); text-decoration: none; }
 .el-switch__core { border-color: var(--bd) !important; }
 .el-switch.is-checked .el-switch__core { background-color: var(--ac) !important; border-color: var(--ac) !important; }
 .el-dropdown__popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
+.el-dropdown-menu { background: var(--bg2) !important; }
 .el-dropdown-menu__item { color: var(--t1) !important; }
 .el-dropdown-menu__item:hover { background: var(--bg3) !important; }
 /* 危险操作菜单项（删除/归档等，popper 传送 body 需全局定义） */
@@ -256,6 +257,7 @@ a { color: var(--ac); text-decoration: none; }
 .el-select__wrapper { background-color: var(--bg3) !important; box-shadow: 0 0 0 1px var(--bd) inset !important; }
 .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--ac) inset !important; }
 .el-select__wrapper .el-select__placeholder, .el-select__wrapper .el-select__selected-item { color: var(--t2) !important; }
+.el-select-dropdown { background: var(--bg2) !important; }
 .el-select-dropdown__item { color: var(--t1) !important; }
 .el-select-dropdown__item.is-hovering, .el-select-dropdown__item:hover { background: var(--bg3) !important; }
 .el-select-dropdown__item.is-selected { color: var(--ac) !important; }
