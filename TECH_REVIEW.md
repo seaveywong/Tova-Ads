@@ -3029,3 +3029,12 @@ E2E 实测：域名型（识别/去重跳过/非法报告）+ URL 完整版（�
 ## 批RR：资产中心重构——主页/BM 总览归令牌页（2026-09-25，9a8642c）
 用户质疑成立（主页此前在令牌、批OO 我放投放链接是图部署相邻的 IA 错位）：主页/BM 是令牌可访问的 FB 资产（广告域），域名才是落地页资产。令牌页升级资产中心：二级 seg 令牌|主页|BM（FB 平台；TT 切换自动回令牌）；主页=PagesOverview 迁入；BM=新 GET /fb/bm-overview（跨令牌聚合去重+归属合并）+ BmOverview 组件（行点击懒加载成员/资产弹层，复用现有端点）；投放链接恢复三 Tab。role 列空为已知坑（/me/businesses 不返角色，成员详情里可见）。
 E2E：seg 三键/主页 44 行/BM 43 行（首行 BM Đã Bên via Fama Bah）/令牌视图回归/Landing 三 Tab 全断言通过。坑：进程级 5min 缓存 per-worker——curl 暖不等于 UI 暖（冷 worker 首拉 11 令牌串行 ~15s，验证等待要给足）。
+
+## 批SS：BM 成员管理（邀请/移除）落地资产中心（2026-09-25，661704d）
+用户拍板权限口径：**owner + 令牌创建者**（谁绑的令牌谁管它的 BM/主页资产，operator 自建令牌可管理）。
+- fb_client.bm_invite_user（POST /{bm}/business_users email+role EMPLOYEE/ADMIN）/ bm_remove_user（DELETE）
+- 端点带 `_cred_manageable`（超管/owner/created_by）+ 邮箱校验 + ADMIN 前端二次确认（完全控制权警示）+ 审计日志
+- BmOverview 详情弹层：成员行✕移除 + 邀请表单（邮箱+角色 select）；canManage UI 走 JWT role
+- 主页 Page Role API 需 pages_manage_metadata（未申请）——FB 官方路径=人进 BM→BM 授权资产，BM 层闭环
+E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 ✓ 截图核对 ✓
+（令牌抽屉融合瘦身 + 域名工作台构思已给用户，待拍板下一批）
