@@ -3011,3 +3011,6 @@ watchdog debug_token 发现 is_valid=False 只发通知+写日志、不改状态
 
 ### 批MM：支付入口去重 + 全站入口扫描（2026-09-25）
 用户「域名注册商还有收款怎么回事」查实：注册商卡残留旧 USDT 块与支付设置卡**双入口**，且 registrar PUT 的 payment_usdt 分支只写 chain+address → **抹掉支付卡的 trongrid_api_key/pay_note**（字段互踩）。修复：注册商卡删块+指引；后端删分支；支付唯一入口 /settings/payment。全站入口扫描（截图核验）：注册商（凭据+定价）/支付（收款）分域清晰相邻；Landing 域名 Tab+购买按钮同址；侧栏无多余入口；Dashboard 域名相关仅通知数据。
+
+### 批NN：域名 Tab 裸显 i18n 键修复（2026-09-25）
+用户实见 domains.tabBuy 英文键裸显——domains 命名空间当初误插 nav{} 内（锚点层级错），全部键变 nav.domains.*；zh/en 移到根层级。伴生：Landing tab 初始化只认 logs，?tab=domains 直达落回管理——三值识别。验证改用**运行时文本断言**（Playwright 读 seg 实文+全页裸键扫描 0），不止目测截图（批KK 验证漏洞根因：截图目测没逐字读小字文本）。
