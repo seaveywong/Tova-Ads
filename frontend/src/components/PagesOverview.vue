@@ -37,7 +37,7 @@ const saveEdit = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   editing.value = null
 }
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('adm.copiedVal', { val: id })) }
+const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
 </script>
 
 <template>

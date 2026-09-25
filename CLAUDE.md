@@ -42,6 +42,11 @@ node _sshx.js 'cd /opt/toveads/backend && venv/bin/python -m py_compile <file> &
 ```
 坑：`MSYS_NO_PATHCONV=1` 防 Git Bash 路径转换；cwd 漂移报 module not found 就 cd 回 `/d/dev/Mira_One`；前端 build cwd 必须在 frontend。
 
+## i18n 裸键零容忍（2026-09-25 铁律）
+- **禁止在 UI 上出现裸 i18n 键**（如 `adm.copiedVal`、`domains.tabBuy`）——用户已两次抓到（domains 命名空间嵌错层级 + adm.copiedVal 跨命名空间引用），**写进 AI 交接文档，违反=改动整体回退**。
+- **验证必做**：①组件新增 `t('ns.key')` 时 grep 确认键存在于 zh.js/en.js（含嵌套对象路径）；②每批前端改动 build 后跑 `node /d/dev/Mira_One/_audit_ui_text.js`（17 路由×2 语言裸键/模板泄漏/CJK 反向泄漏零容忍）；③跨命名空间引用键（如 dashboard 组件里用 common.xxx）必须确认目标命名空间有该键——**别凭记忆写命名空间前缀**。
+- 审计器路径：`D:/dev/Mira_One/_audit_ui_text.js`（页面级）+ `D:/dev/Mira_One/_chk_keys.cjs`（组件级 t() 键校验）。
+
 ## 多租户 / RLS
 两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-119 已占，新增从 120 起）。
 

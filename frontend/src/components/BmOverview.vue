@@ -38,7 +38,7 @@ const openDetail = async (r) => {
   detailLoading.value = false
 }
 const roleClass = (r) => (r === '完全' || r === 'ADMIN' || String(r).toLowerCase().includes('admin')) ? 'full' : 'basic'
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('adm.copiedVal', { val: id })) }
+const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
 
 // ── 成员管理（owner+令牌创建者，批SS）：邀请（邮箱+角色，ADMIN 二次确认）/ 移除 ──
 const canManage = () => isSuperSync || isOwner
