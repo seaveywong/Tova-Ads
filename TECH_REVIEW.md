@@ -3041,3 +3041,8 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 
 ## 批TT：域名工作台（域视角管理）落地（2026-09-25，f1e445f）
 用户不满多域名管理——根因=视角割裂（编辑抽屉是页视角，域名 Tab 只有浅列表，无域视角）。「我的域名」Tab 升级工作台：每域行（DNS/FB屏蔽/在用页数/子域数）→点击展开**子域清单**（子域 → 页名，点击直达编辑）。后端 _domain_usage 增返子域明细 [{host, page_id, page_title}]。E2E：1 域展开 5 子域（lp16→TEST、lp57→RH-Signals V2 GL 等）✓ 截图核对 ✓。
+
+## 批UU：全系统断层扫描（举一反三 BM 邀请 500）+ 修复（2026-09-26，d5ad28f）
+用户实证 BM 邀请 500（fb.py 缺 import re → NameError）——py_compile 不抓运行时错。
+**端点 smoke 17/17 全通**（新端点逐一实调：pages-overview/bm-overview/BM members/域名候选/支付/预检/令牌池等）；**静态 NameError 扫描**（21 标记→人工复核→真 2 假 19）：fb.py 缺 re（已修）、guard_engine.py 缺 random（保活 3599 行 NameError——触发时保活静默 500，已修）。ADMIN 确认文案改清晰。CLAUDE.md 铁律 8（i18n 裸键零容忍）。
+教训：py_compile 只验语法不验运行时——**新端点必须带认证实调**（_smoke_all_endpoints.py 留存）。
