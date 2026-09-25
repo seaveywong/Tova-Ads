@@ -864,10 +864,21 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
             <span v-if="p.owner_email" :class="['owner-chip', 'clickable', { active: ownerFilter === p.owner_email }]" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
                   @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           </span>
-          <span class="lp-dom" v-if="p.bound_subdomains && p.bound_subdomains.length">
-            <span v-for="d in p.bound_subdomains" :key="d" class="lp-dom-item"
-                  :title="t('common.copy') + ': ' + d"
-                  @click.stop="copyText('https://' + d, t('landing.publicUrlCopied'))">{{ d }}</span>
+          <span v-if="p.bound_subdomains && p.bound_subdomains.length" class="lp-dom" :title="p.bound_subdomains.join('  ·  ')">
+            <el-popover v-if="p.bound_subdomains.length > 1" trigger="click" placement="bottom-start" :width="240" :show-arrow="false" popper-class="lp-dom-pop">
+              <template #reference>
+                <span class="lp-dom-line">
+                  <template v-for="(d, i) in p.bound_subdomains" :key="d"><span v-if="i" class="lp-dom-sep">·</span><span class="lp-dom-item">{{ d }}</span></template>
+                </span>
+              </template>
+              <div class="lp-dom-pop-list">
+                <button v-for="d in p.bound_subdomains" :key="d" class="lp-dom-pop-item" @click="copyText('https://' + d, t('landing.publicUrlCopied'))">
+                  <span class="lp-dom-pop-name">{{ d }}</span>
+                  <span class="lp-dom-pop-copy">{{ t('common.copy') }}</span>
+                </button>
+              </div>
+            </el-popover>
+            <span v-else class="lp-dom-item" :title="t('common.copy') + ': ' + p.bound_subdomains[0]" @click.stop="copyText('https://' + p.bound_subdomains[0], t('landing.publicUrlCopied'))">{{ p.bound_subdomains[0] }}</span>
           </span>
           <span v-else class="lp-dom muted">—</span>
           <div class="lp-metrics">
@@ -917,10 +928,21 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
             <span v-if="p.owner_email" :class="['owner-chip', 'clickable', { active: ownerFilter === p.owner_email }]" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
                   @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           </span>
-          <span class="lp-dom" v-if="(p.target_urls||[]).length">
-            <span v-for="d in p.target_urls" :key="d" class="lp-dom-item"
-                  :title="t('common.copy') + ': ' + d"
-                  @click.stop="copyText(d, t('common.copied'))">{{ d }}</span>
+          <span v-if="(p.target_urls||[]).length" class="lp-dom" :title="p.target_urls.join('  ·  ')">
+            <el-popover v-if="p.target_urls.length > 1" trigger="click" placement="bottom-start" :width="240" :show-arrow="false" popper-class="lp-dom-pop">
+              <template #reference>
+                <span class="lp-dom-line">
+                  <template v-for="(d, i) in p.target_urls" :key="d"><span v-if="i" class="lp-dom-sep">·</span><span class="lp-dom-item">{{ d }}</span></template>
+                </span>
+              </template>
+              <div class="lp-dom-pop-list">
+                <button v-for="d in p.target_urls" :key="d" class="lp-dom-pop-item" @click="copyText(d, t('common.copied'))">
+                  <span class="lp-dom-pop-name">{{ d }}</span>
+                  <span class="lp-dom-pop-copy">{{ t('common.copy') }}</span>
+                </button>
+              </div>
+            </el-popover>
+            <span v-else class="lp-dom-item" :title="t('common.copy') + ': ' + p.target_urls[0]" @click.stop="copyText(p.target_urls[0], t('common.copied'))">{{ p.target_urls[0] }}</span>
           </span>
           <span v-else class="lp-dom muted">—</span>
           <div class="lp-metrics">
@@ -1602,10 +1624,19 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-metrics{display:contents}
 .lp-thead{display:grid;padding:4px 14px;font-size:11px;font-weight:600;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:6px}
 .lp-name{display:flex;align-items:center;gap:8px;min-width:0}
-.lp-dom{font-size:12px;color:var(--ac);font-family:var(--font-mono);display:flex;flex-direction:column;gap:2px;min-width:0}
-.lp-dom-item{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.lp-dom{font-size:12px;color:var(--ac);font-family:var(--font-mono);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.lp-dom-line{display:inline;cursor:pointer}
+.lp-dom-line:hover .lp-dom-item{text-decoration:underline}
+.lp-dom-item{cursor:pointer}
 .lp-dom-item:hover{text-decoration:underline}
+.lp-dom-sep{color:var(--t3);margin:0 4px;cursor:default}
 .lp-dom.muted{color:var(--t3);cursor:default}
+.lp-dom-pop-list{display:flex;flex-direction:column;gap:2px;padding:2px 0}
+.lp-dom-pop-item{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:6px 10px;border:none;background:none;color:var(--t1);font-size:12px;font-family:var(--font-mono);cursor:pointer;border-radius:6px;text-align:left}
+.lp-dom-pop-item:hover{background:var(--bg3)}
+.lp-dom-pop-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lp-dom-pop-copy{flex-shrink:0;color:var(--t3);font-size:11px}
+.lp-dom-pop-item:hover .lp-dom-pop-copy{color:var(--ac)}
 .lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:left;cursor:default}
 .lp-subcount i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 @media(min-width:901px){.short-stat i,.lp-subcount i{display:none}}
