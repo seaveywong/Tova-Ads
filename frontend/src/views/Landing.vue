@@ -1635,7 +1635,9 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 
 /* 域名管理表格（批2） */
 .dm-table{margin-top:0;overflow-x:auto}
-.dm-row{display:grid;grid-template-columns:minmax(160px,1.6fr) 76px minmax(120px,1fr) 90px 90px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px}
+.dm-row{display:grid;grid-template-columns:minmax(120px,1.5fr) 70px minmax(80px,1fr) 72px 72px auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd);font-size:12px}
+.dm-row > *{min-width:0}
+.dm-row .sub-ad{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dm-head-row{color:var(--t3);font-size:11px;font-weight:600}
 .dm-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dm-name{display:flex;align-items:center;gap:5px;min-width:0}

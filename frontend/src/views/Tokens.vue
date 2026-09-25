@@ -380,7 +380,7 @@ const drawerAccounts = computed(() => {
 })
 // BM 角色：FB 返回中文（完全/基本）或英文（ADMIN/EMPLOYEE 等）——按关键词识别"完全控制"排序，显示按 locale 译
 const bmFullControl = (role) => /完全|ADMIN|FULL/i.test(role || '')
-const bmRoleLabel = (role) => bmFullControl(role) ? t('tokens.bmFullControl') : (role || '—')
+const bmRoleLabel = (role) => bmFullControl(role) ? t('tokens.bmFullControl') : (role ? t('tokens.bmEmployee') : '—')
 const drawerBusinesses = computed(() => {
   const list = drawerToken.value && assetCache.value[drawerToken.value.id]?.businesses
   if (!list) return []

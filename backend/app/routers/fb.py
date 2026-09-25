@@ -1573,10 +1573,10 @@ def get_credential_assets(
                             if uid in my_buids:
                                 me_role = u.get("role") or my_buids[uid]
                                 break
-                        b["role"] = "完全" if me_role == "ADMIN" else "基本"
+                        b["role"] = "ADMIN" if me_role == "ADMIN" else "EMPLOYEE"
             except FbApiError:
                 for b in businesses:
-                    b["role"] = b["role"] or "基本"
+                    b["role"] = b["role"] or "EMPLOYEE"
     except FbApiError as e:
         # token_expired → 令牌判死（状态+通知）；其余错误只回文案（2026-09-24 Minah 案）
         from ..core.fb_tokens import mark_expired_on_auth_error
