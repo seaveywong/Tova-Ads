@@ -1623,6 +1623,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
   .lp-thead{display:none}
   .lp-row2{grid-template-columns:64px 1fr 56px auto;row-gap:6px}
   .lp-name{grid-column:2}
+  .lp-row2 .health-dot,.lp-row2 .fb-checking,.lp-row2 .fb-block,.lp-row2 .fb-warn{grid-column:3 / 5;grid-row:1;justify-self:end}
   .lp-dom{grid-column:1 / -1}
   .lp-metrics{grid-column:1 / -1;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .lp-fb-empty{display:none}
