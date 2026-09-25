@@ -8,7 +8,6 @@ import { lpStatus, subcodeStatus } from '../composables/useStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import LandingLogs from './LandingLogs.vue'
 import DomainShop from '../components/DomainShop.vue'
-import PagesOverview from '../components/PagesOverview.vue'
 import ListManager from '../components/ListManager.vue'
 
 const { t } = useI18n()
@@ -16,8 +15,8 @@ const router = useRouter()
 const route = useRoute()
 
 // 落地页 内部 tab：管理 / 日志（日志归纳进来，不再是独立侧栏项）
-const tab = ref(['logs', 'domains', 'pages'].includes(route.query.tab) ? route.query.tab : 'manage')
-watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains', 'pages'].includes(tv)) tab.value = tv })
+const tab = ref(['logs', 'domains'].includes(route.query.tab) ? route.query.tab : 'manage')
+watch(() => route.query.tab, (tv) => { if (['logs', 'manage', 'domains'].includes(tv)) tab.value = tv })
 
 // ── 落地页列表 ──
 const pages = ref([])
@@ -805,7 +804,6 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       <div :class="['lp-tab', { on: tab === 'manage' }]" @click="setTab('manage')">{{ t('landing.tabManage') }}</div>
       <div :class="['lp-tab', { on: tab === 'logs' }]" @click="setTab('logs')">{{ t('landing.tabLogs') }}</div>
       <div :class="['lp-tab', { on: tab === 'domains' }]" @click="setTab('domains')">{{ t('landing.tabDomains') }}</div>
-      <div :class="['lp-tab', { on: tab === 'pages' }]" @click="setTab('pages')">{{ t('landing.tabPages') }}</div>
     </div>
     <div v-show="tab === 'manage'">
     <header class="page-head">
@@ -863,7 +861,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-name">
             <span class="short-title" :title="p.title">{{ p.title }}</span>
-            <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+            <span v-if="p.owner_email" :class="['owner-chip', 'clickable', { active: ownerFilter === p.owner_email }]" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
                   @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           </span>
           <span class="lp-dom" v-if="p.bound_subdomains && p.bound_subdomains.length">
@@ -872,11 +870,14 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
                   @click.stop="copyText('https://' + d, t('landing.publicUrlCopied'))">{{ d }}</span>
           </span>
           <span v-else class="lp-dom muted">—</span>
-          <span class="lp-subcount" :title="(p.subcode_count || 0) + ' ' + t('landing.stSubcodes')">{{ p.subcode_count || 0 }}<i>{{ t('landing.stSubcodes') }}</i></span>
-          <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%' + t('landing.stCumulative')">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
-          <span v-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
+          <div class="lp-metrics">
+            <span class="lp-subcount" :title="(p.subcode_count || 0) + ' ' + t('landing.stSubcodes')">{{ p.subcode_count || 0 }}<i>{{ t('landing.stSubcodes') }}</i></span>
+            <span class="short-stat" :title="t('landing.stVisitsTip') + ' · ' + t('landing.stMore', { v: p.last7d_visit || 0, a: p.visit_count || 0 })">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
+            <span class="short-stat" :title="t('landing.stPassTip') + ' · ' + t('landing.stMore', { v: p.last7d_click || 0, a: p.click_count || 0 })">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
+            <span class="short-stat" :title="t('landing.stBlockedTip') + ' · ' + t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 }) + ' · ' + t('landing.stPassRateTip') + ' ' + (p.pass_rate || 0) + '%' + t('landing.stCumulative')">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          </div>
+          <span v-if="healthCheckingId === p.id" class="fb-checking">{{ t('landing.checking') }}</span>
+          <span v-else-if="p.last_fb_status==='fail'" class="tag fb-block" :title="t('landing.fbBlockedTip', { summary: p.last_health_summary || '' })">⛔ {{ t('landing.fbBlocked') }}</span>
           <span v-else-if="p.last_fb_status==='warn'" class="tag fb-warn" :title="p.last_health_summary || t('landing.fbWarnTip')">{{ t('landing.fbPending') }}</span>
           <span v-else-if="p.last_health_status" class="health-dot" :class="p.last_health_status" :title="p.last_health_summary || ''"></span>
           <span v-else class="lp-fb-empty"></span>
@@ -897,7 +898,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           </div>
         </div>
       </div>
-      <div v-if="visibleShortPages.length" class="lp-thead">
+      <div v-if="visibleShortPages.length" class="lp-thead short">
         <span>{{ t('landing.lpColStatus') }}</span>
         <span>{{ t('landing.lpColLink') }}</span>
         <span>{{ t('landing.lpColTarget') }}</span>
@@ -905,16 +906,15 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
         <span>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</span>
         <span>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</span>
         <span>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</span>
-        <span :title="t('landing.fbColTip')">FB</span>
         <span></span>
       </div>
     <!-- 短链行式（2026-09-16 重设计：与落地页同表结构） -->
       <div v-if="visibleShortPages.length" class="short-list">
-        <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', 'lp-row2', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
+        <div v-for="p in visibleShortPages" :key="'s'+p.id" :class="['short-row', 'lp-row2', 'short', p.last_fb_status === 'fail' ? 'alert-fail' : '']">
           <span class="st-tag" :class="lpStatus(p.status).cls">{{ lpStatus(p.status).label }}</span>
           <span class="lp-name">
             <span class="short-title" :title="p.title">{{ p.title }}</span>
-            <span v-if="p.owner_email" class="owner-chip clickable" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
+            <span v-if="p.owner_email" :class="['owner-chip', 'clickable', { active: ownerFilter === p.owner_email }]" :title="t('landing.createdBy') + ': ' + p.owner_email + ' · ' + t('landing.clickToFilter')"
                   @click.stop="ownerFilter = (ownerFilter === p.owner_email ? '' : p.owner_email)">{{ p.owner_email.split('@')[0] }}</span>
           </span>
           <span class="lp-dom" v-if="(p.target_urls||[]).length">
@@ -923,11 +923,12 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
                   @click.stop="copyText(d, t('common.copied'))">{{ d }}</span>
           </span>
           <span v-else class="lp-dom muted">—</span>
-          <span class="lp-subcount">{{ p.subcode_count || 0 }}<i>{{ t('landing.stSubcodes') }}</i></span>
-          <span class="short-stat" :title="t('landing.stVisitsTip')">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stPassTip')">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="short-stat" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
-          <span class="lp-fb-empty"></span>
+          <div class="lp-metrics">
+            <span class="lp-subcount">{{ p.subcode_count || 0 }}<i>{{ t('landing.stSubcodes') }}</i></span>
+            <span class="short-stat" :title="t('landing.stVisitsTip')">{{ p.today_visit || 0 }}<i>{{ t('landing.stVisits') }}·{{ t('landing.todayShort') }}</i></span>
+            <span class="short-stat" :title="t('landing.stPassTip')">{{ p.today_click || 0 }}<i>{{ t('landing.stPass') }}·{{ t('landing.todayShort') }}</i></span>
+            <span class="short-stat" :title="t('landing.stMore', { v: p.last7d_block || 0, a: p.block_count || 0 })">{{ p.today_block || 0 }}<i>{{ t('landing.stBlocked') }}·{{ t('landing.todayShort') }}</i></span>
+          </div>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
@@ -1391,7 +1392,6 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
     </div>
     <LandingLogs v-if="tab === 'logs'" />
     <DomainShop v-if="tab === 'domains'" />
-    <PagesOverview v-if="tab === 'pages'" />
 
   </div>
 </template>
@@ -1598,6 +1598,8 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 /* 表格式行（2026-09-16 重设计）：表头+行同 grid 模板 → 跨行严格对齐；域名=文本属性（主域+N）；
    名称列内联 owner chip；操作收敛 2 常驻 + ⋯ 菜单 */
 .lp-thead,.lp-row2{grid-template-columns:64px minmax(200px,1fr) minmax(150px,210px) 56px 78px 78px 78px 60px 168px;gap:10px;align-items:center}
+.lp-thead.short,.lp-row2.short{grid-template-columns:64px minmax(200px,1fr) minmax(160px,240px) 56px 78px 78px 78px 168px}
+.lp-metrics{display:contents}
 .lp-thead{display:grid;padding:4px 14px;font-size:11px;font-weight:600;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:6px}
 .lp-name{display:flex;align-items:center;gap:8px;min-width:0}
 .lp-dom{font-size:12px;color:var(--ac);font-family:var(--font-mono);display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -1608,16 +1610,21 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-subcount i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 @media(min-width:901px){.short-stat i,.lp-subcount i{display:none}}
 .lp-fb-empty{display:inline-block;width:1px}
+.fb-checking{font-size:11px;color:var(--t3);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.fb-checking::before{content:'';width:10px;height:10px;border:2px solid var(--t3);border-top-color:transparent;border-radius:50%;animation:lp-spin .8s linear infinite}
+@keyframes lp-spin{to{transform:rotate(360deg)}}
 .owner-cell{min-width:0;overflow:hidden}   /* 恒渲染占位（复审P2：无 owner_email 的行 9 列只填 8 列，操作键不齐右）；固定列宽保各行对齐 */
 .owner-chip{font-size: 11px; color: var(--t3); background: none; padding: 0; border-radius: 0; white-space: nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:1.2;flex-shrink:0}
 .owner-chip.clickable{cursor:pointer;transition:all .15s}
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
+.owner-chip.clickable.active{color:var(--ac);background:var(--acg);border-radius:4px;padding:1px 4px;margin:0 -4px}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
 @media(max-width:900px){
   .lp-thead{display:none}
   .lp-row2{grid-template-columns:64px 1fr 56px auto;row-gap:6px}
   .lp-name{grid-column:2}
   .lp-dom{grid-column:1 / -1}
+  .lp-metrics{grid-column:1 / -1;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .lp-fb-empty{display:none}
   .short-ops{grid-column:2 / -1;flex-wrap:wrap;justify-content:flex-end}
 }
