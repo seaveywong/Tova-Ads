@@ -1118,15 +1118,15 @@ export default {
     importBtn: '导入 {n} 条', imported: '已导入 {n} 条',
   },
   bm: {
-    total: '共 {n} 个 BM', colBm: 'Business Manager', colVia: '归属令牌', colRole: '角色',
+    total: '共 {n} 个 BM', colBm: 'BM', colVia: '归属令牌', colRole: '角色',
     tabMembers: '成员', tabAssets: '资产', colPage: '旗下主页',
     accCount: '广告账户 {n}', pgCount: '主页 {n}', noMembers: '暂无成员数据（或令牌无权限读取）',
-    needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 拥有 BM 完全控制权（含移除你）——确认给这个权限？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）',
+    needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 拥有 BM 完全控制权（含移除你）——确认给这个权限？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）', roleFull: '完全控制', roleEmployee: '普通成员',
   },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',
     colPage: '主页', colVia: '归属令牌', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
-    tplN: '{n} 个', copyId: '点击复制 ID', noMatch: '无匹配主页', none: '暂无主页（令牌未配置或无可管主页）',
+    tplN: '{n} 个', copyId: '点击复制 ID', noMatch: '无匹配主页', none: '暂无主页（令牌未配置或无可管主页）', renameBtn: '改名', categoryBtn: '改类型', pageRenamePrompt: '新的主页名称（将真实修改 Facebook 主页名）', pageRenameLimit: '名称需 1-100 字符', pageRenamed: '主页已改名', pageCategoryPrompt: '新的主页类别（如 Internet Marketing Service，将真实修改 FB 主页类型；需主页管理权限）', pageCategoryLimit: '1-120 字符', pageCategorySaved: '主页类别已更新',
   },
   domains: {
     tabBuy: '买域名', tabMine: '我的域名', tabOrders: '订单',

@@ -1,8 +1,8 @@
 <script setup>
-// 统一主页总览（批OO）：全租户主页一张表——归属令牌/粉丝/可投/在投广告数/模板引用 + 行内改名/分类
+// 统一主页总览（批OO）：全租户主页一张表——归属令牌/粉丝/在投广告数/模板引用 + ⋯ 菜单改名/分类（对齐令牌抽屉能力）
 import { ref, computed, onMounted } from 'vue'
 import { GET, POST } from '../api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 const rows = ref([])
@@ -37,7 +37,18 @@ const saveEdit = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   editing.value = null
 }
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
+const changeCategory = async (r) => {
+  try {
+    const { value } = await ElMessageBox.prompt(t('pg.pageCategoryPrompt'), t('pg.categoryBtn'), {
+      inputValue: r.category || '', inputPattern: /^.{1,120}$/, inputErrorMessage: t('pg.pageCategoryLimit'),
+      confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'),
+    })
+    await POST(`/fb/credentials/${r.via_cred_id}/pages/category`, { page_id: r.id, category: value.trim() })
+    r.category = value.trim()
+    ElMessage.success(t('pg.pageCategorySaved'))
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+}
+const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
 </script>
 
 <template>
@@ -54,6 +65,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
         <span class="pg-col">{{ t('pg.colFans') }}</span>
         <span class="pg-col">{{ t('pg.colAds') }}</span>
         <span class="pg-col">{{ t('pg.colTpl') }}</span>
+        <span class="pg-ops"></span>
       </div>
       <div v-for="r in filtered" :key="r.id" class="pg-row">
         <span class="pg-name">
@@ -72,6 +84,17 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
         <span class="pg-col pg-tpl" :title="(r.tpl_refs || []).join('、')">
           {{ r.tpl_ref_count ? t('pg.tplN', { n: r.tpl_ref_count }) + '：' + (r.tpl_refs || []).join('、') : '—' }}
         </span>
+        <span class="pg-ops">
+          <el-dropdown trigger="click" @click.stop>
+            <button class="dots-btn" @click.stop>⋯</button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="startEdit(r, 'name')">{{ t('pg.renameBtn') }}</el-dropdown-item>
+                <el-dropdown-item @click="changeCategory(r)">{{ t('pg.categoryBtn') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </span>
       </div>
       <div v-if="!filtered.length && !loading" class="pg-empty">{{ search ? t('pg.noMatch') : t('pg.none') }}</div>
     </div>
@@ -80,8 +103,8 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
 
 <style scoped>
 .pgov { display: flex; flex-direction: column; gap: 12px; }
-.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; }
-.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; overflow-x: auto; }
+.pg-row { display: flex; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 760px; }
 .pg-row:last-child { border-bottom: none; }
 .pg-head-row { color: var(--t3); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--bd); }
 .pg-name { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
@@ -95,4 +118,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t
 .pg-edit { background: var(--bg3); color: var(--t1); border: 1px solid var(--ac); border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 220px; font-family: var(--font); }
 .pg-count { font-size: 12px; color: var(--t3); }
 .pg-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 30px; }
+.pg-ops { width: 40px; flex: none; text-align: right; }
+.dots-btn { border: none; background: transparent; color: var(--t3); font-size: 16px; cursor: pointer; padding: 0 6px; border-radius: 4px; line-height: 1; transition: .15s; }
+.dots-btn:hover { background: var(--bg3); color: var(--t1); }
 </style>

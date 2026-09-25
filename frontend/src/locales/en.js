@@ -1111,12 +1111,12 @@ export default {
     total: '{n} Business Managers', colBm: 'Business Manager', colVia: 'Owning token', colRole: 'Role',
     tabMembers: 'Members', tabAssets: 'Assets', colPage: 'Owned Pages',
     accCount: 'Ad accounts {n}', pgCount: 'Pages {n}', noMembers: 'No member data (or token lacks permission)',
-    needEmail: 'Enter an email', invite: 'Invite', emailPh: 'Member email (Facebook account)', adminConfirm: 'ADMIN has full BM control (incl. removing you) - confirm?', removeConfirm: 'Remove member "{n}"? Their BM access ends immediately.', invited: 'Invitation sent', noAssets: 'No asset data (or token lacks permission)', none: 'No Business Managers yet',
+    needEmail: 'Enter an email', invite: 'Invite', emailPh: 'Member email (Facebook account)', adminConfirm: 'ADMIN has full BM control (incl. removing you) - confirm?', removeConfirm: 'Remove member "{n}"? Their BM access ends immediately.', invited: 'Invitation sent', noAssets: 'No asset data (or token lacks permission)', none: 'No Business Managers yet', roleFull: 'Full control', roleEmployee: 'Employee',
   },
   pg: {
     searchPh: 'Search page / ID / token', total: '{n} pages',
     colPage: 'Page', colVia: 'Owning token', colFans: 'Fans', colAds: 'Live ads', colTpl: 'Template refs',
-    tplN: '{n}', copyId: 'Click to copy ID', noMatch: 'No matching pages', none: 'No pages yet (no token or no managed pages)',
+    tplN: '{n}', copyId: 'Click to copy ID', noMatch: 'No matching pages', none: 'No pages yet (no token or no managed pages)', renameBtn: 'Rename', categoryBtn: 'Change Category', pageRenamePrompt: 'New page name (renames the real Facebook page)', pageRenameLimit: 'Name must be 1-100 characters', pageRenamed: 'Page renamed', pageCategoryPrompt: 'New page category (e.g. "Internet Marketing Service"). Requires page manage permission.', pageCategoryLimit: '1-120 chars', pageCategorySaved: 'Page category updated',
   },
   domains: {
     tabBuy: 'Buy Domains', tabMine: 'My Domains', tabOrders: 'Orders',

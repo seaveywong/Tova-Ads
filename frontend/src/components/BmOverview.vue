@@ -38,7 +38,8 @@ const openDetail = async (r) => {
   detailLoading.value = false
 }
 const roleClass = (r) => (r === '完全' || r === 'ADMIN' || String(r).toLowerCase().includes('admin')) ? 'full' : 'basic'
-const copyId = (id) => { navigator.clipboard?.writeText(id); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
+const roleLabel = (r) => /ADMIN|完全/i.test(r || '') ? t('bm.roleFull') : (/EMPLOYEE|普通/i.test(r || '') ? t('bm.roleEmployee') : (r || '—'))
+const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
 
 // ── 成员管理（owner+令牌创建者，批SS）：邀请（邮箱+角色，ADMIN 二次确认）/ 移除 ──
 const canManage = () => isSuperSync || isOwner
@@ -98,12 +99,12 @@ const doRemove = async (m) => {
           <span class="bm-id mono" @click.stop="copyId(r.id)" :title="t('pg.copyId')">{{ r.id }}</span>
         </span>
         <span class="bm-col"><span class="bm-via">{{ (r.via_creds || []).join(' / ') }}</span></span>
-        <span class="bm-col"><span :class="['bm-role', roleClass(r.role)]">{{ r.role || '—' }}</span></span>
+        <span class="bm-col"><span :class="['bm-role', roleClass(r.role)]">{{ roleLabel(r.role) }}</span></span>
       </div>
       <div v-if="!rows.length && !loading" class="bm-empty">{{ t('bm.none') }}</div>
     </div>
 
-    <el-dialog v-model="detailOpen" :title="(detail?.row?.name || '') + ' · BM'" width="640px" append-to-body>
+    <el-dialog v-model="detailOpen" :title="detail?.row?.name || ''" width="640px" append-to-body>
       <div v-loading="detailLoading" class="bm-detail">
         <div class="seg-bar" style="margin-bottom:10px">
           <button class="seg-btn" :class="{ on: detail.tab === 'members' }" @click="detail.tab = 'members'">{{ t('bm.tabMembers') }}</button>
@@ -112,14 +113,14 @@ const doRemove = async (m) => {
         <template v-if="detail.tab === 'members'">
           <div v-for="(m, i) in (Array.isArray(detail.members) ? detail.members : [])" :key="i" class="bm-member">
             <span class="bm-m-name">{{ m.title || m.buid }}</span>
-            <span class="bm-m-role">{{ m.role || '' }}</span>
+            <span class="bm-m-role">{{ roleLabel(m.role) }}</span>
             <button v-if="canManage()" class="lm-x" :disabled="removing === m.buid" @click="doRemove(m)" :title="t('common.delete')">✕</button>
           </div>
           <div v-if="canManage()" class="bm-invite">
             <input v-model="inviteForm.email" class="bm-inv-email" :placeholder="t('bm.emailPh')" @keyup.enter="doInvite" />
             <select v-model="inviteForm.role" class="bm-inv-role">
-              <option value="EMPLOYEE">EMPLOYEE</option>
-              <option value="ADMIN">ADMIN</option>
+              <option value="EMPLOYEE">{{ t('bm.roleEmployee') }}</option>
+              <option value="ADMIN">{{ t('bm.roleFull') }}</option>
             </select>
             <button class="ctrl-btn sm primary" :disabled="inviting" @click="doInvite">{{ inviting ? t('common.loading') : t('bm.invite') }}</button>
           </div>
@@ -130,12 +131,12 @@ const doRemove = async (m) => {
             <span>{{ t('bm.accCount', { n: (detail.assets?.accounts || []).length }) }}</span>
             <span>{{ t('bm.pgCount', { n: (detail.assets?.pages || []).length }) }}</span>
           </div>
-          <div v-for="(a, i) in (detail.assets?.accounts || []).slice(0, 20)" :key="'a' + i" class="bm-member">
+          <div v-for="(a, i) in (detail.assets?.accounts || [])" :key="'a' + i" class="bm-member">
             <span class="bm-m-name">{{ a.name || a.act_id }}</span>
             <span class="bm-m-role mono">{{ a.act_id }}</span>
           </div>
           <div v-if="detail.assets?.pages?.length" class="bm-sub-t">{{ t('bm.colPage') }}</div>
-          <div v-for="(pg, i) in (detail.assets?.pages || []).slice(0, 20)" :key="'p' + i" class="bm-member">
+          <div v-for="(pg, i) in (detail.assets?.pages || [])" :key="'p' + i" class="bm-member">
             <span class="bm-m-name">{{ pg.name || pg.id }}</span>
           </div>
           <div v-if="!(detail.assets?.accounts || []).length && !(detail.assets?.pages || []).length && !detailLoading" class="bm-empty">{{ t('bm.noAssets') }}</div>
@@ -147,8 +148,8 @@ const doRemove = async (m) => {
 
 <style scoped>
 .bmov { display: flex; flex-direction: column; gap: 12px; }
-.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; }
-.bm-row { display: flex; gap: 12px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 10px; padding: 6px 14px; overflow-x: auto; }
+.bm-row { display: flex; gap: 12px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--bd); font-size: 13px; min-width: 620px; }
 .bm-row:last-child { border-bottom: none; }
 .bm-head-row { color: var(--t3); font-size: 11px; text-transform: uppercase; }
 .bm-row.link { cursor: pointer; }
@@ -163,7 +164,7 @@ const doRemove = async (m) => {
 .bm-role.basic { background: var(--bg3); color: var(--t3); }
 .bm-count { font-size: 12px; color: var(--t3); }
 .bm-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 30px; }
-.bm-detail { min-height: 120px; }
+.bm-detail { min-height: 120px; max-height: 60vh; overflow-y: auto; }
 .bm-member { display: flex; justify-content: space-between; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--bd); font-size: 13px; }
 .bm-member:last-child { border-bottom: none; }
 .bm-m-name { color: var(--t1); }
