@@ -2,9 +2,12 @@
 // 统一主页总览（批OO）：全租户主页一张表——归属令牌/粉丝/在投广告数/模板引用 + ⋯ 菜单改名/分类（对齐令牌抽屉能力）
 import { ref, computed, onMounted } from 'vue'
 import { GET, POST } from '../api'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
+import CategoryPicker from './CategoryPicker.vue'
 const { t } = useI18n()
+const props = defineProps({ tokenFilter: { type: Object, default: null } })
+const emit = defineEmits(['clear-filter'])
 const rows = ref([])
 const loading = ref(true)
 const search = ref('')
@@ -15,9 +18,11 @@ const load = async () => {
 }
 onMounted(load)
 const filtered = computed(() => {
+  let rs = rows.value
+  if (props.tokenFilter) rs = rs.filter(r => r.via_cred_id === props.tokenFilter.id)
   const q = search.value.trim().toLowerCase()
-  if (!q) return rows.value
-  return rows.value.filter(r => (r.name || '').toLowerCase().includes(q) || r.id.includes(q) || (r.via_cred || '').toLowerCase().includes(q))
+  if (!q) return rs
+  return rs.filter(r => (r.name || '').toLowerCase().includes(q) || r.id.includes(q) || (r.via_cred || '').toLowerCase().includes(q))
 })
 const editing = ref(null)   // {id, field, value, cred_id}
 const startEdit = (r, field) => {
@@ -37,22 +42,27 @@ const saveEdit = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   editing.value = null
 }
-const changeCategory = async (r) => {
+const catRow = ref(null)
+const catOpen = ref(false)
+const openCategory = (r) => { catRow.value = r; catOpen.value = true }
+const saveCategory = async (cat) => {
+  const r = catRow.value
+  if (!r || !cat) return
   try {
-    const { value } = await ElMessageBox.prompt(t('pg.pageCategoryPrompt'), t('pg.categoryBtn'), {
-      inputValue: r.category || '', inputPattern: /^.{1,120}$/, inputErrorMessage: t('pg.pageCategoryLimit'),
-      confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'),
-    })
-    await POST(`/fb/credentials/${r.via_cred_id}/pages/category`, { page_id: r.id, category: value.trim() })
-    r.category = value.trim()
+    await POST(`/fb/credentials/${r.via_cred_id}/pages/category`, { page_id: r.id, category: cat })
+    r.category = cat
     ElMessage.success(t('pg.pageCategorySaved'))
-  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
 }
 const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); ElMessage.success(t('dashboard.copiedVal', { val: id })) }
 </script>
 
 <template>
   <div class="pgov">
+    <div v-if="tokenFilter" class="filter-chip">
+      <span>{{ t('common.filterByToken', { name: tokenFilter.name }) }}</span>
+      <button class="filter-x" @click="$emit('clear-filter')" :title="t('common.clearFilter')">✕</button>
+    </div>
     <div class="list-bar">
       <el-input v-model="search" :placeholder="t('pg.searchPh')" clearable size="small" class="bar-search" />
       <button class="ctrl-btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('common.refresh') }}</button>
@@ -92,7 +102,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="startEdit(r, 'name')">{{ t('pg.renameBtn') }}</el-dropdown-item>
-                <el-dropdown-item @click="changeCategory(r)">{{ t('pg.categoryBtn') }}</el-dropdown-item>
+                <el-dropdown-item @click="openCategory(r)">{{ t('pg.categoryBtn') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -100,6 +110,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
       </div>
       <div v-if="!filtered.length && !loading" class="pg-empty">{{ search ? t('pg.noMatch') : t('pg.none') }}</div>
     </div>
+    <CategoryPicker v-model="catOpen" :current="catRow?.category || ''" :title="t('pg.categoryBtn')" :hint="t('pg.pageCategoryPrompt')" :placeholder="t('pg.categoryPh')" @save="saveCategory" />
   </div>
 </template>
 
@@ -122,6 +133,9 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 .pg-edit { background: var(--bg3); color: var(--t1); border: 1px solid var(--ac); border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 220px; font-family: var(--font); }
 .pg-count { font-size: 12px; color: var(--t3); }
 .pg-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 30px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--acg); color: var(--ac); border: 1px solid rgba(10,132,255,.35); border-radius: 999px; font-size: 12px; width: fit-content; }
+.filter-x { border: none; background: transparent; color: var(--ac); cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; }
+.filter-x:hover { color: var(--error); }
 .pg-ops { width: 40px; flex: none; text-align: right; }
 .dots-btn { border: none; background: transparent; color: var(--t3); font-size: 16px; cursor: pointer; padding: 0 6px; border-radius: 4px; line-height: 1; transition: .15s; }
 .dots-btn:hover { background: var(--bg3); color: var(--t1); }

@@ -1,18 +1,21 @@
 <script setup>
 // 跨令牌 BM 总览（批QQ 资产中心）：BM 表 + 行点击懒加载成员/资产详情（复用令牌抽屉同款端点）
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { GET, POST, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { isSuperadminSync } from '../router'
 import { getToken } from '../api'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
+const props = defineProps({ tokenFilter: { type: Object, default: null } })
+const emit = defineEmits(['clear-filter'])
 const isSuperSync = isSuperadminSync()
 const _role = (() => { try { return JSON.parse(atob((getToken() || '').split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/')).role || '' } catch { return '' } })()
 const isOwner = _role === 'owner'
 // 后端另有权威校验（_cred_manageable：超管/owner/created_by），此处仅控制 UI 显隐
 const rows = ref([])
 const loading = ref(true)
+const filteredRows = computed(() => props.tokenFilter ? rows.value.filter(r => r.via_cred_id === props.tokenFilter.id) : rows.value)
 const load = async () => {
   loading.value = true
   try { rows.value = await GET('/fb/bm-overview', 60000) } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
@@ -83,9 +86,13 @@ const doRemove = async (m) => {
 
 <template>
   <div class="bmov">
+    <div v-if="tokenFilter" class="filter-chip">
+      <span>{{ t('common.filterByToken', { name: tokenFilter.name }) }}</span>
+      <button class="filter-x" @click="$emit('clear-filter')" :title="t('common.clearFilter')">✕</button>
+    </div>
     <div class="list-bar">
       <button class="ctrl-btn" :disabled="loading" @click="load">{{ loading ? t('common.loading') : t('common.refresh') }}</button>
-      <span class="bm-count">{{ t('bm.total', { n: rows.length }) }}</span>
+      <span class="bm-count">{{ t('bm.total', { n: filteredRows.length }) }}</span>
     </div>
     <div class="card" v-loading="loading">
       <div class="bm-row bm-head-row">
@@ -93,7 +100,7 @@ const doRemove = async (m) => {
         <span class="bm-col">{{ t('bm.colVia') }}</span>
         <span class="bm-col">{{ t('bm.colRole') }}</span>
       </div>
-      <div v-for="r in rows" :key="r.id" class="bm-row link" @click="openDetail(r)">
+      <div v-for="r in filteredRows" :key="r.id" class="bm-row link" @click="openDetail(r)">
         <span class="bm-name">
           <span class="bm-title">{{ r.name || r.id }}</span>
           <span class="bm-id mono" @click.stop="copyId(r.id)" :title="t('pg.copyId')">{{ r.id }}</span>
@@ -101,7 +108,7 @@ const doRemove = async (m) => {
         <span class="bm-col"><span class="bm-via">{{ (r.via_creds || []).join(' / ') }}</span></span>
         <span class="bm-col"><span :class="['bm-role', roleClass(r.role)]">{{ roleLabel(r.role) }}</span></span>
       </div>
-      <div v-if="!rows.length && !loading" class="bm-empty">{{ t('bm.none') }}</div>
+      <div v-if="!filteredRows.length && !loading" class="bm-empty">{{ t('bm.none') }}</div>
     </div>
 
     <el-dialog v-model="detailOpen" :title="detail?.row?.name || ''" width="640px" append-to-body>
@@ -164,6 +171,9 @@ const doRemove = async (m) => {
 .bm-role.basic { background: var(--bg3); color: var(--t3); }
 .bm-count { font-size: 12px; color: var(--t3); }
 .bm-empty { text-align: center; color: var(--t3); font-size: 13px; padding: 30px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--acg); color: var(--ac); border: 1px solid rgba(10,132,255,.35); border-radius: 999px; font-size: 12px; width: fit-content; }
+.filter-x { border: none; background: transparent; color: var(--ac); cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; }
+.filter-x:hover { color: var(--error); }
 .bm-detail { min-height: 120px; max-height: 60vh; overflow-y: auto; }
 .bm-member { display: flex; justify-content: space-between; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--bd); font-size: 13px; }
 .bm-member:last-child { border-bottom: none; }

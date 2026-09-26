@@ -8,6 +8,7 @@ import { accountStatus } from '../composables/useStatus'
 import { isSuperadminSync } from '../router'
 import PagesOverview from '../components/PagesOverview.vue'
 import BmOverview from '../components/BmOverview.vue'
+import CategoryPicker from '../components/CategoryPicker.vue'
 const { t, locale } = useI18n()
 const { nextZIndex } = useZIndex()
 const route = useRoute()
@@ -62,6 +63,10 @@ const cleaning = ref(false)
 // ── TikTok 分区（TT 令牌：24h access 自动续期 + 365d refresh 授权寿命）──
 const platform = ref('fb')
 const assetTab = ref('tokens')   // 资产中心二级视图：tokens | pages | bm（批QQ）
+const assetTokenFilter = ref(null)   // { id, name }：令牌列表点「主页/BM」数字跳转时的「只看此令牌」过滤
+const setAssetTab = (tab) => { assetTab.value = tab; assetTokenFilter.value = null }
+const jumpToPages = (tk) => { assetTokenFilter.value = { id: tk.id, name: tk.alias || tk.fb_user_name || ('#' + tk.id) }; assetTab.value = 'pages' }
+const jumpToBm = (tk) => { assetTokenFilter.value = { id: tk.id, name: tk.alias || tk.fb_user_name || ('#' + tk.id) }; assetTab.value = 'bm' }
 const ttLoading = ref(false)
 const ttError = ref('')
 const ttCreds = ref([])
@@ -80,7 +85,7 @@ const loadTtApps = async () => {
   try { ttApps.value = (await GET('/tt/apps')) || [] } catch { ttApps.value = [] }
 }
 const switchPlatform = (p) => {
-  assetTab.value = 'tokens'   // 切平台回令牌视图（TT 无主页/BM）
+  setAssetTab('tokens')   // 切平台回令牌视图（TT 无主页/BM）
   platform.value = p
   if (p === 'tt') { loadTt(); loadTtApps() }
 }
@@ -489,14 +494,15 @@ const ttTypeLabel = (ty) => {
   const k = ty || 'manage'
   return t(`tokens.type${k[0].toUpperCase() + k.slice(1)}`)
 }
-const setPageCategory = async (tk, p) => {
+const pageCatOpen = ref(false)
+const pageCatTarget = ref(null)   // { tk, p }
+const openPageCategory = (tk, p) => { pageCatTarget.value = { tk, p }; pageCatOpen.value = true }
+const savePageCategory = async (cat) => {
+  const tg = pageCatTarget.value
+  if (!tg || !cat) return
   try {
-    const { value } = await ElMessageBox.prompt(
-      t('tokens.pageCategoryPrompt'), t('tokens.categoryBtn'),
-      { inputValue: p.category || '', inputPattern: /^.{1,120}$/, inputErrorMessage: t('tokens.pageCategoryLimit'),
-        confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
-    await POST(`/fb/credentials/${tk.id}/pages/category`, { page_id: p.id, category: value.trim() })
-    p.category = value.trim()   // 原地更新——省掉抽屉资产三组全量重拉
+    await POST(`/fb/credentials/${tg.tk.id}/pages/category`, { page_id: tg.p.id, category: cat })
+    tg.p.category = cat   // 原地更新——省掉抽屉资产三组全量重拉
     ElMessage.success(t('tokens.pageCategorySaved'))
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(e.message) }
 }
@@ -722,13 +728,13 @@ const deleteToken = async (tk) => {
     <!-- 资产中心二级视图（批QQ：主页/BM 跨令牌总览归令牌页——资产的家是凭证，不是投放链接） -->
     <div v-if="platform==='fb'" class="asset-seg">
       <div class="seg-bar">
-        <button class="seg-btn" :class="{ on: assetTab === 'tokens' }" @click="assetTab = 'tokens'">{{ t('tokens.assetTokens') }}</button>
-        <button class="seg-btn" :class="{ on: assetTab === 'pages' }" @click="assetTab = 'pages'">{{ t('tokens.assetPages') }}</button>
-        <button class="seg-btn" :class="{ on: assetTab === 'bm' }" @click="assetTab = 'bm'">{{ t('tokens.assetBm') }}</button>
+        <button class="seg-btn" :class="{ on: assetTab === 'tokens' }" @click="setAssetTab('tokens')">{{ t('tokens.assetTokens') }}</button>
+        <button class="seg-btn" :class="{ on: assetTab === 'pages' }" @click="setAssetTab('pages')">{{ t('tokens.assetPages') }}</button>
+        <button class="seg-btn" :class="{ on: assetTab === 'bm' }" @click="setAssetTab('bm')">{{ t('tokens.assetBm') }}</button>
       </div>
     </div>
-    <PagesOverview v-if="platform==='fb' && assetTab==='pages'" />
-    <BmOverview v-if="platform==='fb' && assetTab==='bm'" />
+    <PagesOverview v-if="platform==='fb' && assetTab==='pages'" :token-filter="assetTokenFilter" @clear-filter="assetTokenFilter = null" />
+    <BmOverview v-if="platform==='fb' && assetTab==='bm'" :token-filter="assetTokenFilter" @clear-filter="assetTokenFilter = null" />
     <div v-if="platform==='tt'" class="tt-wrap" v-loading="ttLoading">
       <div class="tt-note">{{ t('tokens.ttAutoNote') }}</div>
       <!-- App 卡片列表（照 FB oauth-app 模式：先配置 App，从卡片发起连接）。
@@ -830,8 +836,8 @@ const deleteToken = async (tk) => {
         </span>
         <span class="c-by" :title="tk.created_by_name || ''">{{ (tk.created_by_name || '—').split('@')[0] }}</span>
         <span class="c-num clickable" :class="{err:summaryError(tk)}" :title="summaryError(tk)||t('tokens.accountsCountTip')" @click.stop="openDrawer(tk, 'accounts')">{{ summaryError(tk) ? '!' : countOf(tk,'accounts') }}</span>
-        <span class="c-num clickable" @click.stop="openDrawer(tk, 'pages')">{{ countOf(tk,'pages') }}</span>
-        <span class="c-num clickable" @click.stop="openDrawer(tk, 'businesses')">{{ countOf(tk,'businesses') }}</span>
+        <span class="c-num clickable" @click.stop="jumpToPages(tk)">{{ countOf(tk,'pages') }}</span>
+        <span class="c-num clickable" @click.stop="jumpToBm(tk)">{{ countOf(tk,'businesses') }}</span>
         <span class="c-ty">
           <span class="tag" :class="tk.token_type" :title="typeMeta(tk.token_type).title">{{ typeMeta(tk.token_type).label }}</span>
           <span v-if="(tk.account_count||0) > 0" class="tag rotate" :title="t('tokens.rotatePoolTip')">↻</span>
@@ -921,7 +927,7 @@ const deleteToken = async (tk) => {
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item @click="renamePage(drawerToken, p)">{{ t('tokens.renameBtn') }}</el-dropdown-item>
-                    <el-dropdown-item @click="setPageCategory(drawerToken, p)">{{ t('tokens.categoryBtn') }}</el-dropdown-item>
+                    <el-dropdown-item @click="openPageCategory(drawerToken, p)">{{ t('tokens.categoryBtn') }}</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -961,6 +967,8 @@ const deleteToken = async (tk) => {
       </div>
       <div v-if="drawerToken && assetCache[drawerToken.id]?.error" class="asset-err">{{ t('tokens.assetReadPartialShort') }}{{ assetCache[drawerToken.id].error }}</div>
     </el-drawer>
+
+    <CategoryPicker v-model="pageCatOpen" :current="pageCatTarget?.p?.category || ''" :title="t('tokens.categoryBtn')" :hint="t('tokens.pageCategoryPrompt')" :placeholder="t('tokens.categoryPh')" @save="savePageCategory" />
 
     <!-- BM 详情二级浮层（成员/资产，2026-09-07 原"即将上线"占位激活） -->
     <div v-if="bmDetailOpen" class="overlay" style="z-index: 3000" @click.self="closeBmDetail">
