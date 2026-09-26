@@ -129,19 +129,20 @@ const pickQ = ref('')
 const pickTemplates = ref([])
 const pickLoading = ref(false)
 let _pickLoaded = false
+const pickSearchEl = ref(null)
 const openPicker = async () => {
   pickOpen.value = true; pickQ.value = ''
-  if (!_pickLoaded) {
-    pickLoading.value = true
-    try { const r = await GET('/launch-templates'); pickTemplates.value = Array.isArray(r) ? r : (r?.items || []); _pickLoaded = true } catch {}
-    pickLoading.value = false
-  }
+  // 首开显示 loading；之后每次静默换新（stale-while-revalidate——新建/改名模板回来不看过期列表）
+  pickLoading.value = !_pickLoaded
+  try { const r = await GET('/launch-templates'); pickTemplates.value = Array.isArray(r) ? r : (r?.items || []); _pickLoaded = true } catch {}
+  pickLoading.value = false
 }
 const pickFiltered = computed(() => {
   const q = pickQ.value.trim().toLowerCase()
   const arr = [...pickTemplates.value].sort((a, b) =>
     String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
-  return q ? arr.filter(x => (x.name || '').toLowerCase().includes(q)) : arr
+  return q ? arr.filter(x => (x.name || '').toLowerCase().includes(q)
+    || (x.created_by_name || '').toLowerCase().includes(q)) : arr
 })
 const tplAgo = (ts) => {
   if (!ts) return ''
@@ -1435,12 +1436,13 @@ const unsubscribeLeads = async () => {
     </el-drawer>
 
     <!-- 创建按钮：模板选择弹窗（搜索 + 限高滚动，选中直接本页部署不跳页） -->
-    <el-dialog v-model="pickOpen" :title="t('adm.pickTplTitle')" width="480px" append-to-body>
-      <el-input v-model="pickQ" clearable :placeholder="t('adm.pickTplPh')" class="pick-search" />
+    <el-dialog v-model="pickOpen" :title="t('adm.pickTplTitle')" width="min(480px, 92vw)" append-to-body @opened="pickSearchEl?.focus()">
+      <el-input ref="pickSearchEl" v-model="pickQ" clearable :placeholder="t('adm.pickTplPh')" class="pick-search" />
       <div class="pick-list" v-loading="pickLoading">
         <button v-for="tpl in pickFiltered" :key="tpl.id" class="pick-row" @click="pickTpl(tpl)">
           <span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>
           <span class="pick-name" :title="tpl.name">{{ tpl.name }}</span>
+          <span v-if="tpl.created_by_name" class="owner-chip" :title="tpl.created_by_name">{{ tpl.created_by_name.split('@')[0] }}</span>
           <span class="pick-ago">{{ tplAgo(tpl.updated_at || tpl.created_at) }}</span>
         </button>
         <div v-if="!pickLoading && !pickFiltered.length" class="pick-empty">{{ pickQ ? t('adm.pickTplEmpty') : t('adm.pickTplNone') }}</div>
@@ -1695,6 +1697,7 @@ const unsubscribeLeads = async () => {
 .pick-row { display:flex; align-items:center; gap:8px; padding:9px 12px; background:var(--bg2); border:1px solid var(--bd); border-radius:8px; cursor:pointer; font-family:inherit; text-align:left; min-width:0 }
 .pick-row:hover { border-color:var(--ac); background:var(--acg) }
 .pick-name { flex:1; min-width:0; font-size:13px; color:var(--t1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.owner-chip { font-size:11px; color:var(--t3); white-space:nowrap; flex-shrink:0; max-width:110px; overflow:hidden; text-overflow:ellipsis }
 .pick-ago { font-size:11px; color:var(--t3); flex:none; white-space:nowrap }
 .pick-empty { padding:24px; text-align:center; color:var(--t3); font-size:13px }
 .pick-foot { display:flex; justify-content:center; margin-top:10px }
