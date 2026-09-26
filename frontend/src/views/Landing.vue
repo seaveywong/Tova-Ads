@@ -927,7 +927,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <span v-else class="lp-fb-empty"></span>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
-            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">🔗</button>
+            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">{{ t('landing.quickTargetBtn') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p); else if (cmd==='delete') deletePage(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
@@ -987,7 +987,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           </div>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
-            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">🔗</button>
+            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">{{ t('landing.quickTargetBtn') }}</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='archive') archive(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
