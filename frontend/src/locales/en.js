@@ -845,6 +845,7 @@ export default {
     cfReconTitle: 'Domain Reconcile (CF ↔ library)', cfReconOk: 'All consistent ✓', cfReconCfOnly: 'zone in CF but not in the domain library', cfReconLibOnly: 'in the library but no CF zone',
     cfUvToday: 'Requests today · unique visitors (CF aggregates daily; today lags a few hours)',
     cfEmailTokenLabel: 'Email admin token (optional)', cfEmailTokenPh: 'User-level API token (cfat_ account tokens do not work)',
+    cfTokenNameLabel: 'Token name (label)', cfTokenNamePh: 'e.g. Tovaads — match the CF dashboard token name for easy identification',
     cfEmailTokenHint: 'Email Routing address/rule management only supports user-level API tokens. CF dashboard -> My Profile -> API Tokens -> Create Token with Zone (tovaads.com): Email Routing Addresses Edit + DNS Edit + Zone Read. Leave empty if you only need enable/DNS.',
     emNeedUserToken: 'Warning: managing destination addresses / forwarding rules requires a user-level CF token — fill "Email admin token" in Domain service config, then refresh (enable & DNS are unaffected).',
     cfDesc: 'Platform domain service credentials.',

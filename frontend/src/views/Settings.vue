@@ -235,7 +235,7 @@ const loadCf = async () => {
   if (!isSuper.value) return
   try {
     cfCfg.value = await GET('/settings/cf')
-    cfForm.value = { cf_api_token: '', cf_account_id: cfCfg.value.cf_account_id }
+    cfForm.value = { cf_api_token: '', cf_account_id: cfCfg.value.cf_account_id, cf_token_name: cfCfg.value.cf_token_name || '' }
   } catch {}
 }
 const saveCf = async () => {
@@ -245,6 +245,7 @@ const saveCf = async () => {
     if (cfForm.value.cf_api_token) body.cf_api_token = cfForm.value.cf_api_token
     if (cfForm.value.cf_account_id && cfForm.value.cf_account_id !== cfCfg.value.cf_account_id) body.cf_account_id = cfForm.value.cf_account_id
     if (cfForm.value.cf_email_token) body.cf_email_token = cfForm.value.cf_email_token
+    if ((cfForm.value.cf_token_name || '') !== (cfCfg.value.cf_token_name || '')) body.cf_token_name = (cfForm.value.cf_token_name || '').trim()
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); cfSaving.value = false; return }
     await PUT('/settings/cf', body)
     ElMessage.success(t('common.saved'))
@@ -892,6 +893,7 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.cfTitle') }}</div>
       <div class="d">{{ t('settings.cfDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.accountId') }}</label><input v-model="cfForm.cf_account_id" class="input" :placeholder="t('settings.accountId')" /></div>
+      <div class="form-l"><label>{{ t('settings.cfTokenNameLabel') }}</label><input v-model="cfForm.cf_token_name" class="input" :placeholder="t('settings.cfTokenNamePh')" /></div>
       <div class="form-l"><label>API Token</label><input v-model="cfForm.cf_api_token" class="input" type="password" :placeholder="cfCfg.cf_api_token_set ? cfCfg.cf_api_token_masked : t('settings.fillNewTokenPh')" /></div>
       <div class="form-l"><label>{{ t('settings.cfEmailTokenLabel') }}</label><input v-model="cfForm.cf_email_token" class="input" type="password" :placeholder="cfCfg.cf_email_token_set ? cfCfg.cf_email_token_masked : t('settings.cfEmailTokenPh')" />
         <span class="field-hint">{{ t('settings.cfEmailTokenHint') }}</span></div>
@@ -959,7 +961,7 @@ const runKeepaliveNow = async () => {
         <div class="cf-panel">
           <div class="cf-panel-hd">
             <span>{{ t('settings.cfUsageTitle') }}</span>
-            <span v-if="cfUsage?.token_tail" class="cf-token-tail" :title="t('settings.cfTokenTailTip')">Token ···{{ cfUsage.token_tail }}</span>
+            <span v-if="cfUsage?.token_tail" class="cf-token-tail" :title="t('settings.cfTokenTailTip')">Token ···{{ cfUsage.token_tail }}{{ cfCfg.cf_token_name ? ' · ' + cfCfg.cf_token_name : '' }}</span>
             <button class="btn sm" :disabled="cfUsageLoading" @click="loadCfUsage(true)">{{ cfUsageLoading ? t('common.loading') : '⟳' }}</button>
           </div>
           <div class="cf-panel-bd" v-loading="cfUsageLoading">

@@ -249,6 +249,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
       </div>
       <div v-for="o in orders" :key="o.id" class="ds-row dom">
         <span class="ds-dom">{{ o.domain }}</span>
+        <span v-if="isSuper && o.team" class="ds-team" :title="o.created_by_name">{{ o.team }}<template v-if="o.created_by_name"> · {{ o.created_by_name.split('@')[0] }}</template></span>
         <span :class="['st-chip', stClass(o.status)]">{{ stLabel(o.status) }}</span>
         <span class="ds-pay" :title="t('domains.payAmtTip')">{{ ['pending_payment', 'payment_detected'].includes(o.status) ? t('domains.payAmt', { v: o.pay_amount }) : '$' + o.total_usd }}</span>
         <a v-if="o.payment_txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + o.payment_txid" target="_blank" :title="o.payment_txid">TXID ↗</a>
@@ -277,6 +278,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .tld-chip.on { background: var(--acg); color: var(--ac); border-color: var(--ac); }
 .ds-results { margin-top: 8px; min-height: 60px; }
 .ds-row { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap; }
+.ds-team { font-size: 11px; color: var(--t3); background: var(--bg3); border-radius: 6px; padding: 1px 8px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .ds-row:last-child { border-bottom: none; }
 .ds-dom { font-weight: 600; color: var(--t1); font-size: 14px; flex: 1; min-width: 160px; }
 .ds-price { color: var(--t3); font-variant-numeric: tabular-nums; }

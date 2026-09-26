@@ -338,8 +338,12 @@ def list_orders(user: CurrentUser = Depends(require_permission("landing.manage")
             q = q.filter(DomainOrder.tenant_id == user.tenant_id)
     rows = q.order_by(DomainOrder.id.desc()).limit(100).all()
     from ..services.usdt_monitor import pay_amount_for
+    from ..models.auth import Tenant, User
+    tmap = {t.id: t.name for t in db.query(Tenant).all()}
+    umap = {u.id: (u.email or "") for u in db.query(User).all()}
     return {"orders": [{"id": r.id, "domain": r.domain, "years": r.years, "cost_usd": r.cost_usd,
                         "fee_usd": r.fee_usd, "total_usd": r.total_usd, "status": r.status,
+                        "team": tmap.get(r.tenant_id, ""), "created_by_name": umap.get(r.created_by, ""),
                         "payment_method": r.payment_method or "usdt",
                         "pay_amount": pay_amount_for(r.total_usd, r.id),
                         "payment_txid": r.payment_txid or "", "paid_amount": r.paid_amount,

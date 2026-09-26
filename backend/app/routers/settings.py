@@ -285,6 +285,7 @@ class CfConfigIn(BaseModel):
     cf_api_token: str = ""
     cf_account_id: str = ""
     cf_email_token: str = ""  # 用户级 token（Email Routing 地址/规则管理专用，可选）
+    cf_token_name: str = ""   # 令牌备注名（与 CF 后台 token 名对齐，多 token 时辨认用）
 
 
 @router.get("/cf")
@@ -300,6 +301,7 @@ def get_cf_config(user: CurrentUser = Depends(require_superadmin)):
         "cf_account_id": settings.cf_account_id or "",
         "cf_email_token_masked": emasked,
         "cf_email_token_set": bool(etok),
+        "cf_token_name": _get_sys_setting("cf_token_name") or "",
     }
 
 
@@ -325,7 +327,9 @@ def set_cf_config(body: CfConfigIn, user: CurrentUser = Depends(require_superadm
         updates["CF_ACCOUNT_ID"] = _clean_token(body.cf_account_id)
     if body.cf_email_token:
         _set_sys_setting("cf_email_token", _clean_token(body.cf_email_token))  # SystemSetting（不入 .env）
-    if not updates:
+    if body.cf_token_name is not None and body.cf_token_name != "":
+        _set_sys_setting("cf_token_name", body.cf_token_name.strip()[:60])
+    if not updates and not (body.cf_token_name is not None and body.cf_token_name != ""):
         return {"saved": False, "detail": "无变更"}
     updated_lines, found = [], set()
     for line in lines:

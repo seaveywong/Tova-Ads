@@ -856,6 +856,7 @@ export default {
     cfReconTitle: '域名对账（CF ↔ 域名库）', cfReconOk: '全部一致 ✓', cfReconCfOnly: 'CF 有 zone 但域名库未登记', cfReconLibOnly: '域名库已登记但 CF 无 zone',
     cfUvToday: '今日请求数 · 独立访客（CF 按日聚合，今日数据延迟数小时属正常）',
     cfEmailTokenLabel: '邮箱管理 Token（可选）', cfEmailTokenPh: '用户级 API Token（cfat_ 开头的账户级不行）',
+    cfTokenNameLabel: '令牌名称（备注）', cfTokenNamePh: '如 Tovaads——与 CF 后台 token 同名，多把时好辨认',
     cfEmailTokenHint: 'Email Routing 的目的地邮箱/转发规则管理只支持用户级 API Token。CF 后台 → My Profile → API Tokens → Create Token：Zone·tovaads.com 的 Email Routing Addresses·Edit + DNS·Edit + Zone·Read。只做启用/DNS 可不填。',
     emNeedUserToken: '⚠ 目的地邮箱/转发规则管理需要用户级 CF Token——去「域名服务配置」填「邮箱管理 Token」后刷新（启用和 DNS 配置不受影响）。',
     cfDesc: '平台域名服务凭据。',
