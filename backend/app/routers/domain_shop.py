@@ -236,23 +236,39 @@ def _suggest_candidates(q: str, mode: str, tlds: list) -> list:
         for t in tlds:
             _add(root)
         return cands
-    # smart：纯词根×TLD 先保底（模糊搜索主诉求——搜什么先看到什么），修饰组合再补
-    for t in tlds:
-        if root:
-            cands.append(f"{root}.{t}")
-        if len(cands) >= 48:
-            return cands
-    # 词根 × 前后缀修饰 × TLD（组合爆 → 随机采样到 cap）
-    combos = [(h, tl) for h in _SMART_HEAD for tl in _SMART_TAIL]
+    # 模糊（2026-09-26 用户拍板：选购域名必须支持模糊搜索）：词根本体 → 词库包含匹配
+    # （输 oak 出 oakwood/oakland）→ 拼写容错（相邻重复字母折叠 oakk→oak）→ 修饰组合补量
     rng = _rand.Random()
-    rng.shuffle(combos)
-    for h, tl in combos:
+    roots = [root]
+    folded = re.sub(r"(.)\1+", r"\1", root)
+    if len(folded) >= 3 and folded != root:
+        roots.append(folded)
+    _seen = set()
+
+    def _try_name(name: str) -> bool:
+        """加入候选（name×全部选中 TLD 一次进，_seen 防跨来源重名）。返 True=已达 cap。"""
+        if (name in _seen or not (1 <= len(name) <= 40)
+                or not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", name)):
+            return len(cands) >= 48
+        _seen.add(name)
         for t in tlds:
-            name = f"{h}{root}{tl}"
-            if root and name not in cands:
-                _add(name)
-            if len(cands) >= 48:
-                return cands
+            cands.append(f"{name}.{t}")
+        return len(cands) >= 48
+
+    for rt in roots:                       # ① 搜什么先看到什么（词根本体+折叠容错变体）
+        if _try_name(rt):
+            return cands
+    from ..core.domain_words import WORDS
+    contains = [w for w in WORDS if any(rt in w and w != rt for rt in roots)]
+    rng.shuffle(contains)
+    for w in contains[:24]:                # ② 词库包含匹配（模糊核心）
+        if _try_name(w):
+            return cands
+    combos = [(h, tl) for h in _SMART_HEAD for tl in _SMART_TAIL]
+    rng.shuffle(combos)
+    for h, tl in combos:                   # ③ 前后缀修饰组合补量
+        if _try_name(f"{h}{root}{tl}"):
+            return cands
     return cands
 
 
@@ -261,11 +277,11 @@ def suggest_domains(q: str = "", mode: str = "smart", tlds: str = "",
                     price_min: float = 0.0, price_max: float = 0.0, limit: int = 30,
                     user: CurrentUser = Depends(require_permission("landing.manage")),
                     db: Session = Depends(get_db)):
-    """域名候选推送：mode=exact（词根×选中后缀）/ smart（前后缀修饰组合）/ random
-    （品牌词库随机，q 可作种子）。**价格取官方价目表（tld_price，10min 缓存）——0 API
-    秒回**；可注册性不做实时批量核验（Dynadot search 实测一次只收一个域名，
-    逐个查 48 候选=53s 限流灾难），下单时 /check+create_order 单域名实时校验兜底。
-    live_check=false 标记：列表价=价目表价，实时价/premium 以下单核验为准。"""
+    """域名候选推送：mode=exact（词根×选中后缀）/ smart（**模糊**——词根本体+内置词库
+    包含匹配+拼写容错+修饰组合）/ random（品牌词库随机，q 可作种子）。**价格取官方价目表
+    （tld_price，10min 缓存）——0 API 秒回**；可注册性不做实时批量核验（Dynadot search
+    实测一次只收一个域名，逐个查 48 候选=53s 限流灾难），下单时 /check+create_order
+    单域名实时校验兜底。live_check=false 标记：列表价=价目表价，实时价/premium 以下单核验为准。"""
     if mode not in ("exact", "smart", "random"):
         raise HTTPException(400, "mode 必须是 exact/smart/random")
     if not (1 <= limit <= 50):
@@ -355,8 +371,11 @@ def list_orders(user: CurrentUser = Depends(require_permission("landing.manage")
     rows = q.order_by(DomainOrder.id.desc()).limit(100).all()
     from ..services.usdt_monitor import pay_amount_for
     from ..models.auth import Tenant, User
-    tmap = {t.id: t.name for t in db.query(Tenant).all()}
-    umap = {u.id: (u.email or "") for u in db.query(User).all()}
+    # 复审 P2：曾每次全表扫 User/Tenant；改只查本页订单涉及的 id（订单已 limit 100）。
+    tids = {r.tenant_id for r in rows}
+    uids = {r.created_by for r in rows if r.created_by}
+    tmap = {t.id: t.name for t in db.query(Tenant).filter(Tenant.id.in_(tids)).all()} if tids else {}
+    umap = {u.id: (u.email or "") for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
     return {"orders": [{"id": r.id, "domain": r.domain, "years": r.years, "cost_usd": r.cost_usd,
                         "fee_usd": r.fee_usd, "total_usd": r.total_usd, "status": r.status,
                         "team": tmap.get(r.tenant_id, ""), "created_by_name": umap.get(r.created_by, ""),
@@ -406,7 +425,10 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
         o.approved_by, o.approved_at = user.id, datetime.now(timezone.utc)
         db.commit()
         reg = _reg_name(db).upper()
-        raise HTTPException(400, f"{reg}_NOT_CONFIGURED_ORDER_APPROVED")
+        # 复审 P2：曾 400 + 副作用（订单已悄悄转 approved、前端却弹报错）。改 200 明确告知
+        # 「已确认收款、待注册商配置后重试续链」——状态与提示一致，不再误导超管。
+        return {"ok": True, "status": "approved", "domain": o.domain,
+                "pending_registrar": True, "registrar": reg}
     o.status = "registering"
     o.approved_by, o.approved_at = user.id, datetime.now(timezone.utc)
     db.commit()

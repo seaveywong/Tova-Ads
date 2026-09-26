@@ -622,10 +622,17 @@ def get_payment(user: CurrentUser = Depends(require_superadmin), db: Session = D
 def set_payment(body: PaymentSettingIn, user: CurrentUser = Depends(require_superadmin),
                 db: Session = Depends(get_db)):
     chain = body.chain.strip()[:20]
-    pool = []
+    # 地址池（整池覆盖写入；空=不改）：空 addresses 且空 address 时保留现有池——防止只改
+    # pay_note/TronGrid key 就误清空收款地址（2026-09-26 复审 P0，曾因此清空生产池致客户无法打款）。
+    existing = _payment_setting(db)
     if body.addresses:
         pool = sorted({str(a).strip()[:120] for a in body.addresses if str(a).strip()})
-    addr = pool[0] if pool else body.address.strip()[:120]
+        addr = pool[0]
+    elif body.address.strip():
+        addr = body.address.strip()[:120]
+        pool = [addr]
+    else:
+        addr, pool = existing["address"], existing["addresses"]
     for a in ([addr] if addr else []) + pool:
         if a and not re.match(r"^[A-Za-z0-9]{20,120}$", a):
             raise HTTPException(400, f"USDT 地址格式不正确：{a[:20]}…")

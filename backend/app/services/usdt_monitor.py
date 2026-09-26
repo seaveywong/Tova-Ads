@@ -19,9 +19,14 @@ _TRONGRID = "https://api.trongrid.io"
 _USDT_TRC20 = "TR7NHqjeKQxGTCi8qMZYkYKsqLWNKq9iC1"   # USDT (TRC20) 官方合约
 
 
+def pay_amount_cents(total_usd: float, order_id: int) -> int:
+    """应付金额（整数美分）= 总价美分 + 订单号尾两位。整数运算，杜绝浮点误差（复审 P1）。"""
+    return int(round(float(total_usd) * 100)) + (order_id % 100)
+
+
 def pay_amount_for(total_usd: float, order_id: int) -> float:
-    """应付金额 = 总价 + 订单号尾两位（美分）——唯一化防同额串单（TRC20 无 memo）。"""
-    return round(float(total_usd) + (order_id % 100) / 100.0, 2)
+    """应付金额 = 总价 + 订单号尾两位（美分，美元展示用）——唯一化防同额串单（TRC20 无 memo）。"""
+    return round(pay_amount_cents(total_usd, order_id) / 100.0, 2)
 
 
 def _fetch_incoming(addr: str, tg_key: str = "") -> list:
@@ -110,7 +115,7 @@ def run_usdt_monitor():
             if target not in tx_cache:
                 tx_cache[target] = _fetch_incoming(target, tg_key)
             txs = tx_cache[target]
-            want = pay_amount_for(o.total_usd, o.id)
+            want_cents = pay_amount_cents(o.total_usd, o.id)
             created_ts = (o.created_at or datetime.now(timezone.utc)).timestamp()
             for t in txs:
                 try:
@@ -119,12 +124,13 @@ def run_usdt_monitor():
                         continue
                     if (t.get("to") or "") != target:
                         continue
-                    amt = round(int(t.get("value", "0")) / 1e6, 2)
+                    amt_cents = int(round(int(t.get("value", "0")) / 1e4))   # 微单位→美分，整数比较（复审 P1）
                     ts = int(t.get("block_timestamp", 0)) / 1000.0
                 except Exception:
                     continue
-                if amt != want or ts + 600 < created_ts:
+                if amt_cents != want_cents or ts + 600 < created_ts:
                     continue
+                amt = round(amt_cents / 100.0, 2)
                 used_txids.add(_txid)
                 o.status = "payment_detected"
                 o.payment_txid = str(t.get("transaction_id") or "")

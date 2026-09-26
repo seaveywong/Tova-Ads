@@ -111,7 +111,8 @@ const approveOrder = async (o) => {
   orderBusy.value = o.id
   try {
     const r = await POST('/domains-shop/orders/' + o.id + '/approve', {}, 120000)
-    ElMessage.success(t('domains.approveOk', { d: r.domain || o.domain }))
+    if (r.pending_registrar) ElMessage.warning(t('domains.approveParked', { reg: r.registrar }))
+    else ElMessage.success(t('domains.approveOk', { d: r.domain || o.domain }))
     await Promise.all([loadOrders(), loadMyDomains()])
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   orderBusy.value = 0
