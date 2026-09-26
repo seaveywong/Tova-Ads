@@ -132,7 +132,7 @@ def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
             return hit[1]
     cf = _cf()
     zones = cf.list_zones()
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date, timedelta as _td, datetime as _dt, timezone as _tz
     today = _date.today()
     q = """
     query($z: String!, $s: Date!, $e: Date!) {
@@ -144,29 +144,61 @@ def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
         }
       }}
     }"""
+    # 近实时今日（adaptive 分钟粒度聚合，~15min 滞后）——1d 数据集今日要等数小时才出，
+    # 今日列优先取 adaptive；失败（同权限）回落 1d（today_rt=False）
+    q_rt = """
+    query($z: String!, $s: Time!, $e: Time!) {
+      viewer { zones(filter: {zoneTag: $z}) {
+        httpRequestsAdaptiveGroups(limit: 10, filter: {datetime_geq: $s, datetime_leq: $e}) {
+          sum { requests pageViews }
+          uniq { uniques }
+        }
+      }}
+    }"""
+    day_start = _dt.now(_tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     out, needs_perm, perm_pretty = [], False, ""
     for z in zones:
         row = {"zone": z.get("name"), "plan": (z.get("plan") or {}).get("name", ""),
-               "today": None, "d7": 0, "d30": 0, "bytes30": 0, "uniques30": 0}
+               "today": None, "today_rt": False, "d7": 0, "d30": 0,
+               "bytes30": 0, "uniques30": 0, "daily": []}
         groups, r = [], {}
         try:
             r = cf.graphql(q, {"z": z["id"],
                                "s": str(today - _td(days=30)), "e": str(today)})
             groups = (((r.get("data") or {}).get("viewer") or {}).get("zones") or [{}])[0] \
                 .get("httpRequests1dGroups") or []
+            daily = []
             for g in groups:
                 d = (g.get("dimensions") or {}).get("date")
                 s = g.get("sum") or {}
-                row["d30"] += int(s.get("requests") or 0)
+                req = int(s.get("requests") or 0)
+                row["d30"] += req
                 row["bytes30"] += int(s.get("bytes") or 0)
                 row["uniques30"] += int((g.get("uniq") or {}).get("uniques") or 0)
                 delta = (today - _date.fromisoformat(d)).days
+                if 0 < delta <= 30:
+                    daily.append({"d": d, "r": req})   # 迷你趋势不含今日（adaptive 才是今日真值）
                 if delta < 7:
-                    row["d7"] += int(s.get("requests") or 0)
+                    row["d7"] += req
                 if delta == 0:
-                    row["today"] = {"requests": int(s.get("requests") or 0),
+                    row["today"] = {"requests": req,
                                     "pageViews": int(s.get("pageViews") or 0),
                                     "uniques": int((g.get("uniq") or {}).get("uniques") or 0)}
+            row["daily"] = sorted(daily, key=lambda x: x["d"])
+        except Exception:
+            pass
+        # 今日列升级为 adaptive 近实时（同权限；无 dimensions=单行聚合）
+        try:
+            rr = cf.graphql(q_rt, {"z": z["id"], "s": day_start.isoformat().replace("+00:00", "Z"),
+                                   "e": _dt.now(_tz.utc).isoformat().replace("+00:00", "Z")})
+            ag = (((rr.get("data") or {}).get("viewer") or {}).get("zones") or [{}])[0] \
+                .get("httpRequestsAdaptiveGroups") or []
+            if ag:
+                s = ag[0].get("sum") or {}
+                row["today"] = {"requests": int(s.get("requests") or 0),
+                                "pageViews": int(s.get("pageViews") or 0),
+                                "uniques": int((ag[0].get("uniq") or {}).get("uniques") or 0)}
+                row["today_rt"] = True
         except Exception:
             pass
         if not groups:
@@ -188,4 +220,40 @@ def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
            "limits": {"pages_static": "不限", "pages_bandwidth": "不限",
                       "functions_per_day": "10万", "builds_per_month": "500"}}
     _CACHE["usage"] = (_time.time(), res)
+    return res
+
+
+@router.get("/reconcile")
+def cf_reconcile(fresh: int = 0, _=Depends(_cf_client_for_user)):
+    """CF zone ↔ 平台域名库对账（超管体检）：cf_only=CF 有 zone 但库未登记（白买了/漏登记）；
+    lib_only=库登记了但 CF 无对应 zone（NS 没切/已删 zone）。60s 缓存，fresh=1 绕过。"""
+    if not fresh:
+        hit = _CACHE.get("reconcile")
+        if hit and _time.time() - hit[0] < 60:
+            return hit[1]
+    cf = _cf()
+    zones = {(z.get("name") or "").lower().strip().rstrip(".") for z in cf.list_zones()}
+    from ..core.database import SuperSessionLocal
+    from ..models.landing_lib import LandingDomain
+    from ..models.auth import Tenant
+    db = SuperSessionLocal()
+    try:
+        rows = db.query(LandingDomain).filter(LandingDomain.status == "active").all()
+        tmap = {t.id: t.name for t in db.query(Tenant).all()}
+    finally:
+        db.close()
+    lib: dict = {}
+    for r in rows:
+        d = (r.domain or "").lower().strip().rstrip(".")
+        if not d:
+            continue
+        lib.setdefault(d, []).append(
+            {"tenant": tmap.get(r.tenant_id, str(r.tenant_id)), "cf_zone_status": r.cf_zone_status or ""})
+    res = {
+        "matched": sorted(zones & set(lib)),
+        "cf_only": sorted(zones - set(lib)),
+        "lib_only": [{"domain": d, "owners": v} for d, v in sorted(lib.items()) if d not in zones],
+        "cf_zone_count": len(zones), "lib_count": len(lib),
+    }
+    _CACHE["reconcile"] = (_time.time(), res)
     return res

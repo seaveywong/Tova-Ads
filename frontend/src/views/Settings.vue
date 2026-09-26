@@ -368,6 +368,20 @@ const loadCfOverview = async () => {
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   cfLoading.value = false
 }
+// CF zone ↔ 域名库对账（体检：白买 zone / NS 没切）
+const cfRecon = ref(null)
+const cfReconLoading = ref(false)
+const loadCfRecon = async (fresh) => {
+  cfReconLoading.value = true
+  try { cfRecon.value = await GET('/cf-console/reconcile' + (fresh ? '?fresh=1' : ''), 60000) }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  cfReconLoading.value = false
+}
+// 迷你趋势条高度（%：当日请求 / 近30天峰值）
+const sparkH = (u, b) => {
+  const mx = Math.max(1, ...(u.daily || []).map(x => x.r))
+  return Math.max(4, Math.round((b.r / mx) * 100)) + '%'
+}
 const onboardZone = async () => {
   const d = (cfOnboardDomain.value || '').trim()
   if (!d) return
@@ -712,6 +726,7 @@ const anchorGroups = computed(() => [
 watch(activeSection, (id) => {
   if (id === 'sec-cf' && !cfOverview.value && !cfLoading.value) loadCfOverview()
   if (id === 'sec-cf' && !cfUsage.value && !cfUsageLoading.value) loadCfUsage()
+  if (id === 'sec-cf' && !cfRecon.value && !cfReconLoading.value) loadCfRecon()
 })
 
 const switchSection = (id) => {
@@ -956,9 +971,10 @@ const runKeepaliveNow = async () => {
               <div class="cf-usage-row">
                 <span class="cf-zone-name">{{ u.zone }}</span>
                 <span class="cf-usage-plan">{{ u.plan }}</span>
-                <span class="cf-usage-cell" :title="t('settings.cfUvToday')">{{ t('settings.cfToday') }} <b>{{ u.today ? u.today.requests.toLocaleString() : (u.no_data ? '—' : 0) }}</b><i v-if="u.today"> · UV {{ u.today.uniques }}</i></span>
+                <span class="cf-usage-cell" :title="t('settings.cfUvToday') + (u.today_rt ? ' · ' + t('settings.cfUvRt') : '')">{{ t('settings.cfToday') }}<em v-if="u.today_rt" class="cf-rt">⚡</em><b>{{ u.today ? u.today.requests.toLocaleString() : (u.no_data ? '—' : 0) }}</b><i v-if="u.today"> · UV {{ u.today.uniques }}</i></span>
                 <span class="cf-usage-cell">7d <b>{{ u.d7.toLocaleString() }}</b></span>
                 <span class="cf-usage-cell">30d <b>{{ u.d30.toLocaleString() }}</b><i> · {{ fmtBytes(u.bytes30) }}</i></span>
+                <span v-if="(u.daily || []).length" class="cf-spark" :title="t('settings.cfSparkTip')"><i v-for="(b, bi) in u.daily" :key="bi" :style="{ height: sparkH(u, b) }"></i></span>
               </div>
             </template>
             <div v-if="(cfUsage?.zones || []).length > 1" class="cf-usage-row total">
@@ -968,6 +984,27 @@ const runKeepaliveNow = async () => {
               <span class="cf-usage-cell">7d <b>{{ cfUsageTotal.d7.toLocaleString() }}</b></span>
               <span class="cf-usage-cell">30d <b>{{ cfUsageTotal.d30.toLocaleString() }}</b><i> · {{ fmtBytes(cfUsageTotal.bytes30) }}</i></span>
             </div>
+          </div>
+        </div>
+
+        <div class="cf-panel">
+          <div class="cf-panel-hd">
+            <span>{{ t('settings.cfReconTitle') }}</span>
+            <em>{{ cfRecon?.matched?.length || 0 }}/{{ cfRecon?.cf_zone_count || 0 }}</em>
+            <button class="btn sm" :disabled="cfReconLoading" @click="loadCfRecon(true)">{{ cfReconLoading ? t('common.loading') : '⟳' }}</button>
+          </div>
+          <div class="cf-panel-bd" v-loading="cfReconLoading">
+            <div v-if="!(cfRecon?.cf_only || []).length && !(cfRecon?.lib_only || []).length" class="cf-recon-ok">{{ t('settings.cfReconOk') }}</div>
+            <template v-else>
+              <div v-for="d in (cfRecon?.cf_only || [])" :key="'cf-' + d" class="cf-recon-row warn">
+                <span class="cf-zone-name">{{ d }}</span>
+                <span class="cf-recon-note">{{ t('settings.cfReconCfOnly') }}</span>
+              </div>
+              <div v-for="d in (cfRecon?.lib_only || [])" :key="'lib-' + d.domain" class="cf-recon-row">
+                <span class="cf-zone-name">{{ d.domain }}</span>
+                <span class="cf-recon-note">{{ t('settings.cfReconLibOnly') }}<template v-if="d.owners?.length"> · {{ d.owners.map(o => o.tenant + (o.cf_zone_status ? '（' + o.cf_zone_status + '）' : '')).join('、') }}</template></span>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -1528,6 +1565,16 @@ const runKeepaliveNow = async () => {
 .cf-usage-row.total { border-top: 1px solid var(--bd2); margin-top: 2px }
 .cf-usage-row.total .cf-zone-name { font-weight: 600; color: var(--t1) }
 .cf-token-tail { font-size: 10px; color: var(--t3); font-family: var(--font-mono); margin-left: auto; margin-right: 8px }
+/* 近30天迷你趋势（不含今日）：细条按当日请求/峰值取高 */
+.cf-spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 18px; flex: none; margin-left: auto; cursor: default }
+.cf-spark i { width: 3px; min-height: 1px; background: var(--ac); opacity: .5; border-radius: 1px 1px 0 0 }
+.cf-rt { font-style: normal; font-size: 10px; margin-right: 2px }
+/* 域名对账面板 */
+.cf-recon-ok { padding: 14px; text-align: center; color: var(--success); font-size: 12px }
+.cf-recon-row { display: flex; gap: 10px; align-items: baseline; padding: 6px 2px; border-bottom: 1px solid var(--bd); font-size: 12px }
+.cf-recon-row:last-child { border-bottom: none }
+.cf-recon-row.warn .cf-recon-note { color: var(--warning) }
+.cf-recon-note { color: var(--t3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .cf-usage-plan { font-size: 10px; color: var(--t3); min-width: 88px }
 .cf-usage-cell { color: var(--t3); white-space: nowrap }
 .cf-usage-cell b { color: var(--t1); font-weight: 600 }

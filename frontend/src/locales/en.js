@@ -841,6 +841,8 @@ export default {
     cfLimitsLine: 'Free tier reference: static requests {a} · bandwidth {b} · Functions invocations {c}/day · builds {d}/month (higher on paid plans, per zone plan)',
     cfUnlimited: 'Unlimited', cf100k: '100K',
     cfPermHint: 'Analytics permission still missing (live CF check): needs {perm}. CF dashboard → My Profile → API Tokens → find the token ending in {tail} (the exact one) → Edit → add Zone › Analytics › Read (Zone-level, NOT Account-level) → Zone Resources: All zones → save, then click ⟳ to retry.', cfTokenTailTip: 'Last 6 chars of the CF API Token in use (edit THIS token)', cfUsageTotal: 'Total',
+    cfUvRt: 'near real-time (minute granularity)', cfSparkTip: '30-day request trend (today excluded)',
+    cfReconTitle: 'Domain Reconcile (CF ↔ library)', cfReconOk: 'All consistent ✓', cfReconCfOnly: 'zone in CF but not in the domain library', cfReconLibOnly: 'in the library but no CF zone',
     cfUvToday: 'Requests today · unique visitors (CF aggregates daily; today lags a few hours)',
     cfEmailTokenLabel: 'Email admin token (optional)', cfEmailTokenPh: 'User-level API token (cfat_ account tokens do not work)',
     cfEmailTokenHint: 'Email Routing address/rule management only supports user-level API tokens. CF dashboard -> My Profile -> API Tokens -> Create Token with Zone (tovaads.com): Email Routing Addresses Edit + DNS Edit + Zone Read. Leave empty if you only need enable/DNS.',

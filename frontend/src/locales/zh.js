@@ -852,6 +852,8 @@ export default {
     cfLimitsLine: 'Free 档参考：静态请求 {a} · 带宽 {b} · Functions 调用 {c}/天 · 构建 {d}/月（付费档上调，以 zone 套餐为准）',
     cfUnlimited: '不限', cf100k: '10万',
     cfPermHint: '访问量权限仍缺失（CF 实测）：缺 {perm}。CF 后台 → My Profile → API Tokens → 找【尾号 {tail}】的这把 Token（务必同一把）→ Edit → 添加 Zone › Analytics › Read（是 Zone 级，不是 Account 级）→ Zone Resources 含 All zones → 保存后点 ⟳ 立即重试。', cfTokenTailTip: '当前使用的 CF API Token 尾号（改权限须改这把）', cfUsageTotal: '合计',
+    cfUvRt: '近实时（分钟粒度）', cfSparkTip: '近30天请求趋势（不含今日）',
+    cfReconTitle: '域名对账（CF ↔ 域名库）', cfReconOk: '全部一致 ✓', cfReconCfOnly: 'CF 有 zone 但域名库未登记', cfReconLibOnly: '域名库已登记但 CF 无 zone',
     cfUvToday: '今日请求数 · 独立访客（CF 按日聚合，今日数据延迟数小时属正常）',
     cfEmailTokenLabel: '邮箱管理 Token（可选）', cfEmailTokenPh: '用户级 API Token（cfat_ 开头的账户级不行）',
     cfEmailTokenHint: 'Email Routing 的目的地邮箱/转发规则管理只支持用户级 API Token。CF 后台 → My Profile → API Tokens → Create Token：Zone·tovaads.com 的 Email Routing Addresses·Edit + DNS·Edit + Zone·Read。只做启用/DNS 可不填。',
