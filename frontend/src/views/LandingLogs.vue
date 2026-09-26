@@ -472,12 +472,12 @@ watch(() => route.query, (q) => {
 .ctrl-btn.on { background: var(--ac); color: #fff; border-color: var(--ac) }
 .ctrl-btn:disabled { opacity: .5; cursor: not-allowed }
 .tbl { display: flex; flex-direction: column; border: 1px solid var(--bd); border-radius: 10px; overflow-x: auto }
-.row { display: grid; grid-template-columns: 150px 76px 110px minmax(150px,1.4fr) minmax(140px,1.2fr) 100px 118px minmax(110px,1fr) minmax(88px,1fr) 82px minmax(90px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1280px }  /* 批AL：广告ID/目标列放宽自适应 */
+.row { display: grid; grid-template-columns: 130px 84px 96px minmax(140px,1.4fr) minmax(122px,1.2fr) 92px 104px minmax(92px,1fr) minmax(82px,1fr) 76px minmax(110px,1fr); gap: 8px; padding: 7px 12px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--bd); min-width: 1160px }  /* 批AL：广告ID/目标列放宽自适应；深化：收窄整体 min-width 让 11 列塞进侧栏旁内容区，末列不再被裁 */
 .row.head { background: var(--bg2); color: var(--t3); font-size: 11px; font-weight: 600 }
 .row:last-child { border-bottom: none }
 .row:hover { background: var(--bg2) }
 .t-time { color: var(--t2); white-space: nowrap; font-variant-numeric: tabular-nums }
-.slug { color: var(--ac); cursor: pointer; font-size: 11px; font-family: monospace }
+.slug { color: var(--ac); cursor: pointer; font-size: 11px; font-family: monospace; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100% }
 .slug:hover { text-decoration: underline }
 .t-ad { color: var(--t3); font-size: 11px; display: flex; align-items: center; gap: 4px; min-width: 0; font-variant-numeric: tabular-nums }
 .ad-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto }
