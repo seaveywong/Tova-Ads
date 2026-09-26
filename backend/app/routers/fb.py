@@ -906,34 +906,41 @@ def _resolve_bm_roles(fb, bms: list) -> dict:
 _BM_WRITE_CACHE: dict = {}
 
 def _probe_bm_write(db, tenant_id: int, cred) -> bool:
+    """BM 写权限探测（批WW 终版）。原理：POST .invalid 邮箱——如果请求能到达
+    email 验证层（返「邮箱无效/不可达」类错误）=权限通过；被 App 权限墙拦
+    （1752203/270/capability 限制）=不可用。不同 BM 可能返不同错误码，统一
+    用消息关键词判定。10min 缓存。"""
     import time as _t
     key = f"bmw:{tenant_id}"
     hit = _BM_WRITE_CACHE.get(key)
     if hit is not None and _t.time() - hit[0] < 600:
         return hit[1]
-    from ..core.fb_client import FbClient
+    from ..core.fb_client import FbClient, FbApiError
     fb = FbClient(decrypt(cred.access_token_enc))
     ok = False
     try:
-        # 找一个 BM 探
         bms = fb.get_businesses() or []
-        if not bms:
-            _BM_WRITE_CACHE[key] = (_t.time(), False)
-            return False
-        bm_id = str(bms[0].get("id") or "")
-        if not bm_id:
-            _BM_WRITE_CACHE[key] = (_t.time(), False)
-            return False
-        fb.post(f"{bm_id}/business_users", {"email": "@probe", "role": "EMPLOYEE"})
-        ok = True   # 意外成功（邮箱 "@probe" 不合法应该被 FB 拒——但走到了=权限通过）
-    except Exception as e:
-        raw = getattr(e, "raw", {}) or {}
-        subcode = raw.get("error_subcode") or raw.get("error", {}).get("error_subcode")
-        code = raw.get("code") or raw.get("error", {}).get("code")
-        # 1752203=App 没权限 / 270=Dev Mode 拦 / 10=OAuthException(App 级) → 写不可用
-        # 100=参数错（我们故意传非法邮箱）→ 能到参数校验=权限通过
-        # 368=temporary block / 613=频控 → 不确定，保守 False
-        ok = not (subcode in (1752203, 270) or code in (10, 270))
+    except Exception:
+        return False
+    bm_id = str(bms[0].get("id") or "") if bms else ""
+    if not bm_id:
+        _BM_WRITE_CACHE[key] = (_t.time(), False)
+        return False
+    try:
+        fb.post(f"{bm_id}/business_users", {"email": "noreply@write-probe.invalid", "role": "EMPLOYEE"})
+        ok = True   # POST 成功=权限通过（FB 接受了 .invalid 邮箱）
+    except FbApiError as e:
+        msg = str(getattr(e, "friendly", "")) + str(getattr(e, "raw", "") or "")
+        # 权限墙关键词（不同 BM 返不同码但消息都含这些）
+        blocked_kw = ("permission", "权限", "capability", "limited functionality",
+                      "not have permission", "Application does not have")
+        if any(kw.lower() in msg.lower() for kw in blocked_kw):
+            ok = False
+        else:
+            # 非权限错（如「邮箱无效」「域名不存在」「已是成员」）= 请求过了权限层
+            ok = True
+    except Exception:
+        ok = False
     _BM_WRITE_CACHE[key] = (_t.time(), ok)
     return ok
 
