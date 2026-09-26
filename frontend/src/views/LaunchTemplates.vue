@@ -4564,7 +4564,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pp-fans{font-size:11px;color:var(--t3);flex-shrink:0}
 
 /* 部署加载 */
-.config-loading{font-size:12px;color:var(--t3);padding:4px 8px}
+.config-loading{font-size:12px;color:var(--t3);padding:4px 8px;grid-column:1/-1}   /* 跨全列——曾塞进首列 40px 宽导致中文逐字竖排 */
 
 /* 版位选择 */
 .platform-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -4799,6 +4799,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
   .grid{grid-template-columns:1fr !important}
   .picker-grid{grid-template-columns:1fr !important}
   .acc-config{grid-template-columns:1fr !important}
+  .acc-config > .el-select{grid-column:1 !important}
   /* 目标选择弹窗：左右 → 上下（列表+说明堆叠） */
   .objp{flex-direction:column}
   .objp-detail{border-left:none;padding-left:0;border-top:1px solid var(--bd);padding-top:10px}
