@@ -1172,8 +1172,8 @@ const deleteToken = async (tk) => {
 .dot.ok{background:var(--success)}.dot.warn{background:var(--warning)}.dot.err{background:var(--error)}.dot.off{background:var(--t3)}
 
 .c-nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.nm{cursor:text;display:inline-flex;align-items:center;gap:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.pen{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);opacity:0}.nm:hover .pen{opacity:1}
+.nm{cursor:text;display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pen{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;color:var(--t3);opacity:0;margin-left:3px}.nm:hover .pen{opacity:1}
 .inp{width:80px;padding:2px 6px;background:var(--bg3);border:1px solid var(--ac);border-radius:4px;color:var(--t1);font-size:13px}
 
 .c-fb{display:flex;flex-direction:column;line-height:1.3;overflow:hidden;min-width:0}
