@@ -3110,3 +3110,13 @@ CLI 逐项实测（cred#34 + Roly-V21）+ 代码路径比对。**正常工作 8 
 
 ### 结论
 Dynadot 线后端就绪待 Secret；创建按钮新交互全链路上线。部署链路（花钱路径）重构经行为级验证，无功能回归。
+
+## 批ZZ：CF 访问量权限根因 + usage 诊断增强（2026-09-26，745b88c）
+
+**根因（CLI 直打 GraphQL 实证）**：token 有效（/zones 可列 7 zone）但缺 **Zone 级 Analytics Read**——CF 原话 `does not have permission 'com.cloudflare.api.account.zone.analytics.read'`。用户"改了 key 权限仍看不到"= 改的很可能是另一把 token，或加成了 Account 级 Analytics，或 Zone Resources 未含这些域名。另实证 `/user/tokens/verify` 对无 User Details Read 的 token 返回 Invalid（CF 怪癖，非我方 bug）。
+
+**增强上线**：usage 端点新增 `perm`（CF 权限串→可读"Zone › Analytics › Read"）+ `token_tail`（定位改错 token）；⟳ 刷新 `fresh=1` 绕 60s 缓存；面板加全 zone 合计行 + token 尾号 chip + 今日数据延迟说明。live 验证：`needs_permission:True, perm:Zone › Analytics › Read, token_tail:2753c6`。
+
+**用户操作**：CF 后台 → My Profile → API Tokens → **尾号 2753c6 的这把** → Edit → 加 Zone › Analytics › Read（Zone 级）→ Zone Resources: All zones → 保存 → 设置页点 ⟳。
+
+**CF 区优化空间分析结论**（详见会话报告）：近实时今日数据（adaptiveGroups，权限通后可切）/zone↔域名库对账 值得做；sparkline/DNS 手动管理 低优先；purge cache/多 token 不需要。
