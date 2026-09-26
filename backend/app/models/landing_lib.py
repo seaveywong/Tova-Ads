@@ -37,5 +37,11 @@ class LandingDomain(Base):
     cf_zone_status = Column(Text)  # active/pending_nameserver/error
     note = Column(Text)
     status = Column(Text, default="active")
+    # 域名生命周期（批2 0108）：到期/自动续费（默认开）/注册商/续费履历/提醒档去重
+    expires_at = Column(DateTime(timezone=True))
+    auto_renew = Column(Boolean, nullable=False, default=True, server_default="true")
+    registrar = Column(Text)  # dynadot / porkbun / external（自有，不参与续费）
+    last_renewed_at = Column(DateTime(timezone=True))
+    last_notice_tier = Column(Integer)   # 最近已提醒档位（30/14/7/3/1/0=过期）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

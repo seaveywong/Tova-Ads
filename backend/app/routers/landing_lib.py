@@ -516,7 +516,14 @@ def list_domains(user: CurrentUser = Depends(require_permission("ads.read")),
         u = _domain_usage(db, user.tenant_id, d.domain)
         out.append({"id": d.id, "domain": d.domain, "label": d.label, "source": d.source,
                     "cf_zone_status": d.cf_zone_status, "note": d.note, "status": d.status,
+                    # 生命周期（0108 批2）：到期/自动续费/注册商/最近续费
+                    "expires_at": str(d.expires_at)[:10] if d.expires_at else "",
+                    "auto_renew": bool(d.auto_renew),
+                    "registrar": d.registrar or "",
+                    "last_renewed_at": str(d.last_renewed_at)[:10] if d.last_renewed_at else "",
                     "blocked": d.domain in _blocked_domains, **u})
+    # 到期近的排前面（无到期日的自有域名殿后；「需关注在上」原则）
+    out.sort(key=lambda x: (x["expires_at"] == "", x["expires_at"] or "9999"))
     return out
 
 

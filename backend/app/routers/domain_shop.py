@@ -9,7 +9,7 @@
 """
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -130,6 +130,23 @@ def _fee_for(db, cost: float) -> float:
     if r["mode"] == "percent":
         return round(max(r["floor"], r["rate"] * float(cost or 0) / 100.0), 2)
     return round(r["fixed"], 2)
+
+
+def _parse_exp(v):
+    """注册商到期值解析（毫秒/秒时间戳或 ISO 串）→ datetime(UTC)；失败返 None。"""
+    if v in (None, "", 0, "0"):
+        return None
+    try:
+        if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
+            ms = int(v)
+            if ms > 1e12:
+                ms /= 1000.0
+            return datetime.fromtimestamp(ms, tz=timezone.utc)
+        s = str(v)
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
 
 
 def _payment_info(db) -> dict:
@@ -475,9 +492,44 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
 
 
 def _fulfill(o, user, db) -> dict:
-    """注册链（register→CF zone→入库）。失败置 failed 留 error，可重试（approve 重入）。"""
+    """交付链。kind=register（注册→CF zone→入库）/ kind=renew（0108 续费：只 renew+顺延到期，
+    不建 zone 不动 NS）。失败置 failed 留 error，可重试（approve 重入）。"""
     from ..core.cf_client import CfClient
     try:
+        if (getattr(o, "kind", None) or "register") == "renew":
+            # 续费分支：域名已在库（不建 zone / 不动 NS / 不重复入库）
+            row = db.query(LandingDomain).filter(
+                LandingDomain.tenant_id == o.tenant_id,
+                LandingDomain.domain == o.domain).first()
+            reg = _reg_name(db)
+            if reg == "dynadot":
+                r = DynadotClient(_dynadot_key(), _dynadot_secret()).renew(o.domain, o.years) or {}
+            else:
+                r = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key) \
+                    .renew(o.domain, o.years) or {}
+            base = (row.expires_at if row and row.expires_at
+                    and row.expires_at > datetime.now(timezone.utc)
+                    else datetime.now(timezone.utc))
+            exp = _parse_exp(r.get("expiration_date")) or (base + timedelta(days=365 * o.years))
+            if row:
+                row.registrar = row.registrar or reg
+                row.expires_at = exp
+                row.last_renewed_at = datetime.now(timezone.utc)
+                row.last_notice_tier = None
+            o.status, o.fulfilled_at = "bound", datetime.now(timezone.utc)
+            db.commit()
+            write_log(db, tenant_id=o.tenant_id, trace_id=new_trace_id(), actor_type="user",
+                      actor_user_id=user.id, target_type="domain_order", target_id=str(o.id),
+                      action_type="renew", source="domain_shop", result="success",
+                      trigger_detail=f"{o.domain} 续费 {o.years}y → {str(exp)[:10]}")
+            db.commit()
+            from ..core.notify_utils import emit_notification
+            emit_notification(db, tenant_id=o.tenant_id, level="info",
+                              event_type="domain_renewed", trace_id=new_trace_id(),
+                              title=f"域名 {o.domain} 已续费 {o.years} 年",
+                              body=f"新到期日 {str(exp)[:10]}。")
+            db.commit()
+            return {"ok": True, "status": "bound", "domain": o.domain, "expires_at": str(exp)[:10]}
         if not (settings.cf_api_token and settings.cf_account_id):
             raise RuntimeError("CF_API_NOT_CONFIGURED")
         cf = CfClient(settings.cf_api_token, settings.cf_account_id)
@@ -486,20 +538,28 @@ def _fulfill(o, user, db) -> dict:
         ns = zone.get("name_servers") or []
         # ② 注册商注册并把 NS 指到 CF——注册生效后 zone 自动转 active。
         #    Dynadot register 不带 NS 参数：注册→set_ns 两步（客户端内已限速 1.1s）。
-        if _reg_name(db) == "dynadot":
+        reg = _reg_name(db)
+        if reg == "dynadot":
             dyna = DynadotClient(_dynadot_key(), _dynadot_secret())
-            dyna.register(o.domain, o.years)
+            r = dyna.register(o.domain, o.years)
             dyna.set_ns(o.domain, ns)
         else:
             pb = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
-            pb.register(o.domain, o.years, ns=ns)
-        # ③ 入域名库（团队立即可建落地页）
+            r = pb.register(o.domain, o.years, ns=ns) or {}
+        # ③ 入域名库（团队立即可建落地页）+ 到期日（0108：注册响应 expiration_date 毫秒，
+        #    解析不到按 365×年近似，每日同步 cron 对齐纠正）
         exists = db.query(LandingDomain).filter(
             LandingDomain.tenant_id == o.tenant_id, LandingDomain.domain == o.domain).first()
         if not exists:
-            db.add(LandingDomain(tenant_id=o.tenant_id, created_by=o.created_by,
-                                 domain=o.domain, source="purchased",
-                                 cf_zone_status="pending", note=f"代购订单 #{o.id}"))
+            exists = LandingDomain(tenant_id=o.tenant_id, created_by=o.created_by,
+                                   domain=o.domain, source="purchased",
+                                   cf_zone_status="pending", note=f"代购订单 #{o.id}")
+            db.add(exists)
+        exists.registrar = reg
+        exists.expires_at = _parse_exp((r or {}).get("expiration_date")) or \
+            (datetime.now(timezone.utc) + timedelta(days=365 * o.years))
+        exists.last_renewed_at = datetime.now(timezone.utc)
+        exists.last_notice_tier = None
         o.status, o.cf_zone_id = "bound", zone.get("id")
         o.fulfilled_at = datetime.now(timezone.utc)
         db.commit()
@@ -521,3 +581,135 @@ def _fulfill(o, user, db) -> dict:
         o.status, o.error = "failed", str(e)[:300]
         db.commit()
         raise HTTPException(500, f"注册链失败（可重试批准）: {str(e)[:150]}")
+
+
+# ── 域名续费与生命周期（0108 批2：手动续费双通道 + 自动续费开关）──
+class RenewIn(BaseModel):
+    years: int = 1
+
+
+@router.get("/domains/{did}/renew-quote")
+def renew_quote(did: int, years: int = 1,
+                user: CurrentUser = Depends(require_permission("landing.manage")),
+                db: Session = Depends(get_db)):
+    """续费询价（弹窗展示：续费单价×年 + 手续费 = 总价；单一总价口径同购买）。"""
+    from ..models.landing_lib import LandingDomain as _LD
+    row = db.query(_LD).filter(_LD.id == did).first()
+    if not row or row.tenant_id != user.tenant_id:
+        raise HTTPException(404, "域名不存在")
+    years = max(1, min(10, years))
+    client = _registrar_client(db)
+    tld = row.domain.rsplit(".", 1)[-1]
+    unit = (_pricing(client, db).get(tld) or {}).get("renewal")
+    if unit is None:
+        raise HTTPException(400, f"暂不支持 .{tld} 续费（价目表缺价）")
+    cost = round(unit * years, 2)
+    fee = _fee_for(db, cost)
+    from ..core.wallet import wallet_balance
+    return {"domain": row.domain, "years": years, "unit": unit, "cost_usd": cost,
+            "fee_usd": fee, "total_usd": round(cost + fee, 2),
+            "expires_at": str(row.expires_at)[:10] if row.expires_at else "",
+            "balance_usd": wallet_balance(db, user.tenant_id)}
+
+
+@router.post("/domains/{did}/renew")
+def renew_domain(did: int, body: RenewIn,
+                 user: CurrentUser = Depends(require_permission("landing.manage")),
+                 db: Session = Depends(get_db)):
+    """手动续费（双通道，用户拍板 2026-09-27）：余额够 → 扣款+renew 即时完成；
+    不够 → 创建 kind=renew 订单走 USDT 直付（到账自动续费，同注册全自动口径）。
+    可续窗口：到期 ≤90 天或已过期（宽限期内）。自有域名（external）不支持。"""
+    from ..models.landing_lib import LandingDomain as _LD
+    row = db.query(_LD).filter(_LD.id == did).first()
+    if not row or row.tenant_id != user.tenant_id:
+        raise HTTPException(404, "域名不存在")
+    if not row.registrar or row.registrar == "external":
+        raise HTTPException(400, "自有域名请在原注册商侧续费（平台仅管理代购域名）")
+    if body.years < 1 or body.years > 10:
+        raise HTTPException(400, "年限 1-10")
+    if row.expires_at:
+        from datetime import date as _d
+        days = (row.expires_at.date() - _d.today()).days
+        if days > 90:
+            raise HTTPException(400, f"距到期还有 {days} 天（超过 90 天暂不可续）")
+    client = _registrar_client(db)
+    tld = row.domain.rsplit(".", 1)[-1]
+    unit = (_pricing(client, db).get(tld) or {}).get("renewal")
+    if unit is None:
+        raise HTTPException(400, f"暂不支持 .{tld} 续费（价目表缺价）")
+    cost = round(unit * body.years, 2)
+    fee = _fee_for(db, cost)
+    total = round(cost + fee, 2)
+    # 通道一：钱包余额（优先）
+    from ..core.wallet import wallet_balance, wallet_apply, InsufficientBalance
+    if wallet_balance(db, user.tenant_id) >= total - 0.005:
+        try:
+            wallet_apply(db, user.tenant_id, "charge", -total,
+                         ref_type="domain_renew_manual", ref_id=row.id, user_id=user.id,
+                         note=f"{row.domain} 手动续费 {body.years}y")
+        except InsufficientBalance:
+            pass
+        else:
+            reg = _reg_name(db)
+            try:
+                if reg == "dynadot":
+                    r = DynadotClient(_dynadot_key(), _dynadot_secret()).renew(row.domain, body.years) or {}
+                else:
+                    r = PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key) \
+                        .renew(row.domain, body.years) or {}
+                base = row.expires_at if (row.expires_at and row.expires_at > datetime.now(timezone.utc)) \
+                    else datetime.now(timezone.utc)
+                row.expires_at = _parse_exp(r.get("expiration_date")) or (base + timedelta(days=365 * body.years))
+                row.last_renewed_at = datetime.now(timezone.utc)
+                row.last_notice_tier = None
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                wallet_apply(db, user.tenant_id, "refund", total,
+                             ref_type="domain_renew_manual_refund", ref_id=row.id, user_id=user.id,
+                             note=f"{row.domain} 续费失败退回")
+                raise HTTPException(500, f"已扣款但续费失败，款项已退回余额：{str(e)[:150]}")
+            from ..core.notify_utils import emit_notification
+            from ..core.log_utils import new_trace_id as _ntid
+            emit_notification(db, tenant_id=user.tenant_id, level="info",
+                              event_type="domain_renewed", trace_id=_ntid(),
+                              title=f"域名 {row.domain} 已续费 {body.years} 年",
+                              body=f"扣款 ${total:.2f}，新到期日 {str(row.expires_at)[:10]}。")
+            db.commit()
+            return {"ok": True, "paid_by": "wallet", "total_usd": total,
+                    "expires_at": str(row.expires_at)[:10]}
+    # 通道二：USDT 直付订单（kind=renew，到账监听自动续费——_fulfill renew 分支）
+    order = DomainOrder(tenant_id=user.tenant_id, created_by=user.id, kind="renew",
+                        domain=row.domain, years=body.years, cost_usd=cost, fee_usd=fee,
+                        total_usd=total, status="pending_payment")
+    db.add(order)
+    db.flush()
+    pool = _payment_info(db).get("addresses") or []
+    if pool:
+        order.payment_address = pool[(order.id - 1) % len(pool)]
+    db.commit()
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="domain_order", target_id=str(order.id),
+              action_type="renew", source="domain_shop", result="success",
+              trigger_detail=f"{row.domain} 续费单 x{body.years}y total={total} (usdt)")
+    db.commit()
+    return {"ok": True, "paid_by": "usdt", "order_id": order.id, "total_usd": total,
+            "pay_amount": pay_amount_for(total, order.id)}
+
+
+class AutoRenewIn(BaseModel):
+    on: bool
+
+
+@router.post("/domains/{did}/auto-renew")
+def set_auto_renew(did: int, body: AutoRenewIn,
+                   user: CurrentUser = Depends(require_permission("landing.manage")),
+                   db: Session = Depends(get_db)):
+    """自动续费开关（默认开；到期前 14/3 天余额足则自动扣款续费，不足只提醒不垫付）。"""
+    from ..models.landing_lib import LandingDomain as _LD
+    row = db.query(_LD).filter(_LD.id == did).first()
+    if not row or row.tenant_id != user.tenant_id:
+        raise HTTPException(404, "域名不存在")
+    row.auto_renew = bool(body.on)
+    db.commit()
+    return {"ok": True, "auto_renew": row.auto_renew}

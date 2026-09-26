@@ -15,6 +15,7 @@ class DomainOrder(Base):
     total_usd = Column(Float, nullable=False)
     status = Column(Text, nullable=False, default="pending_payment")
     payment_method = Column(Text, nullable=False, default="usdt")   # 0104：暂统一 USDT，后续扩展枚举
+    kind = Column(Text, nullable=False, default="register")   # 0108：register | renew（续费复用订单双通道）
     payment_txid = Column(Text)   # 0105：到账检测的链上 TXID（payment_detected 证据）
     payment_address = Column(Text)  # 0106：收款地址池分配给本单的地址（多地址对账/防资金流串联）
     paid_amount = Column(Float)    # 0105：实收金额（=应付含尾数）

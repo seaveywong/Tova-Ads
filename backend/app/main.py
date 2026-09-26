@@ -216,6 +216,7 @@ def _start_scheduler():
     from .services.ads_cache_sync import run_ads_cache_sync
     from .services.leads_poll import run_leads_poll   # 潜客轮询（并行 webhook 路径）
     from .services.usdt_monitor import run_usdt_monitor   # USDT-TRC20 到账监听（域名商店收款）
+    from .services.domain_renewal import run_domain_renewal   # 域名生命周期：同步到期/提醒/自动续费
     from .core.schedule_config import get_schedule_config, effective_intervals
     from .core.database import SessionLocal
     _db = SessionLocal()
@@ -236,6 +237,8 @@ def _start_scheduler():
     # USDT-TRC20 到账监听（域名商店）：2min 轮询链上入账，尾数对号 → payment_detected
     _scheduler.add_job(run_usdt_monitor, "interval", minutes=2, id="usdt_monitor")
     _scheduler.add_job(run_subcode_cleanup, "cron", hour=4, minute=17, id="subcode_cleanup")
+    # 域名生命周期（批2 0108）：每日 05:17 同步注册商到期日 + 五档提醒 + 自动续费（T-14/T-3）
+    _scheduler.add_job(run_domain_renewal, "cron", hour=5, minute=17, id="domain_renewal")
     # 保活扫描：每日 2:17 查 warming 账户，3天无消耗→建$5 lifetime Page Like
     _scheduler.add_job(run_keepalive, "cron", hour=2, minute=17, id="keepalive_scan")
     # 落地页 FB 屏蔽自动探测：每 1h 扫所有 published 页（Graph scrape），屏蔽→critical 告警 + 看板红标

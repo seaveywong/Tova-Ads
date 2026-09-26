@@ -218,6 +218,69 @@ const submitAdjust = async () => {
   adjustBusy.value = false
 }
 onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet(); if (isSuper) loadWalletAll() } })
+
+// ── 域名生命周期（批2：有效期展示/自动续费开关/手动续费双通道）──
+const expDays = (d) => {
+  if (!d.expires_at) return null
+  return Math.floor((new Date(d.expires_at + 'T00:00:00Z') - new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z')) / 86400000)
+}
+const expTier = (d) => {
+  const n = expDays(d)
+  if (n === null) return ''
+  if (n < 0) return 'expired'
+  if (n <= 7) return 'critical'
+  if (n <= 30) return 'soon'
+  return ''
+}
+const expText = (d) => {
+  const n = expDays(d)
+  if (n === null) return ''
+  if (n < 0) return t('dom.expExpired')
+  if (n === 0) return t('dom.expToday')
+  return t('dom.expDays', { n })
+}
+const expiringCount = computed(() => (myDomains.value || []).filter(d => {
+  const n = expDays(d); return n !== null && n <= 30
+}).length)
+const canRenew = (d) => {
+  const n = expDays(d)
+  return !!d.registrar && d.registrar !== 'external' && n !== null && n <= 90
+}
+const toggleAutoRenew = async (d) => {
+  try {
+    const r = await POST(`/domains-shop/domains/${d.id}/auto-renew`, { on: !d.auto_renew })
+    d.auto_renew = r.auto_renew
+    ElMessage.success(r.auto_renew ? t('dom.autoOn') : t('dom.autoOff'))
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+const renewOpen = ref(false)
+const renewTarget = ref(null)
+const renewYears = ref(1)
+const renewQuote = ref(null)
+const renewBusy = ref(false)
+const openRenew = async (d) => {
+  renewTarget.value = d; renewYears.value = 1; renewQuote.value = null; renewOpen.value = true
+  await refreshQuote()
+}
+const refreshQuote = async () => {
+  try { renewQuote.value = await GET(`/domains-shop/domains/${renewTarget.value.id}/renew-quote?years=${renewYears.value}`) }
+  catch (e) { renewQuote.value = { err: e.message || t('common.opFail') } }
+}
+const submitRenew = async () => {
+  renewBusy.value = true
+  try {
+    const r = await POST(`/domains-shop/domains/${renewTarget.value.id}/renew`, { years: renewYears.value }, 120000)
+    renewOpen.value = false
+    if (r.paid_by === 'wallet') {
+      ElMessage.success(t('dom.renewDone', { d: r.expires_at }))
+      loadMyDomains(); if (canBilling) loadWallet()
+    } else {
+      ElMessage.success(t('dom.renewOrderCreated', { v: r.pay_amount }))
+      sec.value = 'orders'; loadOrders()
+    }
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  renewBusy.value = false
+}
 </script>
 
 <template>
@@ -225,7 +288,7 @@ onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet();
     <div class="list-bar">
       <div class="seg-bar">
         <button class="seg-btn" :class="{ on: sec === 'buy' }" @click="sec = 'buy'">{{ t('domains.tabBuy') }}</button>
-        <button class="seg-btn" :class="{ on: sec === 'mine' }" @click="sec = 'mine'; loadMyDomains()">{{ t('domains.tabMine') }} <i v-if="myDomains.length" class="seg-cnt">{{ myDomains.length }}</i></button>
+        <button class="seg-btn" :class="{ on: sec === 'mine' }" @click="sec = 'mine'; loadMyDomains()">{{ t('domains.tabMine') }} <i v-if="myDomains.length" class="seg-cnt">{{ myDomains.length }}</i><i v-if="expiringCount" class="seg-cnt hot">{{ expiringCount }}</i></button>
         <button class="seg-btn" :class="{ on: sec === 'orders' }" @click="sec = 'orders'; loadOrders()">{{ t('domains.tabOrders') }} <i v-if="pendingCount" class="seg-cnt hot">{{ pendingCount }}</i></button>
         <button v-if="canBilling" class="seg-btn" :class="{ on: sec === 'wallet' }" @click="sec = 'wallet'; loadWallet(); if (isSuper) loadWalletAll()">{{ t('wallet.tab') }} <i v-if="wallet" class="seg-cnt">${{ wallet.balance_usd }}</i></button>
       </div>
@@ -268,11 +331,22 @@ onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet();
           <span class="ds-dom">{{ d.domain }}</span>
           <span :class="['src-tag', d.source]">{{ srcLabel(d.source) }}</span>
           <span :class="['zone-chip', d.cf_zone_status === 'active' ? 'ok' : 'warn']">{{ zoneTxt(d) }}</span>
+          <span v-if="d.expires_at" :class="['exp-chip', expTier(d)]" :title="t('dom.expTitle', { d: d.expires_at })">
+            {{ d.expires_at }} · {{ expText(d) }}</span>
+          <button v-if="d.registrar && d.registrar !== 'external'" class="ar-toggle" :class="{ on: d.auto_renew }"
+                  :title="t('dom.autoTip')" @click.stop="toggleAutoRenew(d)">{{ t('dom.autoRenew') }} {{ d.auto_renew ? '✓' : '✕' }}</button>
+          <button v-if="canRenew(d)" class="ctrl-btn sm primary" @click.stop="openRenew(d)">{{ t('dom.renewBtn') }}</button>
           <span v-if="d.blocked" class="zone-chip fb-block">FB 屏蔽</span>
           <span class="ds-usage">{{ t('domains.usedBy', { n: d.usage_count || 0 }) }}</span>
           <span v-if="hasSubs(d)" class="dw-sub-count">{{ (d.subdomains || []).length }} 子域</span>
         </div>
         <div v-if="expandedDomain === d.domain" class="dom-wb-body">
+          <div class="dw-life">
+            <span v-if="d.registrar">{{ d.registrar === 'external' ? t('dom.regExternal') : d.registrar }}</span>
+            <span v-if="d.expires_at">{{ t('dom.expTitle', { d: d.expires_at }) }}</span>
+            <span v-if="d.last_renewed_at">{{ t('dom.lastRenewed', { d: d.last_renewed_at }) }}</span>
+            <span v-if="!d.registrar">{{ t('dom.regNone') }}</span>
+          </div>
           <div v-if="hasSubs(d)" class="dw-subs">
             <div v-for="sub in d.subdomains" :key="sub.host" class="dw-sub-row" @click="$router.push({ name: 'landing', query: { edit: sub.page_id } })">
               <span class="dw-host mono">{{ sub.host }}</span>
@@ -412,6 +486,27 @@ onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet();
         <button class="btn primary" :disabled="adjustBusy" @click="submitAdjust">{{ adjustBusy ? t('common.loading') : t('common.confirm') }}</button>
       </template>
     </el-dialog>
+
+    <!-- 续费弹窗（双通道：余额够即时续费；不足生成 USDT 直付单，到账自动续） -->
+    <el-dialog v-model="renewOpen" :title="t('dom.renewTitle', { d: renewTarget?.domain || '' })" width="440px" append-to-body>
+      <div v-if="renewQuote && !renewQuote.err">
+        <div class="inv-row"><span class="inv-k">{{ t('dom.curExpires') }}</span><b>{{ renewQuote.expires_at || '—' }}</b></div>
+        <div class="form-l"><label>{{ t('dom.renewYears') }}</label>
+          <el-select v-model="renewYears" size="default" style="width:100%" @change="refreshQuote">
+            <el-option v-for="y in 10" :key="y" :value="y" :label="t('dom.yearsN', { n: y })" />
+          </el-select></div>
+        <div class="inv-row"><span class="inv-k">{{ t('dom.renewPrice') }}</span>
+          <b>{{ t('dom.perYear', { v: renewQuote.unit.toFixed(2) }) }} × {{ renewQuote.years }} = <b class="inv-amt">${{ renewQuote.total_usd.toFixed(2) }}</b></b></div>
+        <div class="inv-row"><span class="inv-k">{{ t('wallet.balanceLabel') }}</span>
+          <b :style="{ color: renewQuote.balance_usd >= renewQuote.total_usd ? 'var(--success)' : 'var(--warning)' }">${{ renewQuote.balance_usd.toFixed(2) }}</b></div>
+        <div class="field-hint">{{ renewQuote.balance_usd >= renewQuote.total_usd ? t('dom.payWallet') : t('dom.payUsdt') }}</div>
+      </div>
+      <div v-else-if="renewQuote?.err" class="ds-err">{{ renewQuote.err }}</div>
+      <div v-else v-loading="true" style="min-height:80px"></div>
+      <template #footer>
+        <button class="btn primary" :disabled="renewBusy || !renewQuote || renewQuote.err" @click="submitRenew">{{ renewBusy ? t('common.loading') : t('dom.renewGo') }}</button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -431,6 +526,14 @@ onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet();
 .ds-row { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap; }
 .ds-team { font-size: 11px; color: var(--t3); background: var(--bg3); border-radius: 6px; padding: 1px 8px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .ds-cost-brk { font-style: normal; font-size: 10px; color: var(--t3); margin-left: 2px }
+/* 域名生命周期：有效期 chip 四档 + 自动续费开关 */
+.exp-chip { font-size: 11px; padding: 1px 8px; border-radius: 8px; white-space: nowrap; flex: none; color: var(--t3); background: var(--bg3) }
+.exp-chip.soon { color: var(--warning); background: rgba(255,159,10,.12) }
+.exp-chip.critical { color: var(--error); background: rgba(255,69,58,.12); font-weight: 600 }
+.exp-chip.expired { color: #fff; background: var(--error); font-weight: 600 }
+.ar-toggle { background: none; border: 1px solid var(--bd); border-radius: 8px; font-size: 10.5px; color: var(--t3); padding: 1px 7px; cursor: pointer; flex: none; font-family: inherit }
+.ar-toggle.on { color: var(--success); border-color: rgba(52,199,89,.4); background: rgba(52,199,89,.08) }
+.dw-life { display: flex; gap: 14px; font-size: 11.5px; color: var(--t3); flex-wrap: wrap }
 /* 钱包（团队余额 / 充值单 / 全平台视图 / 流水） */
 .wal-head { display: flex; align-items: center; gap: 14px; padding: 6px 2px 12px; border-bottom: 1px solid var(--bd); flex-wrap: wrap }
 .wal-balance { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 }
