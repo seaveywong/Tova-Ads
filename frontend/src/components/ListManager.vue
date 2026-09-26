@@ -128,7 +128,7 @@ const label = computed(() => props.type === 'url' ? t('lm.itemUrl') : t('lm.item
 </template>
 
 <style scoped>
-.lm { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.lm { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .lm-inline { flex: none; }
 .lm-toolbar { display: flex; gap: 8px; align-items: center; }
 .lm-count { font-size: 11px; color: var(--t3); }
