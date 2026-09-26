@@ -150,4 +150,11 @@ const label = computed(() => props.type === 'url' ? t('lm.itemUrl') : t('lm.item
 .lm-bad-line { font-size: 11px; color: var(--t3); font-family: 'SF Mono', Consolas, monospace; }
 .lm-prev-list { margin-top: 6px; max-height: 140px; overflow-y: auto; }
 .lm-prev-item { font-size: 11px; color: var(--t2); font-family: 'SF Mono', Consolas, monospace; padding: 1px 0; }
+/* 按钮（.ctrl-btn 全局无定义，本组件自绘——修复批量导入/添加一条等按钮渲染成浏览器默认白底） */
+.ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s; font-family: inherit; }
+.ctrl-btn:hover { border-color: var(--bd2); color: var(--t1); }
+.ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
+.ctrl-btn.primary:hover { filter: brightness(1.08); }
+.ctrl-btn.primary:disabled { opacity: .5; cursor: wait; }
+.ctrl-btn.sm { padding: 0 8px; font-size: 12px; }
 </style>

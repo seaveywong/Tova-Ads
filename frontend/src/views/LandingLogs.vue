@@ -424,8 +424,9 @@ watch(() => route.query, (q) => {
       <button class="ftab" :class="{ on: fEvent === 'submit' }" @click="toggleEvent('submit')">{{ t('lplogs.actionSubmit') }} <b>{{ byEventMap.submit || 0 }}</b></button>
       <span class="farrow">|</span>
       <button class="ftab" :class="{ on: fEvent === 'redirect' }" @click="toggleEvent('redirect')">{{ t('lplogs.actionRedirect') }} <b>{{ byEventMap.redirect || 0 }}</b></button>
+      <span class="farrow">|</span>
       <button class="ftab" :class="{ on: fEvent === 'block', danger: blockTotal > 0 }" @click="toggleEvent('block')">{{ t('lplogs.actionBlock') }} <b>{{ blockTotal }}</b></button>
-      <span class="frate">{{ t('lplogs.convRate') }} <b>{{ convRate }}</b></span>
+      <span class="frate">{{ t('lplogs.convRate') }} <b :class="{ none: !byEventMap.visit }">{{ convRate }}</b></span>
     </div>
     <div class="stats-bar agg-bar" v-if="agg && agg.total">
       <span class="stats-label">{{ t('lplogs.aggCountries') }}</span>
@@ -607,5 +608,5 @@ watch(() => route.query, (q) => {
 .ftab.danger.on b{color:#fff}
 .farrow{color:var(--t3);font-size:13px}
 .frate{margin-left:auto;font-size:12px;color:var(--t3)}
-.frate b{color:var(--success);font-size:14px;margin-left:2px}
+.frate b{color:var(--success);font-size:14px;margin-left:2px}.frate b.none{color:var(--t3)}
 </style>

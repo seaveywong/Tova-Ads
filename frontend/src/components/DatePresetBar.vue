@@ -61,4 +61,6 @@ const queryLabel = () => props.customLabel || t('common.search')
 /* 自定义区间展开/收起过渡（淡入+轻上移，展开方向与按钮行一致） */
 .dpb-enter-active, .dpb-leave-active { transition: opacity 0.18s ease, transform 0.18s ease }
 .dpb-enter-from, .dpb-leave-to { opacity: 0; transform: translateY(-3px) }
+/* 移动端日期 chips 不折行、横向滚动（避免「自定义」孤行） */
+@media (max-width: 600px) { .date-bar { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; min-width: 0; } }
 </style>
