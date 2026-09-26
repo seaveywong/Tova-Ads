@@ -230,7 +230,13 @@ def _suggest_candidates(q: str, mode: str, tlds: list) -> list:
         for t in tlds:
             _add(root)
         return cands
-    # smart：词根 × 前后缀修饰 × TLD（组合爆 → 随机采样到 cap）
+    # smart：纯词根×TLD 先保底（模糊搜索主诉求——搜什么先看到什么），修饰组合再补
+    for t in tlds:
+        if root:
+            cands.append(f"{root}.{t}")
+        if len(cands) >= 48:
+            return cands
+    # 词根 × 前后缀修饰 × TLD（组合爆 → 随机采样到 cap）
     combos = [(h, tl) for h in _SMART_HEAD for tl in _SMART_TAIL]
     rng = _rand.Random()
     rng.shuffle(combos)
@@ -378,7 +384,7 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
     o = db.query(DomainOrder).filter(DomainOrder.id == oid).first()
     if not o:
         raise HTTPException(404, "订单不存在")
-    if o.status not in ("pending_payment", "approved", "payment_detected"):
+    if o.status not in ("pending_payment", "approved", "payment_detected", "failed"):
         raise HTTPException(400, f"状态 {o.status} 不可批准")
     if not _reg_ready(db):
         o.status = "approved"

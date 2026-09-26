@@ -181,7 +181,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
       <div v-loading="shopSuggesting" class="ds-results">
         <div v-for="r in shopResults" :key="r.domain" class="ds-row">
           <span class="ds-dom">{{ r.domain }}</span>
-          <span class="ds-price">${{ r.cost_usd }} <i>+ ${{ r.fee_usd }}</i> = <b>${{ r.total_usd }}</b></span>
+          <span class="ds-price"><b>${{ r.total_usd }}</b><i v-if="isSuper" class="ds-cost-brk" :title="t('domains.costBrkTip')">（${{ r.cost_usd }}+${{ r.fee_usd }}）</i></span>
           <button class="ctrl-btn sm primary" :disabled="shopOrdering === r.domain" @click="orderDomain(r.domain)">{{ shopOrdering === r.domain ? t('common.loading') : t('landing.shopOrderBtn') }}</button>
         </div>
         <div v-if="!shopSuggesting && shopResults.length" class="ds-note">{{ t('domains.listNote') }}</div>
@@ -255,7 +255,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
         <a v-if="o.payment_txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + o.payment_txid" target="_blank" :title="o.payment_txid">TXID ↗</a>
         <span class="ds-time">{{ o.created_at }}</span>
         <button v-if="['pending_payment', 'payment_detected'].includes(o.status)" class="ctrl-btn sm" @click="openPayPanel(o); payPanel.status = o.status; payPanel.payment_txid = o.payment_txid">{{ t('domains.payBtn') }}</button>
-        <button v-if="['pending_payment', 'payment_detected'].includes(o.status) && isSuper" class="ctrl-btn sm primary" :disabled="orderBusy === o.id" @click="approveOrder(o)">{{ orderBusy === o.id ? t('common.loading') : t('domains.approve') }}</button>
+        <button v-if="['pending_payment', 'payment_detected', 'failed'].includes(o.status) && isSuper" class="ctrl-btn sm primary" :disabled="orderBusy === o.id" @click="approveOrder(o)">{{ orderBusy === o.id ? t('common.loading') : t('domains.approve') }}</button>
         <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
         <span v-if="o.status === 'failed' && o.error" class="ds-err" :title="o.error">⚠</span>
       </div>
@@ -279,6 +279,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .ds-results { margin-top: 8px; min-height: 60px; }
 .ds-row { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap; }
 .ds-team { font-size: 11px; color: var(--t3); background: var(--bg3); border-radius: 6px; padding: 1px 8px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.ds-cost-brk { font-style: normal; font-size: 10px; color: var(--t3); margin-left: 2px }
 .ds-row:last-child { border-bottom: none; }
 .ds-dom { font-weight: 600; color: var(--t1); font-size: 14px; flex: 1; min-width: 160px; }
 .ds-price { color: var(--t3); font-variant-numeric: tabular-nums; }

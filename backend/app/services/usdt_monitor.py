@@ -1,9 +1,10 @@
-"""USDT-TRC20 到账监听（域名商店收款确认，2026-09-24 批）。
+"""USDT-TRC20 到账监听（域名商店收款确认，2026-09-24 批；2026-09-26 全自动化）。
 
 链上公开数据直读（TronGrid = Tron 官方免费 API，无第三方支付网关、零抽成）：
 轮询收款地址的 TRC20 USDT 入账 → 按「应付金额 = 总价 + 订单号尾两位美分」精确对号
-（TRC20 无 memo，同额订单靠唯一尾数区分）→ pending_payment 转 payment_detected
-（TXID/实收额入库 + 通知带证据）→ 超管一键确认后注册。全自动模式留钱包批。
+（TRC20 无 memo，同额订单靠唯一尾数区分）→ 金额校验通过即**自动确认+自动注册**
+（用户拍板：充值/直付都全自动，人工只兜异常）——注册链失败才置 failed + 告警
+超管人工重试（订单页「确认收款」对 failed 可重入）。钱包充值入账复用本监听。
 调度：main.py 每 2 分钟；advisory lock 121。
 """
 import logging
@@ -37,6 +38,30 @@ def _fetch_incoming(addr: str, tg_key: str = "") -> list:
     except Exception as e:
         logger.warning(f"[USDT] TronGrid 拉取失败: {e}")
         return []
+
+
+def _auto_fulfill(db, o) -> str:
+    """收款已核实后的自动注册链（复用 domain_shop._fulfill）。成功返 None；失败返原因
+    （订单已由 _fulfill 置 failed 留 error，超管可从订单页重入 approve 重试）。"""
+    try:
+        from ..models.auth import User
+        from ..routers.domain_shop import _reg_ready, _fulfill
+        su = db.query(User).filter(User.is_superadmin.is_(True)).order_by(User.id).first()
+        if not su:
+            return "无超管账号可挂自动确认人"
+        if not _reg_ready(db):
+            o.status = "approved"   # 注册商未配置：留待配置后人工/下轮重试
+            o.approved_by, o.approved_at = su.id, datetime.now(timezone.utc)
+            db.commit()
+            return "注册商凭据未配置（订单已置 approved，配置后点确认收款续链）"
+        o.status = "registering"
+        o.approved_by, o.approved_at = su.id, datetime.now(timezone.utc)
+        db.commit()
+        _fulfill(o, su, db)
+        return ""
+    except Exception as e:
+        db.rollback()
+        return str(getattr(e, "detail", None) or e)[:200]
 
 
 def run_usdt_monitor():
@@ -94,14 +119,25 @@ def run_usdt_monitor():
                 o.payment_txid = str(t.get("transaction_id") or "")
                 o.paid_amount = amt
                 hits += 1
+                # 全自动（2026-09-26 用户拍板）：金额精确匹配+TXID 未用过 = 收款确认，
+                # 直接进注册链；失败才人工（failed 状态可从订单页重试）
+                db.commit()   # 先落 detected——注册链失败时证据（TXID/实收额）不丢
+                auto_err = _auto_fulfill(db, o)
                 from ..core.notify_utils import emit_notification
                 from ..core.log_utils import new_trace_id
-                emit_notification(db, tenant_id=o.tenant_id, level="info",
-                                  event_type="domain_payment_detected", trace_id=new_trace_id(),
-                                  title=f"域名订单 #{o.id} 检测到 USDT 到账 ${amt}",
-                                  body=f"{o.domain} 应付 ${want}（含订单尾号）\n"
-                                       f"TXID {o.payment_txid}\n"
-                                       f"请到 投放链接 → 域名 → 订单 一键确认收款，确认后自动注册并接入。")
+                if auto_err:
+                    emit_notification(db, tenant_id=o.tenant_id, level="warning",
+                                      event_type="domain_auto_fulfill_failed", trace_id=new_trace_id(),
+                                      title=f"域名订单 #{o.id} 到账 ${amt}，但自动注册失败",
+                                      body=f"{o.domain} TXID {o.payment_txid}\n"
+                                           f"原因：{auto_err[:200]}\n"
+                                           f"超管请在 投放链接 → 域名 → 订单 点「确认收款」重试注册链。")
+                else:
+                    emit_notification(db, tenant_id=o.tenant_id, level="info",
+                                      event_type="domain_delivered", trace_id=new_trace_id(),
+                                      title=f"域名 {o.domain} 已自动交付",
+                                      body=f"订单 #{o.id} 检测到 USDT 到账 ${amt}（TXID {o.payment_txid}），"
+                                           f"已自动确认并完成注册接入，现在可以在落地页中使用该域名。")
                 break
         if hits:
             db.commit()
