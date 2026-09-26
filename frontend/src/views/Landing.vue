@@ -414,6 +414,39 @@ const saveSubTarget = async (s) => {
     ElMessage.success(t('landing.subTargetSet'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
 }
+// ── 投放链接快捷编辑（轻量弹窗：只改目标 URL + 轮换，保存即重发，不开整页抽屉）──
+const quickTargetOpen = ref(false)
+const quickTargetId = ref(null)
+const quickTargetTitle = ref('')
+const quickTargetUrls = ref([])
+const quickRotMode = ref('first')
+const quickSaving = ref(false)
+const openQuickTarget = (p) => {
+  quickTargetId.value = p.id
+  quickTargetTitle.value = p.title || ''
+  quickTargetUrls.value = [...(p.target_urls || [])]
+  quickRotMode.value = p.rotation_mode || 'first'
+  quickTargetOpen.value = true
+}
+const saveQuickTarget = async () => {
+  if (!quickTargetUrls.value.length) return ElMessage.warning(t('landing.warnTargetUrl'))
+  if (quickSaving.value) return
+  quickSaving.value = true
+  try {
+    // 部分更新：后端只覆盖 target_urls/rotation_mode，其余字段保留，并立即重新部署
+    const resp = await PUT(`/landing/pages/${quickTargetId.value}`, {
+      target_urls: quickTargetUrls.value, rotation_mode: quickRotMode.value,
+    })
+    quickTargetOpen.value = false
+    ElMessage.success(t('landing.quickTargetSaved'))
+    await loadPages()
+    if (resp && resp.bind_errors && resp.bind_errors.length) {
+      resp.bind_errors.forEach((w) => ElMessage.warning(w))
+    }
+    if (resp && resp.self_check) showSelfCheck(resp.self_check, t('landing.scPostPublishTitle'))
+  } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  quickSaving.value = false
+}
 const copyUrl = (slug) => {
   // 旧版兼容（仅 FB 宏链接）
   const base = (subPage.value?.custom_domain || subPage.value?.custom_domains?.[0] || '').replace(/^https?:\/\//, '')
@@ -894,6 +927,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <span v-else class="lp-fb-empty"></span>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
+            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">🔗</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p); else if (cmd==='delete') deletePage(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
@@ -953,6 +987,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           </div>
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
+            <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">🔗</button>
             <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='archive') archive(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
@@ -1191,6 +1226,25 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
         <button class="btn primary" :disabled="saving" @click="save">{{ saving ? t('landing.deploying') : (editingId ? t('common.save') : t('landing.publish')) }}</button>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="quickTargetOpen" :title="t('landing.quickTargetTitle')" width="480px" :close-on-click-modal="false" :destroy-on-close="true" append-to-body>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div v-if="quickTargetTitle" style="font-size:12px;color:var(--t3)">{{ quickTargetTitle }}</div>
+        <div class="form-l"><label>{{ t('landing.fTargetUrl') }}</label>
+          <ListManager v-model="quickTargetUrls" type="url" :placeholder="t('landing.fTargetUrlPh')" style="flex:1" />
+        </div>
+        <div class="form-l"><label>{{ t('landing.fRotation') }}</label>
+          <select v-model="quickRotMode" class="input">
+            <option v-for="o in rotationOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--t3);line-height:1.5">{{ t('landing.quickTargetDesc') }}</div>
+      </div>
+      <template #footer>
+        <button class="btn" :disabled="quickSaving" @click="quickTargetOpen = false">{{ t('common.cancel') }}</button>
+        <button class="btn primary" :disabled="quickSaving" @click="saveQuickTarget">{{ quickSaving ? t('common.saving') + '…' : t('common.save') }}</button>
+      </template>
+    </el-dialog>
 
     <el-drawer v-model="subOpen" :title="t('landing.subDrawerTitle', { title: subPage?.title || '' })" direction="rtl" size="520px" :destroy-on-close="true" :close-on-click-modal="false">
       <div class="sub-gen">
