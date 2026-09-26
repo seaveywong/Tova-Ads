@@ -3046,3 +3046,12 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 用户实证 BM 邀请 500（fb.py 缺 import re → NameError）——py_compile 不抓运行时错。
 **端点 smoke 17/17 全通**（新端点逐一实调：pages-overview/bm-overview/BM members/域名候选/支付/预检/令牌池等）；**静态 NameError 扫描**（21 标记→人工复核→真 2 假 19）：fb.py 缺 re（已修）、guard_engine.py 缺 random（保活 3599 行 NameError——触发时保活静默 500，已修）。ADMIN 确认文案改清晰。CLAUDE.md 铁律 8（i18n 裸键零容忍）。
 教训：py_compile 只验语法不验运行时——**新端点必须带认证实调**（_smoke_all_endpoints.py 留存）。
+
+## 批VV：BM 写操作根因 + 全系统断层扫描 + 开发规范落地（2026-09-26，954c978）
+**BM 邀请"请求参数错误"根因**：CLI 实测（cred#34 + BM Nhật Minh）→ FB 返 subcode 1752203 "Application does not have permission for this action"。令牌 HAS business_management scope，但 **App 层未过 Review**——读可写不可，与当年 pages_manage_ads 同类 FB App 权限墙。解锁条件：App Review 提交 business_management（Use Case: Manage business people and assets）+ Live Mode。代码已就绪，权限通即用。
+
+**BM 资产管理 API 面**：邀请/移除成员/分配主页/分配账户/像素共享/合作伙伴——全部同一权限墙（business_management）。解锁一个全通。
+
+**全系统断层扫描**：①端点 smoke 17/17 全通（本会话新增端点逐一带认证实调）；②Python NameError 静态扫描 21 项→真 2 假 19（fb.py 缺 re / guard_engine 缺 random，均修）；③i18n 裸键组件级校验（adm.copiedVal 跨命名空间→修）。
+
+**开发规范四步落地 CLAUDE.md 铁律 9**：调研→CLI 实测→复审→文档。禁止：不调研做功能 / 不实测上线 / 带 bug 交付 / 功能做一半上线。
