@@ -347,12 +347,21 @@ const cfLimit = (v) => {
   if (v === '10万') return t('settings.cf100k')
   return v || '-'
 }
-const loadCfUsage = async () => {
+const loadCfUsage = async (fresh) => {
   cfUsageLoading.value = true
-  try { cfUsage.value = await GET('/cf-console/usage', 90000) }
+  try { cfUsage.value = await GET('/cf-console/usage' + (fresh ? '?fresh=1' : ''), 90000) }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   cfUsageLoading.value = false
 }
+// 全部 zone 合计（今日请求数按有数据的 zone 求和；7d/30d/带宽直接求和）
+const cfUsageTotal = computed(() => {
+  const zs = cfUsage.value?.zones || []
+  return { today: zs.reduce((a, z) => a + ((z.today?.requests) || 0), 0),
+           todayAny: zs.some(z => z.today),
+           d7: zs.reduce((a, z) => a + (z.d7 || 0), 0),
+           d30: zs.reduce((a, z) => a + (z.d30 || 0), 0),
+           bytes30: zs.reduce((a, z) => a + (z.bytes30 || 0), 0) }
+})
 const loadCfOverview = async () => {
   cfLoading.value = true
   try { cfOverview.value = await GET('/cf-console/overview', 60000) }
@@ -935,13 +944,14 @@ const runKeepaliveNow = async () => {
         <div class="cf-panel">
           <div class="cf-panel-hd">
             <span>{{ t('settings.cfUsageTitle') }}</span>
-            <button class="btn sm" :disabled="cfUsageLoading" @click="loadCfUsage">{{ cfUsageLoading ? t('common.loading') : '⟳' }}</button>
+            <span v-if="cfUsage?.token_tail" class="cf-token-tail" :title="t('settings.cfTokenTailTip')">Token ···{{ cfUsage.token_tail }}</span>
+            <button class="btn sm" :disabled="cfUsageLoading" @click="loadCfUsage(true)">{{ cfUsageLoading ? t('common.loading') : '⟳' }}</button>
           </div>
           <div class="cf-panel-bd" v-loading="cfUsageLoading">
             <div class="cf-limits">{{ t('settings.cfLimitsLine', {
               a: cfLimit(cfUsage?.limits?.pages_static), b: cfLimit(cfUsage?.limits?.pages_bandwidth),
               c: cfLimit(cfUsage?.limits?.functions_per_day), d: cfLimit(cfUsage?.limits?.builds_per_month) }) }}</div>
-            <div v-if="cfUsage?.needs_permission" class="cf-perm-hint">{{ t('settings.cfPermHint') }}</div>
+            <div v-if="cfUsage?.needs_permission" class="cf-perm-hint">{{ t('settings.cfPermHint', { perm: cfUsage?.perm || 'Zone › Analytics › Read', tail: cfUsage?.token_tail || '?' }) }}</div>
             <template v-for="u in (cfUsage?.zones || [])" :key="u.zone">
               <div class="cf-usage-row">
                 <span class="cf-zone-name">{{ u.zone }}</span>
@@ -951,6 +961,13 @@ const runKeepaliveNow = async () => {
                 <span class="cf-usage-cell">30d <b>{{ u.d30.toLocaleString() }}</b><i> · {{ fmtBytes(u.bytes30) }}</i></span>
               </div>
             </template>
+            <div v-if="(cfUsage?.zones || []).length > 1" class="cf-usage-row total">
+              <span class="cf-zone-name">{{ t('settings.cfUsageTotal') }}</span>
+              <span class="cf-usage-plan"></span>
+              <span class="cf-usage-cell" :title="t('settings.cfUvToday')">{{ t('settings.cfToday') }} <b>{{ cfUsageTotal.todayAny ? cfUsageTotal.today.toLocaleString() : '—' }}</b></span>
+              <span class="cf-usage-cell">7d <b>{{ cfUsageTotal.d7.toLocaleString() }}</b></span>
+              <span class="cf-usage-cell">30d <b>{{ cfUsageTotal.d30.toLocaleString() }}</b><i> · {{ fmtBytes(cfUsageTotal.bytes30) }}</i></span>
+            </div>
           </div>
         </div>
       </div>
@@ -1508,6 +1525,9 @@ const runKeepaliveNow = async () => {
 .cf-perm-hint { font-size: 12px; color: #ff9f0a; padding: 8px 10px; background: rgba(255,159,10,.08); border-radius: 6px; margin: 6px 0 }
 .cf-usage-row { display: flex; gap: 14px; align-items: baseline; padding: 7px 2px; border-bottom: 1px solid var(--bd); font-size: 12px }
 .cf-usage-row:last-child { border-bottom: none }
+.cf-usage-row.total { border-top: 1px solid var(--bd2); margin-top: 2px }
+.cf-usage-row.total .cf-zone-name { font-weight: 600; color: var(--t1) }
+.cf-token-tail { font-size: 10px; color: var(--t3); font-family: var(--font-mono); margin-left: auto; margin-right: 8px }
 .cf-usage-plan { font-size: 10px; color: var(--t3); min-width: 88px }
 .cf-usage-cell { color: var(--t3); white-space: nowrap }
 .cf-usage-cell b { color: var(--t1); font-weight: 600 }

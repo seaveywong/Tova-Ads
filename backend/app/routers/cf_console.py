@@ -121,13 +121,15 @@ def cf_delete_zone(zone_id: str, name: str = "", _=Depends(_cf_client_for_user))
 
 
 @router.get("/usage")
-def cf_usage(_=Depends(_cf_client_for_user)):
+def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
     """各 zone 访问量（今日/近7天/近30天：请求/带宽/独立访客）+ 套餐与限额参考。
     GraphQL Analytics 需 Token 有 Zone Analytics Read——缺权限返回 needs_permission
-    （前端展示加权限指引，不炸）。60s 缓存。"""
-    hit = _CACHE.get("usage")
-    if hit and _time.time() - hit[0] < 60:
-        return hit[1]
+    + perm（CF 原话的权限名转可读）+ token_tail（定位"改错 token"——用户曾改另一把
+    仍看不到数据）。fresh=1 绕 60s 缓存（改完权限立即重试点 ⟳）。"""
+    if not fresh:
+        hit = _CACHE.get("usage")
+        if hit and _time.time() - hit[0] < 60:
+            return hit[1]
     cf = _cf()
     zones = cf.list_zones()
     from datetime import date as _date, timedelta as _td
@@ -142,7 +144,7 @@ def cf_usage(_=Depends(_cf_client_for_user)):
         }
       }}
     }"""
-    out, needs_perm = [], False
+    out, needs_perm, perm_pretty = [], False, ""
     for z in zones:
         row = {"zone": z.get("name"), "plan": (z.get("plan") or {}).get("name", ""),
                "today": None, "d7": 0, "d30": 0, "bytes30": 0, "uniques30": 0}
@@ -169,11 +171,19 @@ def cf_usage(_=Depends(_cf_client_for_user)):
             pass
         if not groups:
             errs = (r.get("errors") or []) if isinstance(r, dict) else []
-            if any("permission" in str(e.get("message", "")) for e in errs):
+            msg = " ".join(str(e.get("message", "")) for e in errs)
+            low = msg.lower()
+            if any(k in low for k in ("permission", "authz", "not entitled", "does not have")):
                 needs_perm = True
+                # CF 原话 'com.cloudflare.api.account.zone.analytics.read' → 'Zone › Analytics › Read'
+                m = re.search(r"permission '([a-z.]+)'", msg.lower())
+                if m and not perm_pretty:
+                    parts = m.group(1).split(".")[-3:]
+                    perm_pretty = " › ".join(p.capitalize() for p in parts)
             row["no_data"] = True
         out.append(row)
-    res = {"zones": out, "needs_permission": needs_perm,
+    res = {"zones": out, "needs_permission": needs_perm, "perm": perm_pretty,
+           "token_tail": (settings.cf_api_token or "")[-6:],
            # 官方常量（Free 套餐参考；Pro/Business 上调）——API 不返回限额，按套餐静态展示
            "limits": {"pages_static": "不限", "pages_bandwidth": "不限",
                       "functions_per_day": "10万", "builds_per_month": "500"}}
