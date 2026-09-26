@@ -1,7 +1,7 @@
 export default {
   zh: {
     pauseAction: '暂停',
-    ownerFilterPh: '按所有者', ownerFilterTip: '按账户归属运营过滤其名下账户的广告',
+    ownerFilterPh: '按所有者', ownerFilterTip: '按账户归属运营过滤其名下账户的广告', ownerSearchPh: '搜索所有者…',
     columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化（访问）',
     costPerResult: '单次成效费用', combinedCpa: '综合 CPA', ctrLabel: 'CTR',
     snapshot: '快照 {time}', snapshotUnknown: '快照时间未知', stIdleTitle: '容器开启但下面没有生效投放中的广告——不消耗，点开关可整体启停',
@@ -20,10 +20,13 @@ export default {
     breakdownResults: '成效', breakdownEmpty: '该维度暂无数据（日期范围内无投放或无消耗）',
     breakdownFail: '细分加载失败：{msg}',
     createAd: '创建',
+    pickTplTitle: '选择投放模板', pickTplPh: '搜索模板名…', pickTplEmpty: '无匹配模板',
+    pickTplNone: '还没有模板——去新建一个',
+    tplAgoNow: '刚刚', tplAgoMin: '{n} 分钟前', tplAgoHour: '{n} 小时前', tplAgoDay: '{n} 天前', tplAgoWeek: '{n} 周前',
   },
   en: {
     pauseAction: 'Pause',
-    ownerFilterPh: 'Owner', ownerFilterTip: 'Show ads under accounts owned by the selected member',
+    ownerFilterPh: 'Owner', ownerFilterTip: 'Show ads under accounts owned by the selected member', ownerSearchPh: 'Search owner…',
     columns: 'Customize columns', resultsFb: 'Results (FB)', totalConversions: 'Combined (visits)',
     costPerResult: 'Cost per result', combinedCpa: 'Combined CPA', ctrLabel: 'CTR',
     snapshot: 'Snapshot {time}', snapshotUnknown: 'Snapshot time unavailable', stIdleTitle: 'Container is on but no ads under it are effectively delivering — zero spend; toggle to start/stop all',
@@ -42,5 +45,8 @@ export default {
     breakdownResults: 'Results', breakdownEmpty: 'No data for this breakdown (no delivery or spend in range)',
     breakdownFail: 'Breakdown failed: {msg}',
     createAd: 'Create',
+    pickTplTitle: 'Pick a Launch Template', pickTplPh: 'Search template name…', pickTplEmpty: 'No matching templates',
+    pickTplNone: 'No templates yet — create one',
+    tplAgoNow: 'just now', tplAgoMin: '{n} min ago', tplAgoHour: '{n} h ago', tplAgoDay: '{n} d ago', tplAgoWeek: '{n} w ago',
   },
 }

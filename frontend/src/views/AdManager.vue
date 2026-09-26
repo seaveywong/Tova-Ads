@@ -9,6 +9,8 @@ import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { usePlatform } from '../composables/usePlatform'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
+import DeployDrawer from '../components/DeployDrawer.vue'
+import JobProgressDialog from '../components/JobProgressDialog.vue'
 import { entityKey, entityContext, searchMatches, compareRows, columnsFor, normalizeViewPreferences, fbResult } from '../composables/adManagerView'
 
 const { t, locale } = useI18n()
@@ -121,10 +123,43 @@ const campNameOf = (s) => {
   return c ? t('adm.belongsToCampaign', { name: c.name }) : ''
 }
 const loading = ref(false)
-const quickTemplates = ref([])   // 创建按钮模板快选（直跳部署不落模板页）
-const loadQuickTemplates = async () => {
-  try { const r = await GET('/launch-templates'); quickTemplates.value = (Array.isArray(r) ? r : (r?.items || [])).slice(0, 8) } catch {}
+// 创建按钮 → 模板选择弹窗（搜索 + 限高滚动）→ 选中直接在本页开部署抽屉（不跳投放模板页）
+const pickOpen = ref(false)
+const pickQ = ref('')
+const pickTemplates = ref([])
+const pickLoading = ref(false)
+let _pickLoaded = false
+const openPicker = async () => {
+  pickOpen.value = true; pickQ.value = ''
+  if (!_pickLoaded) {
+    pickLoading.value = true
+    try { const r = await GET('/launch-templates'); pickTemplates.value = Array.isArray(r) ? r : (r?.items || []); _pickLoaded = true } catch {}
+    pickLoading.value = false
+  }
 }
+const pickFiltered = computed(() => {
+  const q = pickQ.value.trim().toLowerCase()
+  const arr = [...pickTemplates.value].sort((a, b) =>
+    String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+  return q ? arr.filter(x => (x.name || '').toLowerCase().includes(q)) : arr
+})
+const tplAgo = (ts) => {
+  if (!ts) return ''
+  const s = String(ts)
+  const d = new Date(s.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(s) || s.includes('T') ? s : s.replace(' ', 'T') + 'Z')
+  if (isNaN(d)) return ''
+  const m = Math.floor((Date.now() - d.getTime()) / 60000)
+  if (m < 1) return t('adm.tplAgoNow')
+  if (m < 60) return t('adm.tplAgoMin', { n: m })
+  const h = Math.floor(m / 60)
+  if (h < 24) return t('adm.tplAgoHour', { n: h })
+  const dd = Math.floor(h / 24)
+  return dd < 7 ? t('adm.tplAgoDay', { n: dd }) : t('adm.tplAgoWeek', { n: Math.floor(dd / 7) })
+}
+const deployDrawer = ref(null)
+const jobProgress = ref(null)
+const onDeploySubmitted = (jobId) => { jobProgress.value?.open(jobId) }
+const pickTpl = (tpl) => { pickOpen.value = false; deployDrawer.value?.open(tpl) }
 const loadError = ref('')   // UI审计D：页面级错误态——空态与加载失败可区分
 const _loadGuard = useLatest()
 const _diagGuard = useLatest()    // 全库审查P2：诊断/潜客各自请求序列守卫（快速连点旧响应后到丢弃）
@@ -470,7 +505,7 @@ const drillName = computed(() => {
 const drillToAdset = (c) => { drillCampaign.value = c.id; drillAdset.value = ''; tab.value = 'adset'; selectedActs.value = [c.act_id] }
 const drillToAd = (s) => { drillCampaign.value = _idOf(s.campaign_id) || ''; drillAdset.value = s.id; tab.value = 'ad'; selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
-onMounted(() => { loadAccounts(); loadQuickTemplates(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
+onMounted(() => { loadAccounts(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
 // 自动跟随巡检（批N）：巡检 5min 一轮回写缓存，页面静默同步（不弹 loading、不清下钻）；
 // 页面在后台时跳过（回来后 30s 心跳仍会刷新「X 分钟前」走字，下次前台周期再拉）
 let _autoTimer = null
@@ -1027,15 +1062,7 @@ const unsubscribeLeads = async () => {
     </div>
         <div class="ctrl-bar">
       <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
-      <el-dropdown v-if="tab !== 'lead'" trigger="click" placement="bottom-start" @command="tplId => tplId === '_new' ? router.push({ name: 'launch-templates' }) : router.push({ name: 'launch-templates', query: { deploy: tplId } })">
-        <button class="ctrl-btn create-btn">＋ {{ t('adm.createAd') }} ▾</button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item v-for="tpl in quickTemplates" :key="tpl.id" :command="tpl.id">{{ tpl.name }}</el-dropdown-item>
-            <el-dropdown-item command="_new" divided>{{ t('launch.newTemplate') }}</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+      <button v-if="tab !== 'lead'" class="ctrl-btn create-btn" @click="openPicker">＋ {{ t('adm.createAd') }}</button>
       <el-select v-if="tab !== 'lead'" v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
@@ -1406,6 +1433,26 @@ const unsubscribeLeads = async () => {
         </template>
       </div>
     </el-drawer>
+
+    <!-- 创建按钮：模板选择弹窗（搜索 + 限高滚动，选中直接本页部署不跳页） -->
+    <el-dialog v-model="pickOpen" :title="t('adm.pickTplTitle')" width="480px" append-to-body>
+      <el-input v-model="pickQ" clearable :placeholder="t('adm.pickTplPh')" class="pick-search" />
+      <div class="pick-list" v-loading="pickLoading">
+        <button v-for="tpl in pickFiltered" :key="tpl.id" class="pick-row" @click="pickTpl(tpl)">
+          <span :class="['plat-chip', tpl.platform === 'tt' ? 'tt' : 'fb']">{{ tpl.platform === 'tt' ? 'TT' : 'FB' }}</span>
+          <span class="pick-name" :title="tpl.name">{{ tpl.name }}</span>
+          <span class="pick-ago">{{ tplAgo(tpl.updated_at || tpl.created_at) }}</span>
+        </button>
+        <div v-if="!pickLoading && !pickFiltered.length" class="pick-empty">{{ pickQ ? t('adm.pickTplEmpty') : t('adm.pickTplNone') }}</div>
+      </div>
+      <div class="pick-foot">
+        <button class="link-btn" @click="pickOpen = false; router.push({ name: 'launch-templates' })">＋ {{ t('launch.newTemplate') }}</button>
+      </div>
+    </el-dialog>
+
+    <!-- 部署抽屉 + 进度弹窗（与投放模板页共用组件） -->
+    <DeployDrawer ref="deployDrawer" @submitted="onDeploySubmitted" />
+    <JobProgressDialog ref="jobProgress" />
   </div>
 </template>
 
@@ -1641,4 +1688,16 @@ const unsubscribeLeads = async () => {
 /* FB 顶栏式工具条：绿色创建按钮（同 FB Ads Manager 主操作位） */
 .ctrl-btn.create-btn { background:var(--ac); color:#fff; border-color:var(--ac); font-weight:600 }
 .ctrl-btn.create-btn:hover { filter:brightness(1.06); color:#fff }
+
+/* 创建按钮模板选择弹窗：搜索 + 限高滚动（约显 5 行，其余滚动） */
+.pick-search { margin-bottom:10px }
+.pick-list { display:flex; flex-direction:column; gap:6px; max-height:280px; overflow-y:auto; padding:1px }
+.pick-row { display:flex; align-items:center; gap:8px; padding:9px 12px; background:var(--bg2); border:1px solid var(--bd); border-radius:8px; cursor:pointer; font-family:inherit; text-align:left; min-width:0 }
+.pick-row:hover { border-color:var(--ac); background:var(--acg) }
+.pick-name { flex:1; min-width:0; font-size:13px; color:var(--t1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.pick-ago { font-size:11px; color:var(--t3); flex:none; white-space:nowrap }
+.pick-empty { padding:24px; text-align:center; color:var(--t3); font-size:13px }
+.pick-foot { display:flex; justify-content:center; margin-top:10px }
+.link-btn { background:none; border:none; color:var(--ac); font-size:12px; cursor:pointer; font-family:inherit; padding:4px 8px }
+.link-btn:hover { text-decoration:underline }
 </style>
