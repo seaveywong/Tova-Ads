@@ -3055,3 +3055,16 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 **全系统断层扫描**：①端点 smoke 17/17 全通（本会话新增端点逐一带认证实调）；②Python NameError 静态扫描 21 项→真 2 假 19（fb.py 缺 re / guard_engine 缺 random，均修）；③i18n 裸键组件级校验（adm.copiedVal 跨命名空间→修）。
 
 **开发规范四步落地 CLAUDE.md 铁律 9**：调研→CLI 实测→复审→文档。禁止：不调研做功能 / 不实测上线 / 带 bug 交付 / 功能做一半上线。
+
+### 批VV 补：BM API 全量调研（Agent 深度调研，20+ 官方文档页）
+**CLI 实测确认**：邀请报 1752203（App 层权限墙）。调研 Agent 结果与此完全吻合，并发现**三重约束**：
+1. App 需通过 Review 获得 `business_management` + `ads_management` + `pages_read_engagement`（三个都列在 Creating Permissions）
+2. **App 必须被目标 BM claim**（每个客户的 BM 都要添加我们的 App）——多租户最大障碍
+3. **错误 270**：开发访问级别 App 直接被拒——BM 管理 API 实际要求 Ads API Standard Access
+
+**资产分配正确姿势**（非 user 侧而是**资产侧**）：
+- `POST /act_{id}/assigned_users`（user + tasks）——BusinessUser 的 assigned_pages edge 是**只读**的
+- tasks 三层：`['ANALYZE']` / `['ADVERTISE','ANALYZE']` / `['MANAGE','ADVERTISE','ANALYZE']`
+- 像素共享：`POST /{pixel_id}/shared_accounts`（account_id + business）
+
+**API 支持矩阵**（完整版见调研报告）：邀请/移除/改角色✓ / 系统用户创建+token✓ / 分配账户/Page✓ / 像素共享✓ / 资产分组✓ / 新建广告账户⚠️(限5个) / 跨BM伙伴共享⚠️(文档半弃) / OWNER+CONFIRMED 删除✗ / Creative Account claim✗
