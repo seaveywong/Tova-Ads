@@ -121,6 +121,10 @@ const campNameOf = (s) => {
   return c ? t('adm.belongsToCampaign', { name: c.name }) : ''
 }
 const loading = ref(false)
+const quickTemplates = ref([])   // 创建按钮模板快选（直跳部署不落模板页）
+const loadQuickTemplates = async () => {
+  try { const r = await GET('/launch-templates'); quickTemplates.value = (Array.isArray(r) ? r : (r?.items || [])).slice(0, 8) } catch {}
+}
 const loadError = ref('')   // UI审计D：页面级错误态——空态与加载失败可区分
 const _loadGuard = useLatest()
 const _diagGuard = useLatest()    // 全库审查P2：诊断/潜客各自请求序列守卫（快速连点旧响应后到丢弃）
@@ -466,7 +470,7 @@ const drillName = computed(() => {
 const drillToAdset = (c) => { drillCampaign.value = c.id; drillAdset.value = ''; tab.value = 'adset'; selectedActs.value = [c.act_id] }
 const drillToAd = (s) => { drillCampaign.value = _idOf(s.campaign_id) || ''; drillAdset.value = s.id; tab.value = 'ad'; selectedActs.value = [s.act_id] }
 const clearDrill = () => { drillCampaign.value = ''; drillAdset.value = '' }
-onMounted(() => { loadAccounts(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
+onMounted(() => { loadAccounts(); loadQuickTemplates(); _ageTimer = setInterval(() => { nowTick.value = Date.now() }, 30000) })
 // 自动跟随巡检（批N）：巡检 5min 一轮回写缓存，页面静默同步（不弹 loading、不清下钻）；
 // 页面在后台时跳过（回来后 30s 心跳仍会刷新「X 分钟前」走字，下次前台周期再拉）
 let _autoTimer = null
@@ -1023,7 +1027,15 @@ const unsubscribeLeads = async () => {
     </div>
         <div class="ctrl-bar">
       <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
-      <button class="ctrl-btn create-btn" @click="router.push({ name: 'launch-templates' })">＋ {{ t('adm.createAd') }}</button>
+      <el-dropdown v-if="tab !== 'lead'" trigger="click" placement="bottom-start" @command="tplId => tplId === '_new' ? router.push({ name: 'launch-templates' }) : router.push({ name: 'launch-templates', query: { deploy: tplId } })">
+        <button class="ctrl-btn create-btn">＋ {{ t('adm.createAd') }} ▾</button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="tpl in quickTemplates" :key="tpl.id" :command="tpl.id">{{ tpl.name }}</el-dropdown-item>
+            <el-dropdown-item command="_new" divided>{{ t('launch.newTemplate') }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-select v-if="tab !== 'lead'" v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
@@ -1036,7 +1048,7 @@ const unsubscribeLeads = async () => {
       <DatePresetBar v-if="tab !== 'lead'" :presets="DATE_PRESETS" v-model="datePreset" @preset="() => { showCustom = false; load() }" @custom="({from,to}) => { customFrom = from; customTo = to; showCustom = true; load() }" />
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'" :title="t('adm.filterAbnormalTip')">{{ t('adm.filterAbnormal') }}</button></div>
       <el-select v-if="tab !== 'lead' && ownerOptions.length > 1" v-model="ownerFilter" clearable filterable
-                 :placeholder="t('adm.ownerFilterPh')" class="act-filter owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
+                 :placeholder="t('adm.ownerSearchPh')" class="act-filter owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
