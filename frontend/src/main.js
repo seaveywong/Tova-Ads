@@ -11,6 +11,15 @@ import { installGlobalErrorHandler, showError } from './composables/useError'
 
 installGlobalErrorHandler()  // 兜底：未捕获的 Promise/同步错误一定回显
 
+// 抑制 ResizeObserver loop 良性警告（Chrome/Edge 已知行为，非 bug——EP 表格/抽屉
+// resize 回调连锁触发浏览器自动截断；不影响功能，只是控制台碍眼）
+window.addEventListener('error', (e) => {
+  if (e.message?.includes('ResizeObserver loop')) {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+  }
+})
+
 const app = createApp(App)
 app.use(createPinia())
 app.use(router)
