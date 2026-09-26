@@ -3082,3 +3082,31 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 CLI 逐项实测（cred#34 + Roly-V21）+ 代码路径比对。**正常工作 8 项**（deploy 全链、二进制传图、insights、潜客、表单、预算）；**被权限墙拦 5 项**（BM 邀请/移除 1752203、BM 资产分配同墙、BM 建像素同墙、主页改名 code 3、URL 传图 code 3——二进制不受影响）。
 关键发现：URL 传图 vs 二进制传图是不同子能力（URL 被拦但二进制正常=deploy 不受影响）；主页改名在令牌抽屉会报错但 BM 总览的改名走不同路径未测。
 用户操作：App Review 提交 business_management（P0，解锁全部 BM 管理）+ pages_manage_metadata（P1）+ 确认 Live Mode。
+
+## 批YY：Dynadot API3→REST v2 重写 + 部署抽屉组件化（2026-09-26，1131f90 + 183a218）
+
+### 概述
+两线：① Dynadot 注册商客户端整体从旧 API3 重写为新 RESTful API v2（密钥对+HMAC 签名，CLI 探针实证）；② 部署抽屉/进度弹窗从 LaunchTemplates 抽出共享组件，广告管理器创建按钮改弹窗选模板本页部署（不跳页）。
+
+### Dynadot REST v2（用户截图+探针实证）
+- **根因**：Dynadot 有两套 API（页面 RESTful/Legacy 双 Tab）——用户 key 是新版 REST 的「API 生产密钥」（另有 Secret 密钥对），旧 API3 调用恒 invalid key。
+- **认证**：`Authorization: Bearer <Key>`；敏感端点强制 `X-Signature` = Base64(HMAC-SHA256(`key\n路径含query\nrequest_id\nbody`, Secret)) + `X-Request-ID`。免签名：search/bulk_search/get_tld_price；强制签名：accounts/info、register、nameservers。
+- **端点（实测确认）**：`GET /restful/v2/domains/{d}/search`（不回价！价格走价目表）、`GET .../bulk_search?domain_name_list=a,b`、`GET .../get_tld_price?currency=USD`（必填，`all_years_register_price[0]`=一年价）、`POST .../domains/{d}/register`、`PUT .../domains/{d}/nameservers`（body nameserver_list）、`GET /restful/v2/accounts/info`。
+- **限流**：Regular 1req/s，实测连发 4-5 个即 400——保留全局 1.1s 节流 + rate_limited 标记。
+- **配置**：新增 `dynadot_api_secret`（.env DYNADOT_API_SECRET 即时写优先）；Settings 注册商卡加 API Secret 输入框；测试连接 Secret 缺失定向引导。响应形状 snake_case（username/total_spending）。
+- **smoke 4/4**：search/bulk_search/pricing 通 + Secret 缺失正确抛 DynadotSecretMissing。
+- **待用户**：设置→域名注册商粘贴「密钥(Secret)」→ 测试连接（签名算法端到端验证）；首笔真实订单验证 register body 参数。
+
+### 部署抽屉组件化（创建按钮弹窗，方案A 用户拍板）
+- 新增 `components/DeployDrawer.vue`（部署抽屉+预检弹窗，expose open/showPreflight，emit submitted(job_id)）、`components/JobProgressDialog.vue`（进度+轮询+重试+换主页重试，expose open）、`composables/useLaunchJobs.js`（任务展示/重试共享单源——已部署清单与进度弹窗共用勿复制）。
+- LaunchTemplates 瘦身 ~53K 字符；卡片部署/预检/?deploy/openJob 全改走组件；onUnmounted 只留草稿落盘。
+- AdManager：创建按钮下拉 → 弹窗（搜索框+列表限高约5行滚动+新建模板入口），选中直接本页开部署抽屉。
+- 顺手修：`?deploy` 快选引用不存在的 templates/loadTemplates（实为 list/load）ReferenceError；`adm.ownerSearchPh` 裸键（上批锚错文件）。
+- **行为复审 12/12**（playwright live 实测，不提交部署零花费）：LT 卡片部署→抽屉+15 账户+勾选展开配置；?deploy=260 fresh load 自动开抽屉；部署历史弹窗；AM 创建弹窗列表/搜索空态/选中开抽屉/账户加载；全程 0 JS 错。
+- 已知残留：LaunchTemplates 死 CSS（组件化后未删，scoped 隔离无影响，~4KB 待清）；en 模式 ad-manager 中文为数据型（用户广告名），非 i18n 问题。
+
+### 生产变更
+后端 4 文件（dynadot_client/config/domain_shop/settings）restart v1.3.5 ✓ health ✓；前端双次部署（1131f90 / 183a218），hash 核验一致；并行防护：DeepSeek 在途 Landing.vue stash 隔离后其自行提交（02b970f/1190636），树已收敛。
+
+### 结论
+Dynadot 线后端就绪待 Secret；创建按钮新交互全链路上线。部署链路（花钱路径）重构经行为级验证，无功能回归。
