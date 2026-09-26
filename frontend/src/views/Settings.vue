@@ -296,7 +296,8 @@ const testRg = async () => {
   rgTesting.value = false
 }
 // ── 支付设置（批LL：独立于注册商——收款是支付域；USDT-TRC20 + TronGrid 监听 key）──
-const payCfg = ref({ chain: '', address: '', trongrid_key_masked: '', trongrid_configured: false, pay_note: '' })
+// 收款地址池（2026-09-26 用户拍板）：多地址轮询分配给订单——分散链上资金流 + 防同尾号串单
+const payCfg = ref({ chain: '', address: '', addresses: [], trongrid_key_masked: '', trongrid_configured: false, pay_note: '' })
 const payForm = ref({ chain: 'TRC20', address: '', trongrid_api_key: '', pay_note: '' })
 const paySaving = ref(false)
 const payQr = ref('')
@@ -304,12 +305,13 @@ const payQrOpen = ref(false)
 const loadPay = async () => { try { payCfg.value = await GET('/settings/payment'); payForm.value.chain = payCfg.value.chain || 'TRC20' } catch {} }
 // 收款地址二维码（复用 qrcode，扫码核对/分享）；地址变化时重生成并收起二维码
 watch(() => payCfg.value.address, (a) => { payQrOpen.value = false; if (a) QRCode.toDataURL(a, { width: 150, margin: 1 }).then(u => payQr.value = u).catch(() => payQr.value = ''); else payQr.value = '' })
-const copyPayAddr = () => { navigator.clipboard?.writeText(payCfg.value.address || ''); ElMessage.success(t('common.copied')) }
+const copyPayAddr = (a) => { navigator.clipboard?.writeText(a || payCfg.value.address || ''); ElMessage.success(t('common.copied')) }
 const savePay = async () => {
   paySaving.value = true
   try {
     const body = { chain: payForm.value.chain, pay_note: payForm.value.pay_note }
-    if (payForm.value.address) body.address = payForm.value.address
+    const lines = (payForm.value.address || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+    if (lines.length) body.addresses = lines   // 整池覆盖（每行一个地址）
     if (payForm.value.trongrid_api_key) body.trongrid_api_key = payForm.value.trongrid_api_key
     await PUT('/settings/payment', body)
     ElMessage.success(t('common.saved')); payForm.value = { chain: payCfg.value.chain || 'TRC20', address: '', trongrid_api_key: '', pay_note: '' }
@@ -1064,14 +1066,17 @@ const runKeepaliveNow = async () => {
         <span :class="['tag', payCfg.address ? 'ok' : 'warn']">{{ payCfg.address ? t('settings.payReady') : t('settings.payNoAddr') }}</span>
       </div>
       <div v-if="payCfg.address" class="form-l"><label>{{ t('settings.rgPayAddr') }}</label>
-        <div class="pay-addr-wrap">
-          <span class="pay-addr mono" :title="payCfg.address">{{ payCfg.address }}</span>
-          <button class="btn sm" @click="copyPayAddr">{{ t('common.copy') }}</button>
-          <button class="btn sm" @click="payQrOpen = !payQrOpen">{{ payQrOpen ? t('settings.payHideQr') : t('settings.payShowQr') }}</button>
+        <div class="pay-pool">
+          <div v-for="(a, i) in (payCfg.addresses?.length ? payCfg.addresses : [payCfg.address])" :key="a" class="pay-addr-wrap">
+            <span class="pay-addr mono" :title="a">{{ a }}</span>
+            <button class="btn sm" @click="copyPayAddr(a)">{{ t('common.copy') }}</button>
+            <button v-if="i === 0" class="btn sm" @click="payQrOpen = !payQrOpen">{{ payQrOpen ? t('settings.payHideQr') : t('settings.payShowQr') }}</button>
+          </div>
+          <div v-if="(payCfg.addresses?.length || 1) > 1" class="field-hint">{{ t('settings.payPoolNote', { n: payCfg.addresses.length }) }}</div>
         </div>
       </div>
       <div v-if="payQrOpen && payCfg.address" class="form-l"><label></label><img v-if="payQr" :src="payQr" class="pay-qr" alt="QR" /></div>
-      <div class="form-l"><label>{{ payCfg.address ? t('settings.payAddrChange') : t('settings.rgPayAddr') }}</label><input v-model="payForm.address" class="input" :placeholder="payCfg.address ? t('settings.rgPayAddrNewPh') : t('settings.rgPayAddrPh')" /></div>
+      <div class="form-l"><label>{{ payCfg.address ? t('settings.payAddrChange') : t('settings.rgPayAddr') }}</label><textarea v-model="payForm.address" class="input" rows="3" style="resize:vertical" :placeholder="payCfg.address ? t('settings.payPoolPh') : t('settings.rgPayAddrPh')" /></div>
       <div class="form-l"><label>TronGrid API Key</label><input v-model="payForm.trongrid_api_key" class="input" :placeholder="payCfg.trongrid_configured ? payCfg.trongrid_key_masked : t('settings.tgKeyPh')" /></div>
       <div class="field-hint">{{ t('settings.tgKeyHint') }}</div>
       <div class="form-l"><label>{{ t('settings.payNoteLabel') }}</label><input v-model="payForm.pay_note" class="input" :placeholder="payCfg.pay_note || t('settings.payNotePh')" /></div>

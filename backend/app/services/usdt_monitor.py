@@ -74,18 +74,23 @@ def run_usdt_monitor():
         from ..models.system import SystemSetting
         from ..models.domain_shop import DomainOrder
         row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
-        addr, chain, tg_key = "", "", ""
+        addr, chain, tg_key, pool = "", "", "", []
         if row and row.value:
             try:
                 j = json.loads(row.value)
                 addr, chain = str(j.get("address") or ""), str(j.get("chain") or "").upper()
                 tg_key = str(j.get("trongrid_api_key") or "")
+                if isinstance(j.get("addresses"), list):
+                    pool = [str(a).strip() for a in j["addresses"] if str(a).strip()]
             except Exception:
                 addr = ""
         if not tg_key:
             from ..core.config import env_val
             tg_key = env_val("TRONGRID_API_KEY")   # 免 key 可用（限流更低），有 key 更稳
-        if not addr or len(addr) < 20:
+        # 收款地址池（2026-09-26 用户拍板）：订单按 id 轮询分池地址；兼容旧单/单地址
+        # 模式（payment_address 为空 → 绑池首地址）
+        addrs = list(dict.fromkeys([a for a in ([addr] + pool) if len(a) >= 20]))
+        if not addrs:
             return
         if chain and "TRC" not in chain:
             return   # 自动监听暂只支持 TRC20（ERC20 留后续）
@@ -94,11 +99,17 @@ def run_usdt_monitor():
         ).order_by(DomainOrder.id.asc()).limit(50).all()   # 复审：旧单优先——同总额且 id%100 相同的两单尾号相同，asc 让入账先对上更早创建的那单（付款人意图通常为先下的单）
         if not pend:
             return
-        txs = _fetch_incoming(addr, tg_key)
+        tx_cache: dict = {}   # 地址 → 入账列表（多地址各自拉一次，同地址只拉一次）
         hits = 0
         used_txids: set = set()   # 复审II：同一笔入账只能消费一次——曾内层 break 只跳单不标 tx，
         # 同尾号两单会被同一笔付款重复匹配（一笔款标两单 detected）
         for o in pend:
+            target = (o.payment_address or "").strip() or addrs[0]
+            if target not in addrs:
+                continue   # 订单分到的地址已不在池中（池被改）——留人工
+            if target not in tx_cache:
+                tx_cache[target] = _fetch_incoming(target, tg_key)
+            txs = tx_cache[target]
             want = pay_amount_for(o.total_usd, o.id)
             created_ts = (o.created_at or datetime.now(timezone.utc)).timestamp()
             for t in txs:
@@ -106,7 +117,7 @@ def run_usdt_monitor():
                     _txid = str(t.get("transaction_id") or "")
                     if _txid in used_txids:
                         continue
-                    if (t.get("to") or "") != addr:
+                    if (t.get("to") or "") != target:
                         continue
                     amt = round(int(t.get("value", "0")) / 1e6, 2)
                     ts = int(t.get("block_timestamp", 0)) / 1000.0

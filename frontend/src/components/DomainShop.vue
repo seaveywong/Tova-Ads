@@ -120,9 +120,11 @@ const approveOrder = async (o) => {
 const payPanel = ref(null)   // { id, domain, pay_amount, txid, status }
 const payQr = ref('')
 const openPayPanel = async (o) => {
-  payPanel.value = { id: o.id, domain: o.domain, pay_amount: o.pay_amount, payment_txid: o.payment_txid, status: o.status }
+  payPanel.value = { id: o.id, domain: o.domain, pay_amount: o.pay_amount, payment_txid: o.payment_txid, status: o.status,
+                     payment_address: o.payment_address || payInfo.value.address || '' }
   // TRON URI（TokenPocket/TronLink 扫码识别）：tron:地址?token=USDT&amount=应付
-  const uri = `tron:${payInfo.value.address}?token=USDT&amount=${o.pay_amount}`
+  // 地址用本单池分配的专属地址（多地址收款池——分散资金流+防串单）
+  const uri = `tron:${payPanel.value.payment_address}?token=USDT&amount=${o.pay_amount}`
   try { payQr.value = await QRCode.toDataURL(uri, { width: 190, margin: 1 }) } catch { payQr.value = '' }
 }
 const copyVal = (v, label) => {
@@ -143,7 +145,7 @@ watch(orders, () => {   // 轮询刷新后同步面板状态（到账自动变�
 }, { deep: false })
 onUnmounted(() => { if (_payTimer) clearInterval(_payTimer) })
 const copyPay = () => {
-  navigator.clipboard?.writeText(payInfo.value.address || '')
+  navigator.clipboard?.writeText((payPanel.value?.payment_address) || payInfo.value.address || '')
   ElMessage.success(t('domains.payCopied'))
 }
 const pendingCount = computed(() => (orders.value || []).filter(o => ['pending_payment', 'payment_detected'].includes(o.status)).length)
@@ -225,8 +227,9 @@ onMounted(() => { loadOrders(); loadMyDomains() })
     <div v-if="sec === 'orders'" class="card" v-loading="ordersLoading">
       <div v-if="payInfo.address && !payPanel" class="pay-box">
         <span class="pay-label">{{ t('domains.payTo') }}</span>
-        <span class="pay-addr mono" @click="copyPay">{{ payInfo.chain }} · {{ payInfo.address }}</span>
-        <button class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button>
+        <span v-if="(payInfo.addresses?.length || 1) > 1" class="pay-addr mono">{{ t('domains.payPoolN', { n: payInfo.addresses.length }) }}</span>
+        <span v-else class="pay-addr mono" @click="copyPay">{{ payInfo.chain }} · {{ payInfo.address }}</span>
+        <button v-if="(payInfo.addresses?.length || 1) === 1" class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button>
       </div>
       <div v-if="payPanel" class="invoice">
         <div class="inv-qr-wrap">
@@ -238,7 +241,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
           <div class="inv-row"><span class="inv-k">{{ t('domains.payAmtLabel') }}</span>
             <b class="inv-amt" @click="copyVal(payPanel.pay_amount, t('domains.amtCopied'))" :title="t('domains.payAmtTip')">${{ payPanel.pay_amount }} <i>⧉</i></b></div>
           <div class="inv-row"><span class="inv-k">{{ t('settings.rgPayAddr') }}</span>
-            <span class="pay-addr mono" @click="copyPay">{{ payInfo.address }}</span>
+            <span class="pay-addr mono" @click="copyPay">{{ payPanel.payment_address || payInfo.address }}</span>
             <button class="ctrl-btn sm" @click="copyPay">{{ t('common.copy') }}</button></div>
           <div v-if="payInfo.pay_note" class="inv-note">{{ payInfo.pay_note }}</div>
           <div :class="['inv-status', stClass(payPanel.status)]">{{ ['pending_payment', 'payment_detected'].includes(payPanel.status) ? (payPanel.status === 'payment_detected' ? t('domains.stDetected') : t('domains.waitingPay')) : stLabel(payPanel.status) }}</div>

@@ -575,24 +575,34 @@ def test_registrar(user: CurrentUser = Depends(require_superadmin),
 
 
 # ── 支付设置（超管，2026-09-24 批LL：从注册商卡独立——收款是支付域不是注册商域）──
-# system_settings['payment_usdt'] {chain, address, trongrid_api_key, pay_note}
+# system_settings['payment_usdt'] {chain, address, addresses[], trongrid_api_key, pay_note}
+# addresses = 收款地址池（2026-09-26 用户拍板：多地址轮询分配给订单——分散资金流+防串单）；
+# address = 池首地址（向后兼容单地址读取方），二者由写入端保持一致
 def _payment_setting(db) -> dict:
     row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
-    out = {"chain": "", "address": "", "trongrid_api_key": "", "pay_note": ""}
+    out = {"chain": "", "address": "", "addresses": [], "trongrid_api_key": "", "pay_note": ""}
     if row and row.value:
         try:
             import json as _json
             j = _json.loads(row.value)
-            for k in out:
-                out[k] = str(j.get(k) or "").strip()
+            out["chain"] = str(j.get("chain") or "").strip()
+            out["address"] = str(j.get("address") or "").strip()
+            out["pay_note"] = str(j.get("pay_note") or "").strip()
+            out["trongrid_api_key"] = str(j.get("trongrid_api_key") or "").strip()
+            pool = j.get("addresses")
+            if isinstance(pool, list):
+                out["addresses"] = [str(a).strip() for a in pool if str(a).strip()][:50]
         except Exception:
             pass
+    if out["address"] and out["address"] not in out["addresses"]:
+        out["addresses"] = [out["address"]] + out["addresses"]
     return out
 
 
 class PaymentSettingIn(BaseModel):
     chain: str = ""
     address: str = ""
+    addresses: list = []   # 地址池（整池覆盖写入；空=不改）
     trongrid_api_key: str = ""
     pay_note: str = ""
 
@@ -612,17 +622,21 @@ def get_payment(user: CurrentUser = Depends(require_superadmin), db: Session = D
 def set_payment(body: PaymentSettingIn, user: CurrentUser = Depends(require_superadmin),
                 db: Session = Depends(get_db)):
     chain = body.chain.strip()[:20]
-    addr = body.address.strip()[:120]
-    if addr and not re.match(r"^[A-Za-z0-9]{20,120}$", addr):
-        raise HTTPException(400, "USDT 地址格式不正确")
-    if addr and chain and "TRC" not in chain.upper():
+    pool = []
+    if body.addresses:
+        pool = sorted({str(a).strip()[:120] for a in body.addresses if str(a).strip()})
+    addr = pool[0] if pool else body.address.strip()[:120]
+    for a in ([addr] if addr else []) + pool:
+        if a and not re.match(r"^[A-Za-z0-9]{20,120}$", a):
+            raise HTTPException(400, f"USDT 地址格式不正确：{a[:20]}…")
+    if (addr or pool) and chain and "TRC" not in chain.upper():
         raise HTTPException(400, "自动到账监听暂只支持 TRC20（ERC20 后续支持），请选 TRC20 或留空链")
     _upsert_setting(db, "payment_usdt", __import__("json").dumps({
-        "chain": chain, "address": addr,
+        "chain": chain, "address": addr, "addresses": pool,
         "trongrid_api_key": body.trongrid_api_key.strip()[:120],
         "pay_note": body.pay_note.strip()[:200]}))
     db.commit()
-    return {"saved": True}
+    return {"saved": True, "pool_size": len(pool) or (1 if addr else 0)}
 
 
 # ── 数据保留（超管）── 各表老数据保留天数，0=永久

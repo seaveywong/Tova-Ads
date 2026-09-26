@@ -133,20 +133,26 @@ def _fee_for(db, cost: float) -> float:
 
 
 def _payment_info(db) -> dict:
-    """收款信息（USDT 轻量预留）：system_settings['payment_usdt'] {chain, address}。
+    """收款信息（USDT）：system_settings['payment_usdt'] {chain, address, addresses[]}。
+    addresses = 收款地址池（2026-09-26：订单按 id 轮询分池地址——分散链上资金流+防串单）。
     配了地址才返回非空——订单页展示打款目标，超管核对收款有据。"""
     from ..models.system import SystemSetting
     row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
-    out = {"method": "usdt", "chain": "", "address": "", "pay_note": ""}
+    out = {"method": "usdt", "chain": "", "address": "", "addresses": [], "pay_note": ""}
     if row and row.value:
         try:
             j = json.loads(row.value)
             out["chain"] = str(j.get("chain") or "")[:20]
             out["address"] = str(j.get("address") or "")[:120]
             out["pay_note"] = str(j.get("pay_note") or "")[:200]
+            pool = j.get("addresses")
+            if isinstance(pool, list):
+                out["addresses"] = [str(a).strip()[:120] for a in pool if str(a).strip()][:50]
         except Exception:
             pass
-    return out if out["address"] else {"method": "usdt", "chain": "", "address": "", "pay_note": ""}
+    if out["address"] and out["address"] not in out["addresses"]:
+        out["addresses"] = [out["address"]] + out["addresses"]
+    return out if out["address"] else {"method": "usdt", "chain": "", "address": "", "addresses": [], "pay_note": ""}
 
 
 def _norm_domain(raw: str) -> str:
@@ -317,6 +323,10 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
                         years=body.years, cost_usd=cost, fee_usd=fee,
                         total_usd=round(cost + fee, 2), status="pending_payment")
     db.add(order)
+    db.flush()   # 拿 order.id —— 地址池按 id 轮询分配
+    pool = _payment_info(db).get("addresses") or []
+    if pool:
+        order.payment_address = pool[(order.id - 1) % len(pool)]   # 稳定轮询：相邻订单不同地址
     db.commit()
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="domain_order", target_id=str(order.id),
@@ -352,6 +362,7 @@ def list_orders(user: CurrentUser = Depends(require_permission("landing.manage")
                         "team": tmap.get(r.tenant_id, ""), "created_by_name": umap.get(r.created_by, ""),
                         "payment_method": r.payment_method or "usdt",
                         "pay_amount": pay_amount_for(r.total_usd, r.id),
+                        "payment_address": r.payment_address or "",
                         "payment_txid": r.payment_txid or "", "paid_amount": r.paid_amount,
                         "error": r.error, "created_at": str(r.created_at or "")[:16]} for r in rows],
             "payment": _payment_info(db)}
@@ -364,6 +375,10 @@ def cancel_order(oid: int, user: CurrentUser = Depends(require_permission("landi
     from ..models.domain_shop import DomainOrder
     o = db.query(DomainOrder).filter(DomainOrder.id == oid).first()
     if not o:
+        raise HTTPException(404, "订单不存在")
+    # 越租户闸（2026-09-26 权限审计）：require_owned 只拦 operator 不校验租户——
+    # owner 曾可凭他团队订单 ID 直调 API 越租户取消
+    if not getattr(user, "is_superadmin", False) and o.tenant_id != user.tenant_id:
         raise HTTPException(404, "订单不存在")
     if not getattr(user, "is_superadmin", False) and o.created_by != user.id:
         from ..core.deps import require_owned
