@@ -787,7 +787,7 @@ const countryLabel = (code) => {
 .btn.ghost { background: transparent; color: var(--t3); }
 
 /* 批量栏 */
-.batch-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(10,132,255,.08); border: 1px solid rgba(10,132,255,.3); border-radius: 10px; flex-wrap: wrap; position: sticky; top: var(--plat-bar-h, 44px); z-index: 91; }
+.batch-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: color-mix(in srgb, #0A84FF 8%, var(--bg2)); border: 1px solid rgba(10,132,255,.3); border-radius: 10px; flex-wrap: wrap; position: sticky; top: -24px; z-index: 91; }
 .batch-count { font-size: 13px; color: var(--ac); font-weight: 600; margin-right: 6px; }
 
 /* 卡片选择 checkbox（骨架在全局 .card-base；本页 .as-card=缩略图全出血+选中环） */
@@ -811,7 +811,8 @@ const countryLabel = (code) => {
 
 /* AI 参数条（seg 已用全局 .seg-bar/.seg-btn；aggressive 档本页特有橙色 on 态） */
 .seg-btn.warn.on { background: rgba(255,159,10,.18); color: var(--warning); border-color: rgba(255,159,10,.5); }
-.ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; position: sticky; top: var(--plat-bar-h, 44px); z-index: 90; box-shadow: 0 6px 12px -8px rgba(0,0,0,.25); }
+.ai-bar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; position: sticky; top: -24px; z-index: 90; box-shadow: 0 6px 12px -8px rgba(0,0,0,.25); }
+@media (max-width: 768px) { .batch-bar, .ai-bar { top: -12px; } }
 .ai-field { display: flex; align-items: center; gap: 6px; }
 .ai-field-label { font-size: 12px; color: var(--t3); }
 

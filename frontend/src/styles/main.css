@@ -135,10 +135,10 @@ a { color: var(--ac); text-decoration: none; }
    类名刻意不与各页 scoped 旧类同名（.card/.empty/.grid/.tabs 等）——页面迁移时改名收编，
    删各自 scoped 副本，终结 6 套分段控件/圆角漂移/两套主按钮类。 ── */
 
-/* 工具栏行：左筛选右搜索；吸顶让位全局平台上下文条（--plat-bar-h 先例：Assets ai-bar） */
+/* 工具栏行：左筛选右搜索；吸顶 top:-24px 抵消 .content 的 24px 内边距（平台条在滚动区外，无需让位） */
 .list-bar {
   position: sticky;
-  top: var(--plat-bar-h, 44px);
+  top: -24px;
   z-index: 90;
   display: flex;
   align-items: center;

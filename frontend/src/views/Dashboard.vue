@@ -1677,7 +1677,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 .tg-banner-txt { flex: 1; }
 .tg-banner-x { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--tx-3, #999); padding: 2px 6px; }
 /* 贴顶前后样式恒定（圆角/阴影/边框不变）——视觉切换=滚动抖动源，已彻底移除 stuck 态 */
-.toolbar { position: sticky; top: 0; z-index: 100; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bd); border-radius: 12px; box-shadow: var(--shadow-card); overflow: hidden; margin-bottom: 2px; }
+.toolbar { position: sticky; top: -24px; z-index: 100; display: flex; flex-direction: column; background: var(--bg2); border: 1px solid var(--bd); border-radius: 12px; box-shadow: var(--shadow-card); overflow: hidden; margin-bottom: 2px; }
 .tb-row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
 .tb-filters .labeled-select.grow { margin-left: auto; }
 .tb-filters .labeled-select.grow .act-filter { width: 220px; }
@@ -2062,6 +2062,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
 @media (max-width: 1280px) { .block-detail .block-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) {
+  .toolbar { top: -12px; }   /* 移动端 .content padding 12px，吸顶让位同量（桌面 24px 见主规则） */
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .block-detail .block-grid { grid-template-columns: 1fr; }
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }   /* 次级指标条 2×3 */

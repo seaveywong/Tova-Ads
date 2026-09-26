@@ -755,8 +755,8 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 /* 消息模板类型 chip（Messenger 蓝 / WhatsApp 绿） */
 /* ── 消息编辑器（2026-09-15 全面优化）：双栏 + 实时聊天预览 ── */
 .msg-editor{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:18px;align-items:start}
-@media(max-width:860px){.msg-editor{grid-template-columns:1fr}}
-.msg-preview{position:sticky;top:0}
+@media(max-width:860px){.msg-editor{grid-template-columns:1fr}.msg-preview,.fx-left{top:-12px}}
+.msg-preview{position:sticky;top:-24px}
 .chat-mockup{border-radius:14px;overflow:hidden;border:1px solid var(--bd);box-shadow:var(--shadow-card);font-size:13px}
 .chat-mockup.ms .chat-header{background:linear-gradient(135deg,#1877f2,#0a5fd0)}
 .chat-mockup.wa .chat-header{background:#075E54}
@@ -788,7 +788,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
 .msg-chip.wa{color:#4ade80;background:rgba(37,211,102,.12);border:1px solid rgba(37,211,102,.4)}
 /* 编辑器：左预览 + 右设置 */
 .fx-editor{display:flex;gap:20px;align-items:flex-start}
-.fx-left{flex:0 0 342px;position:sticky;top:0}
+.fx-left{flex:0 0 342px;position:sticky;top:-24px}
 .fx-left-head{font-size:11px;color:var(--t3);text-align:center;margin-bottom:8px;font-weight:500}
 .fx-right{flex:1;min-width:0}
 .form{display:flex;flex-direction:column;gap:12px}

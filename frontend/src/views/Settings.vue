@@ -1336,7 +1336,7 @@ const runKeepaliveNow = async () => {
 <style scoped>
 .page{display:flex;flex-direction:column;gap:14px}
 /* 锚点导航 */
-.anchor-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0 14px;position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--bd);margin-bottom:14px}
+.anchor-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0 14px;position:sticky;top:-24px;z-index:20;background:var(--bg);border-bottom:1px solid var(--bd);margin-bottom:14px}
 /* 分组标签竖排两行式排版更稳：个人/平台 标签 + 下方细分按钮行同高对齐 */
 .anchor-group-label{font-size:11px;color:var(--t3);font-weight:600;letter-spacing:.5px;text-transform:uppercase;margin-right:2px;white-space:nowrap;flex-shrink:0}
 .anchor-sep{width:1px;align-self:stretch;background:var(--bd);margin:4px 6px;flex-shrink:0}
@@ -1495,7 +1495,7 @@ const runKeepaliveNow = async () => {
 .card > .d { margin-top: -6px }
 .cf-copy-all { float: right; cursor: pointer; color: var(--t3); font-style: normal; padding: 0 4px }
 .cf-copy-all:hover { color: var(--ac) }
-@media (max-width: 768px) { .anchor-strip { top: 48px } }
+@media (max-width: 768px) { .anchor-strip { top: -12px } }
 
 /* FB App 配置行 + 导入行为表单 */
 .fa-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px }
