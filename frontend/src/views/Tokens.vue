@@ -1157,16 +1157,17 @@ const deleteToken = async (tk) => {
 .btn.primary:disabled{opacity:.5}
 .mb{padding:3px 8px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer}
 .mb:hover{color:var(--ac);border-color:var(--ac)}
+.mb.danger{color:var(--error);border-color:rgba(239,68,68,.4)}
 .mb.danger:hover{color:var(--error);border-color:var(--error)}
 
 /* 9 列：状态|名称|FB用户|账户|主页|BM|类型|操作|› */
 .tbl{border:1px solid var(--bd);border-radius:8px;overflow-x:auto}
-.row{display:grid;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) minmax(70px,110px) 52px 52px 52px 64px 36px 12px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
+.row{display:grid;min-width:720px;grid-template-columns:72px minmax(90px,120px) minmax(100px,1fr) minmax(70px,110px) 52px 52px 52px 64px 36px 12px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;color:var(--t1);cursor:pointer;transition:background .1s}
 .row.head{color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;background:var(--bg2);cursor:default;padding:8px 14px}
 .row:not(.head):hover{background:var(--bg3)}
 .row.err{opacity:.65}
 
-.c-st{display:flex;align-items:center;gap:4px;font-size:12px}
+.c-st{display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;overflow:hidden}
 .st-when{font-size:10px;color:var(--t3)}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .dot.ok{background:var(--success)}.dot.warn{background:var(--warning)}.dot.err{background:var(--error)}.dot.off{background:var(--t3)}

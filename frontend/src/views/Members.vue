@@ -274,6 +274,7 @@ const permLabel = (key) => {
 .ops { text-align: right }
 .mb { padding: 3px 10px; border: 1px solid var(--bd); background: transparent; color: var(--t2); border-radius: 4px; font-size: 11px; cursor: pointer }
 .mb:hover { color: var(--ac); border-color: var(--ac) }
+.mb.danger { color: var(--error); border-color: rgba(239,68,68,.4) }
 .mb.danger:hover { color: var(--error); border-color: var(--error) }
 .muted { color: var(--t3) }
 

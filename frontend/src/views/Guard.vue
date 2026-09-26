@@ -558,6 +558,7 @@ const doInspect = async (force = false) => {
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .mb{padding:3px 10px;border:1px solid var(--bd);background:transparent;color:var(--t2);border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap}
 .mb:hover{color:var(--ac);border-color:var(--ac)}
+.mb.danger{color:var(--error);border-color:rgba(239,68,68,.4)}
 .mb.danger:hover{color:var(--error);border-color:var(--error)}
 
 .list{display:flex;flex-direction:column;gap:10px}
@@ -579,7 +580,7 @@ const doInspect = async (force = false) => {
 .rule-cond{color:var(--t1);font-size:12px}
 .rule-arrow{color:var(--t3);margin:0 4px}
 .rule-hit{font-size:11px;padding:1px 7px;border-radius:9px;background:var(--bg3);color:var(--t3);font-variant-numeric:tabular-nums}
-.rule-hit.active{background:rgba(255,69,58,.12);color:var(--error)}
+.rule-hit.active{background:var(--acg);color:var(--ac)}
 .rule-hit.idle{opacity:.6}
 .rule-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
 .conv{font-size:11px;color:var(--t3)}

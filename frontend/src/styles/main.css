@@ -316,7 +316,8 @@ a { color: var(--ac); text-decoration: none; }
 /* ── el-switch 全局主题化（UI审计#4）：17 处组件 props 硬编码 active/inactive-color 的
    统一底座——props 存在时优先，此处管 hover/disabled 与未来去 props 的场景 ── */
 .el-switch.is-checked .el-switch__core { background-color: var(--ac) !important; border-color: var(--ac) !important; }
-.el-switch:not(.is-checked) .el-switch__core { background-color: var(--bg3) !important; border-color: var(--bd) !important; }
+.el-switch:not(.is-checked) .el-switch__core { background-color: #3a3a5e !important; border-color: #6a6a9a !important; }
+[data-theme="light"] .el-switch:not(.is-checked) .el-switch__core { background-color: #e4e4ea !important; border-color: #9a9aa6 !important; }
 .el-switch.is-disabled .el-switch__core { opacity: .45; }
 /* 开关文字标签对比度（UI审计#4）：active-text/inactive-text 默认蓝/灰在暗色下过淡，统一提亮 */
 .el-switch__label { color: var(--t2) !important; font-size: 12px; }
