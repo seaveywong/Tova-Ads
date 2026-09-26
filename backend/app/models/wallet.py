@@ -6,7 +6,7 @@
 铁律：余额变更只走 core/wallet.py wallet_apply()（行锁+幂等+balance_after 断言），
 任何直接 UPDATE balance_usd 都是 bug。
 """
-from sqlalchemy import BigInteger, ForeignKey, Integer, Text, Float, DateTime, UniqueConstraint, func
+from sqlalchemy import Column, BigInteger, ForeignKey, Integer, Text, Float, DateTime, UniqueConstraint, func
 
 from ..core.database import Base
 

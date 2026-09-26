@@ -9,9 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import text
 
-from ..database import SuperSessionLocal
 from ..models.wallet import WalletAccount, WalletTxn
 
 logger = logging.getLogger("toveads.wallet")

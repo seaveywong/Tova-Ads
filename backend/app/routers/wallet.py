@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..core.deps import CurrentUser, require_permission, require_superadmin
 from ..core.wallet import wallet_apply, wallet_balance
-from ..log_utils import new_trace_id, write_log
-from ..notify_utils import emit_notification
+from ..core.log_utils import new_trace_id, write_log
+from ..core.notify_utils import emit_notification
 from ..models.auth import Tenant
 from ..models.wallet import WalletAccount, WalletTxn, WalletTopup
 
