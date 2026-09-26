@@ -83,7 +83,7 @@ class DynadotClient:
         if signed:
             if not self.secret:
                 raise DynadotSecretMissing()
-            rid = uuid.uuid4().hex
+            rid = str(uuid.uuid4())   # 标准带连字符格式（.hex 无连字符被拒：Invalid X-Request-ID）
             headers["X-Request-ID"] = rid
             headers["X-Signature"] = self._signature(full, rid, body_str)
         if body is not None:
