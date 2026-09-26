@@ -380,7 +380,7 @@ export default {
   },
   tokens: {
     assetTokens: '令牌', assetPages: '主页', assetBm: 'BM 资产', pageTitle: '令牌',
-    statusCount: '{ok} 可用 · {off} 停用',
+    statusCount: '{ok} 可用 · {off} 不可用',
     loadFail: '加载失败',
     openDetailTip: '点击查看令牌详情（账户 / 主页 / BM / 权限）',
     closeLoadConfirm: '已勾选 {n} 个账户尚未导入，关闭将丢失勾选。确定关闭？',

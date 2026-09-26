@@ -369,7 +369,7 @@ export default {
   },
   tokens: {
     assetTokens: 'Tokens', assetPages: 'Pages', assetBm: 'BM Assets', pageTitle: 'Tokens',
-    statusCount: '{ok} active · {off} disabled',
+    statusCount: '{ok} active · {off} unavailable',
     loadFail: 'Failed to load',
     openDetailTip: 'Click to view token details (accounts / pages / BM / permissions)',
     closeLoadConfirm: '{n} account(s) are checked but not imported yet. Close and lose the selection?',

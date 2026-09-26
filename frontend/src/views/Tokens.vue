@@ -1186,7 +1186,7 @@ const deleteToken = async (tk) => {
 .c-num.clickable:hover{color:var(--t1);text-decoration:underline;text-decoration-style:dotted}
 .c-num.err{color:var(--error);font-weight:600;cursor:help}
 
-.c-ty{display:flex;align-items:center;justify-content:center}
+.c-ty{display:flex;align-items:center;justify-content:center;gap:3px}
 .tag{font-size:10px;padding:1px 7px;border-radius:9px;white-space:nowrap;line-height:1.5}
 .tag.operate{background:rgba(10,132,255,.12);color:var(--ac)}.tag.manage{background:rgba(48,209,88,.1);color:var(--success)}.tag.user{background:var(--bg3);color:var(--t3)}
 .tag.rotate{background:rgba(48,209,88,.1);color:var(--success);font-size:11px;padding:1px 5px}
