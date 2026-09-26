@@ -124,7 +124,7 @@ def run_domain_renewal():
         _sync_expiry(db)
         from ..models.landing_lib import LandingDomain
         from ..core.wallet import wallet_balance, wallet_apply, InsufficientBalance
-        from .domain_shop import _pricing, _registrar_client, _fee_for
+        from ..routers.domain_shop import _pricing, _registrar_client, _fee_for
         today = _date.today()
         rows = db.query(LandingDomain).filter(
             LandingDomain.status == "active", LandingDomain.expires_at.isnot(None)).all()

@@ -3,7 +3,7 @@
 按租户隔离。用量统计（usage_count/used_by）不存表，按需子查询 landing_pages（见 routers/landing_lib.py）。
 像素 ID 明文（决策⑦：像素本就公开在页面 HTML，遮掩反 UX）。
 """
-from sqlalchemy import Column, BigInteger, Boolean, Text, DateTime, ForeignKey, func
+from sqlalchemy import Column, BigInteger, Boolean, Integer, Text, DateTime, ForeignKey, func
 from ..core.database import Base
 
 
