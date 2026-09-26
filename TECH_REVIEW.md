@@ -3120,3 +3120,12 @@ Dynadot 线后端就绪待 Secret；创建按钮新交互全链路上线。部�
 **用户操作**：CF 后台 → My Profile → API Tokens → **尾号 2753c6 的这把** → Edit → 加 Zone › Analytics › Read（Zone 级）→ Zone Resources: All zones → 保存 → 设置页点 ⟳。
 
 **CF 区优化空间分析结论**（详见会话报告）：近实时今日数据（adaptiveGroups，权限通后可切）/zone↔域名库对账 值得做；sparkline/DNS 手动管理 低优先；purge cache/多 token 不需要。
+
+## 批AA 补充：CF 三项优化实装 + 批量查询提速（2026-09-26，00c5f80 + 本提交）
+
+- **今日近实时**：改用 `httpRequests1hGroups`（小时粒度 ~1h 滞后；adaptive 数据集字段集与 1d 家族不同——sum/uniq 字段名全不同，内省被禁，探针实证后弃用）；today_rt 标记 ⚡，失败回落 1d。
+- **域名对账**：`/cf-console/reconcile` 上线即抓真问题——**6/7 zone 未登记域名库**（含 tovaads.com 主站域属预期外，其余为真实漏登记）；lib_only 空。
+- **提速**：两查询均 zoneTag_in 批量（14 次串行→2 次），面板 10s+→3s。
+- **坑**：zoneTag_in 的 authz 报错文案是 "zones [...] are not authorized"（不含 "permission"）——检测关键词漏它曾误报权限已通；已补关键词+extensions.code=authz 兜底。
+- 并行会话协作：DeepSeek 曾 stash 本批在途工作（备注 preserve），恢复后收敛部署，hash 核验一致。
+- 待用户：token 2753c6 仍缺 Zone 级 Analytics Read（第一轮改动未生效——疑改错 token 或 Account 级）。
