@@ -3077,3 +3077,8 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 ④规范：CLAUDE.md 铁律 9（四步开发流程）+ 铁律 8（i18n 裸键零容忍）——DeepSeek 同步。
 
 **BM 写权限防护（三轮迭代终版）**：非破坏性探测（.invalid 邮箱→消息关键词判定 permission/capability = 拦截），10min 缓存，write_ok=false 时前端自动隐藏邀请/移除并显示引导文案。App 过审后自动恢复。
+
+## 批XX：全站 App 权限审核状态扫描（2026-09-26）
+CLI 逐项实测（cred#34 + Roly-V21）+ 代码路径比对。**正常工作 8 项**（deploy 全链、二进制传图、insights、潜客、表单、预算）；**被权限墙拦 5 项**（BM 邀请/移除 1752203、BM 资产分配同墙、BM 建像素同墙、主页改名 code 3、URL 传图 code 3——二进制不受影响）。
+关键发现：URL 传图 vs 二进制传图是不同子能力（URL 被拦但二进制正常=deploy 不受影响）；主页改名在令牌抽屉会报错但 BM 总览的改名走不同路径未测。
+用户操作：App Review 提交 business_management（P0，解锁全部 BM 管理）+ pages_manage_metadata（P1）+ 确认 Live Mode。
