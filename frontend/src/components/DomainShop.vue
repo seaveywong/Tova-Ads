@@ -337,4 +337,11 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .inv-status.bound { background: rgba(48,209,88,.13); color: var(--success); }
 .inv-status.failed { background: rgba(255,69,58,.13); color: var(--error); }
 .inv-status.cancelled { background: var(--bg3); color: var(--t3); }
+/* 按钮（.ctrl-btn 全局无定义，本组件自绘——修复所有按钮渲染成浏览器默认白底样式） */
+.ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s; font-family: inherit; }
+.ctrl-btn:hover { border-color: var(--bd2); color: var(--t1); }
+.ctrl-btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
+.ctrl-btn.primary:hover { filter: brightness(1.08); }
+.ctrl-btn.primary:disabled { opacity: .5; cursor: wait; }
+.ctrl-btn.sm { padding: 0 8px; font-size: 12px; }
 </style>
