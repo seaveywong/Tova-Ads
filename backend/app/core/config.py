@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     porkbun_api_key: str = ""     # 域名代购注册商凭据（批DD 预埋；Settings→域名注册商 配置后生效）
     porkbun_secret_key: str = ""
     dynadot_api_key: str = ""     # Dynadot（主力注册商 2026-09-19：单 Key，支付宝充值余额）
+    dynadot_api_secret: str = ""  # REST v2 密钥对之 Secret（2026-09-26：敏感端点 X-Signature 必需）
     # 公网 base URL（OAuth 回调、worker URL 等用）
     public_base_url: str = "https://api.tovaads.com"
     # 前端 base URL（OAuth 完成页"返回前端"链接用）

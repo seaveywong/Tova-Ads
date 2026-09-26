@@ -253,7 +253,7 @@ const saveCf = async () => {
 }
 // ── 域名注册商（批DD Porkbun 预埋 → 2026-09-19 切 Dynadot 主力；选择器+双凭据一卡）──
 const rgCfg = ref({ registrar: 'dynadot', dynadot: { configured: false, key_masked: '' }, porkbun: { configured: false, key_masked: '' } })
-const rgForm = ref({ dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' })
+const rgForm = ref({ dynadot_api_key: '', dynadot_api_secret: '', porkbun_api_key: '', porkbun_secret_key: '' })
 const rgFeeInput = ref('')   // （旧固定值，兼容保留）
 const rgFeeForm = ref({ mode: 'fixed', fixed: '', rate: '', floor: '' })   // 规则化手续费（空=不改）
 const rgSaving = ref(false)
@@ -271,6 +271,7 @@ const saveRg = async () => {
   try {
     const body = {}
     if (rgForm.value.dynadot_api_key) body.dynadot_api_key = rgForm.value.dynadot_api_key
+    if (rgForm.value.dynadot_api_secret) body.dynadot_api_secret = rgForm.value.dynadot_api_secret
     if (rgForm.value.porkbun_api_key) body.porkbun_api_key = rgForm.value.porkbun_api_key
     if (rgForm.value.porkbun_secret_key) body.porkbun_secret_key = rgForm.value.porkbun_secret_key
     if (rgFeeInput.value !== '' && Number(rgFeeInput.value) >= 0) body.domain_shop_fee_usd = Number(rgFeeInput.value)
@@ -279,7 +280,7 @@ const saveRg = async () => {
     }
     if (!Object.keys(body).length) { ElMessage.info(t('settings.noChange')); rgSaving.value = false; return }
     await PUT('/settings/registrar', body)
-    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', porkbun_api_key: '', porkbun_secret_key: '' }; rgFeeInput.value = ''; rgFeeForm.value = { mode: rgCfg.value.fee_rules?.mode || 'fixed', fixed: '', rate: '', floor: '' }
+    ElMessage.success(t('common.saved')); rgForm.value = { dynadot_api_key: '', dynadot_api_secret: '', porkbun_api_key: '', porkbun_secret_key: '' }; rgFeeInput.value = ''; rgFeeForm.value = { mode: rgCfg.value.fee_rules?.mode || 'fixed', fixed: '', rate: '', floor: '' }
     await loadRg()
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   rgSaving.value = false
@@ -962,6 +963,7 @@ const runKeepaliveNow = async () => {
       </div>
       <template v-if="rgCfg.registrar === 'dynadot'">
         <div class="form-l"><label>API Key</label><input v-model="rgForm.dynadot_api_key" class="input" :placeholder="rgCfg.dynadot.configured ? rgCfg.dynadot.key_masked : t('settings.rgDynadotKeyPh')" /></div>
+        <div class="form-l"><label>API Secret</label><input v-model="rgForm.dynadot_api_secret" class="input" type="password" :placeholder="rgCfg.dynadot.secret_masked || t('settings.rgSecretPh')" /></div>
         <div class="field-hint">{{ t('settings.rgDdHint') }}</div>
       </template>
       <template v-else>

@@ -47,6 +47,12 @@ def _dynadot_key() -> str:
     return env_val("DYNADOT_API_KEY") or settings.dynadot_api_key
 
 
+def _dynadot_secret() -> str:
+    """REST v2 密钥对之 Secret（同 key 的 .env 优先口径；敏感端点签名用）。"""
+    from ..core.config import env_val
+    return env_val("DYNADOT_API_SECRET") or settings.dynadot_api_secret
+
+
 def _reg_ready(db) -> bool:
     if _reg_name(db) == "dynadot":
         return bool(_dynadot_key())
@@ -58,7 +64,7 @@ def _registrar_client(db):
     if _reg_name(db) == "dynadot":
         if not _dynadot_key():
             raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
-        return DynadotClient(_dynadot_key())
+        return DynadotClient(_dynadot_key(), _dynadot_secret())
     if not porkbun_configured(settings):
         raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
     return PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
@@ -395,7 +401,7 @@ def _fulfill(o, user, db) -> dict:
         # ② 注册商注册并把 NS 指到 CF——注册生效后 zone 自动转 active。
         #    Dynadot register 不带 NS 参数：注册→set_ns 两步（客户端内已限速 1.1s）。
         if _reg_name(db) == "dynadot":
-            dyna = DynadotClient(_dynadot_key())
+            dyna = DynadotClient(_dynadot_key(), _dynadot_secret())
             dyna.register(o.domain, o.years)
             dyna.set_ns(o.domain, ns)
         else:

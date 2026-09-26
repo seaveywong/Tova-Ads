@@ -419,6 +419,7 @@ def _registrar_setting(db: Session) -> str:
 class RegistrarConfigIn(BaseModel):
     registrar: str = ""            # dynadot | porkbun（空=不改）
     dynadot_api_key: str = ""
+    dynadot_api_secret: str = ""   # REST v2 密钥对之 Secret（2026-09-26）
     porkbun_api_key: str = ""
     porkbun_secret_key: str = ""
     domain_shop_fee_usd: float = -1   # 旧：固定手续费（<0=不改；兼容保留）
@@ -439,14 +440,15 @@ def _upsert_setting(db, key: str, value: str) -> None:
 def get_registrar(user: CurrentUser = Depends(require_superadmin),
                   db: Session = Depends(get_db)):
     from ..core.porkbun_client import porkbun_configured
-    from ..routers.domain_shop import _fee_rules, _payment_info, _dynadot_key as _dd_key
+    from ..routers.domain_shop import _fee_rules, _payment_info, _dynadot_key as _dd_key, _dynadot_secret as _dd_secret
     _vrow = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
     return {"registrar": _registrar_setting(db),
             "registrar_verified_at": (str(_vrow.value)[:16] if _vrow and _vrow.value else ""),
             "fee_rules": _fee_rules(db),
             "payment_usdt": _payment_info(db),
             "dynadot": {"configured": bool(_dd_key()),
-                        "key_masked": _mask(_dd_key())},
+                        "key_masked": _mask(_dd_key()),
+                        "secret_masked": _mask(_dd_secret())},
             "porkbun": {"configured": porkbun_configured(settings),
                         "key_masked": _mask(settings.porkbun_api_key or "")}}
 
@@ -489,6 +491,8 @@ def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_s
     env_updates = {}
     if body.dynadot_api_key:
         env_updates["DYNADOT_API_KEY"] = _clean_token(body.dynadot_api_key)
+    if body.dynadot_api_secret:
+        env_updates["DYNADOT_API_SECRET"] = _clean_token(body.dynadot_api_secret)
     if body.porkbun_api_key:
         env_updates["PORKBUN_API_KEY"] = _clean_token(body.porkbun_api_key)
     if body.porkbun_secret_key:
@@ -509,6 +513,7 @@ def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_s
                 updated_lines.append(f"{k}={v}")
         env_path.write_text("\n".join(updated_lines) + "\n")
         settings.dynadot_api_key = env_updates.get("DYNADOT_API_KEY", settings.dynadot_api_key)
+        settings.dynadot_api_secret = env_updates.get("DYNADOT_API_SECRET", settings.dynadot_api_secret)
         settings.porkbun_api_key = env_updates.get("PORKBUN_API_KEY", settings.porkbun_api_key)
         settings.porkbun_secret_key = env_updates.get("PORKBUN_SECRET_KEY", settings.porkbun_secret_key)
     return {"saved": True, "registrar": _registrar_setting(db)}
@@ -517,23 +522,29 @@ def set_registrar(body: RegistrarConfigIn, user: CurrentUser = Depends(require_s
 @router.post("/registrar/test")
 def test_registrar(user: CurrentUser = Depends(require_superadmin),
                    db: Session = Depends(get_db)):
-    """测试当前选中注册商：Dynadot 返回账户+余额；Porkbun 返回账号名。"""
-    from ..routers.domain_shop import _dynadot_key as _dd_key
+    """测试当前选中注册商：Dynadot（REST v2 需 Key+Secret 签名）返回账户；Porkbun 返回账号名。"""
+    from ..routers.domain_shop import _dynadot_key as _dd_key, _dynadot_secret as _dd_secret
     reg = _registrar_setting(db)
     if reg == "dynadot":
         if not _dd_key():
             raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
-        from ..core.dynadot_client import DynadotClient, DynadotError
+        from ..core.dynadot_client import DynadotClient, DynadotError, DynadotSecretMissing
         try:
-            info = DynadotClient(_dd_key()).account_info()
+            info = DynadotClient(_dd_key(), _dd_secret()).account_info()
+        except DynadotSecretMissing:
+            raise HTTPException(400, "连接失败: 未配置 Secret——Dynadot 新版 REST API 是密钥对，"
+                                     "Tools → API 里「API 生产密钥」和「密钥(Secret)」两把都要填")
         except DynadotError as e:
-            # invalid key 定向指引（2026-09-24 用户实例）：Dynadot 有「密钥」(测试)/
-            # 「生产密钥」两种——填错测试密钥对生产端点恒 invalid key
-            if "invalid key" in str(e).lower():
-                raise HTTPException(400, "连接失败: invalid key——请确认填的是 Dynadot【生产密钥】（Tools → API 里另有测试用「密钥」，两者不通用）")
+            low = str(e).lower()
+            # REST 2026-09-26 实证：密钥对不匹配/无效 → "the provided api key is invalid..."
+            if "invalid" in low and ("key" in low or "signature" in low):
+                raise HTTPException(400, "连接失败: 密钥无效——请确认填的是 Dynadot Tools → API 的"
+                                         "「API 生产密钥」+「密钥(Secret)」这对（REST 新版 API，"
+                                         "密钥与 Secret 必须同一次生成的一对）")
             raise HTTPException(400, f"连接失败: {e}")
-        balance = str(info.get("AccountBalance") or "")
-        account = str(info.get("Username") or "")
+        # REST accounts/info 形状（snake_case；余额字段名以实际返回为准，兼容多层）
+        balance = str(info.get("account_balance") or info.get("balance") or "")
+        account = str(info.get("username") or "")
         _v = db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar_verified_at").first()
         if not _v:
             _v = SystemSetting(key="domain_registrar_verified_at")

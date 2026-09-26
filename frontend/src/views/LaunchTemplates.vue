@@ -443,19 +443,15 @@ onMounted(() => {
   load(); loadLandingPages(); loadFormMsgTemplates(); loadTplPages(); loadAudiences(); loadPixels()
   // 广告列表「复用此帖铺放」入口 → 预填跟帖模板
   const rp = route.query.reuse_post
-// ?deploy=<id> 自动打开部署抽屉（广告管理器创建按钮快选跳转）
-const rd = route.query.deploy
-if (rd) {
-  nextTick(async () => {
-    const tpl = templates.value.find(t => t.id === Number(rd))
-    if (tpl) openDeploy(tpl)
-    else if (!templates.value.length) {
-      await loadTemplates()
-      const tpl2 = templates.value.find(t => t.id === Number(rd))
-      if (tpl2) openDeploy(tpl2)
-    }
-  })
-}
+  // ?deploy=<id> 自动打开部署抽屉（广告管理器创建按钮快选跳转）
+  const rd = route.query.deploy
+  if (rd) {
+    nextTick(async () => {
+      let tpl = list.value.find(t => t.id === Number(rd))
+      if (!tpl) { await load(); tpl = list.value.find(t => t.id === Number(rd)) }
+      if (tpl) openDeploy(tpl)
+    })
+  }
   if (rp) {
     openNew()
     editMode.value = 'flat'; tree.value = { adsets: [] }   // 跟帖预填走平铺流（直达广告 Tab）
