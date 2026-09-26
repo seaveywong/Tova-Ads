@@ -204,6 +204,17 @@ const loadAgg = async () => {
   try { agg.value = await GET('/landing/logs/agg?' + new URLSearchParams(buildStatsParams()).toString()) }
   catch (e) { /* 聚合是辅助信息，失败不阻断 */ }
 }
+// 深化：转化漏斗 + 事件分页签——把「所有日志堆一起」拆成按事件分栏看（register 视图）
+const byEventMap = computed(() => {
+  const m = {}
+  for (const c of (agg.value?.by_event || [])) m[c.k] = c.n
+  return m
+})
+const blockTotal = computed(() => byEventMap.value.block || 0)
+const convRate = computed(() => {
+  const v = byEventMap.value.visit || 0, s = byEventMap.value.submit || 0
+  return v ? ((s / v) * 100).toFixed(1) + '%' : '—'
+})
 const toggleEvent = (v) => { fEvent.value = (fEvent.value === v ? '' : v); search() }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
 const softRefresh = () => { offset.value = 0; load() }   // 批AL：小刷新——保留全部筛选条件只拉最新数据（F5 会重置）
@@ -320,9 +331,6 @@ watch(() => route.query, (q) => {
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />
         <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
       </el-select>
-      <el-select v-model="fEvent" class="fl-sel" @change="search">
-        <el-option v-for="o in EVENT_TYPES" :key="o.v" :value="o.v" :label="o.l" />
-      </el-select>
       <el-select v-model="fSource" class="fl-sel" @change="search">
         <el-option :value="''" :label="t('lplogs.allSources')" />
         <el-option value="controlled" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcControlled')" />
@@ -354,10 +362,21 @@ watch(() => route.query, (q) => {
       </button>
       <span v-if="stats.datacenter" class="stat-chip static src-bad" :title="t('lplogs.datacenterHint')">⚠ {{ t('lplogs.datacenter') }} {{ stats.datacenter }}</span>
     </div>
+    <div class="ftabs" v-if="agg">
+      <span class="ftabs-title">{{ t('lplogs.funnelTitle') }}</span>
+      <button class="ftab" :class="{ on: fEvent === '' }" @click="toggleEvent('')">{{ t('lplogs.actionAll') }} <b>{{ agg.total }}</b></button>
+      <span class="farrow">|</span>
+      <button class="ftab" :class="{ on: fEvent === 'visit' }" @click="toggleEvent('visit')">{{ t('lplogs.actionVisit') }} <b>{{ byEventMap.visit || 0 }}</b></button>
+      <span class="farrow">→</span>
+      <button class="ftab" :class="{ on: fEvent === 'click' }" @click="toggleEvent('click')">{{ t('lplogs.actionClick') }} <b>{{ byEventMap.click || 0 }}</b></button>
+      <span class="farrow">→</span>
+      <button class="ftab" :class="{ on: fEvent === 'submit' }" @click="toggleEvent('submit')">{{ t('lplogs.actionSubmit') }} <b>{{ byEventMap.submit || 0 }}</b></button>
+      <span class="farrow">|</span>
+      <button class="ftab" :class="{ on: fEvent === 'redirect' }" @click="toggleEvent('redirect')">{{ t('lplogs.actionRedirect') }} <b>{{ byEventMap.redirect || 0 }}</b></button>
+      <button class="ftab" :class="{ on: fEvent === 'block', danger: blockTotal > 0 }" @click="toggleEvent('block')">{{ t('lplogs.actionBlock') }} <b>{{ blockTotal }}</b></button>
+      <span class="frate">{{ t('lplogs.convRate') }} <b>{{ convRate }}</b></span>
+    </div>
     <div class="stats-bar agg-bar" v-if="agg && agg.total">
-      <span class="stats-label">{{ t('lplogs.aggEvents') }}</span>
-      <button v-for="c in agg.by_event" :key="'e'+c.k" class="stat-chip" :class="{ on: fEvent === c.k }" @click="toggleEvent(c.k)">{{ eventLabel(c.k) }} <b>{{ c.n }}</b></button>
-      <span class="agg-sep"></span>
       <span class="stats-label">{{ t('lplogs.aggCountries') }}</span>
       <span v-for="c in (agg.by_country||[]).slice(0,5)" :key="'c'+c.k" class="stat-chip static">{{ countryLabel(c.k) || c.k }} <b>{{ c.n }}</b></span>
       <span class="agg-sep"></span>
@@ -518,4 +537,18 @@ watch(() => route.query, (q) => {
 .dt-item{display:flex;gap:6px;align-items:baseline;min-width:0}
 .dt-item span{color:var(--t3);white-space:nowrap}
 .dt-item code{color:var(--t2);word-break:break-all;max-width:340px;font-size:10px}
+/* 深化：转化漏斗 + 事件分页签（register 视图，拆「日志堆一起」） */
+.ftabs{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;background:var(--bg2);border:1px solid var(--bd);border-radius:10px}
+.ftabs-title{font-size:12px;color:var(--t3);font-weight:600;margin-right:2px}
+.ftab{display:flex;align-items:center;gap:5px;padding:5px 11px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;cursor:pointer;font-size:13px;color:var(--t2);white-space:nowrap}
+.ftab b{font-size:14px;font-weight:700;color:var(--t1)}
+.ftab:hover{color:var(--t1);border-color:var(--bd2)}
+.ftab.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.ftab.on b{color:#fff}
+.ftab.danger b{color:var(--error)}
+.ftab.danger.on{background:var(--error);border-color:var(--error);color:#fff}
+.ftab.danger.on b{color:#fff}
+.farrow{color:var(--t3);font-size:13px}
+.frate{margin-left:auto;font-size:12px;color:var(--t3)}
+.frate b{color:var(--success);font-size:14px;margin-left:2px}
 </style>
