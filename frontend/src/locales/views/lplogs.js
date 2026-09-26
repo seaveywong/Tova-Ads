@@ -3,7 +3,7 @@ export default {
   zh: {
         moreFilters: '更多筛选', aggEvents: '事件', aggCountries: '国家 Top', aggDevices: '设备', pageSize: '每页行数',
 pageTitle: '落地页日志', subcode: '子码', adId: '广告 ID', reset: '重置', softRefreshTip: '保留当前筛选条件，只拉取最新数据（不会像整页刷新那样重置筛选）',
-    allLandingPages: '全部落地页', allAccounts: '全部账户', allSources: '全部来源', searchPlaceholder: '搜索 国家/城市/来源',
+    allLandingPages: '全部落地页', allAccounts: '全部账户', allSources: '全部来源', allOwners: '所有人', searchPlaceholder: '搜索 国家/城市/来源',
     actionAll: '全部动作', actionVisit: '访问', actionClick: '点击', actionSubmit: '提交', actionRedirect: '跳转', actionBlock: '拦截', actionDisplay: '落地页',
     funnelTitle: '转化漏斗', convRate: '转化率', blockReasons: '拦截原因',
     resultAll: '全部结果', reasonPass: '通过', reasonDeviceBlock: '设备拦截', reasonUaBlock: 'UA拦截', reasonCountryBlock: '国家拦截', reasonCountryAllow: '地区未放行', reasonDedup: '重复访客', reasonCrawlerBlock: '爬虫拦截', reasonRefererBlock: '来源拦截', reasonQueryBlock: '参数拦截', reasonRequiredQuery: '缺必需参数', reasonDatacenterBlock: '机房拦截', reasonFrequency: '频控拦截',
@@ -25,7 +25,7 @@ pageTitle: '落地页日志', subcode: '子码', adId: '广告 ID', reset: '重�
   en: {
         moreFilters: 'More filters', aggEvents: 'Events', aggCountries: 'Top countries', aggDevices: 'Devices', pageSize: 'Rows per page',
 pageTitle: 'Landing Page Logs', subcode: 'Subcode', adId: 'Ad ID', reset: 'Reset', softRefreshTip: 'Keep current filters, fetch latest data only (unlike a full page refresh)',
-    allLandingPages: 'All landing pages', allAccounts: 'All accounts', allSources: 'All sources', searchPlaceholder: 'Search country/city/source',
+    allLandingPages: 'All landing pages', allAccounts: 'All accounts', allSources: 'All sources', allOwners: 'All owners', searchPlaceholder: 'Search country/city/source',
     actionAll: 'All actions', actionVisit: 'Visit', actionClick: 'Click', actionSubmit: 'Submit', actionRedirect: 'Redirect', actionBlock: 'Block', actionDisplay: 'Landing page',
     funnelTitle: 'Funnel', convRate: 'Conv. rate', blockReasons: 'Block reasons',
     resultAll: 'All results', reasonPass: 'Pass', reasonDeviceBlock: 'Device blocked', reasonUaBlock: 'UA blocked', reasonCountryBlock: 'Country blocked', reasonCountryAllow: 'Region not allowed', reasonDedup: 'Duplicate visitor', reasonCrawlerBlock: 'Crawler blocked', reasonRefererBlock: 'Referrer blocked', reasonQueryBlock: 'Query blocked', reasonRequiredQuery: 'Missing required param', reasonDatacenterBlock: 'Datacenter blocked', reasonFrequency: 'Frequency limit',

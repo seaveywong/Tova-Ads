@@ -1985,6 +1985,7 @@ def landing_logs(
     decision: str = "",
     source_type: str = "",
     reason: str = "",
+    owner_email: str = "",
     date_from: str = "",
     date_to: str = "",
     q: str = "",
@@ -2010,6 +2011,9 @@ def landing_logs(
         _ro(user, _p, attr="owner_user_id")
     _controlled = _controlled_ad_ids(db, user.tenant_id)
     qb = db.query(LandingEvent).filter(LandingEvent.tenant_id == user.tenant_id)
+    if owner_email:
+        _opids = _owner_page_ids(db, user.tenant_id, owner_email)
+        qb = qb.filter(LandingEvent.page_id.in_(_opids) if _opids else LandingEvent.page_id == -1)
     if page_id:
         qb = qb.filter(LandingEvent.page_id == page_id)
     if slug:
@@ -2073,8 +2077,23 @@ def landing_logs(
     return {"total": total, "offset": offset, "limit": limit, "items": items}
 
 
+def _owner_page_ids(db, tenant_id, owner_email) -> list:
+    """落地页 owner 筛选：owner_email → 该成员名下页 id 列表（日志按 page_id 过滤）。
+    无此用户 → [-1]（匹配不到任何页）。"""
+    if not owner_email:
+        return []
+    from ..models.auth import User as _U
+    from ..models.launch import LandingPage as _LP
+    _ou = db.query(_U.id).filter(_U.email == owner_email).first()
+    if not _ou:
+        return [-1]
+    return [p[0] for p in db.query(_LP.id).filter(
+        _LP.tenant_id == tenant_id, _LP.owner_user_id == _ou[0]).all()]
+
+
 def _logs_filtered(db, tenant_id, page_id, slug, ad_id, act_id, event_type, decision,
-                   date_from, date_to, q, source_type: str = "", reason: str = ""):
+                   date_from, date_to, q, source_type: str = "", reason: str = "",
+                   owner_email: str = ""):
     """批2：/logs/agg 与 /logs/export 共用的筛选构造（与 /landing/logs 同口径：北京业务日
     边界转 UTC + q 模糊。刻意不抽 /logs 本体——动存量筛选有回归风险，双份口径注释钉死）。"""
     from ..models.landing_event import LandingEvent
@@ -2084,6 +2103,9 @@ def _logs_filtered(db, tenant_id, page_id, slug, ad_id, act_id, event_type, deci
     if source_type:
         # 复审P1：导出/聚合曾忽略「来源」筛选——CSV 与屏幕所见口径对不上
         qb = _apply_source_filter(qb, source_type, _controlled_ad_ids(db, tenant_id))
+    if owner_email:
+        _opids = _owner_page_ids(db, tenant_id, owner_email)
+        qb = qb.filter(LandingEvent.page_id.in_(_opids) if _opids else LandingEvent.page_id == -1)
     if page_id:
         qb = qb.filter(LandingEvent.page_id == page_id)
     if slug:
@@ -2125,7 +2147,8 @@ def landing_logs_agg(
     user: CurrentUser = Depends(require_permission("ads.read")),
     page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
     event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
-    q: str = "", source_type: str = "", reason: str = "", db: Session = Depends(get_db),
+    q: str = "", source_type: str = "", reason: str = "", owner_email: str = "",
+    db: Session = Depends(get_db),
 ):
     """日志聚合（批2）：总量 + 事件类型/国家/设备分布 top——筛选条一键看结构，此前只有来源分布。"""
     if page_id:   # 复审P1：归属校验漏了 agg/export（曾只加在 /logs）——operator 枚举 page_id 可聚合他人页
@@ -2138,7 +2161,7 @@ def landing_logs_agg(
     from sqlalchemy import func as _fn
     from ..models.landing_event import LandingEvent as _LE
     qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
-                        event_type, decision, date_from, date_to, q, source_type, reason)
+                        event_type, decision, date_from, date_to, q, source_type, reason, owner_email)
 
     def _top(col, n=6):
         rows = qb.with_entities(col, _fn.count()).filter(col.isnot(None), col != "").group_by(col).order_by(_fn.count().desc()).limit(n).all()
@@ -2156,7 +2179,8 @@ def landing_logs_export(
     user: CurrentUser = Depends(require_permission("ads.read")),
     page_id: int | None = None, slug: str = "", ad_id: str = "", act_id: str = "",
     event_type: str = "", decision: str = "", date_from: str = "", date_to: str = "",
-    q: str = "", source_type: str = "", reason: str = "", db: Session = Depends(get_db),
+    q: str = "", source_type: str = "", reason: str = "", owner_email: str = "",
+    db: Session = Depends(get_db),
 ):
     """CSV 导出（批2）：同筛选口径，上限 1 万行（防止拖库式导出拖垮连接）。"""
     if page_id:   # 复审P1：同 agg——导出的是原始事件行，更必须校验
@@ -2170,7 +2194,7 @@ def landing_logs_export(
     from fastapi.responses import Response as _Resp
     from ..models.landing_event import LandingEvent as _LE
     qb = _logs_filtered(db, user.tenant_id, page_id, slug, ad_id, act_id,
-                        event_type, decision, date_from, date_to, q, source_type, reason)
+                        event_type, decision, date_from, date_to, q, source_type, reason, owner_email)
     rows = qb.order_by(_LE.created_at.desc()).limit(10000).all()
     buf = _io.StringIO()
     w = csv.writer(buf)
@@ -2198,6 +2222,7 @@ def landing_log_source_stats(
     date_from: str = "",
     date_to: str = "",
     q: str = "",
+    owner_email: str = "",
     db: Session = Depends(get_db),
 ):
     """来源分布统计（受控/外部/爬虫/占位符/未知 + 机房数）。默认今日（北京业务日），有日期则按日期。
@@ -2237,6 +2262,9 @@ def landing_log_source_stats(
         qb = qb.filter(LandingEvent.event_type == event_type)
     if decision:
         qb = qb.filter(LandingEvent.decision == decision)
+    if owner_email:
+        _opids = _owner_page_ids(db, user.tenant_id, owner_email)
+        qb = qb.filter(LandingEvent.page_id.in_(_opids) if _opids else LandingEvent.page_id == -1)
     if date_from:
         try:
             start = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ)

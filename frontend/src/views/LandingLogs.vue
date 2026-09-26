@@ -113,6 +113,7 @@ const fEvent = ref('')
 const fDecision = ref('')
 const fSource = ref('')
 const fReason = ref('')
+const fOwner = ref('')
 const fFrom = ref('')
 const fTo = ref('')
 const fQ = ref('')
@@ -127,6 +128,15 @@ watch(platform, () => {
 
 const pages = ref([])
 const accounts = ref([])
+// 成员/负责人筛选（与落地页列表 ownerFilter 同口径：按创建人过滤）
+const ownerOptions = computed(() => {
+  const seen = new Map()
+  for (const p of pages.value) {
+    const e = p.owner_email
+    if (e && !seen.has(e)) seen.set(e, { email: e, label: e.split('@')[0] + ' (' + e + ')' })
+  }
+  return [...seen.values()]
+})
 const items = ref([])
 const total = ref(0)
 const offset = ref(0)
@@ -150,6 +160,7 @@ const buildParams = () => {
   if (fDecision.value) p.decision = fDecision.value
   if (fSource.value) p.source_type = fSource.value
   if (fReason.value) p.reason = fReason.value
+  if (fOwner.value) p.owner_email = fOwner.value
   if (fFrom.value) p.date_from = fFrom.value
   if (fTo.value) p.date_to = fTo.value
   if (fQ.value) p.q = fQ.value
@@ -200,6 +211,7 @@ const buildStatsParams = () => {
   if (fAd.value) p.ad_id = fAd.value
   if (fEvent.value) p.event_type = fEvent.value
   if (fDecision.value) p.decision = fDecision.value
+  if (fOwner.value) p.owner_email = fOwner.value
   if (fFrom.value) p.date_from = fFrom.value
   if (fTo.value) p.date_to = fTo.value
   if (fQ.value) p.q = fQ.value
@@ -275,7 +287,7 @@ const debounceSearch = () => {
 }
 onUnmounted(() => { if (_debTimer) clearTimeout(_debTimer) })
 const reset = () => {
-  fPage.value = ''; fAct.value = ''; fSlug.value = ''; fAd.value = ''; fEvent.value = ''; fDecision.value = ''; fSource.value = ''; fReason.value = ''
+  fPage.value = ''; fAct.value = ''; fSlug.value = ''; fAd.value = ''; fEvent.value = ''; fDecision.value = ''; fSource.value = ''; fReason.value = ''; fOwner.value = ''
   fFrom.value = ''; fTo.value = ''; fQ.value = ''; preset.value = ''; offset.value = 0; load()
 }
 // 日期快捷（按北京业务日，和后端查询基准对齐）；自定义区间收进 DatePresetBar
@@ -365,6 +377,10 @@ watch(() => route.query, (q) => {
       <el-select v-model="fPage" class="fl-sel" filterable :placeholder="t('lplogs.allLandingPages')" @change="search">
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />
         <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
+      </el-select>
+      <el-select v-model="fOwner" class="fl-sel" filterable :placeholder="t('lplogs.allOwners')" @change="search">
+        <el-option :value="''" :label="t('lplogs.allOwners')" />
+        <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <el-select v-model="fSource" class="fl-sel" @change="search">
         <el-option :value="''" :label="t('lplogs.allSources')" />
