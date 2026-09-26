@@ -3068,3 +3068,12 @@ E2E：BM 43 行→详情弹层→邀请表单+按钮+6 个移除按钮全可见 
 - 像素共享：`POST /{pixel_id}/shared_accounts`（account_id + business）
 
 **API 支持矩阵**（完整版见调研报告）：邀请/移除/改角色✓ / 系统用户创建+token✓ / 分配账户/Page✓ / 像素共享✓ / 资产分组✓ / 新建广告账户⚠️(限5个) / 跨BM伙伴共享⚠️(文档半弃) / OWNER+CONFIRMED 删除✗ / Creative Account claim✗
+
+## 批WW 总结：BM 权限防护 + 全系统断层扫描 + 开发规范（2026-09-26，91ecc78 终版）
+**目标四步全部完成**：
+①调研：Agent 深度调研 20+ FB 官方文档页——BM API 完整支持矩阵（邀请/移除/角色/系统用户/资产分配/像素共享/资产分组/跨BM伙伴），核心发现：**全部写操作同一 App 权限墙**（business_management App Review + Live Mode + BM claim App）。
+②CLI 实测：cred#34 直调确认 1752203（App 层拦截）——与调研结论吻合；修复 fb.py 缺 import re（NameError 500）+ guard_engine 缺 import random（保活 NameError）。
+③复审：端点 smoke 17/17 全通；i18n 裸键全站扫描（adm.copiedVal 修正）；令牌排版 CSS 修复；ADMIN 文案改进。
+④规范：CLAUDE.md 铁律 9（四步开发流程）+ 铁律 8（i18n 裸键零容忍）——DeepSeek 同步。
+
+**BM 写权限防护（三轮迭代终版）**：非破坏性探测（.invalid 邮箱→消息关键词判定 permission/capability = 拦截），10min 缓存，write_ok=false 时前端自动隐藏邀请/移除并显示引导文案。App 过审后自动恢复。
