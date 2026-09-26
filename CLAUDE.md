@@ -47,6 +47,18 @@ node _sshx.js 'cd /opt/toveads/backend && venv/bin/python -m py_compile <file> &
 - **验证必做**：①组件新增 `t('ns.key')` 时 grep 确认键存在于 zh.js/en.js（含嵌套对象路径）；②每批前端改动 build 后跑 `node /d/dev/Mira_One/_audit_ui_text.js`（17 路由×2 语言裸键/模板泄漏/CJK 反向泄漏零容忍）；③跨命名空间引用键（如 dashboard 组件里用 common.xxx）必须确认目标命名空间有该键——**别凭记忆写命名空间前缀**。
 - 审计器路径：`D:/dev/Mira_One/_audit_ui_text.js`（页面级）+ `D:/dev/Mira_One/_chk_keys.cjs`（组件级 t() 键校验）。
 
+## 标准化开发流程（2026-09-26 用户拍板——不做一半就上线）
+**任何新功能必须走完四步才能部署：**
+1. **调研**：FB API 能不能做？FB UI 怎么做的？完整功能地图（含周边可以一起做的）？→ 不做没调研过的功能
+2. **CLI 实测**：在服务器用 Python 直调 FB API 验证真的能成功（不是猜参数）→ 实测不过不上代码
+3. **复审**：做完后全维度检查（i18n 裸键/权限/NameError/端点 smoke/截图断言）→ 带 bug 的功能不上线
+4. **文档**：TECH_REVIEW 追记 + CLAUDE.md 更新
+
+**禁止行为：**
+- 禁止只写代码不调 API 实测（BM 邀请 500 事故：写了邀请功能但 App 没过 Review——CLI 一测就知道）
+- 禁止功能做一半上线（BM 只做了邀请没做资产分配）
+- 禁止不跑审计器就交付（i18n 裸键两起事故）
+
 ## 多租户 / RLS
 两套 session：`get_db`=RLS 受限（普通请求）/ `SuperSessionLocal`=BYPASSRLS（注册/平台级/定时任务）。`advisory lock`(acquire_run_lock) 防 gunicorn 多 worker 重复跑 cron，**锁号必须唯一**（现 101-119 已占，新增从 120 起）。
 
