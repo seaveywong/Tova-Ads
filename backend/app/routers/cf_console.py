@@ -132,11 +132,13 @@ def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
             return hit[1]
     cf = _cf()
     zones = cf.list_zones()
-    from datetime import date as _date, timedelta as _td, datetime as _dt, timezone as _tz
+    from datetime import date as _date, timedelta as _td
     today = _date.today()
-    q = """
-    query($z: String!, $s: Date!, $e: Date!) {
-      viewer { zones(filter: {zoneTag: $z}) {
+    zids = [z["id"] for z in zones]
+    # 批量查询（zoneTag_in 一次拉全部 zone——逐 zone×2 查询 14 次串行曾拖慢面板 10s+）
+    q30 = """
+    query($zs: [String!]!, $s: Date!, $e: Date!) {
+      viewer { zones(filter: {zoneTag_in: $zs}) { zoneTag
         httpRequests1dGroups(limit: 31, filter: {date_geq: $s, date_leq: $e}, orderBy: [date_DESC]) {
           dimensions { date }
           sum { requests bytes pageViews }
@@ -144,74 +146,79 @@ def cf_usage(fresh: int = 0, _=Depends(_cf_client_for_user)):
         }
       }}
     }"""
-    # 近实时今日（adaptive 分钟粒度聚合，~15min 滞后）——1d 数据集今日要等数小时才出，
-    # 今日列优先取 adaptive；失败（同权限）回落 1d（today_rt=False）
-    q_rt = """
-    query($z: String!, $s: Time!, $e: Time!) {
-      viewer { zones(filter: {zoneTag: $z}) {
-        httpRequestsAdaptiveGroups(limit: 10, filter: {datetime_geq: $s, datetime_leq: $e}) {
+    # 今日近实时：1h groups（小时粒度，~1h 滞后；1d 数据集今日要等数小时）。结构已探针验证
+    # （date_geq 过滤 + 纯聚合无 dimensions；adaptive 数据集字段集不同故弃用）。
+    q_today = """
+    query($zs: [String!]!, $s: Date!, $e: Date!) {
+      viewer { zones(filter: {zoneTag_in: $zs}) { zoneTag
+        httpRequests1hGroups(limit: 10, filter: {date_geq: $s, date_leq: $e}) {
           sum { requests pageViews }
           uniq { uniques }
         }
       }}
     }"""
-    day_start = _dt.now(_tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    out, needs_perm, perm_pretty = [], False, ""
+    g30, gtoday, all_errs = {}, {}, []
+    try:
+        r30 = cf.graphql(q30, {"zs": zids, "s": str(today - _td(days=30)), "e": str(today)})
+        all_errs += r30.get("errors") or []
+        for zn in (((r30.get("data") or {}).get("viewer") or {}).get("zones") or []):
+            g30[zn.get("zoneTag")] = zn.get("httpRequests1dGroups") or []
+    except Exception as e:
+        all_errs.append({"message": str(e)})
+    try:
+        rt = cf.graphql(q_today, {"zs": zids, "s": str(today), "e": str(today)})
+        all_errs += rt.get("errors") or []
+        for zn in (((rt.get("data") or {}).get("viewer") or {}).get("zones") or []):
+            gtoday[zn.get("zoneTag")] = zn.get("httpRequests1hGroups") or []
+    except Exception as e:
+        all_errs.append({"message": str(e)})
+    # 权限探测（两查询合并错误流）。关键词须覆盖两种报错文案：单 zone=“does not have
+    # permission '...'”；zoneTag_in 批量=“zones [...] are not authorized”（不含 permission
+    # 一词——曾漏判误报权限已通）。extensions.code=authz 再兜一层
+    msg = " ".join(str(e.get("message", "")) for e in all_errs)
+    low = msg.lower()
+    code_authz = any((e.get("extensions") or {}).get("code") == "authz" for e in all_errs)
+    needs_perm = code_authz or any(
+        k in low for k in ("permission", "authz", "not entitled",
+                           "does not have", "not authorized"))
+    perm_pretty = ""
+    if needs_perm:
+        # CF 原话 'com.cloudflare.api.account.zone.analytics.read' → 'Zone › Analytics › Read'
+        m = re.search(r"permission '([a-z.]+)'", low)
+        if m:
+            parts = m.group(1).split(".")[-3:]
+            perm_pretty = " › ".join(p.capitalize() for p in parts)
+    out = []
     for z in zones:
         row = {"zone": z.get("name"), "plan": (z.get("plan") or {}).get("name", ""),
                "today": None, "today_rt": False, "d7": 0, "d30": 0,
                "bytes30": 0, "uniques30": 0, "daily": []}
-        groups, r = [], {}
-        try:
-            r = cf.graphql(q, {"z": z["id"],
-                               "s": str(today - _td(days=30)), "e": str(today)})
-            groups = (((r.get("data") or {}).get("viewer") or {}).get("zones") or [{}])[0] \
-                .get("httpRequests1dGroups") or []
-            daily = []
-            for g in groups:
-                d = (g.get("dimensions") or {}).get("date")
-                s = g.get("sum") or {}
-                req = int(s.get("requests") or 0)
-                row["d30"] += req
-                row["bytes30"] += int(s.get("bytes") or 0)
-                row["uniques30"] += int((g.get("uniq") or {}).get("uniques") or 0)
-                delta = (today - _date.fromisoformat(d)).days
-                if 0 < delta <= 30:
-                    daily.append({"d": d, "r": req})   # 迷你趋势不含今日（adaptive 才是今日真值）
-                if delta < 7:
-                    row["d7"] += req
-                if delta == 0:
-                    row["today"] = {"requests": req,
-                                    "pageViews": int(s.get("pageViews") or 0),
-                                    "uniques": int((g.get("uniq") or {}).get("uniques") or 0)}
-            row["daily"] = sorted(daily, key=lambda x: x["d"])
-        except Exception:
-            pass
-        # 今日列升级为 adaptive 近实时（同权限；无 dimensions=单行聚合）
-        try:
-            rr = cf.graphql(q_rt, {"z": z["id"], "s": day_start.isoformat().replace("+00:00", "Z"),
-                                   "e": _dt.now(_tz.utc).isoformat().replace("+00:00", "Z")})
-            ag = (((rr.get("data") or {}).get("viewer") or {}).get("zones") or [{}])[0] \
-                .get("httpRequestsAdaptiveGroups") or []
-            if ag:
-                s = ag[0].get("sum") or {}
-                row["today"] = {"requests": int(s.get("requests") or 0),
+        daily = []
+        for g in g30.get(z["id"]) or []:
+            d = (g.get("dimensions") or {}).get("date")
+            s = g.get("sum") or {}
+            req = int(s.get("requests") or 0)
+            row["d30"] += req
+            row["bytes30"] += int(s.get("bytes") or 0)
+            row["uniques30"] += int((g.get("uniq") or {}).get("uniques") or 0)
+            delta = (today - _date.fromisoformat(d)).days
+            if 0 < delta <= 30:
+                daily.append({"d": d, "r": req})   # 迷你趋势不含今日（今日走 1h 近实时）
+            if delta < 7:
+                row["d7"] += req
+            if delta == 0:
+                row["today"] = {"requests": req,
                                 "pageViews": int(s.get("pageViews") or 0),
-                                "uniques": int((ag[0].get("uniq") or {}).get("uniques") or 0)}
-                row["today_rt"] = True
-        except Exception:
-            pass
-        if not groups:
-            errs = (r.get("errors") or []) if isinstance(r, dict) else []
-            msg = " ".join(str(e.get("message", "")) for e in errs)
-            low = msg.lower()
-            if any(k in low for k in ("permission", "authz", "not entitled", "does not have")):
-                needs_perm = True
-                # CF 原话 'com.cloudflare.api.account.zone.analytics.read' → 'Zone › Analytics › Read'
-                m = re.search(r"permission '([a-z.]+)'", msg.lower())
-                if m and not perm_pretty:
-                    parts = m.group(1).split(".")[-3:]
-                    perm_pretty = " › ".join(p.capitalize() for p in parts)
+                                "uniques": int((g.get("uniq") or {}).get("uniques") or 0)}
+        row["daily"] = sorted(daily, key=lambda x: x["d"])
+        th = gtoday.get(z["id"]) or []
+        if th:
+            s = th[0].get("sum") or {}
+            row["today"] = {"requests": int(s.get("requests") or 0),
+                            "pageViews": int(s.get("pageViews") or 0),
+                            "uniques": int((th[0].get("uniq") or {}).get("uniques") or 0)}
+            row["today_rt"] = True
+        if not (g30.get(z["id"]) or gtoday.get(z["id"])):
             row["no_data"] = True
         out.append(row)
     res = {"zones": out, "needs_permission": needs_perm, "perm": perm_pretty,
