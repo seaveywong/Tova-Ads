@@ -5,7 +5,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { GET, POST } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { isSuperadminSync } from '../router'
+import { isSuperadminSync, getUserPerms } from '../router'
 import QRCode from 'qrcode'
 
 const isSuper = isSuperadminSync()
@@ -144,13 +144,80 @@ watch(orders, () => {   // 轮询刷新后同步面板状态（到账自动变�
   const o = (orders.value || []).find(x => x.id === payPanel.value.id)
   if (o) { payPanel.value.status = o.status; payPanel.value.pay_amount = o.pay_amount; payPanel.value.payment_txid = o.payment_txid }
 }, { deep: false })
-onUnmounted(() => { if (_payTimer) clearInterval(_payTimer) })
+onUnmounted(() => { if (_payTimer) clearInterval(_payTimer); if (_walletTimer) clearInterval(_walletTimer) })
 const copyPay = () => {
   navigator.clipboard?.writeText((payPanel.value?.payment_address) || payInfo.value.address || '')
   ElMessage.success(t('domains.payCopied'))
 }
 const pendingCount = computed(() => (orders.value || []).filter(o => ['pending_payment', 'payment_detected'].includes(o.status)).length)
-onMounted(() => { loadOrders(); loadMyDomains() })
+
+// ── 钱包（批1：团队余额——充值 USDT 自动入账 / 下单自动扣款；超管看全平台+人工调整）──
+const canBilling = isSuper || getUserPerms().includes('billing.view')
+const wallet = ref(null)
+const walletLoading = ref(false)
+const loadWallet = async () => {
+  walletLoading.value = true
+  try { wallet.value = await GET('/wallet') } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  walletLoading.value = false
+}
+const topupOpen = ref(false)
+const topupAmt = ref('')
+const topupBusy = ref(false)
+const topupPanel = ref(null)   // 充值发票 {id, pay_amount, payment_address, amount_usd}
+const topupQr = ref('')
+const openTopup = () => { topupOpen.value = true; topupPanel.value = null; topupAmt.value = '' }
+const copyTopupAddr = () => {
+  navigator.clipboard?.writeText(topupPanel.value?.payment_address || '')
+  ElMessage.success(t('domains.payCopied'))
+}
+const submitTopup = async () => {
+  const amt = Number(topupAmt.value)
+  if (!(amt >= 1)) return ElMessage.warning(t('wallet.amtMin'))
+  topupBusy.value = true
+  try {
+    const r = await POST('/wallet/topup', { amount_usd: amt })
+    topupPanel.value = r
+    const uri = `tron:${r.payment_address}?token=USDT&amount=${r.pay_amount}`
+    try { topupQr.value = await QRCode.toDataURL(uri, { width: 190, margin: 1 }) } catch { topupQr.value = '' }
+    loadWallet()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  topupBusy.value = false
+}
+const cancelTopup = async (id) => {
+  try { await POST(`/wallet/topup/${id}/cancel`, {}); ElMessage.success(t('wallet.topupCancelled')); topupPanel.value = null; loadWallet() }
+  catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+}
+// 到账轮询：有待转账充值单时 8s 刷（监听 2min 一轮）
+let _walletTimer = null
+watch(() => (wallet.value?.pending_topups || []).length, n => {
+  if (n && !_walletTimer) _walletTimer = setInterval(loadWallet, 8000)
+  else if (!n && _walletTimer) { clearInterval(_walletTimer); _walletTimer = null }
+})
+const txnLabel = (x) => ({ deposit: t('wallet.txDeposit'), charge: t('wallet.txCharge'),
+                           refund: t('wallet.txRefund'), adjust: t('wallet.txAdjust') }[x.type] || x.type)
+const refText = (x) => x.ref_type === 'topup' ? t('wallet.refTopup', { id: x.ref_id })
+  : x.ref_type === 'domain_order' ? t('wallet.refOrder', { id: x.ref_id })
+  : x.ref_type === 'domain_order_refund' ? t('wallet.refOrderRefund', { id: x.ref_id }) : (x.note || '')
+// 超管：全平台余额 + 人工调整
+const walletAll = ref(null)
+const loadWalletAll = async () => { try { walletAll.value = await GET('/wallet/all') } catch (e) { ElMessage.error(e.message || t('common.opFail')) } }
+const adjustOpen = ref(false)
+const adjustForm = ref({ tenant_id: 0, amount_usd: '', note: '' })
+const adjustBusy = ref(false)
+const openAdjust = (tid) => { adjustForm.value = { tenant_id: tid, amount_usd: '', note: '' }; adjustOpen.value = true }
+const submitAdjust = async () => {
+  const amt = Number(adjustForm.value.amount_usd)
+  if (!amt) return ElMessage.warning(t('wallet.adjAmtRequired'))
+  if (!adjustForm.value.note.trim()) return ElMessage.warning(t('wallet.adjNoteRequired'))
+  adjustBusy.value = true
+  try {
+    const r = await POST('/wallet/adjust', { tenant_id: adjustForm.value.tenant_id, amount_usd: amt, note: adjustForm.value.note.trim() })
+    ElMessage.success(t('wallet.adjDone', { v: r.balance_usd }))
+    adjustOpen.value = false; loadWalletAll(); if (canBilling) loadWallet()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  adjustBusy.value = false
+}
+onMounted(() => { loadOrders(); loadMyDomains(); if (canBilling) { loadWallet(); if (isSuper) loadWalletAll() } })
 </script>
 
 <template>
@@ -160,6 +227,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
         <button class="seg-btn" :class="{ on: sec === 'buy' }" @click="sec = 'buy'">{{ t('domains.tabBuy') }}</button>
         <button class="seg-btn" :class="{ on: sec === 'mine' }" @click="sec = 'mine'; loadMyDomains()">{{ t('domains.tabMine') }} <i v-if="myDomains.length" class="seg-cnt">{{ myDomains.length }}</i></button>
         <button class="seg-btn" :class="{ on: sec === 'orders' }" @click="sec = 'orders'; loadOrders()">{{ t('domains.tabOrders') }} <i v-if="pendingCount" class="seg-cnt hot">{{ pendingCount }}</i></button>
+        <button v-if="canBilling" class="seg-btn" :class="{ on: sec === 'wallet' }" @click="sec = 'wallet'; loadWallet(); if (isSuper) loadWalletAll()">{{ t('wallet.tab') }} <i v-if="wallet" class="seg-cnt">${{ wallet.balance_usd }}</i></button>
       </div>
     </div>
 
@@ -226,7 +294,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 
     <!-- 订单 -->
     <div v-if="sec === 'orders'" class="card" v-loading="ordersLoading">
-      <div v-if="payInfo.address && !payPanel" class="pay-box">
+      <div v-if="payInfo.address && !payPanel && pendingCount" class="pay-box">
         <span class="pay-label">{{ t('domains.payTo') }}</span>
         <span v-if="(payInfo.addresses?.length || 1) > 1" class="pay-addr mono">{{ t('domains.payPoolN', { n: payInfo.addresses.length }) }}</span>
         <span v-else class="pay-addr mono" @click="copyPay">{{ payInfo.chain }} · {{ payInfo.address }}</span>
@@ -265,6 +333,85 @@ onMounted(() => { loadOrders(); loadMyDomains() })
       </div>
       <div v-if="!orders.length && !ordersLoading" class="ds-empty">{{ t('landing.shopNoOrders') }}<button class="ctrl-btn sm" style="margin-left:10px" @click="sec = 'buy'">{{ t('domains.goBuy') }}</button></div>
     </div>
+
+    <!-- 钱包（团队余额：充值自动入账 / 买单自动扣款；超管含全平台视图+调整） -->
+    <div v-if="sec === 'wallet' && canBilling" class="card" v-loading="walletLoading">
+      <div class="wal-head">
+        <div class="wal-balance">
+          <span class="wal-bal-label">{{ t('wallet.balanceLabel') }}</span>
+          <b class="wal-bal-num tnum">${{ (wallet?.balance_usd ?? 0).toFixed(2) }}</b>
+          <span class="wal-bal-note">{{ t('wallet.teamNote') }}</span>
+        </div>
+        <button class="ctrl-btn primary" @click="openTopup">＋ {{ t('wallet.topupBtn') }}</button>
+      </div>
+      <div v-for="tp in (wallet?.pending_topups || [])" :key="tp.id" class="wal-topup-row">
+        <span class="tnum">${{ tp.amount_usd.toFixed(2) }}</span>
+        <span class="pay-addr mono" :title="tp.payment_address">{{ tp.payment_address }}</span>
+        <span class="ds-pay tnum" :title="t('domains.payAmtTip')">{{ t('domains.payAmt', { v: tp.pay_amount.toFixed(2) }) }}</span>
+        <span class="ds-time">{{ tp.created_at }}</span>
+        <button class="ctrl-btn sm" @click="cancelTopup(tp.id)">{{ t('common.cancel') }}</button>
+      </div>
+      <div v-if="wallet?.pending_topups?.length" class="field-hint" style="margin:0 0 6px">{{ t('domains.payAutoDetect') }}</div>
+
+      <div v-if="isSuper && walletAll" class="wal-all">
+        <div class="wal-all-hd">{{ t('wallet.allTeams') }} · {{ t('wallet.total') }} ${{ (walletAll.total_usd ?? 0).toFixed(2) }}</div>
+        <div v-for="a in walletAll.teams" :key="a.tenant_id" class="wal-all-row">
+          <span class="wal-team-name">{{ a.team }}</span>
+          <b class="tnum">${{ a.balance_usd.toFixed(2) }}</b>
+          <span class="ds-time">{{ a.updated_at }}</span>
+          <button class="ctrl-btn sm" @click="openAdjust(a.tenant_id)">{{ t('wallet.adjustBtn') }}</button>
+        </div>
+        <div v-if="!walletAll.teams?.length" class="ds-empty">{{ t('wallet.noAccounts') }}</div>
+      </div>
+
+      <div class="wal-txns">
+        <div class="wal-txns-hd">{{ t('wallet.txnsTitle') }}</div>
+        <div v-for="x in (wallet?.txns || [])" :key="x.id" class="wal-txn-row">
+          <span :class="['wal-txn-type', x.amount_usd >= 0 ? 'in' : 'out']">{{ txnLabel(x) }}</span>
+          <span :class="['wal-txn-amt tnum', x.amount_usd >= 0 ? 'in' : 'out']">{{ x.amount_usd >= 0 ? '+' : '' }}${{ x.amount_usd.toFixed(2) }}</span>
+          <span class="wal-txn-bal tnum">{{ t('wallet.balAfter') }} ${{ x.balance_after.toFixed(2) }}</span>
+          <span class="wal-txn-ref">{{ refText(x) }}</span>
+          <a v-if="x.txid" class="ds-tx mono" :href="'https://tronscan.org/#/transaction/' + x.txid" target="_blank">TXID ↗</a>
+          <span class="ds-time">{{ x.created_at }}</span>
+        </div>
+        <div v-if="!(wallet?.txns || []).length && !walletLoading" class="ds-empty">{{ t('wallet.noTxns') }}</div>
+      </div>
+    </div>
+
+    <!-- 充值弹窗：金额 → 发票（地址+含尾号金额+QR，到账自动入账） -->
+    <el-dialog v-model="topupOpen" :title="t('wallet.topupTitle')" width="440px" append-to-body>
+      <template v-if="!topupPanel">
+        <div class="form-l"><label>{{ t('wallet.amtLabel') }}（USD）</label>
+          <input v-model="topupAmt" class="input" type="number" min="1" step="0.01" :placeholder="t('wallet.amtPh')" @keyup.enter="submitTopup" /></div>
+        <div class="field-hint">{{ t('wallet.topupHint') }}</div>
+      </template>
+      <template v-else>
+        <div class="inv-qr-wrap"><img v-if="topupQr" :src="topupQr" class="inv-qr" alt="QR" /><div class="inv-qr-hint">{{ t('domains.scanPay') }}</div></div>
+        <div class="inv-row"><span class="inv-k">{{ t('wallet.amtLabel') }}</span><b>${{ topupPanel.amount_usd.toFixed(2) }}</b></div>
+        <div class="inv-row"><span class="inv-k">{{ t('domains.payAmtLabel') }}</span>
+          <b class="inv-amt" :title="t('domains.payAmtTip')" @click="navigator?.clipboard?.writeText(String(topupPanel.pay_amount))">${{ topupPanel.pay_amount.toFixed(2) }} <i>⧉</i></b></div>
+        <div class="inv-row"><span class="inv-k">{{ t('settings.rgPayAddr') }}</span>
+          <span class="pay-addr mono" @click="copyTopupAddr">{{ topupPanel.payment_address }}</span>
+          <button class="ctrl-btn sm" @click="copyTopupAddr">{{ t('common.copy') }}</button></div>
+        <div class="inv-note">{{ t('domains.payAutoDetect') }}</div>
+      </template>
+      <template #footer>
+        <button v-if="!topupPanel" class="btn primary" :disabled="topupBusy" @click="submitTopup">{{ topupBusy ? t('common.loading') : t('wallet.topupGo') }}</button>
+        <button v-else class="btn" @click="topupOpen = false">{{ t('common.close') }}</button>
+      </template>
+    </el-dialog>
+
+    <!-- 超管调整弹窗（退款/纠错/赠款——流水留痕） -->
+    <el-dialog v-model="adjustOpen" :title="t('wallet.adjustTitle')" width="420px" append-to-body>
+      <div class="form-l"><label>{{ t('wallet.adjAmtLabel') }}（±USD）</label>
+        <input v-model="adjustForm.amount_usd" class="input" type="number" step="0.01" :placeholder="t('wallet.adjAmtPh')" /></div>
+      <div class="form-l"><label>{{ t('wallet.adjNoteLabel') }}</label>
+        <input v-model="adjustForm.note" class="input" :placeholder="t('wallet.adjNotePh')" /></div>
+      <div class="field-hint">{{ t('wallet.adjHint') }}</div>
+      <template #footer>
+        <button class="btn primary" :disabled="adjustBusy" @click="submitAdjust">{{ adjustBusy ? t('common.loading') : t('common.confirm') }}</button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -284,6 +431,31 @@ onMounted(() => { loadOrders(); loadMyDomains() })
 .ds-row { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap; }
 .ds-team { font-size: 11px; color: var(--t3); background: var(--bg3); border-radius: 6px; padding: 1px 8px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .ds-cost-brk { font-style: normal; font-size: 10px; color: var(--t3); margin-left: 2px }
+/* 钱包（团队余额 / 充值单 / 全平台视图 / 流水） */
+.wal-head { display: flex; align-items: center; gap: 14px; padding: 6px 2px 12px; border-bottom: 1px solid var(--bd); flex-wrap: wrap }
+.wal-balance { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1 }
+.wal-bal-label { font-size: 12px; color: var(--t3) }
+.wal-bal-num { font-size: 26px; font-weight: 700; color: var(--t1); font-variant-numeric: tabular-nums }
+.wal-bal-note { font-size: 11px; color: var(--t3) }
+.wal-topup-row { display: flex; gap: 12px; align-items: center; padding: 8px 2px; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap }
+.wal-topup-row .pay-addr { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px }
+.wal-all { margin: 12px 0; border: 1px solid var(--bd); border-radius: 8px; padding: 8px 12px }
+.wal-all-hd { font-size: 12px; font-weight: 600; color: var(--ac); padding: 4px 0 8px }
+.wal-all-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--bd) }
+.wal-all-row:last-child { border-bottom: none }
+.wal-team-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font-weight: 500 }
+.wal-txns { margin-top: 12px }
+.wal-txns-hd { font-size: 12px; font-weight: 600; color: var(--t2); padding: 6px 0 }
+.wal-txn-row { display: flex; gap: 12px; align-items: center; padding: 7px 2px; font-size: 12.5px; border-bottom: 1px solid var(--bd); flex-wrap: wrap }
+.wal-txn-row:last-child { border-bottom: none }
+.wal-txn-type { font-size: 11px; padding: 1px 8px; border-radius: 8px; flex: none; font-weight: 600 }
+.wal-txn-type.in { color: var(--success); background: rgba(52,199,89,.12) }
+.wal-txn-type.out { color: var(--ac); background: rgba(10,132,255,.1) }
+.wal-txn-amt { font-weight: 600; flex: none }
+.wal-txn-amt.in { color: var(--success) }
+.wal-txn-amt.out { color: var(--t1) }
+.wal-txn-bal { color: var(--t3); flex: none }
+.wal-txn-ref { color: var(--t3); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .ds-row:last-child { border-bottom: none; }
 .ds-dom { font-weight: 600; color: var(--t1); font-size: 14px; flex: 1; min-width: 160px; }
 .ds-price { color: var(--t3); font-variant-numeric: tabular-nums; }

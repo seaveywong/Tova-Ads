@@ -159,6 +159,57 @@ def run_usdt_monitor():
         if hits:
             db.commit()
             logger.info(f"[USDT] 本轮匹配 {hits} 笔待付款订单")
+        # ── 钱包充值单匹配（批1：同款地址池+尾号对账，到账即自动入账+通知）──
+        from ..models.wallet import WalletTopup
+        from ..core.wallet import wallet_apply
+        ptup = (db.query(WalletTopup).filter(WalletTopup.status == "pending")
+                .order_by(WalletTopup.id.asc()).limit(50).all())
+        for tp in ptup:
+            t_target = (tp.payment_address or "").strip() or addrs[0]
+            if t_target not in addrs:
+                continue
+            if t_target not in tx_cache:
+                tx_cache[t_target] = _fetch_incoming(t_target, tg_key)
+            t_created = (tp.created_at or datetime.now(timezone.utc)).timestamp()
+            for t in tx_cache[t_target]:
+                try:
+                    _txid = str(t.get("transaction_id") or "")
+                    if _txid in used_txids or (t.get("to") or "") != t_target:
+                        continue
+                    amt_cents = int(round(int(t.get("value", "0")) / 1e4))
+                    ts = int(t.get("block_timestamp", 0)) / 1000.0
+                except Exception:
+                    continue
+                want_c = int(round(tp.pay_amount * 100))
+                if amt_cents != want_c or ts + 600 < t_created:
+                    continue
+                used_txids.add(_txid)
+                tp.status, tp.txid = "paid", _txid
+                tp.paid_at = datetime.now(timezone.utc)
+                db.commit()
+                try:
+                    txn = wallet_apply(db, tp.tenant_id, "deposit", tp.amount_usd,
+                                       ref_type="topup", ref_id=tp.id, txid=_txid,
+                                       user_id=tp.created_by)
+                    bal = txn.balance_after
+                except Exception as we:
+                    from ..core.notify_utils import emit_notification
+                    from ..core.log_utils import new_trace_id
+                    emit_notification(db, tenant_id=tp.tenant_id, level="warning",
+                                      event_type="wallet_topup_ingest_failed", trace_id=new_trace_id(),
+                                      title=f"充值 #{tp.id} 到账 ${tp.amount_usd}，但入账失败",
+                                      body=f"TXID {_txid}\n原因：{str(we)[:200]}\n超管请人工处理（钱包调整补入）。")
+                    db.commit()
+                    break
+                from ..core.notify_utils import emit_notification
+                from ..core.log_utils import new_trace_id
+                emit_notification(db, tenant_id=tp.tenant_id, level="info",
+                                  event_type="wallet_topup_paid", trace_id=new_trace_id(),
+                                  title=f"充值到账 ${tp.amount_usd:.2f}，余额 ${bal:.2f}",
+                                  body=f"充值单 #{tp.id} TXID {_txid}，已自动入账团队钱包。")
+                db.commit()
+                logger.info(f"[USDT] 充值 #{tp.id} 入账 ${tp.amount_usd}")
+                break
     except Exception as e:
         logger.warning(f"[USDT] 监听异常: {e}")
     finally:

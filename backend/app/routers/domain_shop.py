@@ -344,6 +344,45 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
     if pool:
         order.payment_address = pool[(order.id - 1) % len(pool)]   # 稳定轮询：相邻订单不同地址
     db.commit()
+    # 钱包余额充足 → 直接扣款+全自动注册（免转账免确认）；不足回落 USDT 直付。
+    # 注册失败自动原路退回余额（订单置 failed 留人工重试，重试时重新扣款）
+    from ..core.wallet import wallet_balance, wallet_apply, InsufficientBalance
+    if wallet_balance(db, user.tenant_id) >= order.total_usd - 0.005:
+        try:
+            wallet_apply(db, user.tenant_id, "charge", -round(order.total_usd, 2),
+                         ref_type="domain_order", ref_id=order.id, user_id=user.id,
+                         note=f"{d} x{body.years}y")
+            order.payment_method = "wallet"
+            order.approved_by, order.approved_at = user.id, datetime.now(timezone.utc)
+            db.commit()
+            write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+                      actor_user_id=user.id, target_type="domain_order", target_id=str(order.id),
+                      action_type="create", source="domain_shop", result="success",
+                      trigger_detail=f"{d} x{body.years}y wallet-charge total={order.total_usd}")
+            db.commit()
+            from ..services.usdt_monitor import pay_amount_for  # noqa: F401（返回结构一致）
+            if not _reg_ready(db):
+                order.status = "approved"
+                db.commit()
+                return {"id": order.id, "domain": d, "years": body.years, "total_usd": order.total_usd,
+                        "status": order.status, "payment_method": "wallet",
+                        "pending_registrar": True, "registrar": _reg_name(db).upper(),
+                        "payment": _payment_info(db)}
+            order.status = "registering"
+            db.commit()
+            try:
+                _fulfill(order, user, db)
+                return {"id": order.id, "domain": d, "years": body.years, "total_usd": order.total_usd,
+                        "status": order.status, "payment_method": "wallet",
+                        "payment": _payment_info(db)}
+            except Exception as fe:
+                detail = str(getattr(fe, "detail", None) or fe)[:200]
+                wallet_apply(db, user.tenant_id, "refund", round(order.total_usd, 2),
+                             ref_type="domain_order_refund", ref_id=order.id, user_id=user.id,
+                             note=f"{d} 注册失败自动退回：{detail[:80]}")
+                raise HTTPException(500, f"已从余额扣款但注册失败，款项已退回余额。原因：{detail[:150]}（订单保留可重试）")
+        except InsufficientBalance:
+            pass   # 并发把余额扣完——订单入库时已是 pending_payment，走下方 USDT 直付返回
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, target_type="domain_order", target_id=str(order.id),
               action_type="create", source="domain_shop", result="success",
