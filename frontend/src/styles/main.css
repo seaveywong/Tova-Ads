@@ -240,6 +240,7 @@ a { color: var(--ac); text-decoration: none; }
 .el-badge__content { border: none !important; }
 .el-popper { background: var(--bg2) !important; border-color: var(--bd) !important; }
 .el-drawer { background: var(--bg2) !important; }
+.el-drawer.rtl { border-left: 1px solid var(--bd); box-shadow: -6px 0 20px rgba(0,0,0,.45); }
 .el-drawer__header { color: var(--t1) !important; margin-bottom: 16px; }
 .el-drawer__title { white-space: normal !important; line-height: 1.4; font-size: 15px; }
 .el-drawer__close-btn { color: var(--t3) !important; }

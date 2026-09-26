@@ -456,7 +456,7 @@ const submitMemberAdd = async () => {
 .dm-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg2);border:1px solid var(--bd);border-radius:6px;font-size:12px}
 .dm-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dm-label{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 6px;border-radius:8px}
-.dm-rm{font-size:11px;color:var(--error);border:1px solid rgba(239,68,68,.4);background:transparent;padding:2px 8px;border-radius:4px;cursor:pointer;white-space:nowrap}
+.dm-rm{font-size:12px;color:var(--error);border:1px solid rgba(239,68,68,.4);background:transparent;padding:3px 10px;border-radius:5px;cursor:pointer;white-space:nowrap}
 .dm-rm:hover{background:var(--error);color:#fff}
 .dm-empty{padding:16px;text-align:center;color:var(--t3);font-size:12px}
 .dm-divider{border-top:1px dashed var(--bd);margin:12px 0}

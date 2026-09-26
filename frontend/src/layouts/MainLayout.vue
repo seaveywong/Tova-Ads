@@ -625,7 +625,7 @@ watch(() => route.path, () => { sidebarOpen.value = false })
   cursor: pointer; color: var(--t2);
 }
 .user-email { font-size: 13px; }
-.role-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--bg3); color: var(--t3); margin-left: 6px; white-space: nowrap }
+.role-badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--bg3); color: var(--t3); margin-left: 6px; white-space: nowrap }
 .role-badge.super { background: rgba(255,159,10,.15); color: var(--warning); font-weight: 600 }
 
 /* 内容（min-height:0 是 flex+overflow 必需，否则被子内容撑高导致整 main-area 滚、sticky 失效）*/

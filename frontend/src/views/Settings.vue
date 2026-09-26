@@ -1472,6 +1472,7 @@ const runKeepaliveNow = async () => {
 .em-inline-btn{margin-top:0;padding:6px 12px;font-size:12px}
 .em-hint{font-size:11px;color:var(--t3);margin-top:8px}
 .field-hint{display:block;font-size:11px;color:var(--t3);margin-top:4px;line-height:1.5}
+.card > .field-hint{margin-bottom:14px}
 .em-list{display:flex;flex-direction:column;gap:4px}
 .em-row{display:flex;align-items:center;gap:10px;padding:7px 10px;background:var(--bg3);border-radius:6px;font-size:13px}
 .em-email{color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
