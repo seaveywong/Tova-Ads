@@ -2108,3 +2108,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
 
 /* UI审计D：页面级错误横幅 */
 .page-error-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); border: 1px solid color-mix(in srgb, var(--error) 30%, transparent) }
+/* .ctrl-btn 全局无定义，本组件自绘（修复错误横幅「重试」按钮渲染成浏览器默认白底） */
+.ctrl-btn { height: 32px; padding: 0 12px; line-height: 30px; font-size: 13px; background: var(--bg2); color: var(--t2); border: 1px solid var(--bd); border-radius: var(--rs); cursor: pointer; box-sizing: border-box; white-space: nowrap; transition: all .15s; font-family: inherit; }
+.ctrl-btn:hover { border-color: var(--bd2); color: var(--t1); }
+.ctrl-btn.sm { padding: 0 8px; font-size: 12px; }
