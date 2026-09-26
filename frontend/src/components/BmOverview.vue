@@ -18,9 +18,14 @@ const loading = ref(true)
 const filteredRows = computed(() => props.tokenFilter ? rows.value.filter(r => r.via_cred_id === props.tokenFilter.id) : rows.value)
 const load = async () => {
   loading.value = true
-  try { rows.value = await GET('/fb/bm-overview', 60000) } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  try {
+    const r = await GET('/fb/bm-overview', 60000)
+    rows.value = (r && r.bms) || r || []
+    writeOk.value = r?.write_ok !== false
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   loading.value = false
 }
+const writeOk = ref(true)   // App 没过 business_management Review 时隐藏邀请/移除（批WW）
 onMounted(load)
 
 const detailOpen = ref(false)
@@ -121,9 +126,12 @@ const doRemove = async (m) => {
           <div v-for="(m, i) in (Array.isArray(detail.members) ? detail.members : [])" :key="i" class="bm-member">
             <span class="bm-m-name">{{ m.title || m.buid }}</span>
             <span class="bm-m-role">{{ roleLabel(m.role) }}</span>
-            <button v-if="canManage()" class="lm-x" :disabled="removing === m.buid" @click="doRemove(m)" :title="t('common.delete')">✕</button>
+            <button v-if="canManage() && writeOk" class="lm-x" :disabled="removing === m.buid" @click="doRemove(m)" :title="t('common.delete')">✕</button>
           </div>
-          <div v-if="canManage()" class="bm-invite">
+          <div v-if="canManage() && !writeOk" class="bm-write-blocked">
+            {{ t('bm.writeBlocked') }}
+          </div>
+          <div v-if="canManage() && writeOk" class="bm-invite">
             <input v-model="inviteForm.email" class="bm-inv-email" :placeholder="t('bm.emailPh')" @keyup.enter="doInvite" />
             <select v-model="inviteForm.role" class="bm-inv-role">
               <option value="EMPLOYEE">{{ t('bm.roleEmployee') }}</option>
@@ -180,6 +188,7 @@ const doRemove = async (m) => {
 .bm-m-name { color: var(--t1); }
 .bm-m-role { color: var(--t3); font-size: 11px; }
 .bm-asset-sum { display: flex; gap: 16px; font-size: 12px; color: var(--t2); margin-bottom: 8px; }
+.bm-write-blocked { padding: 10px; margin-top: 8px; background: rgba(255,159,10,.08); border: 1px dashed rgba(255,159,10,.4); border-radius: 8px; font-size: 12px; color: var(--warning); line-height: 1.6; }
 .bm-invite { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--bd); }
 .bm-inv-email { flex: 1; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 6px; padding: 5px 10px; font-size: 12px; font-family: var(--font); }
 .bm-inv-email:focus { outline: none; border-color: var(--ac); }

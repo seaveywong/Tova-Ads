@@ -1124,7 +1124,7 @@ export default {
     total: '共 {n} 个 BM', colBm: 'BM', colVia: '归属令牌', colRole: '角色',
     tabMembers: '成员', tabAssets: '资产', colPage: '旗下主页',
     accCount: '广告账户 {n}', pgCount: '主页 {n}', noMembers: '暂无成员数据（或令牌无权限读取）',
-    needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 可以管理该 BM 的所有成员和资产（包括增删其他管理员），权限较大。确定授予？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）', roleFull: '完全控制', roleEmployee: '普通成员',
+    needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 可以管理该 BM 的所有成员和资产（包括增删其他管理员），权限较大。确定授予？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', writeBlocked: 'BM 管理操作暂不可用：Facebook App 需通过 business_management 权限审核（App Review → Manage business people and assets），且 App 需切换为 Live Mode。审核通过后此功能自动恢复。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）', roleFull: '完全控制', roleEmployee: '普通成员',
   },
   pg: {
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',

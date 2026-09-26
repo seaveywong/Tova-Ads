@@ -900,6 +900,44 @@ def _resolve_bm_roles(fb, bms: list) -> dict:
     return roles
 
 
+# BM 写权限探测（批WW：App 没过 business_management Review 时隐藏邀请/移除按钮）
+# 非破坏性探测：POST 一个格式非法的邮箱——FB 返参数错(100)=权限通过（能走到参数校验层），
+# 返权限错(1752203/270)=App 被拦。结果 10min 进程缓存。
+_BM_WRITE_CACHE: dict = {}
+
+def _probe_bm_write(db, tenant_id: int, cred) -> bool:
+    import time as _t
+    key = f"bmw:{tenant_id}"
+    hit = _BM_WRITE_CACHE.get(key)
+    if hit is not None and _t.time() - hit[0] < 600:
+        return hit[1]
+    from ..core.fb_client import FbClient
+    fb = FbClient(decrypt(cred.access_token_enc))
+    ok = False
+    try:
+        # 找一个 BM 探
+        bms = fb.get_businesses() or []
+        if not bms:
+            _BM_WRITE_CACHE[key] = (_t.time(), False)
+            return False
+        bm_id = str(bms[0].get("id") or "")
+        if not bm_id:
+            _BM_WRITE_CACHE[key] = (_t.time(), False)
+            return False
+        fb.post(f"{bm_id}/business_users", {"email": "@probe", "role": "EMPLOYEE"})
+        ok = True   # 意外成功（邮箱 "@probe" 不合法应该被 FB 拒——但走到了=权限通过）
+    except Exception as e:
+        raw = getattr(e, "raw", {}) or {}
+        subcode = raw.get("error_subcode") or raw.get("error", {}).get("error_subcode")
+        code = raw.get("code") or raw.get("error", {}).get("code")
+        # 1752203=App 没权限 / 270=Dev Mode 拦 / 10=OAuthException(App 级) → 写不可用
+        # 100=参数错（我们故意传非法邮箱）→ 能到参数校验=权限通过
+        # 368=temporary block / 613=频控 → 不确定，保守 False
+        ok = not (subcode in (1752203, 270) or code in (10, 270))
+    _BM_WRITE_CACHE[key] = (_t.time(), ok)
+    return ok
+
+
 @router.get("/bm-overview")
 def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
                 db: Session = Depends(get_db)):
@@ -910,7 +948,7 @@ def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
     if user.role == "operator":
         ck = f"bmov:{user.tenant_id}:{user.id}"
     hit = _asset_cache_get(ck)
-    if hit is not None:
+    if hit is not None and isinstance(hit, dict) and "bms" in hit:
         return hit
     from ..core.fb_tokens import iter_tenant_clients
     _vis = _visible_cred_ids(db, user) if user.role == "operator" else None
@@ -944,7 +982,10 @@ def bm_overview(user: CurrentUser = Depends(require_permission("ads.read")),
     out = [merged[b] for b in order]
     out.sort(key=lambda x: x["name"].lower())
     _asset_cache_set(ck, out)
-    return out
+    # 写权限探测（批WW：False 时前端隐藏邀请/移除按钮）
+    _first_cred = pairs[0][0] if pairs else None
+    write_ok = _probe_bm_write(db, user.tenant_id, _first_cred) if _first_cred else False
+    return {"bms": out, "write_ok": write_ok}
 
 
 @router.get("/pages/{page_id}/posts")
