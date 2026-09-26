@@ -107,6 +107,7 @@ const fAd = ref('')
 const fEvent = ref('')
 const fDecision = ref('')
 const fSource = ref('')
+const fReason = ref('')
 const fFrom = ref('')
 const fTo = ref('')
 const fQ = ref('')
@@ -143,6 +144,7 @@ const buildParams = () => {
   if (fEvent.value) p.event_type = fEvent.value
   if (fDecision.value) p.decision = fDecision.value
   if (fSource.value) p.source_type = fSource.value
+  if (fReason.value) p.reason = fReason.value
   if (fFrom.value) p.date_from = fFrom.value
   if (fTo.value) p.date_to = fTo.value
   if (fQ.value) p.q = fQ.value
@@ -159,7 +161,9 @@ const exportCsv = async () => {
   exporting.value = true
   try {
     const BASE = import.meta.env.VITE_API_BASE || 'https://api.tovaads.com'
-    const r = await fetch(BASE + '/landing/logs/export?' + new URLSearchParams(buildStatsParams()).toString(),
+    const _ep = buildStatsParams()
+    if (fReason.value) _ep.reason = fReason.value
+    const r = await fetch(BASE + '/landing/logs/export?' + new URLSearchParams(_ep).toString(),
       { headers: { Authorization: 'Bearer ' + (localStorage.getItem('tova_token') || '') } })
     if (!r.ok) throw new Error(r.status + '')
     const blob = await r.blob()
@@ -215,6 +219,17 @@ const convRate = computed(() => {
   const v = byEventMap.value.visit || 0, s = byEventMap.value.submit || 0
   return v ? ((s / v) * 100).toFixed(1) + '%' : '—'
 })
+// 深化：拦截原因分布（Lunio 式）——block 事件按原因拆柱，点 chip 即筛日志表
+const byReasonMap = computed(() => {
+  const m = {}
+  for (const c of (agg.value?.by_reason || [])) m[c.k] = c.n
+  return m
+})
+const REASON_ORDER = ['device_block', 'ua_block', 'country_block', 'country_allow', 'dedup']
+const reasonChips = computed(() => REASON_ORDER
+  .map(k => ({ k, l: reasonLabel(k), n: byReasonMap.value[k] || 0 }))
+  .filter(c => c.n > 0))
+const toggleReason = (k) => { fReason.value = (fReason.value === k ? '' : k); search() }
 const toggleEvent = (v) => { fEvent.value = (fEvent.value === v ? '' : v); search() }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
 const softRefresh = () => { offset.value = 0; load() }   // 批AL：小刷新——保留全部筛选条件只拉最新数据（F5 会重置）
@@ -240,7 +255,7 @@ const debounceSearch = () => {
 }
 onUnmounted(() => { if (_debTimer) clearTimeout(_debTimer) })
 const reset = () => {
-  fPage.value = ''; fAct.value = ''; fSlug.value = ''; fAd.value = ''; fEvent.value = ''; fDecision.value = ''; fSource.value = ''
+  fPage.value = ''; fAct.value = ''; fSlug.value = ''; fAd.value = ''; fEvent.value = ''; fDecision.value = ''; fSource.value = ''; fReason.value = ''
   fFrom.value = ''; fTo.value = ''; fQ.value = ''; preset.value = ''; offset.value = 0; load()
 }
 // 日期快捷（按北京业务日，和后端查询基准对齐）；自定义区间收进 DatePresetBar
@@ -382,6 +397,12 @@ watch(() => route.query, (q) => {
       <span class="agg-sep"></span>
       <span class="stats-label">{{ t('lplogs.aggDevices') }}</span>
       <span v-for="c in agg.by_device||[]" :key="'d'+c.k" class="stat-chip static">{{ DEVICE[c.k] || c.k }} <b>{{ c.n }}</b></span>
+    </div>
+    <div class="stats-bar agg-bar" v-if="agg && blockTotal > 0">
+      <span class="stats-label">{{ t('lplogs.blockReasons') }}</span>
+      <button v-for="c in reasonChips" :key="c.k" class="stat-chip src-bad" :class="{ on: fReason === c.k }" @click="toggleReason(c.k)">
+        {{ c.l }} <b>{{ c.n }}</b>
+      </button>
     </div>
     <div class="tbl" v-loading="loading">
       <div class="row head">
