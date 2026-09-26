@@ -13,12 +13,18 @@ installGlobalErrorHandler()  // 兜底：未捕获的 Promise/同步错误一定
 
 // 抑制 ResizeObserver loop 良性警告（Chrome/Edge 已知行为，非 bug——EP 表格/抽屉
 // resize 回调连锁触发浏览器自动截断；不影响功能，只是控制台碍眼）
+// 双保险：① error 事件捕获阶段拦截 ② console.error 过滤（Chrome 有时不走 error event）
 window.addEventListener('error', (e) => {
   if (e.message?.includes('ResizeObserver loop')) {
     e.preventDefault()
     e.stopImmediatePropagation()
   }
-})
+}, true)
+const _consoleError = console.error
+console.error = (...args) => {
+  if (args.length > 0 && String(args[0]).includes('ResizeObserver loop')) return
+  _consoleError(...args)
+}
 
 const app = createApp(App)
 app.use(createPinia())

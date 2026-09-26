@@ -1063,7 +1063,7 @@ export default {
     snapTag: '快照', snapTagTip: '该账户无可用令牌，此状态为缓存快照（非实时）；操作前请先到令牌管理重新授权', accUnmanaged: '脱管', accBanned: '已禁', accUnmanagedTip: '此账户令牌已移除或失效，系统无法管理其广告（数据为最后快照），请重新绑令牌或移除纳管', accBannedTip: '此账户已被 Facebook 禁用，所有广告已停止', accUnmanagedBanner: '此账户已脱管（无可用令牌）——系统无法暂停/监控这些广告，数据为最后快照。请重新绑定令牌或到 FB 后台处理', accBannedBanner: '此账户已被 Facebook 禁用——所有广告已停止投放', convDual: 'FB成效 {fb} / 综合转化 {total}（含兜底，止损口径）',
     belongsToCampaign: '所属系列：{name}（点击行名查看该系列下的广告组）',
     refreshTip: '全量重拉：系列 + 组 + 广告三层全部刷新（后台跑 1-2 分钟，完成后自动更新）。只秒查广告开/关状态请用工具栏「⚡ 实时核验」', refreshCacheTip: '重新读取当前缓存数据（不请求 FB）', refetch: '重新获取',
-    srBtn: '复制消耗账户', srBtnTip: '按当前筛选（日期段/账户多选/平台）生成行级数据：消耗=严格选定窗口内；在管账户实时拉 FB，已移除账户取库内窗口合计', srLoading: '拉取中…',
+    refreshCacheShort: '读缓存刷新', srBtn: '复制消耗账户', srBtnTip: '按当前筛选（日期段/账户多选/平台）生成行级数据：消耗=严格选定窗口内；在管账户实时拉 FB，已移除账户取库内窗口合计', srLoading: '拉取中…',
     srTitle: '消耗账户报告（{range}）', srMeta: '实时 {live} · 库内 {db}',
     srBasis: '按各账户本地日（与看板一致）', srBasisTip: '窗口日期按每个广告账户自己的时区解释——与看板/快照同一基准，避免跨时区账户错天',
     srOnlySpend: '仅看窗口内有消耗',

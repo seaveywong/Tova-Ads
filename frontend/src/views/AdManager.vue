@@ -20,6 +20,7 @@ const selectedActs = ref([])
 const ownerFilter = ref('')
 const columnsPop = ref(false)
 const toolCmd = (cmd) => {
+  if (cmd === 'spend') { openSpendReport(); return }
   if (cmd === 'columns') columnsPop.value = true
   else if (cmd === 'verify') verifyLive()
   else if (cmd === 'redirect') openRedirectMgmt()
@@ -1000,8 +1001,17 @@ const unsubscribeLeads = async () => {
         <span v-if="currentAccountName" class="ph-fresh">{{ currentAccountName }}</span>
       </div>
       <div class="ph-actions">
-        <button v-if="tab !== 'lead'" class="head-btn" :disabled="loading" :title="t('adm.refreshCacheTip')" @click="load()">{{ loading ? t('common.loading') + '…' : t('common.refresh') }}</button>
-        <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)" :title="t('adm.refreshTip')" @click="tab === 'lead' ? loadLeads() : load(true)">{{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('adm.refetch') }}</button>
+        <el-dropdown trigger="click" placement="bottom-end" @command="cmd => cmd === 'cache' ? load() : (tab === 'lead' ? loadLeads() : load(true))">
+          <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)">
+            {{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('adm.refetch') }} ▾
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="fetch" :disabled="loading">{{ t('adm.refetch') }}</el-dropdown-item>
+              <el-dropdown-item command="cache" :disabled="loading" :title="t('adm.refreshCacheTip')">{{ t('adm.refreshCacheShort') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
     <!-- 警示条归组：账户状态横幅 + 死令牌横幅相邻（都在工具条上方，间距统一） -->
@@ -1030,8 +1040,7 @@ const unsubscribeLeads = async () => {
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
-      <button v-if="tab !== 'lead'" class="ctrl-btn" :disabled="spendRepLoading" :title="t('adm.srBtnTip')" @click="openSpendReport">{{ spendRepLoading ? t('adm.srLoading') : t('adm.srBtn') }}</button>
-      <!-- 工具收纳（2026-09-17 精简）：列/核验/跳转链接 进 ⋯，工具条只留高频项 -->
+      <!-- 工具收纳：列/核验/跳转链接/复制消耗 进 ⋯，工具条只留高频项 -->
       <el-dropdown v-if="tab !== 'lead'" trigger="click" placement="bottom-end" @command="toolCmd">
         <button class="ctrl-btn">⋯<span v-if="Object.keys(redirectMap).length" class="rd-badge">{{ Object.keys(redirectMap).length }}</span></button>
         <template #dropdown>
@@ -1039,6 +1048,7 @@ const unsubscribeLeads = async () => {
             <el-dropdown-item command="columns">{{ t('adm.columns') }}</el-dropdown-item>
             <el-dropdown-item command="verify" :disabled="liveVerifying">{{ liveVerifying ? t('adm.liveVerifying') : t('adm.liveVerify') }}</el-dropdown-item>
             <el-dropdown-item command="redirect">{{ t('adm.redirectLink') }}</el-dropdown-item>
+            <el-dropdown-item command="spend" :disabled="spendRepLoading" divided>{{ spendRepLoading ? t('adm.srLoading') : t('adm.srBtn') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
