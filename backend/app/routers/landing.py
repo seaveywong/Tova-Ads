@@ -2023,7 +2023,9 @@ def landing_logs(
     if decision:
         qb = qb.filter(LandingEvent.decision == decision)
     if reason:
-        qb = qb.filter(LandingEvent.reason == reason)
+        _reasons = [r for r in reason.split(",") if r]
+        if _reasons:
+            qb = qb.filter(LandingEvent.reason.in_(_reasons))
     if date_from:
         try:
             start = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ)
@@ -2095,7 +2097,9 @@ def _logs_filtered(db, tenant_id, page_id, slug, ad_id, act_id, event_type, deci
     if decision:
         qb = qb.filter(LandingEvent.decision == decision)
     if reason:
-        qb = qb.filter(LandingEvent.reason == reason)
+        _reasons = [r for r in reason.split(",") if r]
+        if _reasons:
+            qb = qb.filter(LandingEvent.reason.in_(_reasons))
     if date_from:
         try:
             start = _dt.strptime(date_from, "%Y-%m-%d").replace(tzinfo=BUSINESS_TZ)

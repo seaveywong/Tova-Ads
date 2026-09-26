@@ -24,12 +24,17 @@ const DECISIONS = computed(() => [
   { v: 'click', l: t('lplogs.actionClick') }, { v: 'redirect', l: t('lplogs.actionRedirect') },
 ])
 
-// 原因 → 中文
+// 原因 → 中文（含 root_ 前缀的根域名防护，reasonBase 归一后同标签）
 const REASON_LABEL = computed(() => ({
   pass: t('lplogs.reasonPass'), device_block: t('lplogs.reasonDeviceBlock'), ua_block: t('lplogs.reasonUaBlock'),
   country_block: t('lplogs.reasonCountryBlock'), country_allow: t('lplogs.reasonCountryAllow'), dedup: t('lplogs.reasonDedup'),
+  crawler_block: t('lplogs.reasonCrawlerBlock'), referer_block: t('lplogs.reasonRefererBlock'),
+  query_block: t('lplogs.reasonQueryBlock'), required_query: t('lplogs.reasonRequiredQuery'),
+  datacenter_block: t('lplogs.reasonDatacenterBlock'), frequency: t('lplogs.reasonFrequency'),
 }))
-const reasonLabel = (r) => REASON_LABEL.value[r] || r || ''
+// root_ 前缀 = 根域名直访被防护拦截（非 /a/ 子码路径），与子码同名原因归并成一个「拦截原因」桶
+const reasonBase = (r) => (r && r.startsWith('root_')) ? r.slice(5) : (r || '')
+const reasonLabel = (r) => REASON_LABEL.value[reasonBase(r)] || r || ''
 
 // 国家码 → 国名：中央 useCountries registry（zh/en 双语，未知码原样返回）
 const countryLabel = (c) => (c ? _countryLabel(c) : '')
@@ -219,17 +224,32 @@ const convRate = computed(() => {
   const v = byEventMap.value.visit || 0, s = byEventMap.value.submit || 0
   return v ? ((s / v) * 100).toFixed(1) + '%' : '—'
 })
-// 深化：拦截原因分布（Lunio 式）——block 事件按原因拆柱，点 chip 即筛日志表
+// 深化：拦截原因分布（Lunio 式）——block 事件按原因拆柱，root_* 归并到同名桶，点 chip 即筛日志表
 const byReasonMap = computed(() => {
   const m = {}
-  for (const c of (agg.value?.by_reason || [])) m[c.k] = c.n
+  for (const c of (agg.value?.by_reason || [])) {
+    const base = reasonBase(c.k)
+    m[base] = (m[base] || 0) + c.n
+  }
   return m
 })
-const REASON_ORDER = ['device_block', 'ua_block', 'country_block', 'country_allow', 'dedup']
+const reasonKeysByBase = computed(() => {
+  const m = {}
+  for (const c of (agg.value?.by_reason || [])) {
+    const base = reasonBase(c.k)
+    ;(m[base] = m[base] || []).push(c.k)
+  }
+  return m
+})
+const REASON_ORDER = ['device_block', 'ua_block', 'country_block', 'country_allow', 'dedup', 'crawler_block', 'referer_block', 'query_block', 'required_query', 'datacenter_block', 'frequency']
 const reasonChips = computed(() => REASON_ORDER
-  .map(k => ({ k, l: reasonLabel(k), n: byReasonMap.value[k] || 0 }))
+  .map(k => ({ k, l: REASON_LABEL.value[k], n: byReasonMap.value[k] || 0 }))
   .filter(c => c.n > 0))
-const toggleReason = (k) => { fReason.value = (fReason.value === k ? '' : k); search() }
+const toggleReason = (base) => {
+  const keys = (reasonKeysByBase.value[base] || [base]).join(',')
+  fReason.value = (fReason.value === keys ? '' : keys)
+  search()
+}
 const toggleEvent = (v) => { fEvent.value = (fEvent.value === v ? '' : v); search() }
 const toggleSource = (k) => { fSource.value = (fSource.value === k ? '' : k); search() }
 const softRefresh = () => { offset.value = 0; load() }   // 批AL：小刷新——保留全部筛选条件只拉最新数据（F5 会重置）
