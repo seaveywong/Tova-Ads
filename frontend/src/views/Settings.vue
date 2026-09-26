@@ -8,6 +8,7 @@ import { userTz, setUserTz } from '../composables/useTz'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fbErrorText } from '../composables/useFbError'
 import TgManager from '../components/TgManager.vue'
+import QRCode from 'qrcode'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -297,11 +298,17 @@ const testRg = async () => {
 const payCfg = ref({ chain: '', address: '', trongrid_key_masked: '', trongrid_configured: false, pay_note: '' })
 const payForm = ref({ chain: 'TRC20', address: '', trongrid_api_key: '', pay_note: '' })
 const paySaving = ref(false)
+const payQr = ref('')
+const payQrOpen = ref(false)
 const loadPay = async () => { try { payCfg.value = await GET('/settings/payment'); payForm.value.chain = payCfg.value.chain || 'TRC20' } catch {} }
+// 收款地址二维码（复用 qrcode，扫码核对/分享）；地址变化时重生成并收起二维码
+watch(() => payCfg.value.address, (a) => { payQrOpen.value = false; if (a) QRCode.toDataURL(a, { width: 150, margin: 1 }).then(u => payQr.value = u).catch(() => payQr.value = ''); else payQr.value = '' })
+const copyPayAddr = () => { navigator.clipboard?.writeText(payCfg.value.address || ''); ElMessage.success(t('common.copied')) }
 const savePay = async () => {
   paySaving.value = true
   try {
-    const body = { chain: payForm.value.chain, address: payForm.value.address, pay_note: payForm.value.pay_note }
+    const body = { chain: payForm.value.chain, pay_note: payForm.value.pay_note }
+    if (payForm.value.address) body.address = payForm.value.address
     if (payForm.value.trongrid_api_key) body.trongrid_api_key = payForm.value.trongrid_api_key
     await PUT('/settings/payment', body)
     ElMessage.success(t('common.saved')); payForm.value = { chain: payCfg.value.chain || 'TRC20', address: '', trongrid_api_key: '', pay_note: '' }
@@ -997,12 +1004,18 @@ const runKeepaliveNow = async () => {
       <div class="t">{{ t('settings.payTitle') }}</div>
       <div class="d">{{ t('settings.payDesc') }}</div>
       <div class="form-l"><label>{{ t('settings.rgPayChain') }}</label>
-        <el-radio-group v-model="payForm.chain">
-          <el-radio-button value="TRC20">TRC20（Tron）</el-radio-button>
-        </el-radio-group>
-        <span :class="['tag', payCfg.address ? 'ok' : 'warn']" style="margin-left:8px">{{ payCfg.address ? t('settings.payReady') : t('settings.rgNoKey') }}</span>
+        <span class="chain-badge">USDT · TRC20 (Tron)</span>
+        <span :class="['tag', payCfg.address ? 'ok' : 'warn']">{{ payCfg.address ? t('settings.payReady') : t('settings.payNoAddr') }}</span>
       </div>
-      <div class="form-l"><label>{{ t('settings.rgPayAddr') }}</label><input v-model="payForm.address" class="input" :placeholder="payCfg.address || t('settings.rgPayAddrPh')" /></div>
+      <div v-if="payCfg.address" class="form-l"><label>{{ t('settings.rgPayAddr') }}</label>
+        <div class="pay-addr-wrap">
+          <span class="pay-addr mono" :title="payCfg.address">{{ payCfg.address }}</span>
+          <button class="btn sm" @click="copyPayAddr">{{ t('common.copy') }}</button>
+          <button class="btn sm" @click="payQrOpen = !payQrOpen">{{ payQrOpen ? t('settings.payHideQr') : t('settings.payShowQr') }}</button>
+        </div>
+      </div>
+      <div v-if="payQrOpen && payCfg.address" class="form-l"><label></label><img v-if="payQr" :src="payQr" class="pay-qr" alt="QR" /></div>
+      <div class="form-l"><label>{{ payCfg.address ? t('settings.payAddrChange') : t('settings.rgPayAddr') }}</label><input v-model="payForm.address" class="input" :placeholder="payCfg.address ? t('settings.rgPayAddrNewPh') : t('settings.rgPayAddrPh')" /></div>
       <div class="form-l"><label>TronGrid API Key</label><input v-model="payForm.trongrid_api_key" class="input" :placeholder="payCfg.trongrid_configured ? payCfg.trongrid_key_masked : t('settings.tgKeyPh')" /></div>
       <div class="field-hint">{{ t('settings.tgKeyHint') }}</div>
       <div class="form-l"><label>{{ t('settings.payNoteLabel') }}</label><input v-model="payForm.pay_note" class="input" :placeholder="payCfg.pay_note || t('settings.payNotePh')" /></div>
@@ -1442,6 +1455,15 @@ const runKeepaliveNow = async () => {
 .dlg-field label { font-size: 12px; color: var(--t3) }
 .dlg-btn { margin-top: 0; padding: 7px 16px }
 .btn.sm { padding: 4px 10px; font-size: 12px }
+/* 支付设置：状态胶囊 / 链徽标 / 收款地址 + 二维码（与注册商状态胶囊风格统一） */
+.tag { display:inline-block; font-size:11px; font-weight:600; line-height:1.6; padding:1px 10px; border-radius:999px; background:var(--bg3); color:var(--t3); }
+.tag.ok { background:rgba(48,209,88,.13); color:var(--success); }
+.tag.warn { background:rgba(255,159,10,.13); color:var(--warning); }
+.chain-badge { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:3px 12px; border-radius:8px; background:var(--bg3); color:var(--t1); border:1px solid var(--bd); }
+.chain-badge::before { content:''; width:8px; height:8px; border-radius:50%; background:var(--ac); flex:none; }
+.pay-addr-wrap { display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:1; min-width:0; }
+.pay-addr { font-size:12px; color:var(--ac); word-break:break-all; }
+.pay-qr { width:150px; height:150px; background:#fff; border-radius:8px; padding:6px; border:1px solid var(--bd); }
 .btn.danger { color: var(--error); border-color: var(--error) }
 .ib-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--t2) }
 .ib-cap-row { margin-top: 10px }

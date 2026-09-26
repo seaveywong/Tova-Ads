@@ -258,7 +258,7 @@ onMounted(() => { loadOrders(); loadMyDomains() })
         <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
         <span v-if="o.status === 'failed' && o.error" class="ds-err" :title="o.error">⚠</span>
       </div>
-      <div v-if="!orders.length && !ordersLoading" class="ds-empty">{{ t('landing.shopNoOrders') }}</div>
+      <div v-if="!orders.length && !ordersLoading" class="ds-empty">{{ t('landing.shopNoOrders') }}<button class="ctrl-btn sm" style="margin-left:10px" @click="sec = 'buy'">{{ t('domains.goBuy') }}</button></div>
     </div>
   </div>
 </template>
