@@ -3085,6 +3085,15 @@ def run_sentinel_patrol():
         return {"skipped": "lock_busy"}
     db = SuperSessionLocal()
     trace_id = new_trace_id()
+    # 动态纳管（2026-09-27 用户拍板）：按 arm 会话重刷账户级标志——arm 后新导入/新归属
+    # 的账户自动补标（Roly-101 案：arm 是一次性快照，后来者哨兵失明）
+    try:
+        from ..routers.guard import sentinel_materialize_sessions
+        _newly = sentinel_materialize_sessions(db)
+        if _newly:
+            logger.info(f"[Sentinel] 会话扩张：本轮新纳管 {_newly} 个账户")
+    except Exception as _e:
+        logger.warning(f"[Sentinel] 会话扩张异常（不影响巡逻）: {_e}")
     total_paused = 0
     _paused_by_tenant: dict = {}   # tenant_id -> [(acc_name, act_id, camp_name, camp_id)]
     _failures: list = []           # [(tenant_id, act_id, acc_name, 原因)] 哨兵静默失败清单（P0-6）

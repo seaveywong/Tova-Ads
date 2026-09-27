@@ -47,6 +47,64 @@ class AllowanceIn(BaseModel):
     ad_id: str = ""   # 空 = 整账户加白（存 "*"）
 
 
+# ── 哨兵 arm 会话（2026-09-27 用户拍板：动态纳管——arm 后新导入/新归属的账户自动纳入，
+#    不必重新开关。会话存 system_settings['sentinel_session_{tenant}']=[user_id,…]；
+#    巡逻每轮先按会话重刷账户级标志（物化），点名 arm（act_ids）不入会话=快照语义不变）──
+def _sentinel_session_key(tenant_id: int) -> str:
+    return f"sentinel_session_{tenant_id}"
+
+
+def _sentinel_session_get(db, tenant_id: int) -> list:
+    import json as _json
+    from ..models.system import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == _sentinel_session_key(tenant_id)).first()
+    try:
+        v = _json.loads(row.value) if row and row.value else []
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _sentinel_session_set(db, tenant_id: int, user_ids: list) -> None:
+    import json as _json
+    from ..models.system import SystemSetting
+    key = _sentinel_session_key(tenant_id)
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if not row:
+        row = SystemSetting(key=key)
+        db.add(row)
+    row.value = _json.dumps(sorted(set(user_ids)))
+    db.commit()
+
+
+def sentinel_materialize_sessions(db) -> int:
+    """按 arm 会话重刷账户级标志（巡逻每轮前置步）。返本轮新打标数。
+    口径与 arm 一致：managed + owner∈会话。取消纳管的账户 flag 已被 unmanage 清掉，
+    此处 is_managed 过滤保证不会复活它们。"""
+    from ..models.system import SystemSetting
+    added = 0
+    keys = db.query(SystemSetting).filter(
+        SystemSetting.key.like("sentinel_session_%")).all()
+    for row in keys:
+        try:
+            tenant_id = int(row.key.rsplit("_", 1)[-1])
+            users = [u for u in (json.loads(row.value) if row.value else []) if isinstance(u, int)]
+        except Exception:
+            continue
+        if not users:
+            continue
+        newly = db.query(Account).filter(
+            Account.tenant_id == tenant_id,
+            Account.is_managed.is_(True),
+            Account.owner_user_id.in_(users),
+            Account.sentinel_armed.is_(False),
+        ).update({Account.sentinel_armed: True}, synchronize_session="fetch")
+        added += newly or 0
+    if added:
+        db.commit()
+    return added
+
+
 class SentinelArmIn(BaseModel):
     # None=批量 arm/disarm 本人名下在管账户（2026-09-17 个人口径，含超管/owner）；指定 act_ids=点名（点名不受名下限制）
     act_ids: list[str] | None = None
@@ -274,9 +332,15 @@ def sentinel_arm(body: SentinelArmIn, user: CurrentUser = Depends(require_permis
         # 显式指定 act_ids 不受限（用户点名要 arm）
         query = query.filter(Account.is_managed.is_(True), Account.owner_user_id == user.id)
     count = query.update({Account.sentinel_armed: True}, synchronize_session="fetch")
+    if not body.act_ids:
+        # 动态纳管（2026-09-27）：批量 arm 记会话——之后新导入/新归属到名下的账户
+        # 由巡逻每轮自动补标（Roly-101 案：arm 后导入的账户哨兵失明）
+        sess = _sentinel_session_get(db, user.tenant_id)
+        if user.id not in sess:
+            _sentinel_session_set(db, user.tenant_id, sess + [user.id])
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, action_type="sentinel_arm", source="user",
-              result="success", trigger_detail=f"accounts={count}")
+              result="success", trigger_detail=f"accounts={count}" + ("" if body.act_ids else " session=on"))
     db.commit()
     return {"armed": True, "accounts": count}
 
@@ -293,9 +357,13 @@ def sentinel_disarm(body: SentinelArmIn, user: CurrentUser = Depends(require_per
         query = query.filter(Account.owner_user_id == user.id)
     count = query.update({Account.sentinel_armed: False, Account.sentinel_auto_armed: False},
                          synchronize_session="fetch")
+    if not body.act_ids:
+        sess = _sentinel_session_get(db, user.tenant_id)
+        if user.id in sess:
+            _sentinel_session_set(db, user.tenant_id, [u for u in sess if u != user.id])
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
               actor_user_id=user.id, action_type="sentinel_disarm", source="user",
-              result="success", trigger_detail=f"accounts={count}")
+              result="success", trigger_detail=f"accounts={count}" + ("" if body.act_ids else " session=off"))
     db.commit()
     return {"armed": False, "accounts": count}
 
