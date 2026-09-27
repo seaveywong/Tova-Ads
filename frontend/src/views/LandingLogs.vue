@@ -382,7 +382,7 @@ watch(() => route.query, (q) => {
         <el-option :value="''" :label="t('lplogs.allOwners')" />
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
-      <el-select v-model="fSource" class="fl-sel" filterable @change="search">
+      <el-select v-model="fSource" class="fl-sel" filterable :placeholder="t('lplogs.allSources')" @change="search">
         <el-option :value="''" :label="t('lplogs.allSources')" />
         <el-option value="controlled" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcControlled')" />
         <el-option value="external" :label="t('lplogs.adPrefix') + '·' + t('lplogs.srcExternal')" />
