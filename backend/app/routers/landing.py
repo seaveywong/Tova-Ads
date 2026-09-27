@@ -1210,8 +1210,12 @@ def protection_test(
     return {"profiles": results, "blocked_count": blocked_count, "pass_count": len(results) - blocked_count}
 
 
-def _fb_scrape_once(fb, url: str, loc: str = "zh"):
-    """单 URL 的 FB scrape 判定（纯读）。FbClient 无会话状态（每请求独立 httpx 调用），可跨线程。"""
+def _fb_scrape_once(fb, url: str, loc: str = "zh", protected: bool = False):
+    """单 URL 的 FB scrape 判定（纯读）。FbClient 无会话状态（每请求独立 httpx 调用），可跨线程。
+
+    protected=True 时落地页防护会 302 挡走 FB 爬虫，scrape 成功拿到的标题是跳转目标页（非我们页面），
+    文案标注"抓取到目标页"，避免误读成"FB 正常抓取了我们的页面"。
+    """
     from ..core.fb_client import FbApiError
     try:
         resp = fb.post("", {"id": url, "scrape": "true"})
@@ -1221,7 +1225,8 @@ def _fb_scrape_once(fb, url: str, loc: str = "zh"):
             title = og.get("title") or ""
         if not title and isinstance(resp, dict):
             title = resp.get("title") or ""
-        return "pass", L(loc, "fb.scrapeOk") + (f": {title[:40]}" if title else "")
+        _key = "fb.scrapeOkProtected" if protected else "fb.scrapeOk"
+        return "pass", L(loc, _key) + (f": {title[:40]}" if title else "")
     except FbApiError as e:
         msg = ((e.raw or {}).get("message", "") or "").lower()
         cat = e.category
@@ -1243,7 +1248,7 @@ def _fb_scrape_once(fb, url: str, loc: str = "zh"):
         return "warn", L(loc, "fb.scrapeProbeError", e=str(e)[:50])
 
 
-def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0, loc: str = "zh"):
+def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_timeout: float = 10.0, loc: str = "zh", protected: bool = False):
     """FB 封禁探测（单/批通用）：5 并发 + 单调用 10s 超时兜底（裸调 fb_client 会拖满其内置 30s）。
     单 URL 场景传 [url] 取 [0]。
 
@@ -1262,7 +1267,7 @@ def _fb_ban_probe_batch(db, tenant_id, urls, max_workers: int = 5, per_call_time
         # 单调用独立线程 + result(10s)：兜住 fb_client 内置 30s 超时（fb_client 不在本次改动范围）
         _ex = ThreadPoolExecutor(max_workers=1)
         try:
-            return _ex.submit(_fb_scrape_once, fb, u, loc).result(timeout=per_call_timeout)
+            return _ex.submit(_fb_scrape_once, fb, u, loc, protected).result(timeout=per_call_timeout)
         except _FutTimeout:
             return "warn", L(loc, "fb.banTimeout", s=int(per_call_timeout))
         except Exception as e:
@@ -1692,7 +1697,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         ).all()
         # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
         # 内置 30s 拖满，手动自检整体撞前端超时）
-        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
+        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc, protected=p.block_enabled)[0]
         # 防护内置爬虫拦截会 302 挡掉 FB 爬虫 → scrape 报"appsite/al:ios:url"参数错（非封禁）。
         # 真封禁(#368 abusive/blocked)由 FB 侧黑名单在 fetch 前判定，不受我们防护影响，仍以 fail 返回。
         # 故：fail 保留（真封禁）；warn（防护导致的参数错）降为 pass 并如实标注，消除假警告。
@@ -1703,7 +1708,7 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         if _active_links:
             # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
             _probe_res = _fb_ban_probe_batch(
-                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
+                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc, protected=p.block_enabled)
             _blocked_slugs = [_link.slug for _link, (_st, _d)
                               in zip(_active_links, _probe_res) if _st == "fail"]
             if _blocked_slugs:

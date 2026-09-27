@@ -434,6 +434,7 @@ DATA = {
     "landing.scSummaryAllPass": {"zh": "全部检查通过", "en": "all checks passed"},
     # ── landing.py：FB 封禁探测 detail ──
     "fb.scrapeOk": {"zh": "FB 抓取正常（未封禁）", "en": "FB scrape OK (not banned)"},
+    "fb.scrapeOkProtected": {"zh": "未发现封禁（防护跳转，FB 抓取到目标页）", "en": "no ban detected (protection redirect; FB scraped the target)"},
     "fb.scrapeTokenUnavailable": {"zh": "令牌不可用：{e}", "en": "token unavailable: {e}"},
     "fb.scrapeRateLimited": {"zh": "FB 限流：{e}", "en": "FB rate-limited: {e}"},
     "fb.scrapeBanned": {"zh": "疑似被 FB 封禁：{e}", "en": "possibly banned by FB: {e}"},
