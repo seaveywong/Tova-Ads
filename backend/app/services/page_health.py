@@ -100,11 +100,9 @@ def _fmt_impact(imp: dict) -> str:
 
 
 def _fmt_owner_impact(ent: dict, acc_names: dict | None = None) -> str:
-    names = "、".join(n for n in ent["names"] if n)
     acts = "、".join(f"{(acc_names or {}).get(a, a)}（act_{a}）" for a in list(ent["acts"])[:5])
     return (f"影响你名下 {ent['ads']} 个在投广告 / {len(ent['acts'])} 个账户"
-            + (f"：{acts}" + ("等" if len(ent["acts"]) > 5 else "") if acts else "")
-            + (f"\n在投广告（前 5）：{names}…" if names else ""))
+            + (f"：{acts}" + ("等" if len(ent["acts"]) > 5 else "") if acts else ""))
 
 
 def _quarantine_page_campaigns(db, tenant_id: int, imp: dict) -> dict:
