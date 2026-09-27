@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-09-27 — 投放链路复审修复批（P1×7）+ 主页健康三层体系（迁移 0110）
+
+### 概述
+三段交付（commit 6499e05 / 7356f6a / c97779e，前后端均已部署 hash 核验）：
+**①投放链路 17-agent 复审**（报错环节/多令牌/分流 6 维度 + 对抗验证）：1 P0 + 10 P1 + 18 P2。
+P0（rollbackItem 引用未 import 的 POST——「删除系列」第 5 坑）当天修复上线。
+**②P1 修复批**：落地页全封改节点级收口（曾 raise 穿透绕过自动回退，ACTIVE 广告留 FB）；
+自动回退收紧全败 ok==0（partial 在投广告保留手动带确认）；_account_write_candidates 补
+operate-first tiebreak（O337 对齐——页面感知写撞管理号）；token_expired 判死接线 8 处探测；
+retry 平铺 Instant Form 失败留痕；TT 分支收口；account_sync 归属放宽（主绑定 OR 链接池）+
+BM 共享账户 batch 点查兜底（Roly-99 余额永久停更已修，实测 14/14 覆盖）。
+**③主页健康三层**（判据 CLI 实测：is_published=False；webhook 官方无状态字段）：page_health
+快照表 + 1h 扫描（翻转 critical 告警带影响面/恢复 info/消失页复核 100/33=已删，dedup 6h/page，
+锁 120）+ 部署前置闸（树执行器建系列前拒投未发布页、自动选页只选已发布、换页过滤、
+选择器/下拉禁选标灰）+ 资产页未发布红标（实测 4 页：Q-Ai/Mebrelablo/Drinniftferlim/Scarlett）。
+
+### 变更表
+| 文件 | 变更 | 验证 |
+|---|---|---|
+| routers/launch_templates.py | 穿透收口/自动回退收紧/tiebreak/token_expired×6/前置闸/deploy_pages is_published | 双门+restart+health |
+| core/fb_tokens.py | operate tiebreak + 两处探测判死 | 双门过 |
+| services/account_sync.py | _apply_sync_raw 抽取+归属放宽+batch 兜底 | 实跑 14/14、Roly-99 余额落库 |
+| services/page_health.py（新） | 扫描+影响面+告警 | smoke 三段全断言（抓出 dedup 写反） |
+| core/fb_client.py | get_pages +is_published/promotion_eligible | CLI 实测 Mebrelablo=False |
+| alembic 0110 | page_health 表 | upgrade 过，49 行落库 |
+| core/notify_utils.py / main.py | NO_CAP_EVENTS + cron 1h（锁 120） | 服务 active |
+| JobProgressDialog.vue | pollError 中途可见化+换主页未发布禁选 | build+审计+hash |
+| PagesOverview/DeployDrawer.vue | 未发布红标 / 主页下拉禁选 | playwright 4 badge 实渲染 |
+| locales ×3 | pollInterrupted/pageUnpublished/pg.unpublished | _audit_ui_text PASS |
+
+### DB 迁移
+- 0110：page_health（uq(tenant,page)+ix(tenant,checked_at desc)+GRANT 含序列）。
+
+### 生产环境变更（非代码）
+- 迁移已 upgrade；首轮扫描建基线 49 页（未发布 4 页已知不追溯告警）；诊断脚本已清理。
+
+### 复审结论（已知限制/风险）
+- 自动回退仅树模式全败触发；partial/中断保留手动（资金安全：在投广告不可无确认销毁）。
+- 主页告警归属 owner+operator 广播（主页无 owner 概念）；影响面只数在投状态广告。
+- 层 3（ad_account webhook with_issues_ad_objects 广告被拒实时推送）未做——订阅机制待 CLI 实测另批。
+- P2×18 未清（_audit_launch_chain.md）：rollback 原子性/_is_bare_invalid_param 恒真/文案截断链等择机。
+
+### commit
+6499e05 / 7356f6a / c97779e
+
+---
+
 ## 2026-09-20 — 双修：部署分配主页被节点主页静默覆盖（用户反馈）+ 受众定向 1:1 对齐 FB（用户反馈）
 
 ### 概述
