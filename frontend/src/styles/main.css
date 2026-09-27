@@ -265,6 +265,8 @@ a { color: var(--ac); text-decoration: none; }
 .el-select-dropdown__item.is-disabled { color: var(--t3) !important; opacity: .5; }
 .el-select .el-tag { background: var(--bg3) !important; border-color: var(--bd2) !important; color: var(--t2) !important; }
 .el-select .el-tag .el-tag__close { color: var(--t3) !important; }
+.el-select__prefix { color: var(--t3) !important; }
+.el-select__prefix .el-icon { font-size: 14px; }
 
 /* ── 移动端响应式（全局）── 一处规则修好所有页的水平表单行 + el-drawer 撑满 */
 @media (max-width: 768px) {

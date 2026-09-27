@@ -1165,7 +1165,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           <span class="ls-label">{{ t('dashboard.ownerLabel') }}</span>
           <el-select v-model="selectedOwner" filterable clearable size="small" class="filter-select"
                      @change="loadDashboard(); loadTrend()"
-                     :placeholder="t('dashboard.allOwners')" :title="t('dashboard.ownerFilterTitle')">
+                     :placeholder="t('dashboard.searchOwnerPh')" :title="t('dashboard.ownerFilterTitle')">
+            <template #prefix><el-icon><Search /></el-icon></template>
             <el-option v-for="o in ownerOptions" :key="o.value" :value="o.value" :label="o.label" />
           </el-select>
         </div>
@@ -1173,7 +1174,8 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
           <span class="ls-label">{{ t('dashboard.accountLabel') }}</span>
           <el-select v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable
                      @change="loadDashboard(); loadTrend()" size="small" class="filter-select act-filter"
-                     :placeholder="t('dashboard.allAccounts')" :title="t('dashboard.accountFilterTitle')">
+                     :placeholder="t('dashboard.searchAccountPh')" :title="t('dashboard.accountFilterTitle')">
+            <template #prefix><el-icon><Search /></el-icon></template>
             <template #label="{ label, value }">
               <span v-if="platChipOfAct(value)" :class="['plat-chip', platChipOfAct(value)]">{{ platChipOfAct(value).toUpperCase() }}</span>{{ label }}
             </template>

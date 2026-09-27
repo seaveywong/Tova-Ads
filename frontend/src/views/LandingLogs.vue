@@ -378,7 +378,8 @@ watch(() => route.query, (q) => {
         <el-option :value="''" :label="t('lplogs.allLandingPages')" />
         <el-option v-for="p in pages" :key="p.id" :value="p.id" :label="p.title" />
       </el-select>
-      <el-select v-model="fOwner" class="fl-sel" filterable :placeholder="t('lplogs.allOwners')" @change="search">
+      <el-select v-model="fOwner" class="fl-sel" filterable :placeholder="t('lplogs.searchOwnerPh')" @change="search">
+        <template #prefix><el-icon><Search /></el-icon></template>
         <el-option :value="''" :label="t('lplogs.allOwners')" />
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
@@ -395,7 +396,8 @@ watch(() => route.query, (q) => {
       <button class="ctrl-btn" :disabled="exporting" @click="exportCsv">{{ exporting ? '…' : '⤓ CSV' }}</button>
       <button class="ctrl-btn" @click="reset">{{ t('lplogs.reset') }}</button>
       <div v-if="moreOpen" class="more-filters">
-        <el-select v-model="fAct" class="fl-sel" filterable :placeholder="t('lplogs.allAccounts')" @change="search">
+        <el-select v-model="fAct" class="fl-sel" filterable :placeholder="t('lplogs.searchAccountPh')" @change="search">
+          <template #prefix><el-icon><Search /></el-icon></template>
           <el-option :value="''" :label="t('lplogs.allAccounts')" />
           <el-option v-for="a in platAccounts" :key="a.act_id" :value="a.act_id" :label="(platChip(a) ? platChip(a).toUpperCase() + ' · ' : '') + a.name" />
         </el-select>

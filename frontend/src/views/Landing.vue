@@ -867,8 +867,9 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
         <button class="seg-btn" :class="{ on: modeFilter === 'short' }" @click="modeFilter = 'short'">🔗 {{ t('landing.tabShortOnly') }} <i class="seg-cnt">{{ cntShort }}</i></button>
       </div>
       <el-select v-if="ownerOptions.length > 1" v-model="ownerFilter" clearable filterable size="small"
-                 :placeholder="t('landing.filterByOwner')" style="width:160px;margin-left:auto"
+                 :placeholder="t('landing.searchOwnerPh')" style="width:160px;margin-left:auto"
                  :title="t('landing.filterByOwnerTip')">
+        <template #prefix><el-icon><Search /></el-icon></template>
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
     </div>

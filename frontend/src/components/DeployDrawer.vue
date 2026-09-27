@@ -577,7 +577,8 @@ defineExpose({ open, showPreflight })
     <div class="deploy-search-row">
       <el-input v-model="deploySearch" clearable :placeholder="t('launch.searchAccountPlaceholder')" />
       <el-select v-if="ownerOptions.length > 1" v-model="deployOwner" clearable filterable size="small"
-                 :placeholder="t('launch.ownerFilterPh')" style="width:130px;flex:none">
+                 :placeholder="t('launch.searchOwnerPh')" style="width:130px;flex:none">
+        <template #prefix><el-icon><Search /></el-icon></template>
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>

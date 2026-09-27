@@ -1064,7 +1064,8 @@ const unsubscribeLeads = async () => {
         <div class="ctrl-bar">
       <!-- 工具条顺序照 FB Ads Manager：＋创建 → 账户 → 日期 → 筛选 → 搜索 → 列 → 核验 → 其它（跳转链接）→ 缓存龄 -->
       <button v-if="tab !== 'lead'" class="ctrl-btn create-btn" @click="openPicker">＋ {{ t('adm.createAd') }}</button>
-      <el-select v-if="tab !== 'lead'" v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.allAccounts')" class="act-filter" style="width:180px">
+      <el-select v-if="tab !== 'lead'" v-model="selectedActs" multiple filterable collapse-tags collapse-tags-tooltip clearable :placeholder="t('adm.searchAccountPh')" class="act-filter" style="width:180px">
+        <template #prefix><el-icon><Search /></el-icon></template>
         <template #label="{ label, value }">
           <span v-if="platChipOf(value)" :class="['plat-chip', platChipOf(value)]">{{ platChipOf(value).toUpperCase() }}</span>{{ label }}
         </template>
@@ -1077,6 +1078,7 @@ const unsubscribeLeads = async () => {
       <div v-if="tab !== 'lead'" class="sf-group"><button class="ctrl-btn sm" :class="{ on: statusFilter === 'all' }" @click="statusFilter = 'all'">{{ t('common.all') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'active' }" @click="statusFilter = 'active'">{{ t('adm.active') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'idle' }" @click="statusFilter = 'idle'" :title="t('adm.filterIdleTip')">{{ t('status.adIdle') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'paused' }" @click="statusFilter = 'paused'">{{ t('adm.paused') }}</button><button class="ctrl-btn sm" :class="{ on: statusFilter === 'abnormal' }" @click="statusFilter = 'abnormal'" :title="t('adm.filterAbnormalTip')">{{ t('adm.filterAbnormal') }}</button></div>
       <el-select v-if="tab !== 'lead' && ownerOptions.length > 1" v-model="ownerFilter" clearable filterable
                  :placeholder="t('adm.ownerSearchPh')" class="act-filter owner-filter" style="width:130px" :title="t('adm.ownerFilterTip')">
+        <template #prefix><el-icon><Search /></el-icon></template>
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
       <input v-if="tab !== 'lead'" v-model="searchQ" class="ctrl-btn search-input" :placeholder="t('adm.searchContext')" />
