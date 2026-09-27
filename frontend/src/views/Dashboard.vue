@@ -1163,7 +1163,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         </div>
         <div class="labeled-select">
           <span class="ls-label">{{ t('dashboard.ownerLabel') }}</span>
-          <el-select v-model="selectedOwner" filterable clearable size="small" class="filter-select"
+          <el-select v-model="selectedOwner" filterable clearable size="small" class="filter-select" style="width:150px"
                      @change="loadDashboard(); loadTrend()"
                      :placeholder="t('dashboard.searchOwnerPh')" :title="t('dashboard.ownerFilterTitle')">
             <template #prefix><el-icon><Search /></el-icon></template>
