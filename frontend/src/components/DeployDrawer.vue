@@ -22,11 +22,20 @@ const deployAsset = ref(null)
 const accounts = ref([])
 const accLoading = ref(false)
 const deploySearch = ref('')
+// 所有人筛选（用户拍板 2026-09-27：owner 分发场景按人勾账户）
+const deployOwner = ref('')
+const ownerOptions = computed(() => {
+  const seen = new Map()
+  for (const a of accounts.value) {
+    if (a.owner_email && !seen.has(a.owner_email)) seen.set(a.owner_email, a.owner_email.split('@')[0])
+  }
+  return [...seen.entries()].map(([email, label]) => ({ email, label }))
+})
 const filteredDeployAccounts = computed(() => {
   const q = deploySearch.value.trim().toLowerCase()
-  if (!q) return accounts.value
   return accounts.value.filter(a =>
-    (a.name || '').toLowerCase().includes(q) || (a.act_id || '').includes(q)
+    (!q || (a.name || '').toLowerCase().includes(q) || (a.act_id || '').includes(q))
+    && (!deployOwner.value || (a.owner_email || '') === deployOwner.value)
   )
 })
 const selectedAccs = ref(new Set())
@@ -252,12 +261,22 @@ const randomAssignPages = () => {
   const used = new Set()
   const done = []
   const short = []
+  // 随机池与手选同口径（用户实测：随机选中的主页仍因权限失败）：
+  // ① can_advertise=false 的页随机到必被 FB 拒（手选下拉已禁选，随机曾没过滤）
+  // ② 已指定令牌时只随该令牌能管的页（via_cred_id 对齐——后端 _pinned_write_fb
+  //    三层校验会拒，曾随机出指定令牌管不了的页）
+  const poolOf = (id) => {
+    const pin = deployItems.value[id]?.cred_id || 0
+    return (accPages.value[id] || []).filter(p => p.id && !used.has(p.id)
+      && p.can_advertise !== false
+      && (!pin || p.via_cred_id === pin))
+  }
   const order = ids.map(id => ({
     id, r: Math.random(),
-    n: (accPages.value[id] || []).filter(p => p.id).length,
+    n: poolOf(id).length,
   })).sort((a, b) => a.n - b.n || a.r - b.r)
   for (const { id } of order) {
-    const pool = (accPages.value[id] || []).filter(p => p.id && !used.has(p.id))
+    const pool = poolOf(id)
     const pick = pool[Math.floor(Math.random() * pool.length)]
     if (!pick) {
       deployItems.value[id] = { ...(deployItems.value[id] || {}), page_id: '' }
@@ -556,6 +575,10 @@ defineExpose({ open, showPreflight })
     <div v-if="deployMode==='single' && deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
     <div class="deploy-search-row">
       <el-input v-model="deploySearch" clearable :placeholder="t('launch.searchAccountPlaceholder')" />
+      <el-select v-if="ownerOptions.length > 1" v-model="deployOwner" clearable size="small"
+                 :placeholder="t('launch.ownerFilterPh')" style="width:130px;flex:none">
+        <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
+      </el-select>
       <span class="acc-count-hint">{{ filteredDeployAccounts.length }} / {{ accounts.length }} {{ t('launch.accountsUnit') }}</span>
     </div>
     <div class="acc-batch-row">
@@ -588,7 +611,7 @@ defineExpose({ open, showPreflight })
           <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="(deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)" @change="toggleAcc(a.act_id)" />
           <span class="acc-main">
             <span class="acc-name">{{ a.name || a.act_id }}</span>
-            <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span></span>
+            <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span><span v-if="a.owner_email" class="acc-owner" :title="a.owner_email">· {{ (a.owner_email || '').split('@')[0] }}</span></span>
           </span>
           <!-- 可用额度（花费上限−历史总消耗，USD）；无上限账户显示 ∞；未知币种算不出则不显示。
                曾拿 balance_usd（FB 未结欠款）兜底冒充可用额度——口径错误已移除 -->
@@ -794,6 +817,7 @@ defineExpose({ open, showPreflight })
 .acc-main{min-width:0;display:flex;flex-direction:column;gap:1px}
 .acc-name{font-size:13px;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acc-sub{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--t3);min-width:0}
+.acc-owner{color:var(--ac);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px}
 .acc-id{font-family:var(--font-mono);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acc-bal{font-size:12px;color:var(--t2);white-space:nowrap;font-variant-numeric:tabular-nums}
 .acc-status{font-size:11px;padding:1px 8px;border-radius:var(--rs);font-weight:600;white-space:nowrap;line-height:1.5}

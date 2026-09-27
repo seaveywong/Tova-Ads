@@ -465,6 +465,7 @@ export default {
     emptyStep1: '连接 Facebook 令牌（OAuth 授权或手动粘贴）',
     emptyStep2: '载入广告账户（勾选导入纳管）',
     emptyStep3: '看板自动出数，巡检/止损开始运行',
+    importThisToken: '导入本令牌账户', importGlobalTitle: '导入账户 · 全部令牌', importScopedTitle: '导入账户 · {name}',
     tokenName: '令牌名称',
     typeSource: '类型 / 来源',
     lastVerified: '最近检测',

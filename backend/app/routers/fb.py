@@ -1737,6 +1737,7 @@ def get_assets(
 
 @router.get("/credentials/loadable-accounts")
 def loadable_accounts(
+    cred_id: int = 0,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
 ):
@@ -1744,10 +1745,19 @@ def loadable_accounts(
 
     供「载入账户」勾选用：一个账户可能被多个令牌覆盖（多 FB 用户都管它），
     tokens[] 列出所有覆盖令牌及其当前可用性，前端据此判断"全丢"风险。
+    cred_id>0 = 只列该令牌覆盖的账户（令牌卡「导入本令牌账户」入口——用户拍板 2026-09-27：
+    从特定令牌进来的导入只看它名下，全局导入走不带 cred_id 的入口；过滤纯内存零 FB 调用）。
     大代理令牌可见 3k+ 账户（轻字段全量 ~30s）——进程内 5 分钟缓存，
     /fb/import 复用同一缓存（勾选导入零 FB 调用，秒回）。
     """
     rows, degraded = _get_loadable_rows(db, user.tenant_id)
+    if cred_id:
+        # 令牌归属校验：只能筛本租户自己的令牌
+        _own = db.query(FbCredential.id).filter(
+            FbCredential.id == cred_id, FbCredential.tenant_id == user.tenant_id).first()
+        if not _own:
+            raise HTTPException(404, "令牌不存在")
+        rows = [r for r in rows if any(tk.get("id") == cred_id for tk in (r.get("tokens") or []))]
     imported_ids = {a.act_id for a in db.query(Account).filter(
         Account.tenant_id == user.tenant_id, Account.is_managed == True  # noqa: E712
     ).all()}

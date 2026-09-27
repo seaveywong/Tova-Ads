@@ -454,6 +454,7 @@ export default {
     emptyStep1: 'Connect a Facebook token (OAuth or paste manually)',
     emptyStep2: 'Load ad accounts (select and import to manage)',
     emptyStep3: 'Dashboard data flows in; guard and stop-loss start running',
+    importThisToken: 'Import this token\'s accounts', importGlobalTitle: 'Import accounts · all tokens', importScopedTitle: 'Import accounts · {name}',
     tokenName: 'Token name',
     typeSource: 'Type / Source',
     lastVerified: 'Last checked',

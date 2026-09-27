@@ -429,6 +429,7 @@ const refreshAccounts = async (tk) => {
 const handleAction = (cmd, tk) => {
   if (cmd === 'check') checkToken(tk)
   else if (cmd === 'refresh') refreshAccounts(tk)
+  else if (cmd === 'import_this') openLoad(tk)
   else if (cmd === 'delete') deleteToken(tk)
   else if (cmd === 'update_token') updateToken(tk)
   else if (cmd === 'change_type') changeTokenType(tk)
@@ -562,20 +563,26 @@ const drawerTitle = computed(() => {
   return `${drawerToken.value.fb_user_name || t('tokens.unknown')} · ${t('tokens.userAssets')}`
 })
 
-// 导入账户
-const openLoad = async () => {
+// 导入账户（scopeCred>0 = 只列该令牌名下账户——令牌卡「导入本令牌账户」入口；空 = 全部令牌）
+const loadScopeCred = ref(0)
+const loadScopeAlias = ref('')
+const openLoad = async (tk = null) => {
   popOverlay()
   loadOpen.value = true
   loadTab.value = 'list'
   loadSearch.value = ''
   loadIdText.value = ''
   loadSelected.value = {}
+  loadScopeCred.value = tk?.id || 0
+  loadScopeAlias.value = tk ? (tk.alias || tk.fb_user_name || `#${tk.id}`) : ''
   loadLoading.value = true
   try {
     // 端点返回裸 list（旧形状）；import_default_all 走 X-Import-Default-All 响应头（原生 fetch 才拿得到头）
     const _ctrl = new AbortController()
     const _tmr = setTimeout(() => _ctrl.abort(), 30000)
-    const _resp = await fetch((import.meta.env.VITE_API_BASE || 'https://api.tovaads.com') + '/fb/credentials/loadable-accounts', {
+    const _url = (import.meta.env.VITE_API_BASE || 'https://api.tovaads.com') + '/fb/credentials/loadable-accounts'
+      + (loadScopeCred.value ? `?cred_id=${loadScopeCred.value}` : '')
+    const _resp = await fetch(_url, {
       headers: { Authorization: 'Bearer ' + window.localStorage.getItem('tova_token') }, signal: _ctrl.signal
     })
     clearTimeout(_tmr)
@@ -850,6 +857,7 @@ const deleteToken = async (tk) => {
                 <el-dropdown-item command="check">{{ t('tokens.checkValidity') }}</el-dropdown-item>
                 <el-dropdown-item command="update_token">{{ t('tokens.updateKey') }}</el-dropdown-item>
                 <el-dropdown-item command="refresh">{{ t('tokens.refreshAccounts') }}</el-dropdown-item>
+                <el-dropdown-item command="import_this">{{ t('tokens.importThisToken') }}</el-dropdown-item>
                 <el-dropdown-item command="max_accounts">{{ t('tokens.maxAccountsBtn') }}</el-dropdown-item>
                 <el-dropdown-item command="change_type" divided>{{ t('tokens.changeTypeBtn') }}（{{ ttTypeLabel(tk.token_type) }} → {{ ttTypeLabel((tk.token_type || 'manage') === 'operate' ? 'manage' : 'operate') }}）</el-dropdown-item>
                 <el-dropdown-item command="delete" divided class="danger">{{ t('tokens.deleteToken') }}</el-dropdown-item>
@@ -1011,7 +1019,7 @@ const deleteToken = async (tk) => {
 
     <div v-if="loadOpen" class="overlay" :style="{ zIndex: ovZ }" @click.self="confirmCloseLoad">
       <div class="modal wide">
-        <div class="m-title">{{ t('tokens.importAccounts') }}</div>
+        <div class="m-title">{{ loadScopeCred ? t('tokens.importScopedTitle', { name: loadScopeAlias }) : t('tokens.importGlobalTitle') }}</div>
         <div class="m-tabs">
           <button class="mt-btn" :class="{on:loadTab==='list'}" @click="loadTab='list'">{{ t('tokens.tabChecklist') }}</button>
           <button class="mt-btn" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">{{ t('tokens.tabIdImport') }}</button>
