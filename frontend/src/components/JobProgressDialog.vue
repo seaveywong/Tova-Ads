@@ -4,7 +4,7 @@
 import { ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { GET } from '../api'
+import { GET, POST } from '../api'
 import { fmtTime } from '../composables/useTz'
 import { useLaunchJobs } from '../composables/useLaunchJobs'
 
