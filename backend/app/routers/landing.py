@@ -1690,35 +1690,30 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
             LandingAdLink.page_id == p.id, LandingAdLink.tenant_id == p.tenant_id,
             LandingAdLink.status == "active"
         ).all()
-        if p.block_enabled:
-            # 防护开启时内置爬虫拦截会挡掉 FB 爬虫（facebookexternalhit/facebot/meta-externalagent），
-            # FB scrape 永远拿不到页面元信息 → 探测必然报"appsite/al:ios:url"参数错。跳过并如实标注（非封禁）。
-            checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"),
-                           "status": "pass", "detail": L(loc, "fb.scrapeBlockedByProtection")})
-            if _active_links:
+        # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
+        # 内置 30s 拖满，手动自检整体撞前端超时）
+        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
+        # 防护内置爬虫拦截会 302 挡掉 FB 爬虫 → scrape 报"appsite/al:ios:url"参数错（非封禁）。
+        # 真封禁(#368 abusive/blocked)由 FB 侧黑名单在 fetch 前判定，不受我们防护影响，仍以 fail 返回。
+        # 故：fail 保留（真封禁）；warn（防护导致的参数错）降为 pass 并如实标注，消除假警告。
+        if p.block_enabled and fb_status == "warn":
+            fb_status, fb_detail = "pass", L(loc, "fb.scrapeBlockedByProtection")
+        checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
+        # 子码级 FB 封禁检测（扫描所有 active 子码；warn=防护拦截，天然并入"无封禁"分支）
+        if _active_links:
+            # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
+            _probe_res = _fb_ban_probe_batch(
+                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
+            _blocked_slugs = [_link.slug for _link, (_st, _d)
+                              in zip(_active_links, _probe_res) if _st == "fail"]
+            if _blocked_slugs:
+                checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
+                               "status": "fail",
+                               "detail": L(loc, "landing.scDetailFbSubcodeBlocked", n=len(_blocked_slugs), m=len(_active_links), lst=",".join(_blocked_slugs[:5]))})
+            else:
                 checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "pass",
-                               "detail": L(loc, "fb.scrapeBlockedByProtectionSubcode", n=len(_active_links))})
-        else:
-            # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
-            # 内置 30s 拖满，手动自检整体撞前端超时）
-            fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
-            checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
-            # 子码级 FB 封禁检测（扫描所有 active 子码）
-            if _active_links:
-                # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
-                _probe_res = _fb_ban_probe_batch(
-                    db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
-                _blocked_slugs = [_link.slug for _link, (_st, _d)
-                                  in zip(_active_links, _probe_res) if _st == "fail"]
-                if _blocked_slugs:
-                    checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
-                                   "status": "fail",
-                                   "detail": L(loc, "landing.scDetailFbSubcodeBlocked", n=len(_blocked_slugs), m=len(_active_links), lst=",".join(_blocked_slugs[:5]))})
-                else:
-                    checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
-                                   "status": "pass",
-                                   "detail": L(loc, "landing.scDetailFbSubcodeOk", n=len(_active_links))})
+                               "detail": L(loc, "landing.scDetailFbSubcodeOk", n=len(_active_links))})
     # 9. 预览模式（关=正常运营 pass；开=提醒审核完关掉 warn，避免每页都黄）
     checks.append({"key": "preview", "label": L(loc, "landing.scPreview"),
                    "status": "warn" if p.preview_enabled else "pass",

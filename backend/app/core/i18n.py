@@ -442,8 +442,7 @@ DATA = {
     "fb.scrapeProbeError": {"zh": "检测异常：{e}", "en": "probe error: {e}"},
     "fb.banNoToken": {"zh": "无可用 FB 令牌，跳过封禁检测", "en": "no usable FB token, skipping ban probe"},
     "fb.banTimeout": {"zh": "FB 检测超时（{s}s），已跳过", "en": "FB probe timed out ({s}s), skipped"},
-    "fb.scrapeBlockedByProtection": {"zh": "防护已开启，FB 爬虫被拦截，无法探测（属正常）", "en": "protection on, FB crawler blocked, ban probe unavailable (normal)"},
-    "fb.scrapeBlockedByProtectionSubcode": {"zh": "防护已开启，FB 爬虫被拦截，{n} 个子码无法探测（属正常）", "en": "protection on, FB crawler blocked, {n} subcodes not probed (normal)"},
+    "fb.scrapeBlockedByProtection": {"zh": "防护已开启，FB 爬虫被拦截，未发现封禁（真封禁会在此显示失败）", "en": "protection on, FB crawler blocked; no ban detected (a real ban would show as failed)"},
     "landing.scDiagZoneInactive": {"zh": "根域 {root} 平台解析状态={st}（域名 NS 未指向平台，新子域名无法激活）", "en": "root domain {root} platform status={st} (domain NS not pointed at platform; new subdomains can't activate)"},
     "landing.scDiagDomainPending": {"zh": "CF 域名验证 {st}（新绑定通常数分钟完成，稍后重检）", "en": "CF domain verification {st} (new bindings usually complete in minutes; retry later)"},
 }
