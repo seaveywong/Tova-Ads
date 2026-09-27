@@ -65,7 +65,8 @@ const loadTrend = async () => {
       : `date_preset=${datePreset.value}`
     const actQ = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
     const cq = conversionCategory.value !== 'all' ? `&conversion_category=${conversionCategory.value}` : ''   // KPI 卡收窄时趋势线同步
-    trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}&granularity=${trendGran.value}`)
+    const ownQ = selectedOwner.value ? `&owner_id=${encodeURIComponent(selectedOwner.value)}` : ''   // ⑤ 对应人：趋势线同步收窄
+    trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}${ownQ}&granularity=${trendGran.value}`)
   if (!isLatest()) return
   } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
 }
@@ -170,6 +171,7 @@ const rangeQuery = () => {
     : `date_preset=${datePreset.value}`
   if (conversionCategory.value && conversionCategory.value !== 'all') q += `&conversion_category=${conversionCategory.value}`
   if (selectedActs.value.length) q += `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}`
+  if (selectedOwner.value) q += `&owner_id=${encodeURIComponent(selectedOwner.value)}`   // ⑤ 对应人：KPI/明细/余额同口径收窄
   q += platformQuery()   // fb/tt 才附加（all 不带参，请求与旧版一致）
   return q
 }
@@ -442,18 +444,15 @@ const columnFmt = (col, acc) => {
 // KPI/账户明细内搜索
 const detailSearch = ref('')
 
-// 对应人筛选（账户归属人 owner_user_id → email；'unassigned' = 未分配；只过滤明细表，不改 KPI 汇总口径）
+// 对应人筛选（账户归属人 owner_user_id → email；'unassigned' = 未分配）。
+// owner_id 传后端：KPI 总额/趋势/明细/余额同口径收窄；下拉选项取后端 owner_options（全账户），
+// 避免选中某 owner 后下拉塌缩到只剩该 owner。
 const selectedOwner = ref(null)  // null=全部
 const ownerOptions = computed(() => {
-  const owners = new Map()
-  let hasUnassigned = false
-  for (const a of (data.value.accounts || [])) {
-    if (a.owner_user_id) owners.set(a.owner_user_id, a.owner_email || `#${a.owner_user_id}`)
-    else hasUnassigned = true
-  }
-  const list = Array.from(owners, ([value, label]) => ({ value, label }))
-  if (hasUnassigned) list.push({ value: 'unassigned', label: t('dashboard.ownerUnassigned') })
-  return list
+  return (data.value.owner_options || []).map(o => ({
+    value: o.user_id,
+    label: o.user_id === 'unassigned' ? t('dashboard.ownerUnassigned') : (o.email || `#${o.user_id}`),
+  }))
 })
 
 // ── KPI 分层重排：4 核心大卡（点击=账户明细表切到该指标视角）+ 4 次要小卡 ──
@@ -1165,6 +1164,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         <div class="labeled-select">
           <span class="ls-label">{{ t('dashboard.ownerLabel') }}</span>
           <el-select v-model="selectedOwner" filterable clearable size="small" class="filter-select"
+                     @change="loadDashboard(); loadTrend()"
                      :placeholder="t('dashboard.allOwners')" :title="t('dashboard.ownerFilterTitle')">
             <el-option v-for="o in ownerOptions" :key="o.value" :value="o.value" :label="o.label" />
           </el-select>

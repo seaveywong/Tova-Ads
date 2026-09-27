@@ -58,6 +58,16 @@ def _norm_platform(p: str) -> str:
     return p if p in ("fb", "tt") else "all"
 
 
+def _owner_act_ids(db, user, owner_id):
+    """对应人筛选⑤：owner_user_id → act_id 集合。None=未启用；空集=该 owner 名下无账户。"""
+    if not owner_id:
+        return None
+    _q = scope_account_query(db.query(Account).filter(Account.tenant_id == user.tenant_id), user).all()
+    if owner_id == "unassigned":
+        return {a.act_id for a in _q if not a.owner_user_id}
+    return {a.act_id for a in _q if str(a.owner_user_id) == str(owner_id)}
+
+
 @router.get("")
 def dashboard(
     date_preset: str = "today",
@@ -66,6 +76,7 @@ def dashboard(
     conversion_category: str = "",  # ① 转化分类筛选：全部/购物/私信/线索/互动/流量（只统计符合 KPI 类型的广告）
     act_ids: str = "",  # ③ 账户多选筛选：逗号分隔 act_id
     platform: str = "all",  # ④ 平台筛选：all（跨平台汇总）/ fb / tt（perf 按 platform 列过滤）
+    owner_id: str = "",  # ⑤ 对应人筛选：owner_user_id（'unassigned'=未分配）；KPI 总额/明细/余额/止损/放行同口径收窄
     fresh: bool = False,  # 手动刷新跳过 30s 内存缓存（只读库，不触发 FB 采集）
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
@@ -117,14 +128,26 @@ def dashboard(
     except Exception:
         pass
 
-    # 批AG：operator 只看名下——归属交集进筛选；缓存键必须带用户域（否则 owner 的同参
-    # 缓存结果直接喂给 operator——缓存层泄漏）
+    # 账户域归一：operator 归属 ∩ 账户多选③ ∩ 对应人⑤ → scope_acts。
+    # scope_acts=None=不过滤（全租户）；空集=该域无账户（汇总必须为 0，不能落入全租户聚合）；
+    # 非空集=精确账户集。缓存键必须带 owner_id（否则同参缓存串喂给"全部"视图——缓存层泄漏）。
     _op_scope = getattr(user, "role", None) == "operator"
+    _layers = []
     if _op_scope:
-        _own_acts = {a.act_id for a in scope_account_query(db.query(Account).filter(
-            Account.tenant_id == user.tenant_id), user).all()}
-        act_ids = ",".join(sorted(set(x for x in act_ids.split(",") if x.strip()) & _own_acts)) if act_ids else ",".join(sorted(_own_acts))
-    cache_key = f"{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{since}:{until}:{conversion_category}:{act_ids}:{platform}"
+        _layers.append({a.act_id for a in scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id), user).all()})
+    _owner_acts = _owner_act_ids(db, user, owner_id)
+    if _owner_acts is not None:
+        _layers.append(_owner_acts)
+    if act_ids:
+        _layers.append({x for x in act_ids.split(",") if x.strip()})
+    scope_acts = None
+    if _layers:
+        scope_acts = set(_layers[0])
+        for _s in _layers[1:]:
+            scope_acts &= _s
+    act_ids = ",".join(sorted(scope_acts)) if scope_acts is not None else ""
+    cache_key = f"{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{since}:{until}:{conversion_category}:{act_ids}:{platform}:{owner_id}"
     now = _time.time()
     if not fresh and cache_key in _CACHE:
         entry = _CACHE[cache_key]
@@ -164,8 +187,8 @@ def dashboard(
         params["cat_fields"] = cat_fields
         binds.append(bindparam("cat_fields", expanding=True))
     sel_ids = [s.strip() for s in act_ids.split(",") if s.strip()] if act_ids else []
-    if _op_scope and not sel_ids:
-        sel_ids = ["__none__"]   # 批AG：operator 名下无账户——perf 聚合必须为空（不能落入无过滤的全租户聚合）
+    if scope_acts is not None and not scope_acts:
+        sel_ids = ["__none__"]   # operator/对应人筛选名下无账户——perf 聚合必须为空（不能落入无过滤的全租户聚合）
     if sel_ids:
         sql_text += "  AND act_id IN :act_ids\n"
         params["act_ids"] = sel_ids
@@ -182,15 +205,22 @@ def dashboard(
     _pf_on = platform != "all"
     if _pf_on:
         accounts = [a for a in accounts if (a.platform or "fb") == platform]
-    acc_map = {a.act_id: a for a in accounts}
-    managed_accounts = [a for a in accounts if a.is_managed]
-    managed_act_ids = {a.act_id for a in managed_accounts}
-    # 归属人映射（对应人筛选用）：users 无 name 字段，email 是成员标识；一次查询避免 N+1
+    # 归属人映射 + 对应人下拉选项：必须从「未按 owner 收窄」的全账户算——
+    # 否则选中某 owner 后下拉只剩该 owner，无法切回全部/他人。
     _owner_ids = {a.owner_user_id for a in accounts if a.owner_user_id}
     _owner_map = {}
     if _owner_ids:
         from ..models.auth import User
         _owner_map = {u.id: (u.email or f"#{u.id}") for u in db.query(User).filter(User.id.in_(_owner_ids)).all()}
+    owner_options = [{"user_id": uid, "email": _owner_map[uid]} for uid in sorted(_owner_map)]
+    if any(not a.owner_user_id for a in accounts):
+        owner_options.append({"user_id": "unassigned", "email": None})
+    # 对应人⑤/账户多选③：accounts 统一收窄 → 明细/余额/覆盖同口径归集
+    if scope_acts is not None:
+        accounts = [a for a in accounts if a.act_id in scope_acts]
+    acc_map = {a.act_id: a for a in accounts}
+    managed_accounts = [a for a in accounts if a.is_managed]
+    managed_act_ids = {a.act_id for a in managed_accounts}
 
     # 止损：按所选范围 + 归属到账户本地日（数据/事件同天统一）。
     # 拉宽 UTC 窗口（覆盖各账户时区偏移 ±1 天），再按账户本地日过滤到 [since, until]。
@@ -225,6 +255,9 @@ def dashboard(
         # 平台筛选④：止损/放行计数与所选平台同口径（act 无法归属的保留，不误删）
         _pause_in_range = [p for p in _pause_in_range
                            if not _act(p.trigger_detail) or _act(p.trigger_detail) in acc_map]
+    if scope_acts is not None:
+        # 对应人⑤/账户多选③：止损计数与账户域同口径
+        _pause_in_range = [p for p in _pause_in_range if _act(p.trigger_detail) in scope_acts]
     pause_count = len(_pause_in_range)
 
     # 放行计数/明细：按各账户本地今日（多时区账户不能一刀切 UTC；和加白写入/巡检查询对齐）
@@ -239,6 +272,8 @@ def dashboard(
     today_allows = [a for a in allow_cand if local_today.get(a.act_id) == a.allowance_date]
     if _pf_on:
         today_allows = [a for a in today_allows if a.act_id in acc_map]
+    if scope_acts is not None:
+        today_allows = [a for a in today_allows if a.act_id in scope_acts]
     allowance_count = len(today_allows)
 
     # 止损明细（已按账户本地日过滤到 [since, until]，与快照同天）
@@ -428,10 +463,16 @@ def dashboard(
         _ydb = SuperSessionLocal()
         try:
             _yesterday = (datetime.now(timezone(timedelta(hours=8))) - timedelta(days=1)).strftime("%Y-%m-%d")
-            _yr = _ydb.execute(text(
-                "SELECT SUM(spend) AS s, SUM(conversions) AS c FROM perf_snapshots "
-                "WHERE tenant_id = :t AND snapshot_date = :d"
-            ), {"t": user.tenant_id, "d": _yesterday}).fetchone()
+            _ysql = ("SELECT SUM(spend) AS s, SUM(conversions) AS c FROM perf_snapshots "
+                     "WHERE tenant_id = :t AND snapshot_date = :d")
+            _yparams = {"t": user.tenant_id, "d": _yesterday}
+            _ybinds = []
+            if scope_acts is not None:
+                _ysql += " AND act_id IN :act_ids"
+                _yparams["act_ids"] = list(scope_acts) if scope_acts else ["__none__"]
+                _ybinds.append(bindparam("act_ids", expanding=True))
+            _ystmt = text(_ysql).bindparams(*_ybinds) if _ybinds else text(_ysql)
+            _yr = _ydb.execute(_ystmt, _yparams).fetchone()
             if _yr:
                 y_spend = float(_yr[0] or 0)
                 y_conv = int(_yr[1] or 0)
@@ -463,6 +504,7 @@ def dashboard(
         "last_synced": str(last_synced) if last_synced else None,
         "last_heartbeat": str(_hb.created_at) if _hb else None,
         "next_inspection_in": "约5分钟（定时巡检）",
+        "owner_options": owner_options,
         "accounts": account_details,
     }
 
@@ -478,6 +520,8 @@ def dashboard(
         )
         if _pf_on:
             _chg_q = _chg_q.filter(Notification.platform == platform)
+        if scope_acts is not None:
+            _chg_q = _chg_q.filter(Notification.target_id.in_(list(scope_acts) if scope_acts else ["__none__"]))
         _chg_rows = _chg_q.order_by(Notification.created_at.desc()).all()
         _status_list = []
         for _c in _chg_rows:
@@ -522,6 +566,7 @@ def trend_data(
     act_ids: str = "",
     conversion_category: str = "",   # 转化分类筛选（与 /dashboard 同口径——KPI 卡收窄时趋势线同步）
     platform: str = "all",           # 平台筛选（与 /dashboard 同口径）
+    owner_id: str = "",              # 对应人筛选⑤（与 /dashboard 同口径）
     fresh: bool = False,
     user: CurrentUser = Depends(require_permission("ads.read")),
     db: Session = Depends(get_db),
@@ -535,11 +580,22 @@ def trend_data(
     platform = _norm_platform(platform)
     # 缓存命中（key 含全部筛选维度）
     _op_scope = getattr(user, "role", None) == "operator"
+    _tlayers = []
     if _op_scope:
-        _own_acts = {a.act_id for a in scope_account_query(db.query(Account).filter(
-            Account.tenant_id == user.tenant_id), user).all()}
-        act_ids = ",".join(sorted(set(x for x in act_ids.split(",") if x.strip()) & _own_acts)) if act_ids else ",".join(sorted(_own_acts))
-    _tkey = f"trend:{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}:{platform}"
+        _tlayers.append({a.act_id for a in scope_account_query(db.query(Account).filter(
+            Account.tenant_id == user.tenant_id), user).all()})
+    _towner = _owner_act_ids(db, user, owner_id)
+    if _towner is not None:
+        _tlayers.append(_towner)
+    if act_ids:
+        _tlayers.append({x for x in act_ids.split(",") if x.strip()})
+    _tscope = None
+    if _tlayers:
+        _tscope = set(_tlayers[0])
+        for _s in _tlayers[1:]:
+            _tscope &= _s
+    act_ids = ",".join(sorted(_tscope)) if _tscope is not None else ""
+    _tkey = f"trend:{user.tenant_id}:{'u' + str(user.id) if _op_scope else 't'}:{date_preset}:{date_from}:{date_to}:{granularity}:{act_ids}:{conversion_category}:{platform}:{owner_id}"
     _tnow = _time.time()
     if not fresh and _tkey in _CACHE:
         _te = _CACHE[_tkey]
@@ -555,8 +611,8 @@ def trend_data(
         since = (datetime.now(BUSINESS_TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
         until = today
     sel_ids = [s.strip() for s in act_ids.split(",") if s.strip()] if act_ids else []
-    if _op_scope and not sel_ids:
-        # operator 名下无账户——绝不能落入"不过滤"分支聚全租户
+    if _tscope is not None and not _tscope:
+        # operator/对应人筛选名下无账户——绝不能落入"不过滤"分支聚全租户
         result = {"labels": [], "spend": [], "conversions": [], "cpa": [], "granularity": granularity or "day"}
         _CACHE[_tkey] = (_tnow, result)
         return result

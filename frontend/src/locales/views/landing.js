@@ -70,7 +70,7 @@ export default {
     specSecPh: '② 占位符', specReq: '必填', specOpt: '可选',
     specPhTitle: '页面标题（浏览器标签 & 主标题）', specPhTarget: 'CTA 跳转目标（按钮/链接的 href 一律用它）', specPhPixels: 'FB 像素 ID 数组', specPhDesc: '页面描述文案', specPhConv: 'FB 转化事件名数组，如 ["Purchase"]', specPhTtPixels: 'TikTok 像素 ID 数组', specPhTtConv: 'TikTok 转化事件名数组，如 ["CompletePayment"]',
     specSecGuard: '③ 守卫代码（逐字照抄，不可省略）', specGuardL1: '下面几行必须原样放进 <script> 开头——少写会导致广告流量数据翻倍：', specGuardL2: 'CTA 点击后跳 LP_TARGET_URL（300ms 延迟留给像素上报）。',
-    specSecPixel: '④ 禁止硬编码像素', specPixelL1: '不得出现 fbq 初始化像素 ID 或 ttq.load 加载像素的写法——像素由平台按页配置注入，写死会把数据发到错误像素，直接拒传。',
+    specSecPixel: '④ 禁止写死像素', specPixelL1: '不得出现 fbq 初始化像素 ID 或 ttq.load 加载像素的写法——像素由平台按页配置注入，写死会把数据发到错误像素，直接拒传。',
     specSecLink: '⑤ 禁止写死外链', specLinkL1: '页面内不得出现任何写死的 http(s) 链接（含隐私政策——落地页自包含）。', specLinkL2: '跳转目标一律用 __LP_TARGET_URL__ 占位符。',
     specSecZip: '⑥ 打包规则', specZipL1: '只支持 .zip；根目录必须有且仅有一个 index.html（子目录里的不算）。', specZipL2: 'zip ≤ 10MB、文件数 ≤ 100；类型白名单：html/css/js/json/svg/png/jpg/jpeg/gif/woff/woff2/txt。',
     specSecCheck: '⑦ 上传前自检', specChk1: '本地把占位符换成假值（像素换 ["111"]、目标换 https://example.com）浏览器打开，排版和跳转正常；', specChk2: '守卫 5 行逐字在 <script> 里；', specChk3: '全页搜不到写死的像素 ID 和 http 链接；', specChk4: 'zip 里只有 index.html。', downloadRefTpl: '下载参考模板 zip', uploadNewTpl: '上传新模板（zip）', fTplName: '模板名', fTplNamePh: '如：简洁购买页', fTplDesc: '说明', fZipFile: 'zip 文件',
