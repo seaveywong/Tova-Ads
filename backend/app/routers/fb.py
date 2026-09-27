@@ -2383,7 +2383,9 @@ def unmanage_account(
     # 广告不会自动停、止损/哨兵即刻脱管，必须让 owner/operator 知晓（一次性操作，不 dedup）。
     from ..core.log_utils import write_log, new_trace_id
     _tid = new_trace_id()
-    if active_ads > 0:
+    # 已停用账户（account_status≠1）取消纳管不再告警——缓存里的 ACTIVE 是停用前旧态，
+    # 广告实际已停，告警纯属噪音（2026-09-27 用户拍板：停用的账户移除纳管别发通知）
+    if active_ads > 0 and (acc.account_status or 1) == 1:
         try:
             from ..core.notify_utils import emit_notification
             from ..core.i18n import tenant_locale, notify_text
