@@ -107,7 +107,7 @@ defineExpose({ open })
 
 <template>
   <!-- 进度（表格式网格：账户/状态/创建物/原因/操作 定宽列对齐） -->
-  <el-dialog v-model="progressOpen" :title="t('launch.progTitle', { name: activeJob?.template_name || '' })" width="880px" :close-on-click-modal="false" @close="onProgressClose">
+  <el-dialog v-model="progressOpen" :title="t('launch.progTitle', { name: activeJob?.template_name || '' })" width="min(1060px, 94vw)" :close-on-click-modal="false" @close="onProgressClose">
     <div v-if="activeJob" class="prog">
       <div class="prog-sum">
         <span class="ps-job mono tnum" :title="t('launch.jobIdTip')">#{{ activeJob.id }}</span>
@@ -239,8 +239,8 @@ defineExpose({ open })
 .ps-metric.err b{color:var(--error)}
 .ps-metric.run b{color:var(--ac)}
 .ps-times{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--t3);padding:0 2px 8px;font-variant-numeric:tabular-nums}
-.pj-wrap{border:1px solid var(--bd);border-radius:var(--rs);overflow-x:auto}
-.pj-grid{display:grid;grid-template-columns:minmax(150px,1.1fr) 96px minmax(200px,1.5fr) minmax(160px,1.7fr) auto;gap:8px 12px;align-items:center;padding:8px 12px;font-size:12px;min-width:700px}
+.pj-wrap{border:1px solid var(--bd);border-radius:var(--rs)}
+.pj-grid{display:grid;grid-template-columns:minmax(130px,1.1fr) 84px minmax(170px,1.4fr) minmax(150px,1.6fr) max-content;gap:8px 12px;align-items:center;padding:8px 12px;font-size:12px;min-width:0}
 .pj-head{background:var(--bg2);color:var(--t3);font-size:11px;font-weight:600;padding:6px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
 .pj-col-ops{text-align:center}
 .prog-items{max-height:52vh;overflow-y:auto}
@@ -282,7 +282,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pj-reason-txt{font-size:11px;color:var(--error);line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;word-break:break-all}
 .pj-reason.wrap .pj-reason-txt{-webkit-line-clamp:4}
 .pj-reason.note .pj-reason-txt{color:var(--t2)}
-.pj-ops{display:flex;justify-content:center;gap:4px;flex-wrap:nowrap;white-space:nowrap}
+.pj-ops{display:flex;justify-content:center;gap:4px;flex-wrap:wrap;white-space:nowrap}
 .prog-loading{padding:40px;text-align:center;color:var(--t3);font-size:13px}
 .prog-err{color:var(--error);margin-bottom:12px;font-size:13px}
 /* 换主页重试弹窗 */
@@ -297,4 +297,15 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pp-ad.warn{color:var(--warning);background:rgba(255,159,10,.13)}
 .pp-via{font-size:10px;color:var(--t3);background:var(--bg3);padding:1px 7px;border-radius:4px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0}
 .pp-fans{font-size:11px;color:var(--t3);flex-shrink:0}
+/* 移动端（用户拍板 2026-09-27：不横向拖拽，窄屏堆叠） */
+@media (max-width: 768px) {
+  .pj-grid{grid-template-columns:1fr auto;gap:6px 10px;padding:10px}
+  .pj-grid > .pj-acc{grid-column:1}
+  .pj-grid > .pj-badge{grid-column:2;justify-self:end}
+  .pj-grid > .pj-obj{grid-column:1 / -1}
+  .pj-grid > .pj-reason-cell{grid-column:1 / -1}
+  .pj-grid > .pj-ops{grid-column:1 / -1;justify-content:flex-start}
+  .pj-grid.pj-head{display:none}   /* 表头在堆叠布局无意义（每行自说明） */
+  .pj-row{border-bottom:1px solid var(--bd);padding:4px 0}
+}
 </style>

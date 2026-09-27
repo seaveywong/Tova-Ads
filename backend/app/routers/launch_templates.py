@@ -3423,6 +3423,8 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
 
             for asset in assets:
                 _ad_no += 1
+                _pg_label = ''   # 循环头初始化（bugfix 2026-09-27：曾只在素材校验后赋值，
+                # 早退路径的 except 引用 → UnboundLocalError 吞掉真实错误）
                 # 广告名：节点名 > 素材名（素材组展开的每个广告用素材名，对齐批量生成命名）
                 if aname_base:
                     ad_name = aname_base
