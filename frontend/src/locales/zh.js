@@ -978,7 +978,7 @@ export default {
     emailRequired: '填邮箱', emailInvalid: '邮箱格式不对',
     addedExisting: '已把现有用户 {email} 加入',
     addedNew: '已创建 {email}，初始密码：{password}（请告知对方首次登录后修改）',
-    addSuccess: '添加成功', addFail: '添加失败',
+    addSuccess: '添加成功', addFail: '添加失败', noRolesYet: '该团队还没有角色（异常——建团会自动创建系统角色，请联系平台）',
   },
   adm: {
     ...admanager.zh,

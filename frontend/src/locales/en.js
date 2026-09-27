@@ -968,7 +968,7 @@ export default {
     emailRequired: 'Email is required', emailInvalid: 'Invalid email format',
     addedExisting: 'Existing user {email} added',
     addedNew: 'Created {email}, initial password: {password} (please notify them to change it after first login)',
-    addSuccess: 'Added successfully', addFail: 'Failed to add',
+    addSuccess: 'Added successfully', addFail: 'Failed to add', noRolesYet: 'No roles in this team (unexpected — system roles are created with the team; contact the platform)',
   },
   adm: {
     ...admanager.en,

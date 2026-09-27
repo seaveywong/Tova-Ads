@@ -42,6 +42,8 @@ const submitCreate = async () => {
     createOpen.value = false
     load()
     await ElMessageBox.alert(msg, t('teams.createdTitle'), { confirmButtonText: t('common.ok'), type: 'success' })
+    // 创建即入管理抽屉（成员 tab）——下一步加人/配权限不用再找入口
+    if (r?.id) openManage({ id: r.id, name: r.name, status: 'active' }, 'members')
   } catch (e) { ElMessage.error(e.message || t('teams.createFail')) }
   createSaving.value = false
 }
@@ -108,6 +110,8 @@ const openManage = async (row, tab = 'members') => {
   manageOpen.value = true
   openMembers(row)      // 复用现有加载（不弹独立 dialog——memberOpen 已并入抽屉）
   openDomains(row, true)
+  editingRoleId.value = 0   // 角色权限：换团队重置选中
+  loadRoles()
 }
 const memberOpen = computed({   // 兼容旧引用：成员弹窗开关即抽屉开关+members tab
   get: () => manageOpen.value && manageTab.value === 'members',
@@ -226,6 +230,50 @@ const submitMemberAdd = async () => {
     await ElMessageBox.alert(addMsg, t('teams.addSuccess'), { confirmButtonText: t('common.ok'), type: 'success' })
   } catch (e) { ElMessage.error(e.message || t('teams.addFail')) }
   memberAddSaving.value = false
+}
+
+// 角色权限（2026-09-27 用户反馈补：管理抽屉直接编辑该团队角色矩阵——新团队不必切团队上下文）
+const roleList = ref([])
+const roleLoading = ref(false)
+const permGroups = ref([])
+const editingRoleId = ref(0)
+const roleForm = ref({ name: '', description: '', permissions: [] })
+const roleSaving = ref(false)
+const loadRoles = async () => {
+  roleLoading.value = true
+  try {
+    const [rs, pg] = await Promise.all([
+      GET(`/admin/tenants/${membersTid.value}/roles`),
+      permGroups.value.length ? Promise.resolve(null) : GET('/rbac/permission-groups'),
+    ])
+    roleList.value = rs || []
+    if (pg) permGroups.value = pg.groups || []
+    if (!editingRoleId.value && roleList.value.length) pickRole(roleList.value[0])
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  roleLoading.value = false
+}
+const pickRole = (r) => {
+  editingRoleId.value = r.id
+  roleForm.value = { name: r.name, description: r.description || '', permissions: [...(r.permissions || [])] }
+}
+const hasPerm = k => roleForm.value.permissions.includes(k)
+const togglePerm = k => {
+  const s = new Set(roleForm.value.permissions)
+  s.has(k) ? s.delete(k) : s.add(k)
+  roleForm.value.permissions = [...s]
+}
+const toggleGroup = g => {
+  const all = g.keys.every(k => hasPerm(k))
+  g.keys.forEach(k => { if (all) { if (hasPerm(k)) togglePerm(k) } else if (!hasPerm(k)) togglePerm(k) })
+}
+const saveRolePerms = async () => {
+  roleSaving.value = true
+  try {
+    await PUT(`/admin/tenants/${membersTid.value}/roles/${editingRoleId.value}`, roleForm.value)
+    ElMessage.success(t('common.saved'))
+    await loadRoles()
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  roleSaving.value = false
 }
 </script>
 
@@ -370,6 +418,41 @@ const submitMemberAdd = async () => {
         </div>
       </div>
         </el-tab-pane>
+        <!-- 角色权限（2026-09-27 补：团队内「成员权限」页的超管直达版——新团队无需切上下文） -->
+        <el-tab-pane :label="t('members.tabRoles') + ' (' + roleList.length + ')'" name="roles">
+          <div v-loading="roleLoading">
+            <div class="role-pick">
+              <button v-for="r in roleList" :key="r.id" :class="['role-pick-btn', { on: editingRoleId === r.id }]" @click="pickRole(r)">
+                <span class="rp-name">{{ r.name }}</span>
+                <span v-if="r.is_system" class="rp-sys">{{ t('members.systemTag') }}</span>
+                <span class="rp-count">{{ t('members.permCountLabel', { n: r.member_count }) }}</span>
+              </button>
+            </div>
+            <template v-if="editingRoleId">
+              <div class="form-l" style="margin-top:10px"><label>{{ t('members.roleName') }}</label>
+                <input v-model="roleForm.name" class="input" :disabled="roleList.find(r => r.id === editingRoleId)?.is_system" /></div>
+              <div class="perm-matrix">
+                <div v-for="g in permGroups" :key="g.label" class="perm-group">
+                  <div class="pg-head" @click="toggleGroup(g)">
+                    <span class="pg-name">{{ g.label }}</span>
+                    <span class="pg-count">{{ g.keys.filter(k => hasPerm(k)).length }}/{{ g.keys.length }}</span>
+                  </div>
+                  <div class="pg-items">
+                    <label v-for="k in g.keys" :key="k" class="pg-item" :class="{ on: hasPerm(k) }">
+                      <input type="checkbox" :checked="hasPerm(k)" @change="togglePerm(k)" />
+                      <span>{{ t('members.perm.' + k) }}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="role-save-row">
+                <span class="perm-total">{{ t('members.selectedPerms', { n: roleForm.permissions.length }) }}</span>
+                <button class="btn primary" :disabled="roleSaving" @click="saveRolePerms">{{ roleSaving ? t('common.loading') : t('common.save') }}</button>
+              </div>
+            </template>
+            <div v-else-if="!roleLoading" class="mem-empty">{{ t('teams.noRolesYet') }}</div>
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-drawer>
   </div>
@@ -467,4 +550,24 @@ const submitMemberAdd = async () => {
 .dm-pool-row code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dm-assigned-to{font-size:10px;color:var(--warning);white-space:nowrap}
 .dm-free{font-size:10px;color:var(--t3);white-space:nowrap}
+
+/* 角色权限 tab（样式对齐 Members 页矩阵） */
+.role-pick { display: flex; gap: 6px; flex-wrap: wrap }
+.role-pick-btn { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 6px; cursor: pointer; font-family: inherit }
+.role-pick-btn.on { border-color: var(--ac); background: rgba(10,132,255,.08) }
+.rp-name { font-size: 12.5px; font-weight: 600; color: var(--t1) }
+.rp-sys { font-size: 10px; color: var(--t3); border: 1px solid var(--bd); border-radius: 4px; padding: 0 4px }
+.rp-count { font-size: 10.5px; color: var(--t3) }
+.perm-matrix { margin-top: 10px }
+.perm-group { margin-bottom: 12px }
+.pg-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--bg3); border-radius: 6px; cursor: pointer; margin-bottom: 6px }
+.pg-head:hover { background: var(--bgh) }
+.pg-name { font-size: 12px; font-weight: 600; color: var(--t1) }
+.pg-count { font-size: 11px; color: var(--t3) }
+.pg-items { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 4px }
+.pg-item { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--bd); border-radius: 5px; font-size: 11px; color: var(--t3); cursor: pointer; transition: .12s }
+.pg-item.on { color: var(--ac); border-color: var(--ac); background: rgba(10,132,255,.06) }
+.pg-item input { margin: 0; accent-color: var(--ac) }
+.role-save-row { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid var(--bd) }
+.perm-total { font-size: 12px; color: var(--t3); margin-right: auto }
 </style>

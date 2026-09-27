@@ -423,3 +423,112 @@ def update_tenant_status(tid: int, body: TenantStatusIn,
     t.status = body.status
     db.commit()
     return {"id": tid, "status": body.status, "updated": True}
+
+
+# ── 跨团队角色权限管理（2026-09-27 用户反馈：团队管理里无法分配权限——角色矩阵只在
+#    团队内「成员权限」页，新团队没成员没入口；此处给超管在管理抽屉直接编辑）──
+class RoleIn(BaseModel):
+    name: str = ""
+    description: str = ""
+    permissions: list = []
+
+
+def _role_perm_norm(p):
+    if isinstance(p, str):
+        import json as _json
+        try:
+            v = _json.loads(p)
+            return v if isinstance(v, list) else []
+        except Exception:
+            return []
+    return p or []
+
+
+@router.get("/tenants/{tid}/roles")
+def list_tenant_roles(tid: int, user=Depends(require_superadmin),
+                      db: Session = Depends(get_system_db)):
+    from ..core.permissions import ALL_PERMISSIONS
+    counts = {}
+    for r in db.query(TenantMembership.role, func.count()).filter(
+            TenantMembership.tenant_id == tid).group_by(TenantMembership.role).all():
+        counts[r[0]] = r[1]
+    roles = db.query(Role).filter(Role.tenant_id == tid).order_by(Role.id).all()
+    return [{"id": r.id, "name": r.name, "description": r.description or "",
+             "permissions": _role_perm_norm(r.permissions), "is_system": r.is_system,
+             "member_count": counts.get(r.name, 0)} for r in roles]
+
+
+@router.put("/tenants/{tid}/roles/{role_id}")
+def update_tenant_role(tid: int, role_id: int, body: RoleIn,
+                       user=Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    """改角色权限矩阵（系统角色可改权限不可改名；owner 不可减权限——与团队内页同规则）。"""
+    from ..core.permissions import ALL_PERMISSIONS
+    role = db.query(Role).filter(Role.id == role_id, Role.tenant_id == tid).first()
+    if not role:
+        raise HTTPException(404, "角色不存在")
+    invalid = set(body.permissions) - set(ALL_PERMISSIONS)
+    if invalid:
+        raise HTTPException(400, f"未知权限: {invalid}")
+    if role.name == "owner" and role.is_system and not set(ALL_PERMISSIONS).issubset(set(body.permissions)):
+        raise HTTPException(400, "owner 角色必须保留全部权限")
+    if not role.is_system:
+        new_name = body.name.strip()
+        if new_name and new_name != role.name:
+            if new_name in ("owner", "superadmin"):
+                raise HTTPException(400, "该名称为系统保留")
+            conflict = db.query(Role).filter(Role.tenant_id == tid, Role.name == new_name,
+                                             Role.id != role_id).first()
+            if conflict:
+                raise HTTPException(400, "角色名已存在")
+            db.query(TenantMembership).filter(
+                TenantMembership.tenant_id == tid,
+                TenantMembership.role == role.name).update({TenantMembership.role: new_name})
+            role.name = new_name
+    role.description = body.description
+    role.permissions = body.permissions
+    db.commit()
+    write_log(db, tenant_id=tid, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="role", target_id=str(role.id),
+              action_type="update", source="admin", result="success",
+              trigger_detail=f"角色 {role.name} 权限 {len(body.permissions)} 项（平台侧编辑）")
+    db.commit()
+    return {"ok": True, "id": role.id, "name": role.name}
+
+
+@router.post("/tenants/{tid}/roles")
+def create_tenant_role(tid: int, body: RoleIn, user=Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    from ..core.permissions import ALL_PERMISSIONS
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "角色名不能为空")
+    if name in ("owner", "superadmin"):
+        raise HTTPException(400, "该名称为系统保留")
+    if db.query(Role).filter(Role.tenant_id == tid, Role.name == name).first():
+        raise HTTPException(400, "角色名已存在")
+    invalid = set(body.permissions) - set(ALL_PERMISSIONS)
+    if invalid:
+        raise HTTPException(400, f"未知权限: {invalid}")
+    role = Role(tenant_id=tid, name=name, description=body.description,
+                permissions=body.permissions, is_system=False)
+    db.add(role)
+    db.commit()
+    return {"id": role.id, "name": role.name, "created": True}
+
+
+@router.delete("/tenants/{tid}/roles/{role_id}")
+def delete_tenant_role(tid: int, role_id: int, user=Depends(require_superadmin),
+                       db: Session = Depends(get_system_db)):
+    role = db.query(Role).filter(Role.id == role_id, Role.tenant_id == tid).first()
+    if not role:
+        raise HTTPException(404, "角色不存在")
+    if role.is_system:
+        raise HTTPException(400, "系统角色不可删除")
+    in_use = db.query(TenantMembership).filter(
+        TenantMembership.tenant_id == tid, TenantMembership.role == role.name).count()
+    if in_use:
+        raise HTTPException(400, "该角色下有成员，请先转移")
+    db.delete(role)
+    db.commit()
+    return {"ok": True, "deleted": True}

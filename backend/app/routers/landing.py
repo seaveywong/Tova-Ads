@@ -457,7 +457,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         # 先语法门（快）：node --check
         _r1 = _sp.run(["node", "--check", _worker_tmp], capture_output=True, text=True, timeout=15)
         if _r1.returncode != 0:
-            raise HTTPException(500, f"页面代码校验未通过，已拦截部署：{_r1.stderr[:300]}")
+            raise HTTPException(500, "页面代码校验未通过，已拦截部署（详情请对照规范逐项自查）")
         # 再运行时门（dry-run 跑一遍 /a/ 请求，捕获 ReferenceError 等）
         if _os.path.exists(_check_script):
             _r2 = _sp.run(["node", _check_script, _worker_tmp], capture_output=True, text=True, timeout=20)
