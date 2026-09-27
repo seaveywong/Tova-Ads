@@ -185,6 +185,12 @@ def dashboard(
     acc_map = {a.act_id: a for a in accounts}
     managed_accounts = [a for a in accounts if a.is_managed]
     managed_act_ids = {a.act_id for a in managed_accounts}
+    # 归属人映射（对应人筛选用）：users 无 name 字段，email 是成员标识；一次查询避免 N+1
+    _owner_ids = {a.owner_user_id for a in accounts if a.owner_user_id}
+    _owner_map = {}
+    if _owner_ids:
+        from ..models.auth import User
+        _owner_map = {u.id: (u.email or f"#{u.id}") for u in db.query(User).filter(User.id.in_(_owner_ids)).all()}
 
     # 止损：按所选范围 + 归属到账户本地日（数据/事件同天统一）。
     # 拉宽 UTC 窗口（覆盖各账户时区偏移 ±1 天），再按账户本地日过滤到 [since, until]。
@@ -290,6 +296,7 @@ def dashboard(
                 "act_id": r.act_id, "name": "（已移除账户）", "currency": "USD", "timezone": "",
                 "platform": None,   # 账户行已删，平台无从判定
                 "account_status": None, "is_managed": False, "removed": True,
+                "owner_user_id": None, "owner_email": "",
                 "spend": round(spend_usd, 2), "spend_usd": round(spend_usd, 2),
                 "conversions": conv, "results_fb": getattr(r, "results_fb", 0), "cpa": round(spend_usd / conv, 2) if conv > 0 else 0.0,
                 "roas": round(float(r.avg_roas), 2) if r.avg_roas else 0.0,
@@ -310,6 +317,7 @@ def dashboard(
             "platform": acc.platform or "fb",
             "account_status": acc.account_status, "is_managed": acc.is_managed if acc.is_managed is not None else True,
             "group_label": acc.group_label or "", "disable_reason": acc.disable_reason,
+            "owner_user_id": acc.owner_user_id, "owner_email": _owner_map.get(acc.owner_user_id, "") if acc.owner_user_id else "",
             "last_inspected_at": acc.last_inspected_at.isoformat() if acc.last_inspected_at else None,
             "spend": round(r.total_spend_native or 0, 2),
             "spend_usd": round(spend_usd, 2),
@@ -354,6 +362,7 @@ def dashboard(
                 "platform": acc.platform or "fb",
                 "account_status": acc.account_status, "is_managed": acc.is_managed if acc.is_managed is not None else True,
                 "group_label": acc.group_label or "", "disable_reason": acc.disable_reason,
+                "owner_user_id": acc.owner_user_id, "owner_email": _owner_map.get(acc.owner_user_id, "") if acc.owner_user_id else "",
                 "spend": 0, "spend_usd": 0, "conversions": 0, "cpa": 0, "roas": 0,
                 "impressions": 0, "clicks": 0, "reach": 0, "frequency": 0,
                 "ctr": 0, "cpc": 0,

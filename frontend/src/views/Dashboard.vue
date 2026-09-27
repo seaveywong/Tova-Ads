@@ -442,6 +442,20 @@ const columnFmt = (col, acc) => {
 // KPI/账户明细内搜索
 const detailSearch = ref('')
 
+// 对应人筛选（账户归属人 owner_user_id → email；'unassigned' = 未分配；只过滤明细表，不改 KPI 汇总口径）
+const selectedOwner = ref(null)  // null=全部
+const ownerOptions = computed(() => {
+  const owners = new Map()
+  let hasUnassigned = false
+  for (const a of (data.value.accounts || [])) {
+    if (a.owner_user_id) owners.set(a.owner_user_id, a.owner_email || `#${a.owner_user_id}`)
+    else hasUnassigned = true
+  }
+  const list = Array.from(owners, ([value, label]) => ({ value, label }))
+  if (hasUnassigned) list.push({ value: 'unassigned', label: t('dashboard.ownerUnassigned') })
+  return list
+})
+
 // ── KPI 分层重排：4 核心大卡（点击=账户明细表切到该指标视角）+ 4 次要小卡 ──
 const accountView = ref('spend')  // 账户明细表视角：spend/conv/cpa/roas/balance
 const setAccountView = (mode) => {
@@ -601,6 +615,9 @@ const filteredAccounts = computed(() => {
   if (!showRemoved.value || accountsTable.value.mode === 'balance') accs = accs.filter(a => !a.removed)
   // 不可用默认折叠（搜索时穿透——用户在明确找某个账户）
   if (!showInactive.value && !detailSearch.value.trim()) accs = accs.filter(a => Number(a.account_status) === 1)
+  // 对应人筛选：按账户归属人过滤（null/'' = 全部；'unassigned' = 未分配）
+  if (selectedOwner.value === 'unassigned') accs = accs.filter(a => !a.owner_user_id)
+  else if (selectedOwner.value != null && selectedOwner.value !== '') accs = accs.filter(a => a.owner_user_id === selectedOwner.value)
   if (detailSearch.value.trim()) {
     // 搜索只做过滤、保持表的既有排序（消耗降序等）——
     // 曾直接用 fuse.search().map，结果按匹配相关度重排，把消耗排序打乱
@@ -1143,6 +1160,13 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
             <el-option value="leads" :label="t('dashboard.convLeads')" />
             <el-option value="engagement" :label="t('dashboard.convEngagement')" />
             <el-option value="traffic" :label="t('dashboard.convTraffic')" />
+          </el-select>
+        </div>
+        <div class="labeled-select">
+          <span class="ls-label">{{ t('dashboard.ownerLabel') }}</span>
+          <el-select v-model="selectedOwner" filterable clearable size="small" class="filter-select"
+                     :placeholder="t('dashboard.allOwners')" :title="t('dashboard.ownerFilterTitle')">
+            <el-option v-for="o in ownerOptions" :key="o.value" :value="o.value" :label="o.label" />
           </el-select>
         </div>
         <div class="labeled-select grow">
