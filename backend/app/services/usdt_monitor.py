@@ -148,13 +148,13 @@ def run_usdt_monitor():
                                       title=f"域名订单 #{o.id} 到账 ${amt}，但自动注册失败",
                                       body=f"{o.domain} TXID {o.payment_txid}\n"
                                            f"原因：{auto_err[:200]}\n"
-                                           f"超管请在 投放链接 → 域名 → 订单 点「确认收款」重试注册链。")
+                                           f"平台已收到告警，将尽快处理；您可在订单页查看进度。")
                 else:
                     emit_notification(db, tenant_id=o.tenant_id, level="info",
                                       event_type="domain_delivered", trace_id=new_trace_id(),
                                       title=f"域名 {o.domain} 已自动交付",
-                                      body=f"订单 #{o.id} 检测到 USDT 到账 ${amt}（TXID {o.payment_txid}），"
-                                           f"已自动确认并完成注册接入，现在可以在落地页中使用该域名。")
+                                      body=f"付款已确认，域名已交付，现在可以在投放链接中使用该域名。"
+                                           f"（订单 #{o.id}）")
                 break
         if hits:
             db.commit()
@@ -206,7 +206,7 @@ def run_usdt_monitor():
                 emit_notification(db, tenant_id=tp.tenant_id, level="info",
                                   event_type="wallet_topup_paid", trace_id=new_trace_id(),
                                   title=f"充值到账 ${tp.amount_usd:.2f}，余额 ${bal:.2f}",
-                                  body=f"充值单 #{tp.id} TXID {_txid}，已自动入账团队钱包。")
+                                  body=f"充值已到账，可在钱包流水中查看明细。")
                 db.commit()
                 logger.info(f"[USDT] 充值 #{tp.id} 入账 ${tp.amount_usd}")
                 break

@@ -40,7 +40,7 @@ def create_topup(body: TopupIn, user: CurrentUser = Depends(require_permission("
         raise HTTPException(400, "充值金额 1 - 100000 美元")
     pool = _payment_pool(db)
     if not pool:
-        raise HTTPException(400, "PAYMENT_NOT_CONFIGURED（管理员未配置收款地址）")
+        raise HTTPException(400, "在线充值暂不可用，请联系平台")
     t = WalletTopup(tenant_id=user.tenant_id, created_by=user.id, amount_usd=amt,
                     pay_amount=amt)   # pay_amount 尾数在 flush 拿到 id 后补
     db.add(t)

@@ -63,10 +63,10 @@ def _registrar_client(db):
     """按选择返回注册商客户端；未配置 400 引导。"""
     if _reg_name(db) == "dynadot":
         if not _dynadot_key():
-            raise HTTPException(400, "DYNADOT_NOT_CONFIGURED")
+            raise HTTPException(400, "域名服务暂不可用，请联系平台")
         return DynadotClient(_dynadot_key(), _dynadot_secret())
     if not porkbun_configured(settings):
-        raise HTTPException(400, "PORKBUN_NOT_CONFIGURED")
+        raise HTTPException(400, "域名服务暂不可用，请联系平台")
     return PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
 
 
@@ -82,7 +82,7 @@ def _pricing(client, db) -> dict:
             _PRICING_CACHE["pricing"] = client.pricing()
         except (DynadotError, PorkbunError) as e:
             # 复审 #7：曾冒泡 500（_avail 400 化时漏了定价表这条同型路径）
-            raise HTTPException(400, f"注册商价格表拉取失败：{str(e)[:150]}")
+            raise HTTPException(400, "域名价格暂时不可用，请稍后再试")
         _PRICING_CACHE["at"] = now
         _PRICING_CACHE["reg"] = reg
     return _PRICING_CACHE["pricing"] or {}
@@ -98,7 +98,7 @@ def _avail(client, d: str) -> dict:
         chk = client.check(d)
         return {"available": str(chk.get("porkbunAvailable")) == "yes", "price": None}
     except (DynadotError, PorkbunError) as e:
-        raise HTTPException(400, f"注册商查询失败：{str(e)[:150]}")
+        raise HTTPException(400, "域名查询暂时不可用，请稍后再试")
 
 
 def _fee_rules(db) -> dict:
@@ -397,7 +397,7 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
                 wallet_apply(db, user.tenant_id, "refund", round(order.total_usd, 2),
                              ref_type="domain_order_refund", ref_id=order.id, user_id=user.id,
                              note=f"{d} 注册失败自动退回：{detail[:80]}")
-                raise HTTPException(500, f"已从余额扣款但注册失败，款项已退回余额。原因：{detail[:150]}（订单保留可重试）")
+                raise HTTPException(500, "域名注册失败，扣款已退回余额（订单保留可重试）")
         except InsufficientBalance:
             pass   # 并发把余额扣完——订单入库时已是 pending_payment，走下方 USDT 直付返回
     write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
@@ -572,15 +572,14 @@ def _fulfill(o, user, db) -> dict:
         emit_notification(db, tenant_id=o.tenant_id, level="info",
                           event_type="domain_order_fulfilled", trace_id=new_trace_id(),
                           title=f"域名 {o.domain} 已交付",
-                          body=f"注册成功并已接入 Cloudflare（NS 已自动指向）。"
-                               f"现在可以在落地页中使用该域名。")
+                          body="购买成功，域名已就绪。现在可以在投放链接中使用该域名。")
         db.commit()
         return {"ok": True, "status": "bound", "domain": o.domain, "name_servers": ns}
     except Exception as e:
         db.rollback()
         o.status, o.error = "failed", str(e)[:300]
         db.commit()
-        raise HTTPException(500, f"注册链失败（可重试批准）: {str(e)[:150]}")
+        raise HTTPException(500, "域名注册失败，订单保留可重试")
 
 
 # ── 域名续费与生命周期（0108 批2：手动续费双通道 + 自动续费开关）──
@@ -602,7 +601,7 @@ def renew_quote(did: int, years: int = 1,
     tld = row.domain.rsplit(".", 1)[-1]
     unit = (_pricing(client, db).get(tld) or {}).get("renewal")
     if unit is None:
-        raise HTTPException(400, f"暂不支持 .{tld} 续费（价目表缺价）")
+        raise HTTPException(400, f"暂不支持 .{tld} 续费")
     cost = round(unit * years, 2)
     fee = _fee_for(db, cost)
     from ..core.wallet import wallet_balance
@@ -624,7 +623,7 @@ def renew_domain(did: int, body: RenewIn,
     if not row or row.tenant_id != user.tenant_id:
         raise HTTPException(404, "域名不存在")
     if not row.registrar or row.registrar == "external":
-        raise HTTPException(400, "自有域名请在原注册商侧续费（平台仅管理代购域名）")
+        raise HTTPException(400, "自有域名请在购买处续费；平台代购的域名可在此续费")
     if body.years < 1 or body.years > 10:
         raise HTTPException(400, "年限 1-10")
     if row.expires_at:
@@ -636,7 +635,7 @@ def renew_domain(did: int, body: RenewIn,
     tld = row.domain.rsplit(".", 1)[-1]
     unit = (_pricing(client, db).get(tld) or {}).get("renewal")
     if unit is None:
-        raise HTTPException(400, f"暂不支持 .{tld} 续费（价目表缺价）")
+        raise HTTPException(400, f"暂不支持 .{tld} 续费")
     cost = round(unit * body.years, 2)
     fee = _fee_for(db, cost)
     total = round(cost + fee, 2)
@@ -668,7 +667,7 @@ def renew_domain(did: int, body: RenewIn,
                 wallet_apply(db, user.tenant_id, "refund", total,
                              ref_type="domain_renew_manual_refund", ref_id=row.id, user_id=user.id,
                              note=f"{row.domain} 续费失败退回")
-                raise HTTPException(500, f"已扣款但续费失败，款项已退回余额：{str(e)[:150]}")
+                raise HTTPException(500, "续费失败，扣款已退回余额（可重试）")
             from ..core.notify_utils import emit_notification
             from ..core.log_utils import new_trace_id as _ntid
             emit_notification(db, tenant_id=user.tenant_id, level="info",

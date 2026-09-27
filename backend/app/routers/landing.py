@@ -457,7 +457,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
         # 先语法门（快）：node --check
         _r1 = _sp.run(["node", "--check", _worker_tmp], capture_output=True, text=True, timeout=15)
         if _r1.returncode != 0:
-            raise HTTPException(500, f"worker JS 语法错误，已拦截部署：\n{_r1.stderr[:500]}")
+            raise HTTPException(500, f"页面代码校验未通过，已拦截部署：{_r1.stderr[:300]}")
         # 再运行时门（dry-run 跑一遍 /a/ 请求，捕获 ReferenceError 等）
         if _os.path.exists(_check_script):
             _r2 = _sp.run(["node", _check_script, _worker_tmp], capture_output=True, text=True, timeout=20)
@@ -600,7 +600,7 @@ def _do_publish(db: Session, user: CurrentUser, body: PublishIn, existing=None, 
             else:
                 # zone 查不到（get_zone_id 返 None 不是异常）也要留痕——否则存量页 zone 恶化
                 # 后编辑发布：200 + bind_errors 空 + 域名没绑上，无声复现本次事故（复审P2）
-                bind_errors.append(f"{sub}: CF zone 未找到（域名 NS 可能已移出平台）")
+                bind_errors.append(f"{sub}: 域名解析配置未找到（域名 DNS 可能已移出平台）")
         except Exception as e:
             # 绑定失败不静默——响应带回（前端 toast）。「发布成功但域名没绑上」曾无从排查
             bind_errors.append(f"{sub}: {str(e)[:100]}")
@@ -1328,13 +1328,13 @@ def add_subdomain(pid: int, body: dict,
         cf = CfClient(cf_token, cf_account)
         try:
             if not cf.get_zone_id(_domain_root(sub)):
-                raise HTTPException(400, f"根域名 {_domain_root(sub)} 的 CF zone 未找到"
+                raise HTTPException(400, f"域名 {_domain_root(sub)} 的解析配置未找到"
                                          f"（NS 可能已移出平台）——子域名未绑定，不入库")
             cf.bind_custom_domain(f"tovaads-landing-{p.id}", sub)
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(400, f"CF 绑定失败: {e}")
+            raise HTTPException(400, f"域名绑定失败: {e}")
     # 加入 bound_subdomains
     subs = []
     try:
@@ -1451,7 +1451,7 @@ def hard_delete_landing_page(pid: int,
         except Exception as e:
             cf_errors.append(f"Pages 项目: {str(e)[:80]}")
     if cf_errors:
-        raise HTTPException(500, "CF 清理失败（页面未删除，可重试）：" + "；".join(cf_errors)[:200])
+        raise HTTPException(500, "域名清理失败（页面未删除，可重试）：" + "；".join(cf_errors)[:200])
     # ── DB 清理 ──
     db.query(LandingAdLink).filter(LandingAdLink.page_id == p.id).delete(synchronize_session="fetch")
     title = p.title

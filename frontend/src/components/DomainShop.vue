@@ -342,7 +342,7 @@ const submitRenew = async () => {
         </div>
         <div v-if="expandedDomain === d.domain" class="dom-wb-body">
           <div class="dw-life">
-            <span v-if="d.registrar">{{ d.registrar === 'external' ? t('dom.regExternal') : d.registrar }}</span>
+            <span v-if="d.registrar">{{ d.registrar === 'external' ? t('dom.regExternal') : t('dom.regPlatform') }}</span>
             <span v-if="d.expires_at">{{ t('dom.expTitle', { d: d.expires_at }) }}</span>
             <span v-if="d.last_renewed_at">{{ t('dom.lastRenewed', { d: d.last_renewed_at }) }}</span>
             <span v-if="!d.registrar">{{ t('dom.regNone') }}</span>
