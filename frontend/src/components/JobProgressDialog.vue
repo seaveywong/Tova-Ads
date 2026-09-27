@@ -36,6 +36,7 @@ const pollJob = async (jobId) => {
   try {
     activeJob.value = await GET('/launch-templates/jobs/' + jobId)
     _pollFail = 0
+    pollError.value = ''   // 恢复成功清中断横幅（行内重试等路径恢复轮询后不再误导）
     if (['completed','partial_failed','failed'].includes(activeJob.value.status)) { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
   } catch (e) {
     // 轮询失败可见化：连续 4 次失败（~1min）→ 停轮询 + 弹窗显示错误（否则永卡「加载中」+ 无限空转）
