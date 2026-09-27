@@ -68,7 +68,7 @@ const orderDomain = async (d) => {
     if (no) await openPayPanel(no)
     else ElMessage.success(t('domains.orderedPay', { v: r.pay_amount || r.total_usd }))
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
-  shopOrdering.value = ''
+  finally { shopOrdering.value = '' }   // 审计 P1：被占用分支曾漏清互斥锁——之后所有下单静默无效
 }
 
 // ── 我的域名：已购 + 外部自有合并 ──
@@ -463,7 +463,7 @@ const submitRenew = async () => {
         <div class="inv-qr-wrap"><img v-if="topupQr" :src="topupQr" class="inv-qr" alt="QR" /><div class="inv-qr-hint">{{ t('domains.scanPay') }}</div></div>
         <div class="inv-row"><span class="inv-k">{{ t('wallet.amtLabel') }}</span><b>${{ topupPanel.amount_usd.toFixed(2) }}</b></div>
         <div class="inv-row"><span class="inv-k">{{ t('domains.payAmtLabel') }}</span>
-          <b class="inv-amt" :title="t('domains.payAmtTip')" @click="navigator?.clipboard?.writeText(String(topupPanel.pay_amount))">${{ topupPanel.pay_amount.toFixed(2) }} <i>⧉</i></b></div>
+          <b class="inv-amt" :title="t('domains.payAmtTip')" @click="copyVal(String(topupPanel.pay_amount), t('domains.amtCopied'))">${{ topupPanel.pay_amount.toFixed(2) }} <i>⧉</i></b></div>
         <div class="inv-row"><span class="inv-k">{{ t('settings.rgPayAddr') }}</span>
           <span class="pay-addr mono" @click="copyTopupAddr">{{ topupPanel.payment_address }}</span>
           <button class="ctrl-btn sm" @click="copyTopupAddr">{{ t('common.copy') }}</button></div>

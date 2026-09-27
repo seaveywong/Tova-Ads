@@ -20,15 +20,18 @@ class InsufficientBalance(Exception):
 
 
 def wallet_apply(db, tenant_id: int, type_: str, amount: float, ref_type: str,
-                 ref_id=None, txid: str = "", note: str = "", user_id=None) -> WalletTxn:
-    """记账一笔（amount 带符号：+入账 / -扣款）并提交。幂等：同 ref 已记则直接返回旧流水。
-    type_: deposit | charge | refund | adjust（adjust 的方向由 amount 符号定）。"""
-    # 幂等快查（唯一约束兜底并发）。ref_id=None（人工调整）无幂等键——每笔必记，
-    # 不能查 NULL 旳流水（会把新调整误判为已记）
-    if ref_id is not None:
-        hit = db.query(WalletTxn).filter(WalletTxn.ref_type == ref_type,
-                                         WalletTxn.ref_id == ref_id,
-                                         WalletTxn.type == type_).first()
+                 ref_id=None, txid: str = "", note: str = "", user_id=None,
+                 idempotency: str = "") -> WalletTxn:
+    """记账一笔（amount 带符号：+入账 / -扣款）并提交。
+    type_: deposit | charge | refund | adjust（adjust 的方向由 amount 符号定）。
+
+    幂等（0109 重构——审计 P0 教训）：只认 idempotency 键（唯一部分索引 + 快查）。
+    ref_type/ref_id 转纯对账展示，不再做幂等（旧约束已删——续费曾用域名 row.id 当键，
+    同域名第二次续费被旧流水吞掉扣款却照常续费）。idempotency 为空 = 不去重
+    （人工 adjust、无重放风险的调用方）。
+    同一业务事件的 charge 与 refund 必须用不同 idem 后缀（如 ...-rf）。"""
+    if idempotency:
+        hit = db.query(WalletTxn).filter(WalletTxn.idempotency == idempotency).first()
         if hit:
             return hit
     # 行锁账户（无则建）
@@ -53,12 +56,22 @@ def wallet_apply(db, tenant_id: int, type_: str, amount: float, ref_type: str,
         raise InsufficientBalance(f"余额不足：{acc.balance_usd:.2f} < {abs(amount):.2f}")
     txn = WalletTxn(tenant_id=tenant_id, type=type_, amount_usd=round(float(amount), 2),
                     balance_after=new_bal, ref_type=ref_type, ref_id=ref_id,
-                    txid=txid or None, note=note or None, created_by=user_id)
+                    txid=txid or None, note=note or None, created_by=user_id,
+                    idempotency=idempotency or None)
     acc.balance_usd = new_bal
     acc.version = (acc.version or 0) + 1
     db.add(txn)
-    db.commit()
-    logger.info(f"[wallet] t={tenant_id} {type_} {amount:+.2f} → {new_bal:.2f} ref={ref_type}/{ref_id}")
+    try:
+        db.commit()
+    except Exception:
+        # 并发同 idem 撞唯一索引：回滚后按 idem 回读对手已插的流水（幂等收敛）
+        db.rollback()
+        if idempotency:
+            hit = db.query(WalletTxn).filter(WalletTxn.idempotency == idempotency).first()
+            if hit:
+                return hit
+        raise
+    logger.info(f"[wallet] t={tenant_id} {type_} {amount:+.2f} → {new_bal:.2f} ref={ref_type}/{ref_id} idem={idempotency or '-'}")
     return txn
 
 

@@ -9,7 +9,7 @@
 """
 import logging
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
 
@@ -104,14 +104,32 @@ def run_usdt_monitor():
         ).order_by(DomainOrder.id.asc()).limit(50).all()   # 复审：旧单优先——同总额且 id%100 相同的两单尾号相同，asc 让入账先对上更早创建的那单（付款人意图通常为先下的单）
         if not pend:
             return
+        # 审计 P0 修复（跨轮重复消费）：used_txids 曾仅单轮内存——一笔链上入账在被挤出近 50 笔
+        # 前每轮都能再匹配另一张 pending 单（一笔款双倍入账/既交付域名又进余额）。
+        # 现每轮先从库里拉全量已消费 txid（订单+充值，量级极小），加上 0109 的 txid 唯一索引双保险
+        from ..models.wallet import WalletTopup
+        db_used = {x[0] for x in db.query(DomainOrder.payment_txid).filter(
+            DomainOrder.payment_txid.isnot(None)).all()}
+        db_used |= {x[0] for x in db.query(WalletTopup.txid).filter(
+            WalletTopup.txid.isnot(None)).all()}
         tx_cache: dict = {}   # 地址 → 入账列表（多地址各自拉一次，同地址只拉一次）
         hits = 0
-        used_txids: set = set()   # 复审II：同一笔入账只能消费一次——曾内层 break 只跳单不标 tx，
-        # 同尾号两单会被同一笔付款重复匹配（一笔款标两单 detected）
+        used_txids: set = db_used   # 轮内 + 跨轮（DB）合并去重
         for o in pend:
             target = (o.payment_address or "").strip() or addrs[0]
             if target not in addrs:
-                continue   # 订单分到的地址已不在池中（池被改）——留人工
+                # 审计 P1：地址池被改后旧 pending 单静默失配——用户照页面地址转了款却永不变更。
+                # 一次性告警平台（6h dedup）
+                from ..core.notify_utils import emit_notification
+                from ..core.log_utils import new_trace_id
+                emit_notification(db, tenant_id=1, level="warning",
+                                  event_type="payment_addr_mismatch", trace_id=new_trace_id(),
+                                  title=f"订单 #{o.id} 的收款地址已不在地址池",
+                                  body=f"{o.domain} 分配地址 {target[:16]}… 已被移出收款池——"
+                                       f"用户按旧地址付款将无法自动确认。请核对链上到账后人工处理，"
+                                       f"或把该地址加回池中。", dedup_recent=21600)
+                db.commit()
+                continue
             if target not in tx_cache:
                 tx_cache[target] = _fetch_incoming(target, tg_key)
             txs = tx_cache[target]
@@ -167,6 +185,15 @@ def run_usdt_monitor():
         for tp in ptup:
             t_target = (tp.payment_address or "").strip() or addrs[0]
             if t_target not in addrs:
+                from ..core.notify_utils import emit_notification
+                from ..core.log_utils import new_trace_id
+                emit_notification(db, tenant_id=1, level="warning",
+                                  event_type="payment_addr_mismatch", trace_id=new_trace_id(),
+                                  title=f"充值单 #{tp.id} 的收款地址已不在地址池",
+                                  body=f"充值 ${tp.amount_usd} 分配地址 {t_target[:16]}… 已被移出收款池——"
+                                       f"用户按旧地址付款将无法自动入账。请核对链上到账后人工处理。",
+                                  dedup_recent=21600)
+                db.commit()
                 continue
             if t_target not in tx_cache:
                 tx_cache[t_target] = _fetch_incoming(t_target, tg_key)
@@ -190,7 +217,7 @@ def run_usdt_monitor():
                 try:
                     txn = wallet_apply(db, tp.tenant_id, "deposit", tp.amount_usd,
                                        ref_type="topup", ref_id=tp.id, txid=_txid,
-                                       user_id=tp.created_by)
+                                       user_id=tp.created_by, idempotency=f"topup-{tp.id}")
                     bal = txn.balance_after
                 except Exception as we:
                     from ..core.notify_utils import emit_notification
@@ -210,6 +237,52 @@ def run_usdt_monitor():
                 db.commit()
                 logger.info(f"[USDT] 充值 #{tp.id} 入账 ${tp.amount_usd}")
                 break
+        # ── 卡死订单收口（审计 P1：扣款后进程死在注册链 → 订单永久卡 registering，
+        # approve 拒绝重入、无退款入口）——每轮扫超 30 分钟的 registering 钱包订单：
+        # 已有退款流水 → 直接 failed（可重试，重试会重新扣款）；无退款 → 自动退款+failed ──
+        _reap_stuck_wallet_orders(db)
+    except Exception as e:
+        logger.warning(f"[USDT] 监听异常: {e}")
+    finally:
+        db.close()
+        release_run_lock(_lock, 121)
+
+
+def _reap_stuck_wallet_orders(db) -> None:
+    """超 30 分钟仍 registering 的钱包订单收口（进程中断遗孤）。"""
+    try:
+        from ..models.wallet import WalletTxn
+        from ..core.wallet import wallet_apply
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        stuck = db.query(DomainOrder).filter(
+            DomainOrder.status == "registering",
+            DomainOrder.payment_method == "wallet",
+            DomainOrder.fulfilled_at.is_(None),
+            DomainOrder.created_at < cutoff).all()
+        for o in stuck:
+            refunded = db.query(WalletTxn).filter(
+                WalletTxn.tenant_id == o.tenant_id, WalletTxn.type == "refund",
+                WalletTxn.ref_type == "domain_order_refund", WalletTxn.ref_id == o.id).first()
+            if not refunded:
+                wallet_apply(db, o.tenant_id, "refund", round(o.total_usd, 2),
+                             ref_type="domain_order_refund", ref_id=o.id,
+                             note=f"{o.domain} 注册中断自动退回（进程收口）",
+                             idempotency=f"order-refund-{o.id}")
+            o.status = "failed"
+            o.error = "注册进程中断，已收口（款项已退回余额，可重试）"
+            db.commit()
+            from ..core.notify_utils import emit_notification
+            from ..core.log_utils import new_trace_id
+            emit_notification(db, tenant_id=o.tenant_id, level="warning",
+                              event_type="domain_order_stuck_reaped", trace_id=new_trace_id(),
+                              title=f"域名订单 #{o.id} 注册中断已收口",
+                              body=f"{o.domain} 注册过程被中断，扣款已退回余额，订单转为可重试——"
+                                   f"请到订单页重新提交。")
+            db.commit()
+            logger.warning(f"[USDT] 收口卡死钱包订单 #{o.id} {o.domain}")
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"[USDT] 卡死订单收口异常: {e}")
     except Exception as e:
         logger.warning(f"[USDT] 监听异常: {e}")
     finally:

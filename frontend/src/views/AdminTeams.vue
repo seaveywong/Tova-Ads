@@ -8,6 +8,11 @@ import { tenantStatus } from '../composables/useStatus'
 const { t } = useI18n()
 
 const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance' }
+import { PERM_I18N_MAP } from '../composables/permLabels'
+const permLabel = (k) => {
+  const key = PERM_I18N_MAP[k]
+  return key ? t(key) : k
+}
 const statusLabel = (s) => tenantStatus(s).label
 
 const teams = ref([])
@@ -440,7 +445,7 @@ const saveRolePerms = async () => {
                   <div class="pg-items">
                     <label v-for="k in g.keys" :key="k" class="pg-item" :class="{ on: hasPerm(k) }">
                       <input type="checkbox" :checked="hasPerm(k)" @change="togglePerm(k)" />
-                      <span>{{ t('members.perm.' + k) }}</span>
+                      <span>{{ permLabel(k) }}</span>
                     </label>
                   </div>
                 </div>

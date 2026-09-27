@@ -368,7 +368,7 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
         try:
             wallet_apply(db, user.tenant_id, "charge", -round(order.total_usd, 2),
                          ref_type="domain_order", ref_id=order.id, user_id=user.id,
-                         note=f"{d} x{body.years}y")
+                         note=f"{d} x{body.years}y", idempotency=f"order-{order.id}")
             order.payment_method = "wallet"
             order.approved_by, order.approved_at = user.id, datetime.now(timezone.utc)
             db.commit()
@@ -396,7 +396,8 @@ def create_order(body: OrderIn, user: CurrentUser = Depends(require_permission("
                 detail = str(getattr(fe, "detail", None) or fe)[:200]
                 wallet_apply(db, user.tenant_id, "refund", round(order.total_usd, 2),
                              ref_type="domain_order_refund", ref_id=order.id, user_id=user.id,
-                             note=f"{d} 注册失败自动退回：{detail[:80]}")
+                             note=f"{d} 注册失败自动退回：{detail[:80]}",
+                             idempotency=f"order-refund-{order.id}")
                 raise HTTPException(500, "域名注册失败，扣款已退回余额（订单保留可重试）")
         except InsufficientBalance:
             pass   # 并发把余额扣完——订单入库时已是 pending_payment，走下方 USDT 直付返回
@@ -476,6 +477,33 @@ def approve_order(oid: int, user: CurrentUser = Depends(require_superadmin),
         raise HTTPException(404, "订单不存在")
     if o.status not in ("pending_payment", "approved", "payment_detected", "failed"):
         raise HTTPException(400, f"状态 {o.status} 不可批准")
+    # 审计 P0 修复：钱包订单失败时已自动退款——重试前必须重新扣款（曾免费交付）。
+    # USDT 已付单不走此逻辑（款已在链上核销）
+    if (getattr(o, "payment_method", "") or "") == "wallet":
+        from ..models.wallet import WalletTxn
+        refunded = db.query(WalletTxn).filter(
+            WalletTxn.tenant_id == o.tenant_id,
+            WalletTxn.type == "refund",
+            WalletTxn.ref_type == "domain_order_refund",
+            WalletTxn.ref_id == o.id).first() is not None
+        charged_ok = db.query(WalletTxn).filter(
+            WalletTxn.tenant_id == o.tenant_id,
+            WalletTxn.type == "charge",
+            WalletTxn.ref_type.in_(["domain_order", "domain_order_retry"]),
+            WalletTxn.ref_id == o.id).order_by(WalletTxn.id.desc()).all()
+        net_charged = (sum(t.amount_usd for t in charged_ok) or 0)
+        if refunded and net_charged + round(o.total_usd, 2) < -0.005:
+            # 退款后无有效扣款（净额已回正）→ 重试前重新扣款
+            from ..core.wallet import wallet_apply, InsufficientBalance
+            import uuid as _uuid
+            try:
+                wallet_apply(db, o.tenant_id, "charge", -round(o.total_usd, 2),
+                             ref_type="domain_order_retry", ref_id=o.id, user_id=user.id,
+                             note=f"{o.domain} 重试重新扣款",
+                             idempotency=f"order-retry-{o.id}-{_uuid.uuid4().hex[:10]}")
+            except InsufficientBalance:
+                raise HTTPException(400, "该订单款项已退回用户余额，重试需重新扣款但余额不足——请用户充值后再重试")
+            db.commit()
     if not _reg_ready(db):
         o.status = "approved"
         o.approved_by, o.approved_at = user.id, datetime.now(timezone.utc)
@@ -639,13 +667,17 @@ def renew_domain(did: int, body: RenewIn,
     cost = round(unit * body.years, 2)
     fee = _fee_for(db, cost)
     total = round(cost + fee, 2)
-    # 通道一：钱包余额（优先）
+    # 通道一：钱包余额（优先）。幂等键按「每次尝试」生成（审计 P0：曾固定用 row.id，
+    # 同域名第二次续费被旧流水吞掉扣款却照常续费——免费续费）
     from ..core.wallet import wallet_balance, wallet_apply, InsufficientBalance
+    import uuid as _uuid
     if wallet_balance(db, user.tenant_id) >= total - 0.005:
+        attempt = _uuid.uuid4().hex[:12]
         try:
             wallet_apply(db, user.tenant_id, "charge", -total,
                          ref_type="domain_renew_manual", ref_id=row.id, user_id=user.id,
-                         note=f"{row.domain} 手动续费 {body.years}y")
+                         note=f"{row.domain} 手动续费 {body.years}y",
+                         idempotency=f"renew-m-{row.id}-{attempt}")
         except InsufficientBalance:
             pass
         else:
@@ -666,7 +698,8 @@ def renew_domain(did: int, body: RenewIn,
                 db.rollback()
                 wallet_apply(db, user.tenant_id, "refund", total,
                              ref_type="domain_renew_manual_refund", ref_id=row.id, user_id=user.id,
-                             note=f"{row.domain} 续费失败退回")
+                             note=f"{row.domain} 续费失败退回",
+                             idempotency=f"renew-m-{row.id}-{attempt}-rf")
                 raise HTTPException(500, "续费失败，扣款已退回余额（可重试）")
             from ..core.notify_utils import emit_notification
             from ..core.log_utils import new_trace_id as _ntid
@@ -678,6 +711,9 @@ def renew_domain(did: int, body: RenewIn,
             return {"ok": True, "paid_by": "wallet", "total_usd": total,
                     "expires_at": str(row.expires_at)[:10]}
     # 通道二：USDT 直付订单（kind=renew，到账监听自动续费——_fulfill renew 分支）
+    # 审计 P1 修复：曾缺局部 import → 通道二 100% NameError 500（余额不足用户完全无法续费）
+    from ..models.domain_shop import DomainOrder
+    from ..services.usdt_monitor import pay_amount_for
     order = DomainOrder(tenant_id=user.tenant_id, created_by=user.id, kind="renew",
                         domain=row.domain, years=body.years, cost_usd=cost, fee_usd=fee,
                         total_usd=total, status="pending_payment")

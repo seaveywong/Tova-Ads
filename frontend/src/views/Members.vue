@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { GET, POST, PUT, DELETE } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { tenantStatus } from '../composables/useStatus'
+import { PERM_I18N_MAP } from '../composables/permLabels'
 const { t } = useI18n()
 const memberStatus = (s) => tenantStatus(s)
 
@@ -138,8 +139,8 @@ const removeMember = async (m) => {
 const ROLE_KEY = { owner: 'role.owner', operator: 'role.operator', finance: 'role.finance', superadmin: 'role.superadmin', super: 'role.super' }
 const roleLabel = (name) => ROLE_KEY[name] ? t(ROLE_KEY[name]) : name
 const permLabel = (key) => {
-  const map = { 'ads.read':'members.perm.adsRead','ads.create':'members.perm.adsCreate','ads.pause':'members.perm.adsPause','ads.resume':'members.perm.adsResume','ads.update':'members.perm.adsUpdate','ads.delete':'members.perm.adsDelete','rules.read':'members.perm.rulesRead','rules.create':'members.perm.rulesCreate','rules.edit':'members.perm.rulesEdit','landing.manage':'members.perm.landingManage','assets.manage':'members.perm.assetsManage','billing.view':'members.perm.billingView','billing.manage':'members.perm.billingManage','members.invite':'members.perm.membersInvite','members.manage':'members.perm.membersManage','audit.read':'members.perm.auditRead' }
-  return map[key] ? t(map[key]) : key
+  const k = PERM_I18N_MAP[key]
+  return k ? t(k) : key
 }
 </script>
 

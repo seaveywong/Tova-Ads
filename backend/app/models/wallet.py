@@ -28,8 +28,9 @@ class WalletTxn(Base):
     type = Column(Text, nullable=False)
     amount_usd = Column(Float, nullable=False)             # 带符号：+入账 / -扣款
     balance_after = Column(Float, nullable=False)          # 记账后余额快照（对账断言）
-    ref_type = Column(Text, nullable=False)                # topup / domain_order / manual
+    ref_type = Column(Text, nullable=False)                # topup / domain_order / manual（对账展示）
     ref_id = Column(BigInteger)                            # 关联单号
+    idempotency = Column(Text, index=True)                 # 幂等键（调用方生成，唯一部分索引；0109）
     txid = Column(Text)                                    # 链上证据（充值）
     note = Column(Text)
     created_by = Column(BigInteger)

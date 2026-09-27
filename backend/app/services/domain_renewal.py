@@ -19,14 +19,24 @@ _TIERS = [30, 14, 7, 3, 1]   # 提醒档（天）
 
 
 def _registrar_creds():
-    """当前注册商客户端（dynadot 优先；未配置返 None）。"""
+    """当前注册商客户端——与路由侧同源（system_settings['domain_registrar']，审计 P2 修复：
+    曾 env 优先 dynadot，超管切 porkbun 后本 cron 仍走 dynadot → 存量域名自动续费失败）。"""
+    from ..core.database import SuperSessionLocal as _S
+    from ..models.system import SystemSetting
     from ..core.config import settings, env_val
-    key = env_val("DYNADOT_API_KEY") or settings.dynadot_api_key
-    if key:
-        from ..core.dynadot_client import DynadotClient
-        secret = env_val("DYNADOT_API_SECRET") or settings.dynadot_api_secret
-        return "dynadot", DynadotClient(key, secret)
-    if settings.porkbun_api_key:
+    _db = _S()
+    try:
+        row = _db.query(SystemSetting).filter(SystemSetting.key == "domain_registrar").first()
+        reg = (row.value if row and row.value in ("dynadot", "porkbun") else "dynadot")
+    finally:
+        _db.close()
+    if reg == "dynadot":
+        key = env_val("DYNADOT_API_KEY") or settings.dynadot_api_key
+        if key:
+            from ..core.dynadot_client import DynadotClient
+            secret = env_val("DYNADOT_API_SECRET") or settings.dynadot_api_secret
+            return "dynadot", DynadotClient(key, secret)
+    elif settings.porkbun_api_key:
         from ..core.porkbun_client import PorkbunClient
         return "porkbun", PorkbunClient(settings.porkbun_api_key, settings.porkbun_secret_key)
     return "", None
@@ -168,19 +178,21 @@ def run_domain_renewal():
                                 f"自动续费需 ${total:.2f}（1 年），当前余额不足。请充值——"
                                 f"{days} 天后到期（{row.expires_at.date()}）。")
                         continue
-                    # 幂等键分档（T-14/T-3 各一次）：同 ref_type+ref_id+type 唯一——
-                    # 若共用一个 ref，T-3 的扣款会被幂等快查吞掉（返回旧流水不扣钱）却照常续费
-                    rt = f"domain_renew_t{days}"
+                    # 幂等键带到期年+档位（审计 P0 修复：曾无年份维度——次年同档命中旧流水
+                    # 不扣款却照常续费 = 每年免费续费；charge/refund 再加 -rf 区分）
+                    idem = f"renew-auto-{row.id}-{row.expires_at.year}-{days}"
                     wallet_apply(db, row.tenant_id, "charge", -total,
-                                 ref_type=rt, ref_id=row.id, note=f"{name} 自动续费 1y")
+                                 ref_type=f"domain_renew_t{days}", ref_id=row.id,
+                                 note=f"{name} 自动续费 1y", idempotency=idem)
                     try:
                         _do_renew(db, row, 1, note="auto")
                         _notify(db, row.tenant_id, "info", f"域名 {name} 已自动续费 1 年",
                                 f"扣款 ${total:.2f}，新到期日 {row.expires_at.date()}。")
                     except Exception as re_:
                         wallet_apply(db, row.tenant_id, "refund", total,
-                                     ref_type=rt + "_refund", ref_id=row.id,
-                                     note=f"{name} 自动续费失败退回")
+                                     ref_type=f"domain_renew_t{days}_refund", ref_id=row.id,
+                                     note=f"{name} 自动续费失败退回",
+                                     idempotency=idem + "-rf")
                         _notify(db, row.tenant_id, "warning", f"域名 {name} 自动续费失败（已退款）",
                                 f"扣款已退回余额。原因：{str(re_)[:150]}。请手动续费或联系平台。")
                 except InsufficientBalance:
