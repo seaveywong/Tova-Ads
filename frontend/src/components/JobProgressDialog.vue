@@ -112,6 +112,11 @@ defineExpose({ open })
   <!-- 进度（表格式网格：账户/状态/创建物/原因/操作 定宽列对齐） -->
   <el-dialog v-model="progressOpen" :title="t('launch.progTitle', { name: activeJob?.template_name || '' })" width="min(1060px, 94vw)" :close-on-click-modal="false" @close="onProgressClose">
     <div v-if="activeJob" class="prog">
+      <!-- 轮询中断可见化（复审 P1）：中途连续失败停轮后横幅+重连——否则冻结在最后快照无提示 -->
+      <div v-if="pollError" class="prog-poll-err">
+        <span>{{ t('launch.pollInterrupted') }}</span>
+        <button class="op primary sm" @click="open(activeJobId)">{{ t('common.retry') }}</button>
+      </div>
       <div class="prog-sum">
         <span class="ps-job mono tnum" :title="t('launch.jobIdTip')">#{{ activeJob.id }}</span>
         <span :class="['prog-status', activeJob.status]">{{ jobText(activeJob.status) }}</span>
@@ -228,6 +233,7 @@ defineExpose({ open })
 .op:hover{color:var(--ac);border-color:var(--ac)}
 .empty-sm{padding:30px;text-align:center;color:var(--t3);font-size:13px}
 /* 部署进度弹窗：表格式网格（定宽列，行高统一，斑马纹） */
+.prog-poll-err{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--warning);background:rgba(255,159,10,.1);border:1px solid rgba(255,159,10,.4);border-radius:var(--rs);padding:8px 12px;margin-bottom:6px}
 .prog-sum{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 12px;margin-bottom:6px;background:var(--bg3);border:1px solid var(--bd);border-radius:var(--rs)}
 .ps-job{font-size:12px;color:var(--t2);background:var(--bg2);border:1px solid var(--bd);border-radius:4px;padding:1px 7px;line-height:1.6;flex:none}
 .prog-status{font-size:11px;padding:2px 10px;border-radius:var(--rs);font-weight:600;white-space:nowrap;flex:none}

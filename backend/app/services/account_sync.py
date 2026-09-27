@@ -10,7 +10,7 @@ from ..core.encryption import decrypt
 from ..core.fb_client import FbClient, FbApiError
 from ..core.notify_utils import emit_notification
 from ..core.log_utils import new_trace_id, write_log
-from ..models.fb import FbCredential, Account
+from ..models.fb import FbCredential, Account, AccountFbCredential
 from ..models.log import ActionLog
 from ..routers.landing_lib import sync_pixels_for_act
 
@@ -228,6 +228,95 @@ def _sync_tt_accounts(db) -> tuple[int, int, int]:
     return synced, alerted, recovered
 
 
+def _apply_sync_raw(db, fb, tenant_id: int, acc, raw: dict, threshold_usd: float,
+                    counters: dict) -> None:
+    """单账户实况落库（主列表循环与 batch 点查兜底共用，2026-09-27 抽取）：余额/上限/
+    已花/币种/时区 + 状态/disable_reason 先写先提交（2026-09-15 语义保持），状态变化
+    告警（异常/恢复一次一事）+ 低额告警 + 像素同步。counters={alerted,recovered,low_balance_alerts}。"""
+    act_id = str(raw.get("account_id", ""))
+    if not act_id:
+        return
+    old_status = acc.account_status or 1
+    new_status = int(raw.get("account_status", 1))
+    # 更新余额/上限/已花/币种/时区 + 状态/disable_reason 一次写
+    # 2026-09-15 修复：曾把 account_status 写在告警块之后（L334），
+    # 告警/write_log 异常 → 外层 rollback 把状态更新一起回滚 →
+    # "拉回来了但没写进去"（用户实锤 10 户 FB=2 DB=1 长期不同步）。
+    # 现在状态先写先提交，告警/像素等后续操作失败不影响状态落库。
+    acc.balance = str(raw.get("balance", 0))
+    acc.spend_cap = str(raw.get("spend_cap", 0))
+    acc.amount_spent = str(raw.get("amount_spent", 0))
+    if raw.get("currency"):
+        acc.currency = raw["currency"]
+    if raw.get("timezone_name"):
+        acc.timezone_name = raw["timezone_name"]
+    _dr = raw.get("disable_reason")
+    if _dr is not None:
+        acc.disable_reason = int(_dr)
+    acc.account_status = new_status
+    db.commit()   # 状态先落库——后续告警/像素失败不再回滚状态
+    # 状态告警（一次事件只告一次 + 恢复告知）。
+    if old_status != new_status:
+        if new_status in STATUS_ABNORMAL:
+            # 进入异常：仅在"新状态 ≠ 上次已告状态"时告（横跳 9↔2 / 一直停用不重报）
+            if _last_notified_status(db, tenant_id, act_id) != new_status:
+                old_label = STATUS_LABELS.get(old_status, str(old_status))
+                new_label = STATUS_LABELS.get(new_status, str(new_status))
+                try:
+                    emit_notification(
+                        db, tenant_id=tenant_id, level="critical",
+                        event_type="account_status_change",
+                        title=f"账户状态变动 · {acc.name}",
+                        body=(f"账户：{acc.name}（act_{act_id}）\n"
+                              f"状态：<b>{old_label} → {new_label}</b>\n"
+                              f"{STATUS_ADVICE.get(new_status, '')}"),
+                        roles=["owner", "operator"], trace_id=new_trace_id(),
+                        target_type="account", target_id=act_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"[AccountSync] 告警发送失败 act {act_id}: {e}")
+                write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(),
+                          actor_type="system", target_type="account", target_id=act_id,
+                          action_type="account_status_change", source="account_sync",
+                          result="alerted", trigger_detail=f"old={old_status} new={new_status}",
+                          metadata={"status": new_status, "old": old_status})
+                counters["alerted"] += 1
+        elif new_status == 1 and old_status in STATUS_ABNORMAL:
+            # 恢复正常：告知一次（支付失败恢复/禁用恢复）+ 写 status=1 标记，
+            # 使下次再异常时 _last_notified_status=1≠新异常 → 能再告
+            old_label = STATUS_LABELS.get(old_status, str(old_status))
+            try:
+                emit_notification(
+                    db, tenant_id=tenant_id, level="info",
+                    event_type="account_status_recovered",
+                    title=f"账户已恢复 · {acc.name}",
+                    body=(f"账户：{acc.name}（act_{act_id}）\n"
+                          f"状态：<b>{old_label} → 正常</b>\n账户已恢复正常。"),
+                    roles=["owner", "operator"], trace_id=new_trace_id(),
+                    target_type="account", target_id=act_id,
+                    platform=(acc.platform or "fb"))
+            except Exception as e:
+                logger.warning(f"[AccountSync] 恢复告警发送失败 act {act_id}: {e}")
+            write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(),
+                      actor_type="system", target_type="account", target_id=act_id,
+                      action_type="account_status_change", source="account_sync",
+                      result="recovered", trigger_detail=f"old={old_status} new=1",
+                      metadata={"status": 1, "old": old_status, "recovered": True})
+            counters["recovered"] += 1
+    # 可用额度低告警（仅活跃账户；阈值 balance_alert_threshold，0=关；6h dedup）
+    if threshold_usd > 0 and new_status == 1:
+        try:
+            if _maybe_low_balance_alert(db, tenant_id, acc, threshold_usd):
+                counters["low_balance_alerts"] += 1
+        except Exception as e:
+            logger.warning(f"[AccountSync] 低额告警检查失败 act {act_id}: {e}")
+    # 同步该账户像素到像素库（绑 act_id，子码级像素用）
+    try:
+        sync_pixels_for_act(db, fb, tenant_id, act_id)
+    except Exception:
+        pass
+
+
 def run_account_status_sync():
     """定时同步账户状态/余额，变动到异常 → emit 告警。每 30min。"""
     lock = acquire_run_lock(110)
@@ -247,6 +336,15 @@ def run_account_status_sync():
         # 审计#2（2026-09-12）：含 rate_limited——status 永不自动回 active，硬过滤 active
         # 会让限流过的令牌（哪怕冷却早已过期）的账户列表永久停更；仍在冷却中的调用失败
         # 由 per-cred try 兜住跳过（下一轮再试）
+        # 归属预载（复审 P1）：{cred_id: {act_id}}——主绑定之外，链接池含此令牌的账户也同步
+        _link_map: dict = {}
+        for _cid, _aid in db.query(AccountFbCredential.fb_credential_id, Account.act_id).join(
+                Account, Account.id == AccountFbCredential.account_id).filter(
+                AccountFbCredential.status == "active",
+                Account.is_managed.is_(True)).all():
+            _link_map.setdefault(_cid, set()).add(_aid)
+        _synced_acts: set = set()
+        counters = {"alerted": alerted, "recovered": recovered, "low_balance_alerts": low_balance_alerts}
         creds = db.query(FbCredential).filter(
             FbCredential.status.in_(("active", "rate_limited"))).all()
         for cred in creds:
@@ -264,97 +362,20 @@ def run_account_status_sync():
             for raw in raw_accounts:
               try:
                 act_id = str(raw.get("account_id", ""))
-                if not act_id:
-                    continue
-                # 2026-09-15 修复：只同步绑定此令牌的账户——多令牌可见同一账户时
-                # （cred28/29 都拉到 1429525619059295），不过滤会后者覆盖前者：
-                # 绑定令牌（fb_credential_id）才是权威数据源
+                if not act_id or act_id in _synced_acts:
+                    continue   # 本轮已同步（多令牌可见同一账户：只刷一次，绑定令牌即权威）
                 acc = db.query(Account).filter(
                     Account.act_id == act_id, Account.tenant_id == tenant_id,
                     Account.is_managed.is_(True),  # 跳过已取消纳管的（不刷状态/不发恢复告警）
-                    Account.fb_credential_id == cred.id,  # 只同步绑定此令牌的
                 ).first()
                 if not acc:
                     continue
-                old_status = acc.account_status or 1
-                new_status = int(raw.get("account_status", 1))
-                # 更新余额/上限/已花/币种/时区 + 状态/disable_reason 一次写
-                # 2026-09-15 修复：曾把 account_status 写在告警块之后（L334），
-                # 告警/write_log 异常 → 外层 rollback 把状态更新一起回滚 →
-                # "拉回来了但没写进去"（用户实锤 10 户 FB=2 DB=1 长期不同步）。
-                # 现在状态先写先提交，告警/像素等后续操作失败不影响状态落库。
-                acc.balance = str(raw.get("balance", 0))
-                acc.spend_cap = str(raw.get("spend_cap", 0))
-                acc.amount_spent = str(raw.get("amount_spent", 0))
-                if raw.get("currency"):
-                    acc.currency = raw["currency"]
-                if raw.get("timezone_name"):
-                    acc.timezone_name = raw["timezone_name"]
-                _dr = raw.get("disable_reason")
-                if _dr is not None:
-                    acc.disable_reason = int(_dr)
-                acc.account_status = new_status
-                db.commit()   # 状态先落库——后续告警/像素失败不再回滚状态
-                # 状态告警（一次事件只告一次 + 恢复告知）。
-                if old_status != new_status:
-                    if new_status in STATUS_ABNORMAL:
-                        # 进入异常：仅在"新状态 ≠ 上次已告状态"时告（横跳 9↔2 / 一直停用不重报）
-                        if _last_notified_status(db, tenant_id, act_id) != new_status:
-                            old_label = STATUS_LABELS.get(old_status, str(old_status))
-                            new_label = STATUS_LABELS.get(new_status, str(new_status))
-                            try:
-                                emit_notification(
-                                    db, tenant_id=tenant_id, level="critical",
-                                    event_type="account_status_change",
-                                    title=f"账户状态变动 · {acc.name}",
-                                    body=(f"账户：{acc.name}（act_{act_id}）\n"
-                                          f"状态：<b>{old_label} → {new_label}</b>\n"
-                                          f"{STATUS_ADVICE.get(new_status, '')}"),
-                                    roles=["owner", "operator"], trace_id=new_trace_id(),
-                                    target_type="account", target_id=act_id,
-                                )
-                            except Exception as e:
-                                logger.warning(f"[AccountSync] 告警发送失败 act {act_id}: {e}")
-                            write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(),
-                                      actor_type="system", target_type="account", target_id=act_id,
-                                      action_type="account_status_change", source="account_sync",
-                                      result="alerted", trigger_detail=f"old={old_status} new={new_status}",
-                                      metadata={"status": new_status, "old": old_status})
-                            alerted += 1
-                    elif new_status == 1 and old_status in STATUS_ABNORMAL:
-                        # 恢复正常：告知一次（支付失败恢复/禁用恢复）+ 写 status=1 标记，
-                        # 使下次再异常时 _last_notified_status=1≠新异常 → 能再告
-                        old_label = STATUS_LABELS.get(old_status, str(old_status))
-                        try:
-                            emit_notification(
-                                db, tenant_id=tenant_id, level="info",
-                                event_type="account_status_recovered",
-                                title=f"账户已恢复 · {acc.name}",
-                                body=(f"账户：{acc.name}（act_{act_id}）\n"
-                                      f"状态：<b>{old_label} → 正常</b>\n账户已恢复正常。"),
-                                roles=["owner", "operator"], trace_id=new_trace_id(),
-                                target_type="account", target_id=act_id,
-                                platform=(acc.platform or "fb"))
-                        except Exception as e:
-                            logger.warning(f"[AccountSync] 恢复告警发送失败 act {act_id}: {e}")
-                        write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(),
-                                  actor_type="system", target_type="account", target_id=act_id,
-                                  action_type="account_status_change", source="account_sync",
-                                  result="recovered", trigger_detail=f"old={old_status} new=1",
-                                  metadata={"status": 1, "old": old_status, "recovered": True})
-                        recovered += 1
-                # 可用额度低告警（仅活跃账户；阈值 balance_alert_threshold，0=关；6h dedup）
-                if threshold_usd > 0 and new_status == 1:
-                    try:
-                        if _maybe_low_balance_alert(db, tenant_id, acc, threshold_usd):
-                            low_balance_alerts += 1
-                    except Exception as e:
-                        logger.warning(f"[AccountSync] 低额告警检查失败 act {act_id}: {e}")
-                # 同步该账户像素到像素库（绑 act_id，子码级像素用）
-                try:
-                    sync_pixels_for_act(db, fb, tenant_id, act_id)
-                except Exception:
-                    pass
+                # 归属判定（复审 P1 2026-09-27 放宽）：主绑定 OR 链接池含此令牌——曾只认
+                # 主绑定，链接池扩容（自愈/多令牌导入）后其他令牌列表里的账户永不同步
+                if acc.fb_credential_id != cred.id and act_id not in _link_map.get(cred.id, ()):
+                    continue
+                _apply_sync_raw(db, fb, tenant_id, acc, raw, threshold_usd, counters)
+                _synced_acts.add(act_id)
                 synced += 1
                 # 每 25 个账户提交一次——中途异常不再丢掉已处理账户的余额/状态更新
                 if synced % 25 == 0:
@@ -364,6 +385,49 @@ def run_account_status_sync():
                 logger.warning(f"[AccountSync] 账户 {raw.get('account_id','')} 处理异常: {e}")
                 db.rollback()
                 continue
+        # ── BM 共享账户兜底（复审 P1 2026-09-27 Roly-99 案）──
+        # me/adaccounts 不列共享账户（点查导入的它们不在任何令牌列表里）——本轮未被覆盖的
+        # FB 纳管账户用链接池令牌 batch 点查拉实况，余额/状态/告警链与主循环同款
+        try:
+            from ..core.fb_tokens import _account_write_candidates as _cands
+            _uncovered = [a for a in db.query(Account).filter(
+                Account.is_managed.is_(True)).all()
+                if (a.platform or "fb") == "fb" and a.act_id not in _synced_acts]
+            if _uncovered:
+                logger.info(f"[AccountSync] {len(_uncovered)} 个账户未见于任何令牌列表，batch 点查兜底")
+            _groups: dict = {}
+            for _acc in _uncovered:
+                _cs = _cands(db, _acc.tenant_id, _acc.act_id, "read")
+                if _cs:
+                    _g = _groups.setdefault(_cs[0].id, (_cs[0], []))
+                    _g[1].append(_acc)
+            for _cred_id, (_cred, _accs) in _groups.items():
+                try:
+                    _fb = FbClient(decrypt(_cred.access_token_enc))
+                except Exception:
+                    continue
+                for _i in range(0, len(_accs), 50):
+                    _chunk = _accs[_i:_i + 50]
+                    try:
+                        _rs = _fb.batch_get(
+                            [f"act_{a.act_id}?fields={ADACCOUNT_SYNC_FIELDS}" for a in _chunk])
+                    except Exception as _e:
+                        logger.warning(f"[AccountSync] 兜底 batch 失败 cred {_cred_id}: {_e}")
+                        break
+                    for _acc, _meta in zip(_chunk, _rs):
+                        if not _meta or "error" in _meta or not _meta.get("account_id"):
+                            continue
+                        try:
+                            _apply_sync_raw(db, _fb, _acc.tenant_id, _acc, _meta,
+                                            threshold_usd, counters)
+                            _synced_acts.add(_acc.act_id)
+                            synced += 1
+                        except Exception as _e:
+                            logger.warning(f"[AccountSync] 兜底账户 {_acc.act_id} 处理异常: {_e}")
+                            db.rollback()
+        except Exception as e:
+            logger.warning(f"[AccountSync] 兜底段异常: {e}")
+            db.rollback()
         # ── TT 账户（P1-9）：advertiser/info 拉状态/余额/币种/时区；异常/恢复告警链同款 FB ──
         # 整段 try 包裹：TT 侧异常不影响 FB 已完成的同步提交
         try:
@@ -375,6 +439,8 @@ def run_account_status_sync():
             logger.warning(f"[AccountSync][TT] 同步异常: {e}")
             db.rollback()
         db.commit()
+        alerted, recovered, low_balance_alerts = (counters["alerted"], counters["recovered"],
+                                                    counters["low_balance_alerts"])
         logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复，{low_balance_alerts} 低额告警")
     finally:
         db.close()

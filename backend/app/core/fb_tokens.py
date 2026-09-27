@@ -328,6 +328,13 @@ def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
             ordered.append(c); seen.add(c.id)
 
     if acc:
+        # 写序 tiebreak（复审 P1 2026-09-27）：与 cred_for_account_op 同款——同 priority 时
+        # operate（操作号）先于 manage（管理号），否则 O337 事故复刻（页面感知部署主路径
+        # 写撞管理号「权限不足」，而 guard 停牌路径有 tiebreak 能成功）。显式 priority 仍最高。
+        from sqlalchemy import case as _case
+        _order = [AccountFbCredential.priority,
+                  _case((FbCredential.token_type == "operate", 0), else_=1),
+                  FbCredential.id]
         for c in db.query(FbCredential).join(
             AccountFbCredential, AccountFbCredential.fb_credential_id == FbCredential.id
         ).filter(
@@ -336,7 +343,7 @@ def _account_write_candidates(db: Session, tenant_id: int, act_id: str,
             # 审计#7：与 cred_for_account_op 同口径——rate_limited（冷却中/已过期）由
             # _add 的 _is_cred_available 判可用性，不在此硬过滤（曾冷却过的令牌永久出局）
             FbCredential.status.in_(("active", "rate_limited")),
-        ).order_by(AccountFbCredential.priority, FbCredential.id).all():
+        ).order_by(*_order).all():
             _add(c)
         if acc.fb_credential_id:
             _add(db.query(FbCredential).filter(FbCredential.id == acc.fb_credential_id).first())
@@ -356,7 +363,8 @@ def cred_for_account_page(db: Session, tenant_id: int, act_id: str, page_id: str
         if manages is None:
             try:
                 manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id))
-            except Exception:
+            except Exception as _pe:
+                mark_expired_on_auth_error(db, c, _pe)   # 批JJ：过期判死（非过期错 no-op）
                 manages = False
             if _cache is not None:
                 _cache[c.id] = manages
@@ -390,7 +398,8 @@ def client_for_page(db: Session, tenant_id: int, page_id: str) -> Optional[FbCli
         try:
             if FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id):
                 return FbClient(decrypt(c.access_token_enc))
-        except Exception:
+        except Exception as _pe:
+            mark_expired_on_auth_error(db, c, _pe)   # 批JJ：过期判死（非过期错 no-op）
             continue
     return None
 

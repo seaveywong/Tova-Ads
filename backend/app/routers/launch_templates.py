@@ -1371,7 +1371,7 @@ def _pinned_write_fb(sdb, tenant_id: int, act_id: str, cred_id: int, pages: set,
     """用户指定令牌 → FbClient（控制面执行侧）。三层校验：在写候选池内（防越权/错池）、
     令牌仍可用、能管本 item 全部主页——任一不过给明确原因（raise FbApiError）。
     pages 为空（主页未定）时只做前两层。"""
-    from ..core.fb_tokens import _account_write_candidates
+    from ..core.fb_tokens import _account_write_candidates, mark_expired_on_auth_error
     from ..core.encryption import decrypt
     cands = _account_write_candidates(sdb, tenant_id, act_id, "write")
     cred = next((c for c in cands if c.id == cred_id), None)
@@ -1383,7 +1383,8 @@ def _pinned_write_fb(sdb, tenant_id: int, act_id: str, cred_id: int, pages: set,
         if manages is None:
             try:
                 manages = bool(FbClient(decrypt(cred.access_token_enc)).get_page_access_token(pid))
-            except Exception:
+            except Exception as _pe:
+                mark_expired_on_auth_error(sdb, cred, _pe)   # 批JJ：过期即判死（非过期错 no-op）
                 manages = False
             cache[k] = manages
         if not manages:
@@ -1400,7 +1401,7 @@ def _page_aware_write_clients(sdb, tenant_id: int, act_id: str, pages: set,
     返 (FbClient|None, 覆盖全部主页的候选列表, cred|None)；列表供结构树裸
     Invalid parameter 换牌重试。cache={(cred_id,page_id):bool} 跨 item 复用
     （多账户共享令牌只查一次 FB get_page_access_token）。"""
-    from ..core.fb_tokens import _account_write_candidates
+    from ..core.fb_tokens import _account_write_candidates, mark_expired_on_auth_error
     from ..core.encryption import decrypt
     chosen = None
     covering: list = []
@@ -1412,7 +1413,8 @@ def _page_aware_write_clients(sdb, tenant_id: int, act_id: str, pages: set,
             if manages is None:
                 try:
                     manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(pid))
-                except Exception:
+                except Exception as _pe:
+                    mark_expired_on_auth_error(sdb, c, _pe)   # 批JJ：过期判死，防「不能管主页」误导
                     manages = False
                 cache[k] = manages
             if not manages:
@@ -1438,12 +1440,13 @@ def _auto_switch_page(sdb, tenant_id: int, item, old_pages: set,
     令牌的其他可投主页，而不是直接失败）。仅新帖模式（跟帖主页绑死帖源不可换）。
     扫写令牌候选池（priority 序）各令牌的可投广告主页，取第一个能落地的页写回
     item.page_id。成功 True（已 note 留痕）；无可换页 False（调用方按原错误失败）。"""
-    from ..core.fb_tokens import _account_write_candidates
+    from ..core.fb_tokens import _account_write_candidates, mark_expired_on_auth_error
     from ..core.encryption import decrypt
     for c in _account_write_candidates(sdb, tenant_id, item.act_id, "write"):
         try:
             pages = FbClient(decrypt(c.access_token_enc)).get_pages() or []
-        except Exception:
+        except Exception as _pe:
+            mark_expired_on_auth_error(sdb, c, _pe)   # 批JJ：过期判死（非过期错 no-op 继续）
             continue
         for p in pages:
             pid = p.get("id", "")
@@ -3435,8 +3438,13 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     _hb, _hp, _herr = _healthy_landing_base(sdb, tenant_id, node_lpid, _lp_probe_cache)
                     _lp_base_cache[node_lpid] = "__BLOCKED__" if _herr else (_hb or "")
                 if _lp_base_cache[node_lpid] == "__BLOCKED__":
-                    raise _LandingBlockedError(
-                        f"落地页(#{node_lpid})所有绑定域名均被 FB 屏蔽，已阻止部署——请换绑健康域名")
+                    # 复审 P1（2026-09-27）：曾 raise 穿透整个函数 → 绕过失败收口与自动回退，
+                    # 前序组已建 ACTIVE 广告留在 FB 且重试被守卫锁死。改为节点级记失败（走
+                    # 正常 _apply_batch_result 收口：全败 ok==0 自动删系列，partial 保留手动）
+                    _blk_aname = (anode.get("name") or f"广告{ai}")
+                    for _ in range(max(len(anode.get("asset_ids") or []), 1)):
+                        fails.append(f"{sname}/{_blk_aname}: 落地页(#{node_lpid})所有绑定域名均被 FB 屏蔽，已跳过（请换绑健康域名）")
+                    continue
                 node_lp_base = _lp_base_cache[node_lpid]
             aname_base = (anode.get("name") or "").strip()
 
@@ -3705,17 +3713,23 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         # 降级不静默（铁律 bare-except-silent-failure）：广告照建（裸 URL 直投），item 留痕
         item.error = f"部署提示 {len(auto_warns)} 条：{'；'.join(w[:110] for w in auto_warns[:2])}"[:300]
         item.error_code = "auto_subcode_degraded"
-    # 失败自动回退（2026-09-27）：系列已建但 item 终态 fail → FB 侧删系列 + 清 id，
-    # 不留残留也不卡重试守卫；删除失败才留 id 走手动「删除系列」
+    # 失败自动回退（2026-09-27 复审收紧）：仅全败（ok==0）自动删系列——partial（部分广告
+    # 已在投）不自动删（在投广告无确认不可销毁，保留手动「删除系列」按钮走确认弹窗）；
+    # 全败删干净 = 重试守卫放行 + FB 无残留。删除失败留 id 走手动。
     if item.status == "fail" and (item.campaign_id or ""):
-        _rb_note = _auto_rollback_tree_campaign(sdb, tenant_id, item, fb)
-        item.error = f"{item.error}｜{_rb_note}"[:400]
-        item.progress = _rb_note[:120]
-        write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
-                  target_type="launch_job", target_id=str(job.id if job else ""),
-                  action_type="delete", source="launch",
-                  result="success" if not item.campaign_id else "fail",
-                  trigger_detail=f"失败自动回退 {item.act_id}（job #{job.id if job else '?'}）")
+        if ok == 0:
+            _rb_note = _auto_rollback_tree_campaign(sdb, tenant_id, item, fb)
+            item.error = f"{item.error}｜{_rb_note}"[:400]
+            item.progress = _rb_note[:120]
+            write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                      target_type="launch_job", target_id=str(job.id if job else ""),
+                      action_type="delete", source="launch",
+                      result="success" if not item.campaign_id else "fail",
+                      trigger_detail=f"失败自动回退(全败) {item.act_id}（job #{job.id if job else '?'}）")
+        else:
+            _keep_note = (f"部分成功（{ok} 个广告在投）：系列已保留——可「删除系列」整树重来，"
+                          "或到广告管理器核查已建内容")
+            item.error = f"{item.error}｜{_keep_note}"[:400]
 
 
 def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
@@ -3912,6 +3926,14 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
             except Exception as e:
                 item.status = "fail"; item.error = str(e)[:300]; item.error_code = "error"
                 job.failed = (job.failed or 0) + 1
+                # 穿透兜底（复审 P1 2026-09-27）：异常穿出树执行器时 series 已建（campaign_id
+                # 在库）——不自动删（中断路径无法确认零成功，在投广告不可无确认销毁，与
+                # partial 语义一致），但文案明确指路，防「已建系列无感知+重试被守卫锁死」
+                if (item.campaign_id or "") and _parse_structure(tpl):
+                    item.error = (f"{item.error}｜部署中断：该账户已建出系列，请先「删除系列」"
+                                  "再重试（或到广告管理器核查已建内容）")[:400]
+                logging.getLogger("toveads.launch").exception(
+                    f"[Launch] item {item.id} 部署异常（act {item.act_id}）")
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id="",
                           action_type="deploy", source="launch", result="fail",
@@ -4089,6 +4111,8 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
         try:
             pages = _FbC(decrypt(c.access_token_enc)).get_pages() or []
         except FbApiError as e:
+            from ..core.fb_tokens import mark_expired_on_auth_error
+            mark_expired_on_auth_error(db, c, e)   # 批JJ：过期判死（非过期错 no-op）
             first_err = first_err or e.friendly   # 单令牌拉取失败不拖垮并集（其他令牌的页仍可选）
             continue
         for p in pages:
@@ -4111,6 +4135,8 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
         _probe = _FbC(decrypt(cands[0].access_token_enc))
         _probe.get(f"/act_{act_id}", params={"fields": "name"})   # 广告账户节点必须带 act_ 前缀（裸 ID 报无权限假阳性）
     except FbApiError as e:
+        from ..core.fb_tokens import mark_expired_on_auth_error
+        mark_expired_on_auth_error(db, cands[0], e)   # 批JJ：过期判死
         account_ok, account_err = False, (e.friendly or str(e))[:150]
     except Exception as e:
         account_ok, account_err = False, str(e)[:150]
@@ -4166,7 +4192,9 @@ def page_coverage(page_id: str, act_ids: str,
                 if manages is None:
                     try:
                         manages = bool(FbClient(decrypt(c.access_token_enc)).get_page_access_token(page_id))
-                    except Exception:
+                    except Exception as _pe:
+                        from ..core.fb_tokens import mark_expired_on_auth_error
+                        mark_expired_on_auth_error(db, c, _pe)   # 批JJ：过期判死
                         manages = False
                     cache[k] = manages
                 if manages:
@@ -4462,8 +4490,12 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     _deploy_item_tt_batch(sdb, job, it, tpl, batch_assets, tenant_id, link, is_retry=True)
                 else:
                     _deploy_item_tt(sdb, job, it, tpl, asset, tenant_id, link, is_retry=True)
-            except Exception:
-                pass  # 执行器内部已消化为 item fail
+            except Exception as _tte:
+                # 复审 P1：曾裸 pass——执行器外异常（如准备段崩溃）会让 item 永卡 creating、
+                # job 卡 running。落 fail 带原因 + 记日志（执行器内部已消化的不走这里）
+                it.status = "fail"; it.error = f"重试执行异常：{str(_tte)[:250]}"; it.error_code = "error"
+                logging.getLogger("toveads.launch").exception(
+                    f"[Retry-TT] item {it.id} 重试异常（act {it.act_id}）")
             _close_job_if_done(sdb, job_id)   # 批AP：按 items 实况收口（并发重试不提前关门）
             sdb.commit()
             return  # TT 不做 ads_cache 对账（P4 接）
@@ -4591,8 +4623,9 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     lead_form_id = _resolve_lead_form(fb, sdb, tpl, asset, _page_id,
                                                       _stable_landing_url(tpl.landing_url or "", tpl.name or ""),
                                                       post_content=post_content)
-                except Exception:
-                    pass
+                except Exception as _lfe:
+                    # 对齐首投 _deploy_series_fb（复审 P1：曾裸 except:pass——重试静默丢表单）
+                    _item_note(sdb, it, f"表单创建失败（广告将无 Instant Form）：{str(_lfe)[:120]}")
             # 没选消息模板 → AI 生成（ENGAGEMENT+消息）；跟帖无素材→用帖内容
             message_template = tpl.message_template or ""
             if not message_template and tpl.objective == "OUTCOME_ENGAGEMENT":
@@ -4687,6 +4720,11 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             it.status = "fail"; it.error = (e.friendly or str(e))[:300]; it.error_code = e.category
         except Exception as e:
             it.status = "fail"; it.error = str(e)[:300]; it.error_code = "error"
+            # 穿透兜底（复审 P1）：中断时系列已建——文案指路（不自动删：无法确认零成功）
+            if (it.campaign_id or ""):
+                it.error = (f"{it.error}｜重试中断：该账户已建出系列，请核查后处理（广告管理器）")[:400]
+            logging.getLogger("toveads.launch").exception(
+                f"[Retry] item {it.id} 重试异常（act {it.act_id}）")
         # 批AP：收口统一走 _close_job_if_done——失败也收（防 running 永停 409 锁死部署），
         # 但还有并发重试的 item 在跑时不提前关门
         _close_job_if_done(sdb, job_id)
