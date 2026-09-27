@@ -189,6 +189,11 @@ def add_allowance(body: AllowanceIn, user: CurrentUser = Depends(require_permiss
     ).first()
     if not acc:
         raise HTTPException(404, "账户不存在")
+    # 审计 P1（批评员补漏）：加白=静默豁免止损一整天——operator 只能给自己名下账户加白
+    # （曾任意持 rules.edit 者可对团队内他人账户加白）
+    from ..core.deps import account_operable
+    if not account_operable(user, acc):
+        raise HTTPException(404, "账户不在你的名下")
     from ..services.guard_engine import _account_local_today
     today = _account_local_today(acc)
     existing = db.query(GuardAllowance).filter(

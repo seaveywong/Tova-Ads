@@ -2316,6 +2316,11 @@ def unmanage_account(
     ).first()
     if not acc:
         raise HTTPException(404, "账户未纳管")
+    # 审计 P1：取消纳管是破坏性写（止损即刻失明）——operator 只能动自己名下账户
+    # （曾只按租户过滤，operator 可凭 ID 移出 owner 名下账户）
+    from ..core.deps import account_operable
+    if not account_operable(user, acc):
+        raise HTTPException(404, "账户不在你的名下")
     # 先数 ACTIVE 广告（删缓存前数——前端确认文案要告知"广告不会停、止损失效"）。
     # ads_cache 同 act_id 可跨平台并存（FB/TT act_id 空间独立）——按账户 platform 过滤。
     active_ads = 0
@@ -2431,6 +2436,10 @@ def create_account_pixel(
         raise HTTPException(404, "账户不存在")
     if (acc.platform or "fb") == "tt":
         raise HTTPException(400, "TikTok 账户不支持在此创建 FB 像素")
+    # 审计 P1：operator 范围闸（曾只按租户过滤）
+    from ..core.deps import account_operable
+    if not account_operable(user, acc):
+        raise HTTPException(404, "账户不在你的名下")
     from ..core.fb_tokens import cred_for_account_op
     cred = cred_for_account_op(db, user.tenant_id, aid, "write")
     if not cred:

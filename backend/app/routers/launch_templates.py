@@ -1182,6 +1182,11 @@ def deploy_template(tid: int, body: DeployIn, bg: BackgroundTasks,
         ).first()
         if not acc:
             raise HTTPException(400, f"账户 {it.act_id} 不在已纳管列表（先在令牌页载入并勾选导入）")
+        # 审计 P1：operator 范围闸——部署直接花钱，operator 只能对名下账户提交
+        # （曾只查租户+managed，operator 可凭 API 直调对名下范围外账户部署）
+        from ..core.deps import account_operable
+        if not account_operable(user, acc):
+            raise HTTPException(404, f"账户 {it.act_id} 不在你的名下")
         # 平台匹配守卫（TK P3）：TT 模板只能部署 TT 账户（反之亦然）——错平台走下去会撞
         # FB 令牌分发 fail-fast，不如在提交前 400 把话说清楚
         if (acc.platform or "fb") != (t.platform or "fb"):
@@ -3148,6 +3153,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     campaign_id = camp.get("id")
     if not campaign_id:
         raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
+    # 审计 P1（树模式逃逸）：campaign 建成即落库——后续任一节点失败（含 _LandingBlockedError
+    # 穿透每广告 try 的路径）item 已带 campaign_id，重试守卫拦住整树重跑（曾不落库 →
+    # 守卫被绕过 → 重试整树重建 = 双倍投放双倍花费）
+    item.campaign_id = campaign_id
+    sdb.commit()
 
     ok, fails, last = 0, [], None
     _acc = sdb.query(Account).filter(
@@ -3859,8 +3869,12 @@ def _item_dict(it: LaunchJobItem) -> dict:
 @router.get("/jobs")
 def list_jobs(user: CurrentUser = Depends(require_permission("ads.create")),
               db: Session = Depends(get_db), limit: int = 20):
-    rows = db.query(LaunchJob).filter(LaunchJob.tenant_id == user.tenant_id) \
-        .order_by(LaunchJob.id.desc()).limit(min(max(limit, 1), 100)).all()
+    # 审计 P3：operator 只看自己提交的部署任务（与模板列表口径一致；曾全租户可见）
+    from ..core.deps import scope_account_query
+    q = db.query(LaunchJob).filter(LaunchJob.tenant_id == user.tenant_id)
+    if getattr(user, "role", None) == "operator":
+        q = q.filter(LaunchJob.created_by == user.id)
+    rows = q.order_by(LaunchJob.id.desc()).limit(min(max(limit, 1), 100)).all()
     return [{
         "id": j.id, "template_id": j.template_id, "template_name": j.template_name or "",
         "status": j.status, "total": j.total, "succeeded": j.succeeded, "failed": j.failed,
@@ -3874,6 +3888,9 @@ def get_job(job_id: int, user: CurrentUser = Depends(require_permission("ads.cre
             db: Session = Depends(get_db)):
     j = db.query(LaunchJob).filter(LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id).first()
     if not j:
+        raise HTTPException(404, "job 不存在")
+    # 审计 P3：operator 只能看自己提交的任务详情
+    if getattr(user, "role", None) == "operator" and j.created_by != user.id:
         raise HTTPException(404, "job 不存在")
     items = db.query(LaunchJobItem).filter(LaunchJobItem.job_id == job_id).all()
     # 模板平台（前端按平台跳 FB/TT 广告后台；模板可能已归档但软删不物理删，查询安全）
@@ -4081,6 +4098,9 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
         LaunchTemplate.id == j.template_id, LaunchTemplate.tenant_id == user.tenant_id).first()
     if not _tpl or _tpl.status == "archived":
         raise HTTPException(400, "模板已归档，不能重试（恢复模板或复制新模板后再部署）")
+    # 审计 P1：retry 双漏补——模板归属（operator 只能重试自己建的模板的失败项）
+    from ..core.deps import require_owned, account_operable
+    require_owned(user, _tpl, attr="created_by")
     # 占位符校验（复审R2-P1，与 deploy 端点同口径）：拦截 ⑥ 上线前的存量脏占位符
     try:
         _check_url_placeholders(_tpl.landing_url)
@@ -4106,6 +4126,9 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     ).first()
     if not _acc:
         raise HTTPException(400, "该账户已移除纳管，不能重试（重新导入后再部署）")
+    # 审计 P1：账户范围闸（与 deploy_template 同款，此处曾漏）
+    if not account_operable(user, _acc):
+        raise HTTPException(404, "账户不在你的名下")
     # 原子抢占：UPDATE ... WHERE status='fail' 判 rowcount——双击并发时只有一个请求能置 pending
     # （原 check-then-write：两请求都读到 fail 都通过 → 两个后台任务 = 同账户两份广告）
     from sqlalchemy import text as _text

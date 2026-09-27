@@ -460,6 +460,13 @@ def fb_upload_image(aid: int, body: FbUploadIn,
         raise HTTPException(404, "素材文件丢失")
     with open(filepath, "rb") as f:
         image_bytes = f.read()
+    # 审计 P1：operator 范围闸——上传目标账户须在名下（曾只按租户定位）
+    from ..core.deps import account_operable
+    _aid = str(body.act_id).replace("act_", "").replace("ACT_", "").strip()
+    _acc = db.query(Account).filter(
+        Account.tenant_id == user.tenant_id, Account.act_id == _aid).first()
+    if _acc and not account_operable(user, _acc):
+        raise HTTPException(404, "账户不在你的名下")
     fb = client_for_account(db, user.tenant_id, body.act_id, "write")  # 上传 image_hash 是写操作，选写令牌
     if not fb:
         raise HTTPException(400, "未绑定有效 FB 凭证")

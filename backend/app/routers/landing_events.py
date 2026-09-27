@@ -251,7 +251,9 @@ def dedup_check(body: DedupCheckIn):
         recent = db.query(LandingEvent).filter(
             LandingEvent.page_id == page.id,
             LandingEvent.ip_hash == ip_hash,
-            LandingEvent.event_type == "visit",
+            # 审计 P1：跳转模式 worker 只发 redirect 事件（不发 visit）——去重须两种都认，
+            # 曾只认 visit → 跳转模式防重复访客完全失效
+            LandingEvent.event_type.in_(["visit", "redirect"]),
             LandingEvent.created_at >= since,
         ).first()
         return {"repeat": bool(recent)}

@@ -578,6 +578,17 @@ def import_domains(
         ).first()
         if exists:
             continue
+        # 审计 P2：RLS 会话内查重看不见他团队——同一域名曾可进第二个团队的库（跨租户双行
+        # → 续费 cron 双扣/流量串页）。超管会话查全库去重。
+        from ..core.database import SuperSessionLocal
+        _sdb = SuperSessionLocal()
+        try:
+            _any = _sdb.query(LandingDomain).filter(
+                LandingDomain.domain == name, LandingDomain.status == "active").first()
+        finally:
+            _sdb.close()
+        if _any:
+            continue
         db.add(LandingDomain(tenant_id=user.tenant_id, domain=name,
                              source="imported", status="active"))
         added += 1
