@@ -1685,30 +1685,40 @@ def _run_self_check(db, p, include_fb=True, live_probe=True, loc: str = "zh"):
         checks.append({"key": "protection", "label": L(loc, "landing.scProtection"), "status": "warn", "detail": L(loc, "landing.scDetailProtectionOff")})
     # 8. FB 平台封禁（慢，发布时跳过）——域名级 + 子码级
     if include_fb:
-        # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
-        # 内置 30s 拖满，手动自检整体撞前端超时）
-        fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
-        checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
-        # 子码级 FB 封禁检测（扫描所有 active 子码）
         from ..models.launch import LandingAdLink
         _active_links = db.query(LandingAdLink).filter(
             LandingAdLink.page_id == p.id, LandingAdLink.tenant_id == p.tenant_id,
             LandingAdLink.status == "active"
         ).all()
-        if _active_links:
-            # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
-            _probe_res = _fb_ban_probe_batch(
-                db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
-            _blocked_slugs = [_link.slug for _link, (_st, _d)
-                              in zip(_active_links, _probe_res) if _st == "fail"]
-            if _blocked_slugs:
-                checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
-                               "status": "fail",
-                               "detail": L(loc, "landing.scDetailFbSubcodeBlocked", n=len(_blocked_slugs), m=len(_active_links), lst=",".join(_blocked_slugs[:5]))})
-            else:
+        if p.block_enabled:
+            # 防护开启时内置爬虫拦截会挡掉 FB 爬虫（facebookexternalhit/facebot/meta-externalagent），
+            # FB scrape 永远拿不到页面元信息 → 探测必然报"appsite/al:ios:url"参数错。跳过并如实标注（非封禁）。
+            checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"),
+                           "status": "pass", "detail": L(loc, "fb.scrapeBlockedByProtection")})
+            if _active_links:
                 checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
                                "status": "pass",
-                               "detail": L(loc, "landing.scDetailFbSubcodeOk", n=len(_active_links))})
+                               "detail": L(loc, "fb.scrapeBlockedByProtectionSubcode", n=len(_active_links))})
+        else:
+            # 单 URL 走 batch 版：复用其 10s 超时兜底（裸调 _fb_ban_probe 会被 fb_client
+            # 内置 30s 拖满，手动自检整体撞前端超时）
+            fb_status, fb_detail = _fb_ban_probe_batch(db, p.tenant_id, [base], loc=loc)[0]
+            checks.append({"key": "fb_ban", "label": L(loc, "landing.scFbBan"), "status": fb_status, "detail": fb_detail})
+            # 子码级 FB 封禁检测（扫描所有 active 子码）
+            if _active_links:
+                # 并发 scrape（串行 N×30s 会撞网关超时）；结果与 links 同序
+                _probe_res = _fb_ban_probe_batch(
+                    db, p.tenant_id, [f"{base.rstrip('/')}/a/{_link.slug}" for _link in _active_links], loc=loc)
+                _blocked_slugs = [_link.slug for _link, (_st, _d)
+                                  in zip(_active_links, _probe_res) if _st == "fail"]
+                if _blocked_slugs:
+                    checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
+                                   "status": "fail",
+                                   "detail": L(loc, "landing.scDetailFbSubcodeBlocked", n=len(_blocked_slugs), m=len(_active_links), lst=",".join(_blocked_slugs[:5]))})
+                else:
+                    checks.append({"key": "fb_subcode", "label": L(loc, "landing.scFbSubcode"),
+                                   "status": "pass",
+                                   "detail": L(loc, "landing.scDetailFbSubcodeOk", n=len(_active_links))})
     # 9. 预览模式（关=正常运营 pass；开=提醒审核完关掉 warn，避免每页都黄）
     checks.append({"key": "preview", "label": L(loc, "landing.scPreview"),
                    "status": "warn" if p.preview_enabled else "pass",
