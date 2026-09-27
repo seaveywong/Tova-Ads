@@ -3217,10 +3217,22 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
               or list(_pg_health))
         if _c:
             _page_id = _c[0]
-    elif _page_id and _page_id in _pg_health and not _pg_health[_page_id]["ok"]:
+    # 健康检查面（复审 P1 补全）：不只基础页——树节点页（批O-2 一等特性）与跟帖帖源页
+    # （reuse_post_ref 前缀）才是各广告实际落地页，任一未发布即拒投（建系列前，无残留）
+    _needs = {_page_id} if _page_id else set()
+    for _sn in (adsets or []):
+        for _an in (_sn.get("ads") or []):
+            _np = str(_an.get("page_id") or "")
+            if _np:
+                _needs.add(_np)
+            _ref = str(_an.get("reuse_post_ref") or "")
+            if _ref and "_" in _ref:
+                _needs.add(_ref.split("_", 1)[0])
+    _bad_pg = [pid for pid in _needs if pid in _pg_health and not _pg_health[pid]["ok"]]
+    if _bad_pg:
         raise FbApiError(
             "no_id",
-            f"所选主页「{_pg_health[_page_id]['name'] or _page_id}」已取消发布（不可投放）——"
+            f"所选主页「{_pg_health[_bad_pg[0]]['name'] or _bad_pg[0]}」已取消发布（不可投放）——"
             "请先在 FB 恢复主页，或在部署抽屉换已发布的主页")
 
     _item_note(sdb, item, "创建系列…")   # 批BQ：分步进度可见

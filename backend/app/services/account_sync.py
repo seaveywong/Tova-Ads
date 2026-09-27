@@ -343,7 +343,7 @@ def run_account_status_sync():
                 AccountFbCredential.status == "active",
                 Account.is_managed.is_(True)).all():
             _link_map.setdefault(_cid, set()).add(_aid)
-        _synced_acts: set = set()
+        _synced_acts: set = set()   # 键 (tenant_id, act_id)——裸 act_id 跨租户去重会让后遍历租户的同账户行永久饥饿（复审 P1）
         counters = {"alerted": alerted, "recovered": recovered, "low_balance_alerts": low_balance_alerts}
         creds = db.query(FbCredential).filter(
             FbCredential.status.in_(("active", "rate_limited"))).all()
@@ -362,7 +362,7 @@ def run_account_status_sync():
             for raw in raw_accounts:
               try:
                 act_id = str(raw.get("account_id", ""))
-                if not act_id or act_id in _synced_acts:
+                if not act_id or (tenant_id, act_id) in _synced_acts:
                     continue   # 本轮已同步（多令牌可见同一账户：只刷一次，绑定令牌即权威）
                 acc = db.query(Account).filter(
                     Account.act_id == act_id, Account.tenant_id == tenant_id,
@@ -375,7 +375,7 @@ def run_account_status_sync():
                 if acc.fb_credential_id != cred.id and act_id not in _link_map.get(cred.id, ()):
                     continue
                 _apply_sync_raw(db, fb, tenant_id, acc, raw, threshold_usd, counters)
-                _synced_acts.add(act_id)
+                _synced_acts.add((tenant_id, act_id))
                 synced += 1
                 # 每 25 个账户提交一次——中途异常不再丢掉已处理账户的余额/状态更新
                 if synced % 25 == 0:
@@ -392,7 +392,7 @@ def run_account_status_sync():
             from ..core.fb_tokens import _account_write_candidates as _cands
             _uncovered = [a for a in db.query(Account).filter(
                 Account.is_managed.is_(True)).all()
-                if (a.platform or "fb") == "fb" and a.act_id not in _synced_acts]
+                if (a.platform or "fb") == "fb" and (a.tenant_id, a.act_id) not in _synced_acts]
             if _uncovered:
                 logger.info(f"[AccountSync] {len(_uncovered)} 个账户未见于任何令牌列表，batch 点查兜底")
             _groups: dict = {}
@@ -420,7 +420,7 @@ def run_account_status_sync():
                         try:
                             _apply_sync_raw(db, _fb, _acc.tenant_id, _acc, _meta,
                                             threshold_usd, counters)
-                            _synced_acts.add(_acc.act_id)
+                            _synced_acts.add((_acc.tenant_id, _acc.act_id))
                             synced += 1
                         except Exception as _e:
                             logger.warning(f"[AccountSync] 兜底账户 {_acc.act_id} 处理异常: {_e}")
@@ -439,8 +439,10 @@ def run_account_status_sync():
             logger.warning(f"[AccountSync][TT] 同步异常: {e}")
             db.rollback()
         db.commit()
-        alerted, recovered, low_balance_alerts = (counters["alerted"], counters["recovered"],
-                                                    counters["low_balance_alerts"])
+        # FB counters 回写后再跑 TT（曾顺序相反：TT 计数被 counters 覆盖少报——复审 P2）
+        alerted += counters["alerted"]
+        recovered += counters["recovered"]
+        low_balance_alerts += counters["low_balance_alerts"]
         logger.info(f"[AccountSync] 同步 {synced} 账户，{alerted} 异常告警，{recovered} 恢复，{low_balance_alerts} 低额告警")
     finally:
         db.close()

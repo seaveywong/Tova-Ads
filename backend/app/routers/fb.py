@@ -869,7 +869,8 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
         row = merged[pid]
         row["via_cred"] = " / ".join(row.pop("via_creds"))
         out.append(row)
-    out.sort(key=lambda x: (-(x["live_ads"] or 0), -(x["fan_count"] or 0)))
+    # 未发布红旗置顶（复审 P2，对齐「需关注在上」排序原则），其余按在投数/粉丝数
+    out.sort(key=lambda x: (x.get("is_published") is not False, -(x["live_ads"] or 0), -(x["fan_count"] or 0)))
     _asset_cache_set(ck, out)
     return out
 

@@ -180,7 +180,7 @@ def maybe_recompute(db, tenant_id: int, max_age_h: int = 6):
         # advisory lock 自持连接（acquire_run_lock(key) 单参，返回持锁 conn；非 session 方法——
         # 曾误传 db 导致 TypeError 500 素材页全挂）。try 拿不到=别人在算，本请求直接跳过。
         from ..core.database import acquire_run_lock, release_run_lock
-        _lock_conn = acquire_run_lock(120)
+        _lock_conn = acquire_run_lock(123)   # 复审：120 三撞（domain_renewal/page_health），请求路径换 123
         if not _lock_conn:
             return
         try:

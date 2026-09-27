@@ -121,7 +121,8 @@ def _emit_page_alert(db, tenant_id: int, ph: PageHealth, level: str, event_type:
         except Exception as e:
             logger.warning(f"[PageHealth] 告警发送失败 page {ph.page_id} uid={uid}: {e}")
     write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
-              target_type="fb_page", target_id=str(ph.page_id), action_type="page_health",
+              target_type="fb_page", target_id=str(ph.page_id), action_type=event_type,
+              # 锚点 action_type 必须与 dedup 键一致（复审 P1：曾写 "page_health" → 6h 去重永不命中）
               source="page_health", result="alerted",
               trigger_detail=title[:120], metadata={"page_id": ph.page_id,
                                                     "is_published": ph.is_published,
@@ -134,7 +135,7 @@ def run_page_health_scan() -> dict:
     upsert 快照对比旧值 → 翻转告警（挂=critical / 恢复=info / 删除=critical）。
     多令牌可见同一页：任一令牌读到即 seen；is_published 取该页任一读数（页属性与令牌无关）。
     全部令牌都读不到 → 单页 GET 复核（100/33=已删；能读=更新）。"""
-    lock = acquire_run_lock(120)
+    lock = acquire_run_lock(122)   # 复审 P1：120 与 asset_scoring/domain_renewal 三撞（锁号唯一铁律）
     if not lock:
         return {"skipped": True}
     db = SuperSessionLocal()
@@ -211,6 +212,11 @@ def run_page_health_scan() -> dict:
                 continue
             cred = cred_by_id.get(ph.via_cred_id or 0)
             fb = FbClient(decrypt(cred.access_token_enc)) if cred else None
+            if not fb:
+                # 复审 P2（高险）：探测令牌不可用时曾误判全部页 gone → 逐页 critical TG 风暴。
+                # 跳过复核保留 seen 旧值（下轮令牌恢复再看），只记日志
+                logger.warning(f"[PageHealth] page {pid} 复核跳过（探测令牌 #{ph.via_cred_id} 不可用）")
+                continue
             gone = True
             if fb:
                 try:
@@ -244,4 +250,4 @@ def run_page_health_scan() -> dict:
         return {"error": True}
     finally:
         db.close()
-        release_run_lock(lock, 120)
+        release_run_lock(lock, 122)

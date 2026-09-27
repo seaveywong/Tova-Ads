@@ -269,6 +269,7 @@ const randomAssignPages = () => {
     const pin = deployItems.value[id]?.cred_id || 0
     return (accPages.value[id] || []).filter(p => p.id && !used.has(p.id)
       && p.can_advertise !== false
+      && p.is_published !== false   // 复审 P1：未发布页随机选中必失败（与手选/自动换页同闸）
       && (!pin || p.via_cred_id === pin))
   }
   const order = ids.map(id => ({
