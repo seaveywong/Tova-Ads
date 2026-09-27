@@ -237,6 +237,8 @@ def run_usdt_monitor():
                 db.commit()
                 logger.info(f"[USDT] 充值 #{tp.id} 入账 ${tp.amount_usd}")
                 break
+        # 无法认领的到账告警（充值单取消后付款/无单直转/金额不符——曾完全静默）
+        _alert_unknown_payments(db, addrs, tx_cache, used_txids)
         # ── 卡死订单收口（审计 P1：扣款后进程死在注册链 → 订单永久卡 registering，
         # approve 拒绝重入、无退款入口）——每轮扫超 30 分钟的 registering 钱包订单：
         # 已有退款流水 → 直接 failed（可重试，重试会重新扣款）；无退款 → 自动退款+failed ──
@@ -283,8 +285,56 @@ def _reap_stuck_wallet_orders(db) -> None:
     except Exception as e:
         db.rollback()
         logger.warning(f"[USDT] 卡死订单收口异常: {e}")
+
+
+def _alert_unknown_payments(db, addrs, tx_cache, used_txids) -> None:
+    """无法认领的到账告警（审计 P1：充值单取消后付款/无单直转/金额不符——款到了链上
+    但没有任何 pending 单能认领，曾完全静默）。已消费 txid 之外的近期入账 → 平台告警。"""
+    try:
+        from ..core.notify_utils import emit_notification
+        from ..core.log_utils import new_trace_id
+        for addr in addrs:
+            txs = tx_cache.get(addr) or _fetch_incoming(addr, "")
+            # 重新拉（tx_cache 可能未覆盖该地址——本轮没有分配到它的 pending 单）
+            if addr not in tx_cache:
+                txs = _fetch_incoming(addr, _tg_key_of(db))
+            for t in txs:
+                try:
+                    _txid = str(t.get("transaction_id") or "")
+                    amt = round(int(t.get("value", "0")) / 1e6, 2)
+                    ts = datetime.fromtimestamp(int(t.get("block_timestamp", 0)) / 1000.0, tz=timezone.utc)
+                except Exception:
+                    continue
+                if _txid in used_txids or (t.get("to") or "") != addr:
+                    continue
+                if datetime.now(timezone.utc) - ts > timedelta(minutes=30):
+                    continue   # 只报近 30 分钟的新到账（历史孤儿单一次性太多，人工对账另做）
+                emit_notification(db, tenant_id=1, level="warning",
+                                  event_type="payment_unclaimed", trace_id=new_trace_id(),
+                                  title=f"收到无法自动认领的 USDT ${amt}",
+                                  body=f"地址 {addr[:16]}… TXID {_txid}\n"
+                                       f"没有匹配的待付款订单/充值单（可能：充值单被取消后付款、"
+                                       f"金额不符、或无单直转）。请人工核对链上与用户诉求后处理。",
+                                  dedup_recent=3600)
+                db.commit()
+                logger.warning(f"[USDT] 无法认领到账 ${amt} txid={_txid[:16]}…")
+                break   # 每地址每轮最多报一条（dedup 兜底）
     except Exception as e:
-        logger.warning(f"[USDT] 监听异常: {e}")
-    finally:
-        db.close()
-        release_run_lock(_lock, 121)
+        db.rollback()
+        logger.warning(f"[USDT] 无法认领告警异常: {e}")
+
+
+def _tg_key_of(db) -> str:
+    from ..core.config import env_val
+    from ..models.system import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == "payment_usdt").first()
+    if row and row.value:
+        try:
+            import json as _json
+            k = str(_json.loads(row.value).get("trongrid_api_key") or "")
+            if k:
+                return k
+        except Exception:
+            pass
+    return env_val("TRONGRID_API_KEY")
+
