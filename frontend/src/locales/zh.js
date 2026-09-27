@@ -1132,6 +1132,7 @@ export default {
     needEmail: '请输入邮箱', invite: '邀请', emailPh: '成员邮箱（Facebook 账号邮箱）', adminConfirm: 'ADMIN 可以管理该 BM 的所有成员和资产（包括增删其他管理员），权限较大。确定授予？', removeConfirm: '移除成员「{n}」？其 BM 权限即时失效。', writeBlocked: 'BM 管理操作暂不可用：Facebook App 需通过 business_management 权限审核（App Review → Manage business people and assets），且 App 需切换为 Live Mode。审核通过后此功能自动恢复。', invited: '邀请已发送', noAssets: '暂无资产数据（或令牌无权限读取）', none: '暂无 BM（令牌未关联 Business Manager）', roleFull: '完全控制', roleEmployee: '普通成员',
   },
   pg: {
+    unpublished: '未发布',
     searchPh: '搜索主页名 / ID / 归属令牌', total: '共 {n} 个主页',
     colPage: '主页', colVia: '归属令牌', colCat: '类型', colFans: '粉丝', colAds: '在投广告', colTpl: '被模板引用',
     tplN: '{n} 个', copyId: '点击复制 ID', noMatch: '无匹配主页', none: '暂无主页（令牌未配置或无可管主页）', renameBtn: '改名', categoryBtn: '改类型', categoryPh: '搜索或输入主页类别', pageRenamePrompt: '新的主页名称（将真实修改 Facebook 主页名）', pageRenameLimit: '名称需 1-100 字符', pageRenamed: '主页已改名', pageCategoryPrompt: '新的主页类别（如 Internet Marketing Service，将真实修改 FB 主页类型；需主页管理权限）', pageCategoryLimit: '1-120 字符', pageCategorySaved: '主页类别已更新',
@@ -1142,7 +1143,7 @@ export default {
     usedBy: '{n} 个落地页在用', noUse: '此域暂无落地页在用', noMine: '还没有团队域名——买一个或绑定自有域名', goBuy: '去买域名',
     approve: '确认收款', approveOk: '{d} 已确认收款，自动注册并接入中（完成入「我的域名」）', approveParked: '{reg} 尚未配置凭据，订单已标记「已收款」；配置注册商后再点「确认收款」继续注册',
     takenNow: '域名 {d} 刚被占用或不可注册，已从列表移除——换一个试试', payPoolN: '点「去支付」查看本单收款地址',
-    scanPay: '扫码支付（TokenPocket/TronLink）', payDomain: '订单域名', payAmtLabel: '应付金额', amtCopied: '金额已复制', waitingPay: '等待到账…', payAutoDetect: '转账后约 1-2 分钟自动确认并交付，无需人工。', payBtn: '去支付', payTo: '请向以下地址转 USDT：', payCopied: '收款地址已复制', stDetected: '已到账·注册中', payAmt: '应付 ${v}', payAmtTip: '请按此金额精确转账，到账后自动确认', orderedPay: '已下单，应付 ${v}（USDT，订单页有收款地址）', listNote: '价格含全部费用（价低在前）· 实际可注册性与实时价以下单核验为准', costBrkTip: '内部口径：域名成本+平台服务费（仅超管可见）',
+    scanPay: '扫码支付（TokenPocket/TronLink）', payDomain: '订单域名', payAmtLabel: '应付金额', amtCopied: '金额已复制', waitingPay: '等待到账…', payAutoDetect: '转账后约 1-2 分钟自动确认并交付，无需人工。', payBtn: '去支付', payTo: '请向以下地址转 USDT：', payCopied: '收款地址已复制', stDetected: '已到账·注册中', payAmt: '应付 ${v}', payAmtTip: '请按此金额精确转账，到账后自动确认', orderedPay: '已下单，应付 ${v}（USDT，订单页有收款地址）', listNote: '价格含全部费用（价低在前）· 实际可注册性与实时价以下单核验为准', costBrkTip: '成本拆分：域名成本 + 平台服务费（仅超管可见）',
   },
   wallet: {
     tab: '钱包', balanceLabel: '团队余额', teamNote: '团队共用（买单/续费从这扣）',

@@ -1,0 +1,205 @@
+# -*- coding: utf-8 -*-
+"""主页健康扫描（2026-09-27）：主页挂了/禁用的感知 + 影响面告警。
+
+判据（CLI 实测定案，2026-09-27 服务器真实令牌验证）：
+- /me/accounts 的 is_published=False = 未发布/下架（job82 部署失败实证页 Mebrelablo
+  Plogordmire 返 False；管理员令牌可读、无需新权限）
+- promotion_eligible=False = 不可投广告（伴随未发布出现）
+- 页从全部令牌列表消失 → 单页 GET 复核：error code 100/subcode 33 = 已删/不可达
+- FB Page webhook 无状态字段可订阅（官方字段表核实）——只能轮询；每令牌每轮 1 次调用
+
+影响面：ads_cache 每广告 creative.effective_object_story_id 前缀即 page_id（与资产页
+「关联广告数」同源，fb.py pages-overview），叠加在投状态过滤 + 账户聚合。
+告警：critical + dedup_recent 6h/page（notify-dedup-mandatory 铁律）+ NO_CAP_EVENTS。
+"""
+import logging
+from datetime import datetime, timezone
+
+from sqlalchemy import text as _t
+
+from ..core.database import SuperSessionLocal, acquire_run_lock, release_run_lock
+from ..core.encryption import decrypt
+from ..core.fb_client import FbClient
+from ..core.log_utils import new_trace_id, write_log
+from ..core.notify_utils import emit_notification, dedup_recent
+from ..models.fb import FbCredential, PageHealth
+
+logger = logging.getLogger("toveads.page_health")
+
+# 在投状态（影响面只数真正在跑的广告——DISAPPROVED/PAUSED 不算）
+_LIVE_STATUSES = ("ACTIVE", "IN_PROCESS", "LEARNING", "LEARNING_COMPLETED")
+
+
+def page_impact(db, tenant_id: int, page_id: str) -> dict:
+    """主页 → 影响面：{ads_total, ads_live, live_acts, live_names}。
+    解析 ads_cache.ads_json 的 creative.effective_object_story_id（{page_id}_{post_id}），
+    前缀匹配 + 在投状态过滤 + 账户去重（与 pages-overview 的 live_ads 同源，口径补状态过滤）。"""
+    total = live = 0
+    live_acts: set = set()
+    live_names: list = []
+    rows = db.execute(_t(
+        "SELECT act_id, ads_json FROM ads_cache WHERE tenant_id = :t AND platform = 'fb' "
+        "AND ads_json IS NOT NULL"), {"t": tenant_id}).fetchall()
+    prefix = f"{page_id}_"
+    for act_id, blob in rows:
+        try:
+            import json
+            ads = json.loads(blob or "[]")
+        except Exception:
+            continue
+        for ad in ads:
+            story = str(((ad.get("creative") or {}).get("effective_object_story_id")) or "")
+            if not story.startswith(prefix):
+                continue
+            total += 1
+            if str(ad.get("effective_status") or "") in _LIVE_STATUSES:
+                live += 1
+                live_acts.add(act_id)
+                if len(live_names) < 5:
+                    live_names.append(str(ad.get("name") or "")[:40])
+    return {"ads_total": total, "ads_live": live, "live_acts": live_acts, "live_names": live_names}
+
+
+def _fmt_impact(imp: dict) -> str:
+    """影响面文案：在投广告 N 个 / M 个账户（+前 5 个广告名）；无在投时给关联总数。"""
+    if imp["ads_live"]:
+        names = "、".join(n for n in imp["live_names"] if n)
+        return (f"影响 {imp['ads_live']} 个在投广告 / {len(imp['live_acts'])} 个账户"
+                + (f"（{names}…）" if names else ""))
+    return f"当前无在投广告（关联广告 {imp['ads_total']} 个）"
+
+
+def _emit_page_alert(db, tenant_id: int, ph: PageHealth, level: str, event_type: str,
+                     title: str, body: str) -> None:
+    """告警 + dedup 锚点 + 留痕（dedup 6h/page；NO_CAP_EVENTS 见 notify_utils）。
+    dedup_recent 返回 True=近期已发应跳过（此处曾写反致告警永不发出——smoke 断言抓出）。"""
+    if dedup_recent(db, tenant_id, event_type, str(ph.page_id), 360):
+        return
+    try:
+        emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
+                          title=title, body=body, roles=["owner", "operator"],
+                          trace_id=new_trace_id(), target_type="fb_page",
+                          target_id=str(ph.page_id), force_tg=(level == "critical"))
+    except Exception as e:
+        logger.warning(f"[PageHealth] 告警发送失败 page {ph.page_id}: {e}")
+    write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+              target_type="fb_page", target_id=str(ph.page_id), action_type="page_health",
+              source="page_health", result="alerted",
+              trigger_detail=title[:120], metadata={"page_id": ph.page_id,
+                                                    "is_published": ph.is_published})
+
+
+def run_page_health_scan() -> dict:
+    """主页健康扫描（cron 每 1h，advisory lock 120）：
+    逐租户逐令牌拉 /me/accounts（带 is_published）→ 聚合 per (tenant, page) →
+    upsert 快照对比旧值 → 翻转告警（挂=critical / 恢复=info / 删除=critical）。
+    多令牌可见同一页：任一令牌读到即 seen；is_published 取该页任一读数（页属性与令牌无关）。
+    全部令牌都读不到 → 单页 GET 复核（100/33=已删；能读=更新）。"""
+    lock = acquire_run_lock(120)
+    if not lock:
+        return {"skipped": True}
+    db = SuperSessionLocal()
+    now = datetime.now(timezone.utc)
+    alerted = recovered_cnt = upserted = 0
+    try:
+        creds = db.query(FbCredential).filter(
+            FbCredential.status.in_(("active", "rate_limited")),
+        ).all()   # FB 令牌表本身就是 FB 域（TT 在独立表），无平台列
+        # (tenant, page_id) → 观测聚合
+        seen_map: dict = {}
+        cred_by_id = {c.id: c for c in creds}
+        for c in creds:
+            try:
+                pages = FbClient(decrypt(c.access_token_enc)).get_pages() or []
+            except Exception as e:
+                from ..core.fb_tokens import mark_expired_on_auth_error
+                mark_expired_on_auth_error(db, c, e)   # 批JJ：过期判死（非过期错 no-op）
+                logger.warning(f"[PageHealth] cred {c.id} 拉主页失败: {str(e)[:90]}")
+                continue
+            for p in pages:
+                pid = str(p.get("id") or "")
+                if not pid:
+                    continue
+                ent = seen_map.setdefault((c.tenant_id, pid), {
+                    "name": p.get("name") or pid, "cred_id": c.id,
+                    "is_published": p.get("is_published", True) is not False,
+                    "promotion_eligible": p.get("promotion_eligible")})
+                # 任一令牌读到 published=True 即以 true 为准（页属性，读数应一致；防单令牌毛刺）
+                if ent["is_published"] is False and p.get("is_published") is True:
+                    ent["is_published"] = True
+                    ent["cred_id"] = c.id
+        # 对比 + upsert
+        existing = {(ph.tenant_id, ph.page_id): ph for ph in db.query(PageHealth).all()}
+        for (tenant_id, pid), obs in seen_map.items():
+            ph = existing.get((tenant_id, pid))
+            imp = None
+            if ph is None:
+                db.add(PageHealth(tenant_id=tenant_id, page_id=pid, name=obs["name"],
+                                  via_cred_id=obs["cred_id"], is_published=obs["is_published"],
+                                  promotion_eligible=obs["promotion_eligible"],
+                                  seen=True, checked_at=now))
+                upserted += 1
+                continue   # 首轮建基线不告警（存量未发布页已知，不追溯轰炸）
+            was_pub, now_pub = bool(ph.is_published), obs["is_published"]
+            ph.name = obs["name"]; ph.via_cred_id = obs["cred_id"]
+            ph.promotion_eligible = obs["promotion_eligible"]
+            ph.seen = True; ph.checked_at = now
+            if was_pub and not now_pub:
+                imp = page_impact(db, tenant_id, pid)
+                ph.is_published = False
+                _emit_page_alert(
+                    db, tenant_id, ph, "critical", "page_unavailable",
+                    f"主页不可用 · {obs['name']}",
+                    f"主页：{obs['name']}（{pid}）\n状态：<b>已取消发布/不可用</b>\n"
+                    f"{'⚠️ ' + _fmt_impact(imp) if imp else ''}\n"
+                    "该主页下的广告可能被拒/无法投放，部署也会失败——请到 FB 恢复主页或换绑主页")
+                alerted += 1
+            elif not was_pub and now_pub:
+                ph.is_published = True
+                _emit_page_alert(
+                    db, tenant_id, ph, "info", "page_recovered",
+                    f"主页已恢复 · {obs['name']}",
+                    f"主页：{obs['name']}（{pid}）\n状态：已重新发布，可正常投放")
+                recovered_cnt += 1
+            else:
+                ph.is_published = now_pub
+            upserted += 1
+        # 消失页复核：上轮 seen 且本轮不可见 → 单页 GET（100/33=已删告警；能读=更新快照）
+        for (tenant_id, pid), ph in existing.items():
+            if (tenant_id, pid) in seen_map or not ph.seen:
+                continue
+            cred = cred_by_id.get(ph.via_cred_id or 0)
+            fb = FbClient(decrypt(cred.access_token_enc)) if cred else None
+            gone = True
+            if fb:
+                try:
+                    r = fb.get(f"/{pid}", params={"fields": "id,name,is_published"})
+                    if r.get("id"):
+                        gone = False
+                        ph.seen = True; ph.checked_at = now
+                        ph.is_published = r.get("is_published", ph.is_published) is not False
+                        ph.name = r.get("name") or ph.name
+                except Exception:
+                    gone = True
+            if gone:
+                ph.seen = False; ph.checked_at = now
+                imp = page_impact(db, tenant_id, pid)
+                _emit_page_alert(
+                    db, tenant_id, ph, "critical", "page_unavailable",
+                    f"主页不可达 · {ph.name}",
+                    f"主页：{ph.name}（{pid}）\n状态：<b>已删除或令牌失去访问</b>\n"
+                    f"{'⚠️ ' + _fmt_impact(imp) if imp['ads_live'] else ''}\n"
+                    "请检查令牌授权或该主页是否已被删除")
+                alerted += 1
+            upserted += 1
+        db.commit()
+        logger.info(f"[PageHealth] 扫描 {len(seen_map)} 页，告警 {alerted}，恢复 {recovered_cnt}")
+        return {"pages": len(seen_map), "alerted": alerted,
+                "recovered": recovered_cnt, "upserted": upserted}
+    except Exception:
+        logger.exception("[PageHealth] 扫描异常")
+        db.rollback()
+        return {"error": True}
+    finally:
+        db.close()
+        release_run_lock(lock, 120)

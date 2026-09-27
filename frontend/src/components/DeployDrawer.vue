@@ -636,8 +636,8 @@ defineExpose({ open, showPreflight })
             <el-select v-model="deployItems[a.act_id].page_id" size="small" filterable style="width:100%">
               <el-option value="" :label="t('launch.defaultVal', { v: deployTpl?.page_id || t('launch.none') })" />
               <el-option v-for="p in pageOptsFor(a.act_id)" :key="p.id" :value="p.id"
-                         :label="p.name + ' (' + p.id + ')' + (p.via_cred ? ' · ' + p.via_cred : '') + (p.can_advertise ? '' : ' · ' + t('launch.pgNoAd'))"
-                         :disabled="!p.can_advertise" />
+                         :label="p.name + ' (' + p.id + ')' + (p.via_cred ? ' · ' + p.via_cred : '') + (p.can_advertise ? '' : ' · ' + t('launch.pgNoAd')) + (p.is_published === false ? ' · ' + t('launch.pageUnpublished') : '')"
+                         :disabled="!p.can_advertise || p.is_published === false" />
             </el-select>
             <label>{{ t('launch.credLabel') }}</label>
             <el-select v-model="deployItems[a.act_id].cred_id" size="small" style="width:100%" :title="t('launch.credHint')">

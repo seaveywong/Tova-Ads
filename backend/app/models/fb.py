@@ -91,3 +91,20 @@ class AccountFbCredential(Base):
     status = Column(Text, default="active")  # active / disabled
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint("account_id", "fb_credential_id", name="uq_acct_cred"),)
+
+
+class PageHealth(Base):
+    """主页健康快照（2026-09-27 迁移 0110）：轮询 /me/accounts 的 is_published 判据落库，
+    状态翻转（发布↔未发布/消失）由 page_health 扫描对比产生告警；恢复也通知。
+    每 (tenant, page) 一行 upsert；seen=本轮任何令牌可见（全不可见时单页复核判删除）。"""
+    __tablename__ = "page_health"
+    id = Column(BigInteger, primary_key=True)
+    tenant_id = Column(BigInteger, ForeignKey("tenants.id"), nullable=False)
+    page_id = Column(Text, nullable=False)
+    name = Column(Text)
+    via_cred_id = Column(BigInteger)
+    is_published = Column(Boolean, nullable=False, server_default="true")
+    promotion_eligible = Column(Boolean)
+    seen = Column(Boolean, nullable=False, server_default="true")
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (UniqueConstraint("tenant_id", "page_id", name="uq_page_health_tenant_page"),)

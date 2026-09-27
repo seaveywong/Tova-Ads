@@ -232,6 +232,9 @@ def _start_scheduler():
     _scheduler.add_job(run_subcode_autobind, "interval", minutes=_eff["subcode"], id="subcode_autobind")
     _scheduler.add_job(run_sentinel_patrol, "interval", minutes=_eff["sentinel"], id="sentinel_patrol")
     _scheduler.add_job(run_account_status_sync, "interval", minutes=_eff["account_sync"], id="account_status_sync")
+    # 主页健康扫描（2026-09-27 迁移 0110）：is_published 翻转告警 + 影响面；advisory lock 120（service 内取锁，多 worker 防重）
+    from .services.page_health import run_page_health_scan
+    _scheduler.add_job(run_page_health_scan, "interval", minutes=60, id="page_health_scan")
     _scheduler.add_job(run_ads_cache_sync, "interval", minutes=15, id="ads_cache_sync")
     _scheduler.add_job(run_leads_poll, "interval", minutes=10, id="leads_poll")
     # USDT-TRC20 到账监听（域名商店）：2min 轮询链上入账，尾数对号 → payment_detected

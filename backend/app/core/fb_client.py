@@ -266,9 +266,12 @@ class FbClient:
         return out
 
     def get_pages(self) -> list[dict]:
-        """拉取可管理的主页列表（全量分页）。"""
+        """拉取可管理的主页列表（全量分页）。
+        is_published/promotion_eligible：主页健康判据（2026-09-27 CLI 实测定案——
+        is_published=False 即未发布/下架，部署必失败「公共主页未发布」；管理员令牌可读，
+        无需新权限）。"""
         return self.get_paged("me/accounts", {
-            "fields": "id,name,category,can_post,fan_count,tasks",
+            "fields": "id,name,category,can_post,fan_count,tasks,is_published,promotion_eligible",
         })
 
     def get_page_access_token(self, page_id: str) -> str:

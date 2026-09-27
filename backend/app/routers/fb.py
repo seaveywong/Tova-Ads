@@ -850,12 +850,15 @@ def pages_overview(user: CurrentUser = Depends(require_permission("ads.read")),
                        "category": pg.get("category", ""),
                        "fan_count": pg.get("fan_count", 0),
                        "can_advertise": "ADVERTISE" in (pg.get("tasks") or []),
+                       "is_published": pg.get("is_published") is not False,   # 主页健康（批 2：未发布=红旗）
                        "via_creds": [], "via_cred": "", "via_cred_id": 0,
                        "live_ads": live_ads.get(pid, 0),
                        "tpl_refs": tpl_ref.get(pid, [])[:5],
                        "tpl_ref_count": len(tpl_ref.get(pid, []))}
                 merged[pid] = row
                 order.append(pid)
+            if pg.get("is_published") is True:
+                row["is_published"] = True   # 任一令牌读到已发布即视为已发布（页属性，防单令牌毛刺）
             _alias = cred.alias or f"#{cred.id}"
             if _alias not in row["via_creds"]:
                 row["via_creds"].append(_alias)

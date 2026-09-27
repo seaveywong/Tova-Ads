@@ -32,6 +32,8 @@ NO_CAP_EVENTS = {
     "rule_pause",
     # tg_channel_down：通道故障告警自身（per-chat 6h dedup，最多 ~4 条/日/chat，不会真风暴）
     "tg_channel_down",
+    # page_unavailable/recovered：主页挂了/恢复（per-page 6h dedup；挂=critical 恒推 TG）
+    "page_unavailable", "page_recovered",
 }
 DEFAULT_STORM_CAP = 30
 

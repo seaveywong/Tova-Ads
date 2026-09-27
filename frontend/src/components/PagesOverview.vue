@@ -85,7 +85,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
             <button class="ctrl-btn sm primary" @click="saveEdit">{{ t('common.save') }}</button>
           </template>
           <template v-else>
-            <span class="pg-title" :title="r.name" @dblclick="startEdit(r, 'name')" @click="copyId(r.id)">{{ r.name }}</span>
+            <span class="pg-title" :title="r.name" @dblclick="startEdit(r, 'name')" @click="copyId(r.id)">{{ r.name }}<i v-if="r.is_published === false" class="pg-unpub">{{ t('pg.unpublished') }}</i></span>
             <span class="pg-id mono" @click="copyId(r.id)" :title="t('pg.copyId')">{{ r.id }}</span>
           </template>
         </span>
@@ -122,6 +122,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
 .pg-head-row { color: var(--t3); font-size: 11px; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--bd); }
 .pg-name { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
 .pg-title { font-weight: 600; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+.pg-unpub { font-style: normal; font-size: 10px; color: var(--error); background: rgba(255,69,58,.12); border-radius: 4px; padding: 0 6px; margin-left: 6px; vertical-align: 1px; }
 .pg-id { font-size: 10px; color: var(--t3); }
 .pg-col { width: 110px; flex: none; color: var(--t2); }
 .pg-col.via { width: 150px; }

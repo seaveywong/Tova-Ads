@@ -1454,6 +1454,8 @@ def _auto_switch_page(sdb, tenant_id: int, item, old_pages: set,
                 continue   # 老页本身就选不出令牌，换页才有意义
             if "ADVERTISE" not in (p.get("tasks") or []):
                 continue
+            if p.get("is_published") is False:
+                continue   # 未发布页换了也必失败（批 2 健康闸）
             item.page_id = pid
             if page_name_cache is not None:
                 page_name_cache[pid] = p.get("name") or pid
@@ -3222,16 +3224,31 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
     auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     _page_id = item.page_id or tpl.page_id or ""
-    # 主页自动识别（批O-2）：抽屉/模板都没指定且非跟帖 → 该账户可用主页里选第一个有广告权限的
-    # （me/accounts tasks 含 ADVERTISE；拉不到不阻断——空主页会在下游原错误路径暴露）
+    # 主页健康前置闸（批 2，2026-09-27）：is_published=False 的页拒投/不选——防系列建到
+    # 一半才报「公共主页未发布」（job82 实证 Mebrelablo Plogordmire）；判据 CLI 实测过
+    _pg_health: dict = {}
+    try:
+        for _p in (fb.get_pages() or []):
+            _pid_h = str(_p.get("id") or "")
+            if _pid_h:
+                _pg_health[_pid_h] = {
+                    "ok": _p.get("is_published") is not False,
+                    "name": (_p.get("name") or "")[:40],
+                    "adv": "ADVERTISE" in (_p.get("tasks") or [])}
+    except Exception:
+        pass   # 拉不到不阻断（旧行为：空主页在下游原错误路径暴露）
     if not _page_id and (tpl.post_source or "new") != "reuse":
-        try:
-            _pgs = fb.get_pages()
-            _adv_pgs = [p for p in _pgs if "ADVERTISE" in (p.get("tasks") or [])] or _pgs
-            if _adv_pgs:
-                _page_id = str(_adv_pgs[0].get("id") or "")
-        except Exception:
-            pass
+        # 主页自动识别（批O-2 升级）：已发布 + 有广告权限优先；全未发布时退化旧行为
+        _c = ([pid for pid, h in _pg_health.items() if h["ok"] and h["adv"]]
+              or [pid for pid, h in _pg_health.items() if h["ok"]]
+              or list(_pg_health))
+        if _c:
+            _page_id = _c[0]
+    elif _page_id and _page_id in _pg_health and not _pg_health[_page_id]["ok"]:
+        raise FbApiError(
+            "no_id",
+            f"所选主页「{_pg_health[_page_id]['name'] or _page_id}」已取消发布（不可投放）——"
+            "请先在 FB 恢复主页，或在部署抽屉换已发布的主页")
 
     def _fail_group(sname: str, snode: dict, msg: str):
         nonlocal fails
@@ -4122,6 +4139,7 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
             seen.add(pid)
             out.append({"id": pid, "name": p.get("name", ""),
                         "can_advertise": "ADVERTISE" in (p.get("tasks") or []),
+                        "is_published": p.get("is_published") is not False,
                         "fan_count": p.get("fan_count", 0),
                         "via_cred": (c.alias or f"#{c.id}"),
                         "via_cred_id": c.id})

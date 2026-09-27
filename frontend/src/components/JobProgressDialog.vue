@@ -203,9 +203,10 @@ defineExpose({ open })
     <div class="pp-hint">{{ t('launch.pagePickHint') }}</div>
     <div v-if="pagePickAccDead" class="pp-acc-dead">{{ pagePickAccDead }}</div>
     <div v-loading="pagePickLoading" class="pp-list">
-      <label v-for="p in pagePickPages" :key="p.id" :class="['pp-row', { on: pagePickSel === p.id }]">
-        <input type="radio" name="pp-sel" :value="p.id" v-model="pagePickSel" />
+      <label v-for="p in pagePickPages" :key="p.id" :class="['pp-row', { on: pagePickSel === p.id, dead: p.is_published === false }]">
+        <input type="radio" name="pp-sel" :value="p.id" v-model="pagePickSel" :disabled="p.is_published === false" />
         <span class="pp-name">{{ p.name }}</span>
+        <span v-if="p.is_published === false" class="pp-dead">{{ t('launch.pageUnpublished') }}</span>
         <span v-if="p.via_cred" class="pp-via" :title="t('launch.pagePickVia')">{{ p.via_cred }}</span>
         <span :class="['pp-ad', p.can_advertise ? 'ok' : 'warn']">{{ p.can_advertise ? t('launch.pagePickAdOk') : t('launch.pagePickAdNo') }}</span>
         <span class="pp-fans">{{ p.fan_count || 0 }} {{ t('launch.pagePickFans') }}</span>
@@ -302,6 +303,8 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .pp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:13px}
 .pp-row:hover{border-color:var(--ac)}
 .pp-row.on{border-color:var(--ac);background:color-mix(in srgb, var(--ac) 8%, transparent)}
+.pp-row.dead{opacity:.55}
+.pp-dead{font-size:10px;padding:1px 7px;border-radius:9px;color:var(--error);background:rgba(255,69,58,.12);flex-shrink:0}
 .pp-name{flex:1;min-width:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pp-ad{font-size:10px;padding:1px 7px;border-radius:9px;flex-shrink:0}
 .pp-ad.ok{color:var(--success);background:rgba(52,199,89,.13)}
