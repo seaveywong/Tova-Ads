@@ -576,7 +576,7 @@ defineExpose({ open, showPreflight })
     <div v-if="deployMode==='single' && deployAsset?.type==='video'" class="deploy-video-hint">{{ t('launch.deployVideoHint', { name: deployAsset.name || deployAsset.filename || '' }) }}<template v-if="deployAsset.duration_sec">（{{ t('launch.durationLabel') }} {{ deployAsset.duration_sec }}s）</template></div>
     <div class="deploy-search-row">
       <el-input v-model="deploySearch" clearable :placeholder="t('launch.searchAccountPlaceholder')" />
-      <el-select v-if="ownerOptions.length > 1" v-model="deployOwner" clearable size="small"
+      <el-select v-if="ownerOptions.length > 1" v-model="deployOwner" clearable filterable size="small"
                  :placeholder="t('launch.ownerFilterPh')" style="width:130px;flex:none">
         <el-option v-for="o in ownerOptions" :key="o.email" :value="o.email" :label="o.label" />
       </el-select>
@@ -641,7 +641,7 @@ defineExpose({ open, showPreflight })
                          :disabled="!p.can_advertise || p.is_published === false" />
             </el-select>
             <label>{{ t('launch.credLabel') }}</label>
-            <el-select v-model="deployItems[a.act_id].cred_id" size="small" style="width:100%" :title="t('launch.credHint')">
+            <el-select v-model="deployItems[a.act_id].cred_id" filterable size="small" style="width:100%" :title="t('launch.credHint')">
               <el-option :value="0" :label="t('launch.credAuto')" />
               <el-option v-for="c in (accCreds[a.act_id]||[])" :key="c.id" :value="c.id"
                          :label="c.alias + (c.available ? '' : ' · ' + t('launch.credCooling'))" :disabled="!c.available" />

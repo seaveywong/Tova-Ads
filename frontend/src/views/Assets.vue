@@ -485,7 +485,7 @@ const countryLabel = (code) => {
       <div class="seg-bar">
         <button v-for="tc in typeChips" :key="tc.key" :class="['seg-btn', { on: fType === tc.key }]" @click="setType(tc.key)">{{ tc.label }}</button>
       </div>
-      <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable size="small" style="width:140px" @change="load">
+      <el-select v-if="allTags.length" v-model="fTag" :placeholder="t('assets.tagPh')" clearable filterable size="small" style="width:140px" @change="load">
         <el-option v-for="tg in allTags" :key="tg" :value="tg" :label="tg" />
       </el-select>
       <el-input v-model="fSearch" :placeholder="t('assets.searchNamePh')" clearable size="small" class="bar-search" @keyup.enter="loadNow" />
