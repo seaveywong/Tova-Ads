@@ -33,14 +33,23 @@ _LIVE_STATUSES = ("ACTIVE", "IN_PROCESS", "LEARNING", "LEARNING_COMPLETED")
 def page_impact(db, tenant_id: int, page_id: str) -> dict:
     """主页 → 影响面：{ads_total, ads_live, live_acts, live_names}。
     解析 ads_cache.ads_json 的 creative.effective_object_story_id（{page_id}_{post_id}），
-    前缀匹配 + 在投状态过滤 + 账户去重（与 pages-overview 的 live_ads 同源，口径补状态过滤）。"""
+    前缀匹配 + 在投状态过滤 + 账户去重（与 pages-overview 的 live_ads 同源，口径补状态过滤）。
+    by_owner：在投广告按账户归属人分组（告警归属路由用——2026-09-27 用户确认推归属人）；
+    total_owners：关联广告（任意状态）的归属人集合（恢复通知路由用）。"""
     total = live = 0
     live_acts: set = set()
     live_names: list = []
+    owner_of: dict = {}   # act_id → owner_user_id
+    total_owners: set = set()
     rows = db.execute(_t(
         "SELECT act_id, ads_json FROM ads_cache WHERE tenant_id = :t AND platform = 'fb' "
         "AND ads_json IS NOT NULL"), {"t": tenant_id}).fetchall()
+    owner_rows = db.execute(_t(
+        "SELECT act_id, owner_user_id FROM accounts WHERE tenant_id = :t"), {"t": tenant_id}).fetchall()
+    for aid, ou in owner_rows:
+        owner_of[aid] = ou
     prefix = f"{page_id}_"
+    by_owner: dict = {}
     for act_id, blob in rows:
         try:
             import json
@@ -52,12 +61,22 @@ def page_impact(db, tenant_id: int, page_id: str) -> dict:
             if not story.startswith(prefix):
                 continue
             total += 1
+            if owner_of.get(act_id):
+                total_owners.add(owner_of[act_id])
             if str(ad.get("effective_status") or "") in _LIVE_STATUSES:
                 live += 1
                 live_acts.add(act_id)
                 if len(live_names) < 5:
                     live_names.append(str(ad.get("name") or "")[:40])
-    return {"ads_total": total, "ads_live": live, "live_acts": live_acts, "live_names": live_names}
+                ou = owner_of.get(act_id)
+                if ou:
+                    ent = by_owner.setdefault(ou, {"acts": set(), "ads": 0, "names": []})
+                    ent["acts"].add(act_id)
+                    ent["ads"] += 1
+                    if len(ent["names"]) < 5:
+                        ent["names"].append(str(ad.get("name") or "")[:40])
+    return {"ads_total": total, "ads_live": live, "live_acts": live_acts,
+            "live_names": live_names, "by_owner": by_owner, "total_owners": total_owners}
 
 
 def _fmt_impact(imp: dict) -> str:
@@ -69,24 +88,44 @@ def _fmt_impact(imp: dict) -> str:
     return f"当前无在投广告（关联广告 {imp['ads_total']} 个）"
 
 
+def _fmt_owner_impact(ent: dict) -> str:
+    names = "、".join(n for n in ent["names"] if n)
+    return (f"影响你名下 {ent['ads']} 个在投广告 / {len(ent['acts'])} 个账户"
+            + (f"（{names}…）" if names else ""))
+
+
 def _emit_page_alert(db, tenant_id: int, ph: PageHealth, level: str, event_type: str,
-                     title: str, body: str) -> None:
+                     title: str, body: str, imp: dict | None = None) -> None:
     """告警 + dedup 锚点 + 留痕（dedup 6h/page；NO_CAP_EVENTS 见 notify_utils）。
-    dedup_recent 返回 True=近期已发应跳过（此处曾写反致告警永不发出——smoke 断言抓出）。"""
+    归属路由（2026-09-27 用户确认推归属人，不广播）：有受影响在投广告 → 逐归属人
+    发（body 带该人名下影响面，站内信/TG 均只达本人）；无在投 → owner 角色广播
+    （团队 owner 知悉即可，不扰 operator）。dedup_recent 返回 True=近期已发应跳过
+    （此处曾写反致告警永不发出——smoke 断言抓出）。"""
     if dedup_recent(db, tenant_id, event_type, str(ph.page_id), 360):
         return
-    try:
-        emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
-                          title=title, body=body, roles=["owner", "operator"],
-                          trace_id=new_trace_id(), target_type="fb_page",
-                          target_id=str(ph.page_id), force_tg=(level == "critical"))
-    except Exception as e:
-        logger.warning(f"[PageHealth] 告警发送失败 page {ph.page_id}: {e}")
+    targets: list = []   # [(user_id|None, body)]
+    if imp and imp.get("by_owner"):
+        for ou, ent in imp["by_owner"].items():
+            targets.append((ou, f"{body}\n⚠️ {_fmt_owner_impact(ent)}"))
+    elif imp and imp.get("total_owners"):
+        for ou in imp["total_owners"]:   # 恢复/挂但无在投：按关联归属人路由
+            targets.append((ou, body))
+    else:
+        targets.append((None, body))   # 无任何关联 → owner 角色广播
+    for uid, b in targets:
+        try:
+            emit_notification(db, tenant_id=tenant_id, level=level, event_type=event_type,
+                              title=title, body=b, user_id=uid, roles=["owner"],
+                              trace_id=new_trace_id(), target_type="fb_page",
+                              target_id=str(ph.page_id), force_tg=(level == "critical"))
+        except Exception as e:
+            logger.warning(f"[PageHealth] 告警发送失败 page {ph.page_id} uid={uid}: {e}")
     write_log(db, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
               target_type="fb_page", target_id=str(ph.page_id), action_type="page_health",
               source="page_health", result="alerted",
               trigger_detail=title[:120], metadata={"page_id": ph.page_id,
-                                                    "is_published": ph.is_published})
+                                                    "is_published": ph.is_published,
+                                                    "owners": sorted((imp or {}).get("by_owner") or [])})
 
 
 def run_page_health_scan() -> dict:
@@ -151,15 +190,17 @@ def run_page_health_scan() -> dict:
                     db, tenant_id, ph, "critical", "page_unavailable",
                     f"主页不可用 · {obs['name']}",
                     f"主页：{obs['name']}（{pid}）\n状态：<b>已取消发布/不可用</b>\n"
-                    f"{'⚠️ ' + _fmt_impact(imp) if imp else ''}\n"
-                    "该主页下的广告可能被拒/无法投放，部署也会失败——请到 FB 恢复主页或换绑主页")
+                    + (f"⚠️ {_fmt_impact(imp)}\n" if imp and not imp.get("by_owner") else "")
+                    + "该主页下的广告可能被拒/无法投放，部署也会失败——请到 FB 恢复主页或换绑主页",
+                    imp=imp)
                 alerted += 1
             elif not was_pub and now_pub:
                 ph.is_published = True
                 _emit_page_alert(
                     db, tenant_id, ph, "info", "page_recovered",
                     f"主页已恢复 · {obs['name']}",
-                    f"主页：{obs['name']}（{pid}）\n状态：已重新发布，可正常投放")
+                    f"主页：{obs['name']}（{pid}）\n状态：已重新发布，可正常投放",
+                    imp=page_impact(db, tenant_id, pid))
                 recovered_cnt += 1
             else:
                 ph.is_published = now_pub
@@ -188,8 +229,9 @@ def run_page_health_scan() -> dict:
                     db, tenant_id, ph, "critical", "page_unavailable",
                     f"主页不可达 · {ph.name}",
                     f"主页：{ph.name}（{pid}）\n状态：<b>已删除或令牌失去访问</b>\n"
-                    f"{'⚠️ ' + _fmt_impact(imp) if imp['ads_live'] else ''}\n"
-                    "请检查令牌授权或该主页是否已被删除")
+                    + (f"⚠️ {_fmt_impact(imp)}\n" if imp and imp.get("ads_live") and not imp.get("by_owner") else "")
+                    + "请检查令牌授权或该主页是否已被删除",
+                    imp=imp)
                 alerted += 1
             upserted += 1
         db.commit()
