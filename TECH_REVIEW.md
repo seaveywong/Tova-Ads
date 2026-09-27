@@ -3129,3 +3129,18 @@ Dynadot 线后端就绪待 Secret；创建按钮新交互全链路上线。部�
 - **坑**：zoneTag_in 的 authz 报错文案是 "zones [...] are not authorized"（不含 "permission"）——检测关键词漏它曾误报权限已通；已补关键词+extensions.code=authz 兜底。
 - 并行会话协作：DeepSeek 曾 stash 本批在途工作（备注 preserve），恢复后收敛部署，hash 核验一致。
 - 待用户：token 2753c6 仍缺 Zone 级 Analytics Read（第一轮改动未生效——疑改错 token 或 Account 级）。
+
+## 批AB：商用就绪全面复审（16-agent 工作流）+ P0/P1 修复轮（2026-09-27，8ed23d0）
+
+**方法**：7 域并行审计（资金/域名/RBAC/投放/落地页/前端/运营旅程）→ P0/P1 逐条对抗反驳（8 条全 CONFIRMED）→ 完备性批评员补漏。共 73 发现。
+
+**已修（本 commit）**：
+- P0×3 资金：①幂等键错设计（续费用 row.id → 第二次续费免费；重构为 idempotency 列+事件唯一键，迁移 0109）②监听 txid 跨轮重复消费（库级去重+双表唯一索引）③钱包订单退款后 approve 重试白送（净额检测+重新扣款）
+- P1×7：续费 USDT 通道 NameError / 卡死 registering 收口（30min 遗孤单扫描）/ 地址池失配告警 / 自动续费注册商口径 / 角色矩阵裸 i18n 键（permLabels 共享）/ 下单互斥锁漏清 / 发票复制静默失效
+- 验证：幂等重放收敛 smoke、监听空跑、角色矩阵零裸键、0 JS 错、i18n+技术泄漏审计零
+
+**遗留（待拍板排期，按域）**：
+- RBAC P1×3：unmanage/create-pixel/fb-upload/deploy/retry 缺 operator 范围闸；树模式 _LandingBlockedError 逃逸致重试双倍投放；当日加白无归属校验
+- 资金 P1×2：尾号跨租户错配理论窗口（池≥多地址+同额同尾号）；充值单取消后到账无对账路径
+- 落地页 P1×2：dedup 跳转模式失效；域名库跨租户双行（RLS 查重局限）
+- 运营 P2×n：六新表无 RLS 策略、AI 调用无计量频控、素材无配额、发布回滚三态漂移、续费 cron 精确等日匹配等 46 条 P2/P3（全清单见会话记录）
