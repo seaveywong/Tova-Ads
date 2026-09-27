@@ -2900,6 +2900,25 @@ def _apply_batch_result(job, item: LaunchJobItem, total: int, ok: int, fails: li
         job.failed = (job.failed or 0) + 1  # 重试仍失败：原 fail 已计过，不重复加
 
 
+def _auto_rollback_tree_campaign(sdb, tenant_id: int, item: LaunchJobItem, fb) -> str:
+    """失败树 item 自动回退（2026-09-27 用户拍板：失败系列 FB 侧不留残留、不靠人工点删除）：
+    删除已建系列（连带组/广告）+ 清对象 id——重试守卫（已建系列拦整树重跑）即放行。
+    删除失败不吞：保留 id + 报原因，走手动「删除系列」。返结果文案（成败都写进 item 留痕）。"""
+    _fb2, _ = _write_fb_with_fallback(sdb, tenant_id, item.act_id)   # 本模块函数（fb_tokens 里没有——延迟 import 逃过部署门的坑）
+    tried: list[str] = []
+    for cand in [fb] + [c for c in (_fb2 or []) if c is not fb]:
+        if cand is None:
+            continue
+        try:
+            cand.delete_node(item.campaign_id)
+        except Exception as e:
+            tried.append((getattr(e, "friendly", None) or str(e))[:80])
+            continue
+        item.campaign_id, item.adset_id, item.ad_id = None, None, None
+        return f"已自动删除 FB 侧失败系列（无残留），可直接重试"
+    return f"自动删除系列失败：{tried[0] if tried else '无可用写令牌'}——请手动「删除系列」或到广告管理器核查"
+
+
 def _deploy_series_fb(sdb, fb, item: LaunchJobItem, tpl: LaunchTemplate, asset, tenant_id: int,
                       link, targeting, advanced, post_content: dict, series_name: str = "") -> dict:
     """单系列 FB 部署（原 _run_deploy_job/_retry_one 的素材相关内联块抽成公共函数，行为不变）：
@@ -3686,6 +3705,17 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
         # 降级不静默（铁律 bare-except-silent-failure）：广告照建（裸 URL 直投），item 留痕
         item.error = f"部署提示 {len(auto_warns)} 条：{'；'.join(w[:110] for w in auto_warns[:2])}"[:300]
         item.error_code = "auto_subcode_degraded"
+    # 失败自动回退（2026-09-27）：系列已建但 item 终态 fail → FB 侧删系列 + 清 id，
+    # 不留残留也不卡重试守卫；删除失败才留 id 走手动「删除系列」
+    if item.status == "fail" and (item.campaign_id or ""):
+        _rb_note = _auto_rollback_tree_campaign(sdb, tenant_id, item, fb)
+        item.error = f"{item.error}｜{_rb_note}"[:400]
+        item.progress = _rb_note[:120]
+        write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
+                  target_type="launch_job", target_id=str(job.id if job else ""),
+                  action_type="delete", source="launch",
+                  result="success" if not item.campaign_id else "fail",
+                  trigger_detail=f"失败自动回退 {item.act_id}（job #{job.id if job else '?'}）")
 
 
 def _deploy_item_tt_batch(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, assets: list,
@@ -4073,7 +4103,18 @@ def deploy_pages(act_id: str, user: CurrentUser = Depends(require_permission("ad
                         "via_cred_id": c.id})
     if not out and first_err:
         raise HTTPException(400, first_err)
-    return out
+    # 账户可达性探测（2026-09-27 Roly-99 案）：账户 FB 侧授权失效时换主页必失败——
+    # 提前告知「换主页解决不了」，避免用户在 8 个主页间空转。软信号（不 400）：部署抽屉
+    # 同端点只取 pages，不受影响
+    account_ok, account_err = True, ""
+    try:
+        _probe = _FbC(decrypt(cands[0].access_token_enc))
+        _probe.get(f"/act_{act_id}", params={"fields": "name"})   # 广告账户节点必须带 act_ 前缀（裸 ID 报无权限假阳性）
+    except FbApiError as e:
+        account_ok, account_err = False, (e.friendly or str(e))[:150]
+    except Exception as e:
+        account_ok, account_err = False, str(e)[:150]
+    return {"pages": out, "account_ok": account_ok, "account_err": account_err}
 
 
 @router.get("/creds")
@@ -4171,7 +4212,7 @@ def rollback_item(job_id: int, item_id: int, body: RollbackIn, bg: BackgroundTas
         raise HTTPException(400, f"仅失败 item 可回退（当前 {it.status}）")
     if not (it.campaign_id or ""):
         raise HTTPException(400, "该 item 没有已建系列（系列未建成即全败），直接重试即可")
-    if (j.platform or _tpl.platform or "fb") == "tt":
+    if (_tpl.platform or "fb") == "tt":   # LaunchJob 无 platform 列（实测 500 根因），从模板取
         raise HTTPException(400, "TikTok 部署暂不支持一键回退，请到 TikTok 后台删除")
     from ..models.fb import Account as _Acc
     _acc = db.query(_Acc).filter(
@@ -4181,13 +4222,12 @@ def rollback_item(job_id: int, item_id: int, body: RollbackIn, bg: BackgroundTas
     if not account_operable(user, _acc):
         raise HTTPException(404, "账户不在你的名下")
     # FB 侧删除（连带全部组/广告）：写令牌兜底序列第一个；失败原样报错（不静默）
-    from ..core.fb_tokens import _write_fb_with_fallback
-    _fbs, _ = _write_fb_with_fallback(db, user.tenant_id, it.act_id)
+    _fbs, _ = _write_fb_with_fallback(db, user.tenant_id, it.act_id)   # 本模块函数（曾误从 fb_tokens import → 调用时 500）
     if not _fbs:
         raise HTTPException(400, "该账户无可用写令牌，无法删除")
     _fb = _fbs[0]
     try:
-        _fb.delete(it.campaign_id)
+        _fb.delete_node(it.campaign_id)
     except Exception as e:
         raise HTTPException(400, f"FB 删除系列失败：{getattr(e, 'friendly', None) or str(e)[:150]}")
     # 清对象 id + 留痕（error 追加回退记录；重试守卫看 campaign_id 已空即放行）

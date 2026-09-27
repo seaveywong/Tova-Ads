@@ -1673,8 +1673,10 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .short-stat i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
 /* 表格式行（2026-09-16 重设计）：表头+行同 grid 模板 → 跨行严格对齐；域名=文本属性（主域+N）；
    名称列内联 owner chip；操作收敛 2 常驻 + ⋯ 菜单 */
-.lp-thead,.lp-row2{grid-template-columns:64px minmax(200px,1fr) minmax(150px,210px) 56px 78px 78px 78px 60px 168px;gap:10px;align-items:center}
-.lp-thead.short,.lp-row2.short{grid-template-columns:64px minmax(200px,1fr) minmax(160px,240px) 56px 78px 78px 78px 168px}
+/* 操作列宽随语言（按钮文案长度不同，实测 zh 165/en 195 + 余量）；窄列收窄保 1280 桌面也放得下 */
+.lp-thead,.lp-row2{grid-template-columns:64px minmax(160px,1fr) minmax(130px,210px) 56px 64px 64px 64px 60px var(--lp-ops-w,170px);gap:10px;align-items:center}
+.lp-thead.short,.lp-row2.short{grid-template-columns:64px minmax(160px,1fr) minmax(130px,240px) 56px 64px 64px 64px var(--lp-ops-w,170px)}
+:lang(en) .lp-thead,:lang(en) .lp-row2{--lp-ops-w:200px}
 .lp-metrics{display:contents}
 .lp-thead{display:grid;padding:4px 14px;font-size:11px;font-weight:600;color:var(--t3);border-bottom:1px solid var(--bd);margin-bottom:6px}
 .lp-name{display:flex;align-items:center;gap:8px;min-width:0}
@@ -1693,7 +1695,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .lp-dom-pop-item:hover .lp-dom-pop-copy{color:var(--ac)}
 .lp-subcount{font-variant-numeric:tabular-nums;color:var(--t1);font-size:13px;text-align:left;cursor:default}
 .lp-subcount i{font-style:normal;font-size:10px;color:var(--t3);margin-left:3px}
-@media(min-width:901px){.short-stat i,.lp-subcount i{display:none}}
+@media(min-width:1281px){.short-stat i,.lp-subcount i{display:none}}   /* 与堆叠断点 1280 联动：堆叠区间显示指标小标签 */
 .lp-fb-empty{display:inline-block;width:1px}
 .fb-checking{font-size:11px;color:var(--t3);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
 .fb-checking::before{content:'';width:10px;height:10px;border:2px solid var(--t3);border-top-color:transparent;border-radius:50%;animation:lp-spin .8s linear infinite}
@@ -1704,7 +1706,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
 .owner-chip.clickable:hover{color:var(--ac);background:var(--acg)}
 .owner-chip.clickable.active{color:var(--ac);background:var(--acg);border-radius:4px;padding:1px 4px;margin:0 -4px}
 .short-meta{font-size:11px;color:var(--t3);white-space:nowrap}
-@media(max-width:900px){
+@media(max-width:1280px){   /* 断点 900→1280（2026-09-27 溢出修复）：9 列表格在窄桌面放不下 → 堆叠，任何宽度零溢出 */
   .lp-thead{display:none}
   .lp-row2{grid-template-columns:64px 1fr 56px auto;row-gap:6px}
   .lp-name{grid-column:2}
@@ -1715,6 +1717,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
   .short-ops{grid-column:2 / -1;flex-wrap:wrap;justify-content:flex-end}
 }
 .short-ops{display:flex;gap:5px}
+.short-ops .mb{padding-left:7px;padding-right:7px}   /* 4 钮收紧，操作列不超框 */
 .st-tag.err{background:rgba(255,69,58,.12);color:var(--error)}   /* subcodeStatus('deleted') 曾无样式渲染成裸文本 */
 
 

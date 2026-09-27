@@ -1889,6 +1889,72 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
     return out
 
 
+def _heal_account_links(db, tenant_id: int, act_ids: list[str]) -> dict:
+    """账户-令牌链接自愈（2026-09-27 Roly-99 案）：逐令牌 batch 点查 GET /act_{id}，
+    能访问的令牌补挂 account_fb_credentials（active, priority=0）。
+    背景：导入只记当时选的一把令牌（_pick 单选），而 /me/adaccounts 对 BM 共享账户
+    不全——多令牌链接从未形成，部署/换主页的令牌池缩成单令牌（Roly-99 实际 4 令牌
+    可管，DB 只挂 1 把）。不改 owner/主令牌，只补关联。"""
+    from ..core.fb_tokens import _is_cred_available
+    act_ids = [a for a in dict.fromkeys(act_ids) if a]
+    if not act_ids:
+        return {"added": 0, "accounts": 0, "creds": 0}
+    creds = db.query(FbCredential).filter(
+        FbCredential.tenant_id == tenant_id,
+        FbCredential.status.in_(("active", "rate_limited")),
+    ).all()
+    acc_rows = db.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id.in_(act_ids)).all()
+    acc_by_id = {a.act_id: a for a in acc_rows}
+    rowid_to_act = {a.id: a.act_id for a in acc_rows}
+    linked: dict[str, set[int]] = {a: set() for a in acc_by_id}
+    if rowid_to_act:
+        for lk in db.query(AccountFbCredential).filter(
+                AccountFbCredential.account_id.in_(rowid_to_act.keys()),
+                AccountFbCredential.status == "active").all():
+            act = rowid_to_act.get(lk.account_id)
+            if act:
+                linked[act].add(lk.fb_credential_id)
+    added = 0
+    for c in creds:
+        if not _is_cred_available(c):
+            continue
+        todo = [a for a in linked if c.id not in linked[a]]
+        if not todo:
+            continue
+        fb = FbClient(decrypt(c.access_token_enc))
+        for i in range(0, len(todo), 50):
+            chunk = todo[i:i + 50]
+            try:
+                results = fb.batch_get([f"act_{a}?fields=account_id" for a in chunk])
+            except FbApiError:
+                break   # 该令牌整批失败（失效/限流）→ 换下一个
+            for aid, meta in zip(chunk, results):
+                if meta and "error" not in meta and meta.get("account_id"):
+                    acc = acc_by_id.get(aid)
+                    if acc:
+                        db.add(AccountFbCredential(
+                            tenant_id=tenant_id, account_id=acc.id,
+                            fb_credential_id=c.id, priority=0, status="active",
+                        ))
+                        added += 1
+    db.commit()
+    return {"added": added, "accounts": len(linked), "creds": len(creds)}
+
+
+def _bg_heal_imported_links(tenant_id: int, act_ids: list[str]):
+    """导入后后台跑链接自愈（失败只记日志——下次导入/手动再触发会补）。"""
+    import logging
+    db = SuperSessionLocal()
+    try:
+        r = _heal_account_links(db, tenant_id, act_ids)
+        logging.getLogger("toveads.import").info(f"[link-heal] {r}")
+    except Exception:
+        logging.getLogger("toveads.import").exception("[link-heal] 失败")
+    finally:
+        db.close()
+
+
 def _bg_complete_imported(tenant_id: int, cred_ids: list[int]):
     """导入后补全轻字段拉取时缺的余额/上限/已花费（后台跑，不阻塞响应）。
 
@@ -2117,6 +2183,9 @@ def import_accounts(
     db.commit()
     # 载入缓存行不含 imported 标记（每次现算），导入后无需作废——
     # 勾选场景「开弹窗（慢一次）→ 导入（缓存命中秒回）」保持成立
+    # 链接自愈（2026-09-27）：导入只挂一把令牌，后台点查补挂全部可访问令牌
+    # （BM 共享账户 /me/adaccounts 看不全，换主页/部署令牌池曾因此缩成单令牌）
+    background_tasks.add_task(_bg_heal_imported_links, user.tenant_id, sorted(covered))
     if imported:
         background_tasks.add_task(_bg_complete_imported, user.tenant_id, sorted(touched_creds))
         # 立即拉新导入账户的广告缓存：广告管理器只读 ads_cache（15min cron 同步），

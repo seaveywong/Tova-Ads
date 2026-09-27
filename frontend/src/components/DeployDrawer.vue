@@ -177,11 +177,11 @@ const ensureAccConfig = async (id) => {
       // 主页走令牌池并集端点（2026-09-24 三层完善：曾只拉绑定主令牌的页——池内其他令牌
       // 独占的主页在部署抽屉根本选不到，Roly-V21-81 案）；每页带 via_cred 归属标注
       const [pages, pixels, creds] = await Promise.all([
-        GET('/launch-templates/pages?act_id=' + encodeURIComponent(id)).catch(() => []),
+        GET('/launch-templates/pages?act_id=' + encodeURIComponent(id)).catch(() => ({ pages: [] })),
         GET('/fb/credentials/' + credId + '/pixels?act_id=' + encodeURIComponent(id)).catch(() => []),
         GET('/launch-templates/creds?act_id=' + encodeURIComponent(id)).catch(() => []),
       ])
-      accPages.value[id] = pages; accPixels.value[id] = pixels; accCreds.value[id] = creds
+      accPages.value[id] = (pages && pages.pages) || []; accPixels.value[id] = pixels; accCreds.value[id] = creds
       // 策略为「随机用账户像素」时，新加载池的账户立即随机填入（与已选账户保持同策略）
       if (pixelStrategy.value === 'random') {
         const pid = randomPixelFor(id)

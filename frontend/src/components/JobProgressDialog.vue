@@ -3,7 +3,7 @@
 // 用法：<JobProgressDialog ref="jobRef" /> → jobRef.value.open(jobId)
 import { ref, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { GET } from '../api'
 import { fmtTime } from '../composables/useTz'
 import { useLaunchJobs } from '../composables/useLaunchJobs'
@@ -83,13 +83,16 @@ const pagePickItem = ref(null)
 const pagePickPages = ref([])
 const pagePickLoading = ref(false)
 const pagePickSel = ref('')
+const pagePickAccDead = ref('')   // 账户 FB 侧失联（换主页救不了）的提示
 const openPagePick = async (it) => {
   pagePickItem.value = it; pagePickSel.value = ''
-  pagePickPages.value = []; pagePickLoading.value = true; pagePickOpen.value = true
+  pagePickPages.value = []; pagePickAccDead.value = ''; pagePickLoading.value = true; pagePickOpen.value = true
   try {
-    // 只列可投广告的主页（用户反馈：不可投的页换了也必失败）+ 每页带归属令牌
-    pagePickPages.value = (await GET('/launch-templates/pages?act_id=' + encodeURIComponent(it.act_id)))
-      .filter(p => p.can_advertise !== false)
+    // 只列可投广告的主页（用户反馈：不可投的页换了也必失败）+ 每页带归属令牌；
+    // account_ok=false = 账户本身失联——换主页解决不了，横幅告知（Roly-99 案）
+    const r = await GET('/launch-templates/pages?act_id=' + encodeURIComponent(it.act_id))
+    pagePickPages.value = (r.pages || []).filter(p => p.can_advertise !== false)
+    if (r.account_ok === false) pagePickAccDead.value = t('launch.pagePickAccDead')
   }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   pagePickLoading.value = false
@@ -193,6 +196,7 @@ defineExpose({ open })
   <!-- 换主页重试弹窗：强绑主页账户「可推广对象不匹配」失败时选账户实际绑定主页再试 -->
   <el-dialog v-model="pagePickOpen" :title="t('launch.pagePickTitle')" width="460px" append-to-body>
     <div class="pp-hint">{{ t('launch.pagePickHint') }}</div>
+    <div v-if="pagePickAccDead" class="pp-acc-dead">{{ pagePickAccDead }}</div>
     <div v-loading="pagePickLoading" class="pp-list">
       <label v-for="p in pagePickPages" :key="p.id" :class="['pp-row', { on: pagePickSel === p.id }]">
         <input type="radio" name="pp-sel" :value="p.id" v-model="pagePickSel" />
@@ -287,6 +291,7 @@ a.pj-obj-id, .pj-obj-id.link{color:var(--ac);cursor:pointer}
 .prog-err{color:var(--error);margin-bottom:12px;font-size:13px}
 /* 换主页重试弹窗 */
 .pp-hint{font-size:12px;color:var(--t3);line-height:1.5;margin-bottom:10px}
+.pp-acc-dead{font-size:12px;color:var(--error);background:rgba(255,69,58,.08);border:1px solid rgba(255,69,58,.35);border-radius:6px;padding:8px 10px;margin-bottom:10px;line-height:1.5}
 .pp-list{display:flex;flex-direction:column;max-height:320px;overflow-y:auto}
 .pp-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;margin-bottom:6px;cursor:pointer;font-size:13px}
 .pp-row:hover{border-color:var(--ac)}
