@@ -1432,6 +1432,35 @@ def _page_aware_write_clients(sdb, tenant_id: int, act_id: str, pages: set,
     return fb, (covering or [fb]), chosen
 
 
+def _auto_switch_page(sdb, tenant_id: int, item, old_pages: set,
+                       cache: dict, page_name_cache: Optional[dict] = None) -> bool:
+    """多令牌自动适配（用户拍板 2026-09-27：指定主页的令牌没可用主页时，自动选其他
+    令牌的其他可投主页，而不是直接失败）。仅新帖模式（跟帖主页绑死帖源不可换）。
+    扫写令牌候选池（priority 序）各令牌的可投广告主页，取第一个能落地的页写回
+    item.page_id。成功 True（已 note 留痕）；无可换页 False（调用方按原错误失败）。"""
+    from ..core.fb_tokens import _account_write_candidates
+    from ..core.encryption import decrypt
+    for c in _account_write_candidates(sdb, tenant_id, item.act_id, "write"):
+        try:
+            pages = FbClient(decrypt(c.access_token_enc)).get_pages() or []
+        except Exception:
+            continue
+        for p in pages:
+            pid = p.get("id", "")
+            if not pid or pid in old_pages:
+                continue   # 老页本身就选不出令牌，换页才有意义
+            if "ADVERTISE" not in (p.get("tasks") or []):
+                continue
+            item.page_id = pid
+            if page_name_cache is not None:
+                page_name_cache[pid] = p.get("name") or pid
+            _item_note(sdb, item,
+                       f"主页自动切换 → {str(p.get('name') or pid)[:24]}"
+                       f"（原主页无可用令牌，已换其他令牌的主页）")
+            return True
+    return False
+
+
 def _is_bare_invalid_param(e) -> bool:
     """裸 Invalid parameter（无 error_data）——FB 对无权限令牌的伪装报错形态。"""
     return (getattr(e, "category", "") == "invalid_param"
@@ -1757,7 +1786,7 @@ def _preflight_tree_fb(db, t: LaunchTemplate, adsets: list, body: "PreflightIn",
     is_cbo = (t.budget_mode or "ABO").upper() == "CBO"
     import secrets as _sec
     from datetime import datetime as _dtn
-    campaign_name = f"{t.name_prefix or t.name or 'Tova Ads'} {_dtn.now().strftime('%m%d-%H%M')}-{_sec.token_hex(2)}"[:100]
+    campaign_name = f"{t.name_prefix or t.name or 'Tova Ads'} · {_dtn.now().strftime('%m%d-%H%M')}-{_sec.token_hex(2)}"[:100]
     # 系列支出上限（0091）：模板 USD → 该账户本币 minor units（与部署 runner 同管道；
     # 批次III 统一缺汇率口径：_usd_to_account_minor 缺汇率 raise→调用处 400，不再静默 1.0 兜底）
     try:
@@ -3093,7 +3122,8 @@ def _tree_expanded_count(adsets: list) -> int:
 
 
 def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, adsets: list,
-                         tenant_id: int, fb, is_retry: bool = False) -> None:
+                         tenant_id: int, fb, is_retry: bool = False,
+                         page_name_cache: Optional[dict] = None) -> None:
     """结构模式 FB 部署（0088）：1 系列 → N 广告组 → M 广告（素材组节点逐素材展开为多个广告）。
 
     粒度与失败语义（对齐批量模式 partial）：系列建失败 = 整 item 失败（外抛）；组级失败
@@ -3117,7 +3147,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     import secrets as _sec
     from datetime import datetime as _dtn
     _suffix = _dtn.now().strftime("%m%d-%H%M") + "-" + _sec.token_hex(2)
-    campaign_name = f"{tpl.name_prefix or tpl.name or 'Tova Ads'} {_suffix}"[:100]
+    campaign_name = f"{tpl.name_prefix or tpl.name or 'Tova Ads'} · {_suffix}"[:100]
     is_cbo = (tpl.budget_mode or "ABO").upper() == "CBO"
     _cats = []
     try:
@@ -3193,7 +3223,7 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
     _px_memo: dict = {}   # 批BU：像素核对按 item 记忆——同账户第一组定了正确像素，后续组直接复用
     _px_noted = False      # 「已自动换」提示只弹一次（组组重复弹=用户实测噪音）
     for si, snode in enumerate(adsets, 1):
-        sname = ((snode.get("name") or f"{campaign_name} 组{si}"))[:100]
+        sname = ((snode.get("name") or f"{(tpl.name_prefix or tpl.name or 'Tova Ads')[:30]}·组{si}"))[:100]
         _item_note(sdb, item, f"组 {si}/{len(adsets)}：{sname[:36]}")   # 批BQ
         s_enabled = bool(snode.get("enabled"))
         # 组预算（ABO）：节点 USD 覆盖 > 模板默认；节点/模板可选 lifetime（总预算须排期，
@@ -3398,9 +3428,14 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     ad_name = aname_base
                 else:
                     ad_name = ((asset.name or asset.filename or "") if asset else "") or f"{sname} 广告{ai}"
+                # 素材文件名去扩展名（.png/.jpg 对人无信息量——可读性批 2026-09-27）
+                if "." in ad_name[1:]:
+                    _stem, _dot, _ext = ad_name.rpartition(".")
+                    if len(_ext) <= 5 and _ext.isalnum():
+                        ad_name = _stem
                 ad_name = ad_name[:100]
                 # 心跳+进度注记（批BQ，原裸 job touch）：素材上传耗时 > reap 窗口，commit 后轮询立即可见
-                _item_note(sdb, item, f"广告 {_ad_no}/{_ads_total}：{ad_name[:36]}")
+                _item_note(sdb, item, f"广告 {_ad_no}/{_ads_total}：{ad_name[:36]}{_pg_label}")
                 try:
                     if asset is None and not (node_post == "reuse" and anode.get("reuse_post_ref")):
                         raise FbApiError("no_id", "广告节点未选素材或素材已被删除（跟帖模式可无素材）")
@@ -3431,6 +3466,11 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                     # Instant Form（LEADS）：节点表单模板 > 模板级 > AI 自动生成
                     # 广告身份主页：批O-2 引入节点级；2026-09-19 优先级定稿见 _resolve_ad_page
                     _ad_page = _resolve_ad_page(str(anode.get("page_id") or ""), item.page_id, _page_id, node_post)
+                    # 部署日志带主页：本广告实际用的主页标注进进度注记与失败文案（用户拍板）
+                    _pg_label = ""
+                    if _ad_page and page_name_cache is not None:
+                        _pn = page_name_cache.get(_ad_page) or _ad_page
+                        _pg_label = f" · 主页{str(_pn)[:14]}"
                     lead_form_id = ""
                     _fdiag_t = {}
                     if tpl.objective == "OUTCOME_LEADS" and _ad_page:
@@ -3623,14 +3663,14 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
                                         "subcode_slug": (auto_slug or node_slug or ""),
                                         "tree": f"{sname}/{ad_name}"})
                 except FbApiError as e:
-                    fails.append(f"{sname}/{ad_name}: {(e.friendly or str(e))[:110]}")
+                    fails.append(f"{sname} · {ad_name}{_pg_label}: {(e.friendly or str(e))[:110]}")
                     write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                               target_type="ad", target_id="", action_type="deploy", source="launch",
                               result="fail", friendly_error=(e.friendly or str(e))[:200],
                               metadata={"act_id": item.act_id, "template_id": tpl.id,
                                         "tree": f"{sname}/{ad_name}"})
                 except Exception as e:
-                    fails.append(f"{sname}/{ad_name}: {str(e)[:110]}")
+                    fails.append(f"{sname} · {ad_name}{_pg_label}: {str(e)[:110]}")
                     write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                               target_type="ad", target_id="", action_type="deploy", source="launch",
                               result="fail", friendly_error=str(e)[:200],
@@ -3705,6 +3745,7 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 post_content = {}
         # 页面感知选令牌的 (cred,page) 探测缓存——跨 item 复用（多账户共享令牌只查一次 FB）
         _page_token_cache: dict = {}
+        _page_name_cache: dict = {}   # page_id → 名称（部署日志带主页用；所选令牌解析）
         # 用户指定令牌映射（控制面）：{act_id: cred_id}，0/空=自动
         _cred_ovr = _job_cred_overrides(sdb, job_id, tenant_id)
         for item in items:
@@ -3754,6 +3795,14 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                 elif _pages_needed:
                     fb, _fb_list, _pg_cred = _page_aware_write_clients(
                         sdb, tenant_id, item.act_id, _pages_needed, _page_token_cache)
+                    if not fb and (tpl.post_source or "new") != "reuse" and len(_pages_needed) == 1:
+                        # 多令牌自动适配（2026-09-27）：单主页选不出令牌（令牌失效/主页不可用）
+                        # → 自动换其他令牌的可投主页重选；跟帖/多主页树不换（页绑死语义）
+                        if _auto_switch_page(sdb, tenant_id, item, _pages_needed,
+                                             _page_token_cache, _page_name_cache):
+                            _pages_needed = _effective_pages_for_item(tpl, item, tree_adsets)
+                            fb, _fb_list, _pg_cred = _page_aware_write_clients(
+                                sdb, tenant_id, item.act_id, _pages_needed, _page_token_cache)
                     if not fb:
                         raise FbApiError(
                             "no_id",
@@ -3766,6 +3815,15 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     fb = _fb_list[0]
                 # 批BZ：进度里可见本次用谁的令牌下发（成功失败都可归因——0911 Radar 兜底选错令牌事故）
                 item.cred_name = _cred_label_for(sdb, tenant_id, item.act_id, fb)
+                # 部署日志带主页（用户拍板 2026-09-27）：用所选令牌解析本 item 涉及主页的
+                # 名称缓存（1 次 FB 调用/账户），进度注记与失败文案引用
+                try:
+                    for _pg in (fb.get_pages() or []):
+                        _pid = _pg.get("id")
+                        if _pid:
+                            _page_name_cache[_pid] = (_pg.get("name") or _pid)
+                except Exception:
+                    pass
                 sdb.commit()
                 # 批量模式（按素材批量生成系列）：item 内逐素材克隆系列，单素材失败不中断后续
                 # （partial 汇总）。item = 账户 的粒度不变——job.total / 前端进度轮询 / 重试入口零改动
@@ -3782,7 +3840,8 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                     _tree_err = None
                     for _fb_cand in (_fb_list or [fb]):
                         try:
-                            _deploy_item_fb_tree(sdb, job, item, tpl, tree_adsets, tenant_id, _fb_cand)
+                            _deploy_item_fb_tree(sdb, job, item, tpl, tree_adsets, tenant_id, _fb_cand,
+                                                 page_name_cache=_page_name_cache)
                             _tree_err = None
                             break
                         except FbApiError as _fe:
@@ -4078,6 +4137,84 @@ def page_coverage(page_id: str, act_ids: str,
     return out
 
 
+class RollbackIn(BaseModel):
+    retry_after: bool = False   # True = 删除后立即整树重试（回退+重跑一键）
+
+
+@router.post("/jobs/{job_id}/items/{item_id}/rollback")
+def rollback_item(job_id: int, item_id: int, body: RollbackIn, bg: BackgroundTasks,
+                  user: CurrentUser = Depends(require_permission("ads.create")),
+                  db: Session = Depends(get_db)):
+    """回退删除：把该 item 已建出的系列在 FB 侧删除（连带其下全部组/广告，不可逆），
+    清掉 item 的对象 id——之后整树重试不再被「已建系列」守卫拦（用户拍板 2026-09-27：
+    失败系列不要残留在 FB 上；重试被守卫挡时提供干净重跑路径）。
+    仅结构树模式的 fail/partial item（批量模式 item=账户含多个系列，删单系列清不干净）。"""
+    j = db.query(LaunchJob).filter(LaunchJob.id == job_id, LaunchJob.tenant_id == user.tenant_id).first()
+    if not j:
+        raise HTTPException(404, "job 不存在")
+    if j.status in ("pending", "running"):
+        raise HTTPException(409, "任务进行中，不能回退")
+    _tpl = db.query(LaunchTemplate).filter(
+        LaunchTemplate.id == j.template_id, LaunchTemplate.tenant_id == user.tenant_id).first()
+    if not _tpl:
+        raise HTTPException(404, "模板不存在")
+    if not _parse_structure(_tpl):
+        raise HTTPException(400, "仅结构树部署支持回退删除（批量模式一个账户多个系列，请到广告管理器逐个删除）")
+    from ..core.deps import require_owned, account_operable
+    require_owned(user, _tpl, attr="created_by")
+    it = db.query(LaunchJobItem).filter(LaunchJobItem.id == item_id, LaunchJobItem.job_id == job_id).first()
+    if not it:
+        raise HTTPException(404, "item 不存在")
+    if it.status not in ("fail",):
+        raise HTTPException(400, f"仅失败 item 可回退（当前 {it.status}）")
+    if not (it.campaign_id or ""):
+        raise HTTPException(400, "该 item 没有已建系列（系列未建成即全败），直接重试即可")
+    if (j.platform or _tpl.platform or "fb") == "tt":
+        raise HTTPException(400, "TikTok 部署暂不支持一键回退，请到 TikTok 后台删除")
+    from ..models.fb import Account as _Acc
+    _acc = db.query(_Acc).filter(
+        _Acc.tenant_id == user.tenant_id, _Acc.act_id == it.act_id, _Acc.is_managed == True).first()
+    if not _acc:
+        raise HTTPException(400, "该账户已移除纳管，不能回退")
+    if not account_operable(user, _acc):
+        raise HTTPException(404, "账户不在你的名下")
+    # FB 侧删除（连带全部组/广告）：写令牌兜底序列第一个；失败原样报错（不静默）
+    from ..core.fb_tokens import _write_fb_with_fallback
+    _fbs, _ = _write_fb_with_fallback(db, user.tenant_id, it.act_id)
+    if not _fbs:
+        raise HTTPException(400, "该账户无可用写令牌，无法删除")
+    _fb = _fbs[0]
+    try:
+        _fb.delete(it.campaign_id)
+    except Exception as e:
+        raise HTTPException(400, f"FB 删除系列失败：{getattr(e, 'friendly', None) or str(e)[:150]}")
+    # 清对象 id + 留痕（error 追加回退记录；重试守卫看 campaign_id 已空即放行）
+    it.campaign_id, it.adset_id, it.ad_id = None, None, None
+    it.error = (f"{it.error or ''}｜已回退删除系列({job_id})").strip("｜")[:400]
+    it.progress = "已删除 FB 侧系列，可整树重试"
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="launch_job", target_id=str(job_id),
+              action_type="delete", source="launch", result="success",
+              trigger_detail=f"回退删除 {it.act_id} 的失败系列（job #{job_id} item #{item_id}）")
+    db.commit()
+    if not body.retry_after:
+        return {"ok": True, "rolled_back": True, "retrying": False}
+    # 删除并重试：沿用 retry 的原子抢占 + 后台重跑
+    from sqlalchemy import text as _text
+    claimed = db.execute(
+        _text("UPDATE launch_job_items SET status='pending', error=NULL, error_code=NULL, "
+              "campaign_id=NULL, adset_id=NULL, ad_id=NULL, progress=NULL "
+              "WHERE id=:id AND status='fail'"),
+        {"id": item_id}).rowcount
+    db.execute(_text("UPDATE launch_jobs SET status='running', finished_at=NULL, created_at=now() WHERE id=:jid"),
+               {"jid": job_id})
+    db.commit()
+    if not claimed:
+        raise HTTPException(409, "该 item 状态已变化，请刷新后重试")
+    bg.add_task(_retry_one, job_id, user.tenant_id, j.template_id, item_id)
+    return {"ok": True, "rolled_back": True, "retrying": True}
+
+
 @router.post("/jobs/{job_id}/retry/{item_id}")
 def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
                user: CurrentUser = Depends(require_permission("ads.create")),
@@ -4117,7 +4254,7 @@ def retry_item(job_id: int, item_id: int, body: RetryIn, bg: BackgroundTasks,
     # 结构模式部分成功守卫（0088）：item 已建出系列（部分广告失败）时整树重试 =
     # 已成功的广告再建一份双份预算。全败（系列未建成，campaign_id 空）才允许整树重跑。
     if _parse_structure(_tpl) and (it.campaign_id or ""):
-        raise HTTPException(400, "该账户已建出系列（部分广告失败）——整树重试会重复已成功的广告。请到广告管理器核查已建内容；需要补投请复制模板裁剪后再部署")
+        raise HTTPException(400, "该账户已建出系列（部分广告失败）——整树重试会重复已成功的广告。可先「删除系列」回退（FB 侧一并删除）后整树重试，或到广告管理器核查已建内容")
     # 账户纳管守卫（与 deploy_template 同款）——retry 原先没有：账户移除后重试，
     # cred 兜底会走全租户 RR 令牌，只要令牌还能管该 act_id 就真建广告花钱且无止损覆盖
     from ..models.fb import Account as _Acc
@@ -4309,6 +4446,12 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
             elif _pages_needed:
                 fb, _fb_list, _ = _page_aware_write_clients(
                     sdb, tenant_id, it.act_id, _pages_needed, {})
+                if not fb and (tpl.post_source or "new") != "reuse" and len(_pages_needed) == 1:
+                    # 重试同款自动适配（2026-09-27）：换主页重试的页也选不出令牌时自动再换
+                    if _auto_switch_page(sdb, tenant_id, it, _pages_needed, {}):
+                        _pages_needed = _effective_pages_for_item(tpl, it, tree_adsets)
+                        fb, _fb_list, _ = _page_aware_write_clients(
+                            sdb, tenant_id, it.act_id, _pages_needed, {})
                 if not fb:
                     raise FbApiError(
                         "no_id",
@@ -4320,12 +4463,20 @@ def _retry_one(job_id: int, tenant_id: int, template_id: int, item_id: int):
                     raise FbApiError("no_id", f"act_{it.act_id} 未绑定写令牌")
                 fb = _fb_list[0]
             it.cred_name = _cred_label_for(sdb, tenant_id, it.act_id, fb)   # 批BZ：令牌归因可见
+            _retry_page_names: dict = {}
+            try:
+                for _pg in (fb.get_pages() or []):
+                    if _pg.get("id"):
+                        _retry_page_names[_pg["id"]] = (_pg.get("name") or _pg["id"])
+            except Exception:
+                pass
             sdb.commit()
             # 结构模式重试（0088）：整树重跑（仅全败 item——部分成功在端点层已拒）；
             # 不走 _find_existing_campaign 幂等捷径（树有多组多名，同名命中无法确认归属）
             # tree_adsets 已在选令牌处解析，此处直接用
             if tree_adsets:
-                _deploy_item_fb_tree(sdb, job, it, tpl, tree_adsets, tenant_id, fb, is_retry=True)
+                _deploy_item_fb_tree(sdb, job, it, tpl, tree_adsets, tenant_id, fb, is_retry=True,
+                                     page_name_cache=_retry_page_names)
                 _close_job_if_done(sdb, job_id)
                 sdb.commit()
                 if it.status == "success" and it.ad_id:

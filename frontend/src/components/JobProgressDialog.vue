@@ -57,6 +57,25 @@ const onProgressClose = () => { if (pollTimer) { clearTimeout(pollTimer); pollTi
 const retryItem = async (it) => {
   if (await submitItemRetry(activeJob.value, it, {}) && !pollTimer) startPoll(activeJob.value.id, 0)
 }
+// 回退删除（2026-09-27 用户拍板：失败系列不留 FB 残留）：删除已建系列；retry=true 删后整树重试
+const rollbackBusy = ref(false)
+const rollbackItem = async (it, retryAfter) => {
+  const key = retryAfter ? 'launch.rollbackAndRetryConfirm' : 'launch.rollbackConfirm'
+  try {
+    await ElMessageBox.confirm(t(key, { id: it.campaign_id }), t('common.confirm'),
+      { type: 'warning', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'),
+        confirmButtonClass: 'el-button--danger' })
+  } catch { return }
+  rollbackBusy.value = true
+  try {
+    const r = await POST(`/launch-templates/jobs/${activeJob.value.id}/items/${it.id}/rollback`,
+      { retry_after: !!retryAfter })
+    ElMessage.success(r.rolling_back_note || t(r.retrying ? 'launch.rollbackRetrying' : 'launch.rollbackDone'))
+    if (r.retrying) { if (!pollTimer) startPoll(activeJob.value.id, 0) }
+    else await pollJob(activeJob.value.id)
+  } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  rollbackBusy.value = false
+}
 // 换主页重试（2026-09-14）：强绑主页账户部署失败（可推广对象不匹配）时，选账户实际
 // 绑定的主页再试——后端 retry 的 body.page_id → item.page_id 优先于模板主页
 const pagePickOpen = ref(false)
@@ -67,7 +86,11 @@ const pagePickSel = ref('')
 const openPagePick = async (it) => {
   pagePickItem.value = it; pagePickSel.value = ''
   pagePickPages.value = []; pagePickLoading.value = true; pagePickOpen.value = true
-  try { pagePickPages.value = await GET('/launch-templates/pages?act_id=' + encodeURIComponent(it.act_id)) }
+  try {
+    // 只列可投广告的主页（用户反馈：不可投的页换了也必失败）+ 每页带归属令牌
+    pagePickPages.value = (await GET('/launch-templates/pages?act_id=' + encodeURIComponent(it.act_id)))
+      .filter(p => p.can_advertise !== false)
+  }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   pagePickLoading.value = false
 }
@@ -151,6 +174,8 @@ defineExpose({ open })
             <div class="pj-ops">
               <button v-if="it.status==='fail' || (['pending','creating'].includes(it.status) && !['pending','running'].includes(activeJob.status))" class="op primary sm" :title="it.status!=='fail' ? t('launch.retryStuckTip') : ''" @click="retryItem(it)">{{ t('common.retry') }}</button>
               <button v-if="it.status==='fail'" class="op sm" :title="t('launch.pagePickTip')" @click="openPagePick(it)">{{ t('launch.pagePickRetry') }}</button>
+              <button v-if="it.status==='fail' && it.campaign_id && activeJob?.platform !== 'tt'" class="op sm" :disabled="rollbackBusy" :title="t('launch.rollbackTip')" @click="rollbackItem(it, false)">{{ t('launch.rollbackBtn') }}</button>
+              <button v-if="it.status==='fail' && it.campaign_id && activeJob?.platform !== 'tt'" class="op sm danger" :disabled="rollbackBusy" :title="t('launch.rollbackRetryTip')" @click="rollbackItem(it, true)">{{ t('launch.rollbackRetryBtn') }}</button>
             </div>
           </div>
         </div>
@@ -194,6 +219,8 @@ defineExpose({ open })
 .op.primary:hover{background:var(--ac);color:#fff}
 .op.primary.sm{padding:2px 8px;font-size:11px}
 .op.sm{padding:2px 8px;font-size:11px}
+.op.danger{color:var(--error);border-color:rgba(255,69,58,.4)}
+.op.danger:hover{background:var(--error);color:#fff;border-color:var(--error)}
 .op:hover{color:var(--ac);border-color:var(--ac)}
 .empty-sm{padding:30px;text-align:center;color:var(--t3);font-size:13px}
 /* 部署进度弹窗：表格式网格（定宽列，行高统一，斑马纹） */
