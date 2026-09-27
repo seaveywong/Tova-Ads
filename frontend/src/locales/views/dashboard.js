@@ -80,7 +80,7 @@ export default {
     convAll: '全部成效', convShopping: '购物', convMessaging: '私信', convLeads: '线索', convEngagement: '互动', convTraffic: '流量',
     scopeAccounts: '{n} 账户', clearedActs: '已切换平台，清除 {n} 个不属于该平台的已选账户',
     allAccounts: '全部账户', accountFilterTitle: '账户筛选（多选，模糊搜索）',
-    ownerLabel: '对应人', allOwners: '全部对应人', ownerFilterTitle: '按账户归属人筛选（模糊搜索，KPI 与明细同步收窄）', ownerUnassigned: '未分配',
+    ownerLabel: '归属人', allOwners: '全部归属人', ownerFilterTitle: '按账户归属人筛选（模糊搜索，KPI 与明细同步收窄）', ownerUnassigned: '未分配',
     tabData: '数据看板', tabLanding: '链接数据',
     searchPh: '搜索...', removedTag: '已移除', noSubcodeData: '暂无子码数据', subcodePerformance: '子码表现',
     searchLandingPh: '搜索子码 / 广告ID / 域名...', noLandingData: '暂无落地页访问数据',

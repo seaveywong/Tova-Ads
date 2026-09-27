@@ -1,7 +1,7 @@
 export default {
   zh: {
     pauseAction: '暂停',
-    ownerFilterPh: '按所有者', ownerFilterTip: '按账户归属运营过滤其名下账户的广告', ownerSearchPh: '搜索所有者…',
+    ownerFilterPh: '归属人', ownerFilterTip: '按账户归属人过滤其名下账户的广告', ownerSearchPh: '搜索归属人…',
     columns: '自定义列', resultsFb: '成效（FB）', totalConversions: '综合转化（访问）',
     costPerResult: '单次成效费用', combinedCpa: '综合 CPA', ctrLabel: 'CTR',
     snapshot: '快照 {time}', snapshotUnknown: '快照时间未知', stIdleTitle: '容器开启但下面没有生效投放中的广告——不消耗，点开关可整体启停',
