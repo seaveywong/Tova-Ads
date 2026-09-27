@@ -3196,33 +3196,6 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             _spend_cap_fb = _usd_to_account_minor(sdb, item.act_id, float(tpl.spend_cap_usd), tenant_id)
         except ValueError as e:
             raise FbApiError("no_id", f"支出上限换算失败：{e}")
-    _item_note(sdb, item, "创建系列…")   # 批BQ：分步进度可见
-    camp_payload = build_campaign(
-        name=campaign_name, objective=tpl.objective,
-        daily_budget=(camp_budget_fb if (is_cbo and not _camp_lifetime_fb) else None),
-        lifetime_budget=_camp_lifetime_fb,
-        budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
-        special_ad_categories=_cats, spend_cap=_spend_cap_fb)
-    camp = fb.post(f"act_{item.act_id}/campaigns", camp_payload)
-    campaign_id = camp.get("id")
-    if not campaign_id:
-        raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
-    # 审计 P1（树模式逃逸）：campaign 建成即落库——后续任一节点失败（含 _LandingBlockedError
-    # 穿透每广告 try 的路径）item 已带 campaign_id，重试守卫拦住整树重跑（曾不落库 →
-    # 守卫被绕过 → 重试整树重建 = 双倍投放双倍花费）
-    item.campaign_id = campaign_id
-    sdb.commit()
-
-    ok, fails, last = 0, [], None
-    _acc = sdb.query(Account).filter(
-        Account.tenant_id == tenant_id, Account.act_id == item.act_id).first()
-    _acc_name = (_acc.name if _acc else "") or ""
-    _tpl_adv = _parse_advanced(tpl) or {}
-    _subcode_cache: dict = {}
-    _lp_base_cache: dict = {}      # landing_page_id → 公网 base（自动建链用，页行解析）
-    _lp_probe_cache: dict = {}     # url → FB 封禁探测结果（批S；同 item 内去重 FB Graph 调用）
-    _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
-    auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     _page_id = item.page_id or tpl.page_id or ""
     # 主页健康前置闸（批 2，2026-09-27）：is_published=False 的页拒投/不选——防系列建到
     # 一半才报「公共主页未发布」（job82 实证 Mebrelablo Plogordmire）；判据 CLI 实测过
@@ -3250,6 +3223,33 @@ def _deploy_item_fb_tree(sdb, job, item: LaunchJobItem, tpl: LaunchTemplate, ads
             f"所选主页「{_pg_health[_page_id]['name'] or _page_id}」已取消发布（不可投放）——"
             "请先在 FB 恢复主页，或在部署抽屉换已发布的主页")
 
+    _item_note(sdb, item, "创建系列…")   # 批BQ：分步进度可见
+    camp_payload = build_campaign(
+        name=campaign_name, objective=tpl.objective,
+        daily_budget=(camp_budget_fb if (is_cbo and not _camp_lifetime_fb) else None),
+        lifetime_budget=_camp_lifetime_fb,
+        budget_mode=tpl.budget_mode, bid_strategy=tpl.bid_strategy,
+        special_ad_categories=_cats, spend_cap=_spend_cap_fb)
+    camp = fb.post(f"act_{item.act_id}/campaigns", camp_payload)
+    campaign_id = camp.get("id")
+    if not campaign_id:
+        raise FbApiError("no_id", f"FB 创建 campaign 未返回 id（响应：{str(camp)[:200]}）")
+    # 审计 P1（树模式逃逸）：campaign 建成即落库——后续任一节点失败（含 _LandingBlockedError
+    # 穿透每广告 try 的路径）item 已带 campaign_id，重试守卫拦住整树重跑（曾不落库 →
+    # 守卫被绕过 → 重试整树重建 = 双倍投放双倍花费）
+    item.campaign_id = campaign_id
+    sdb.commit()
+
+    ok, fails, last = 0, [], None
+    _acc = sdb.query(Account).filter(
+        Account.tenant_id == tenant_id, Account.act_id == item.act_id).first()
+    _acc_name = (_acc.name if _acc else "") or ""
+    _tpl_adv = _parse_advanced(tpl) or {}
+    _subcode_cache: dict = {}
+    _lp_base_cache: dict = {}      # landing_page_id → 公网 base（自动建链用，页行解析）
+    _lp_probe_cache: dict = {}     # url → FB 封禁探测结果（批S；同 item 内去重 FB Graph 调用）
+    _auto_slugs: list[str] = []    # 本 item 自动建的子码（落 item.subcode_slug + 成功日志）
+    auto_warns: list[str] = []     # 自动建链失败降级记录（不静默）
     def _fail_group(sname: str, snode: dict, msg: str):
         nonlocal fails
         for ai, anode in enumerate(snode.get("ads") or [], 1):
