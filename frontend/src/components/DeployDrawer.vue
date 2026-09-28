@@ -347,6 +347,10 @@ const switchDeployMode = async (m) => {
   }
 }
 const batchSelectable = computed(() => batchAssets.value.filter(a => a.type === 'image' || a.type === 'video'))
+// 无 AI 文案的选中素材计数（默认文案显性化）：这些素材部署时用模板默认文案
+const batchNoAiCount = computed(() => batchSelectable.value.filter(a =>
+  batchAssetIds.value.has(a.id) && !((a.ai_copy && (a.ai_copy.headlines || []).length) || (a.ai_copy && (a.ai_copy.bodies || []).length))).length)
+const hasTplCopy = computed(() => !!((deployTpl.value?.headline || '').trim() || (deployTpl.value?.body || '').trim()))
 const toggleBatchAsset = (id) => {
   const s = new Set(batchAssetIds.value)
   if (s.has(id)) { s.delete(id) }
@@ -555,6 +559,12 @@ defineExpose({ open, showPreflight })
     </div>
     <template v-if="deployMode==='batch' && !deployTreeStats">
       <div class="deploy-reuse-hint batch-hint">{{ t('launch.batchHint') }}</div>
+      <!-- 无 AI 文案素材计数（默认文案显性化）：让「哪些素材会用模板默认文案」下单前可见 -->
+      <div v-if="batchNoAiCount > 0" :class="['batch-copy-note', { warn: !hasTplCopy }]">
+        {{ hasTplCopy
+          ? t('launch.batchNoAiUsesTpl', { n: batchNoAiCount })
+          : t('launch.batchNoAiNoTpl', { n: batchNoAiCount }) }}
+      </div>
       <div class="batch-bar">
         <span class="batch-count">{{ t('launch.batchAssetCount', { n: batchAssetIds.size }) }}</span>
         <button class="op sm" @click="batchSelectAllAssets">{{ t('launch.batchSelectAll') }}</button>
@@ -796,6 +806,8 @@ defineExpose({ open, showPreflight })
 .batch-hint{margin:8px 0;background:var(--bg2);border-color:var(--bd);color:var(--t2)}
 .batch-bar{display:flex;gap:6px;align-items:center;margin:8px 0}
 .batch-count{font-size:12px;color:var(--t2);margin-right:auto}
+.batch-copy-note{font-size:12px;color:var(--ac);background:var(--acg);border:1px solid rgba(10,132,255,.3);border-radius:6px;padding:6px 10px;margin:6px 0}
+.batch-copy-note.warn{color:var(--warning);background:rgba(255,159,10,.1);border-color:rgba(255,159,10,.35)}
 .batch-grid{max-height:300px;overflow-y:auto;padding:1px}
 .batch-card{position:relative}
 .batch-card.on{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac) inset}

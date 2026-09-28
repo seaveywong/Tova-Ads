@@ -2337,6 +2337,19 @@ const {
         </template>
         <!-- FB ABO structure mode: template default daily budget (nodes fall back to it) -->
         <div v-else-if="editMode==='tree'" class="row"><label>{{ t('launch.treeDefaultDailyBudget') }}</label><input v-model.number="form.budget_usd" type="number" min="1" step="0.5" class="inp" /><span class="hint">{{ t('launch.treeBudgetPh') }}</span></div>
+        <!-- 默认文案显性化（2026-09-28 用户拍板：树模式曾无模板级文案入口，「填过忘了」变隐藏兜底误导） -->
+        <div v-if="editMode==='tree'" class="row copy-fb-row">
+          <label>{{ t('launch.fallbackCopyLabel') }}</label>
+          <div class="copy-fb">
+            <div class="cf-line"><span class="cf-k">{{ t('launch.headlineLabel') }}</span>
+              <input v-model="form.headline" class="inp" :placeholder="t('launch.fallbackHeadlinePh')" /></div>
+            <div class="cf-line"><span class="cf-k">{{ t('launch.bodyLabel') }}</span>
+              <textarea v-model="form.body" class="inp ta" rows="2" :placeholder="t('launch.fallbackBodyPh')" /></div>
+            <div :class="['cf-meta', { on: form.headline || form.body }]">
+              {{ (form.headline || form.body) ? t('launch.fallbackCopyActive') : t('launch.fallbackCopyEmpty') }}
+            </div>
+          </div>
+        </div>
         <!-- bid strategy (campaign-level) + bid amount / minimum ROAS (FB)：模板默认值，各广告组在组卡「出价控制」逐组覆盖（ABO/CBO 下 FB 出价额都在组级生效） -->
         <div class="row"><label>{{ t('launch.bidStrategy') }}</label><el-select v-model="form.bid_strategy" style="width:100%" size="small"><el-option v-for="b in BID_STRATEGIES" :key="b.v" :value="b.v" :label="t(b.l)" /></el-select></div>
         <div v-if="BID_NEEDS_AMOUNT.includes(form.bid_strategy)" class="row"><label>{{ t('launch.bidAmountUsd') }}</label><input v-model.number="form.bid_amount_usd" type="number" min="0" step="0.5" class="inp" :placeholder="t('launch.bidAmountPh')" /><span class="hint">{{ t('launch.budgetConvertHint') }}</span><span class="hint">{{ t('launch.bidDefaultHint') }}</span></div>
@@ -3368,6 +3381,13 @@ const {
 .inp.sm{padding:4px 8px;font-size:12px}
 .inp.multi{min-height:70px}
 .hint{font-size:11px;color:var(--t3)}
+/* 默认文案显性化（树模式模板级文案编辑区） */
+.copy-fb{display:flex;flex-direction:column;gap:6px;border:1px solid var(--bd);border-radius:8px;padding:8px 10px;width:100%}
+.copy-fb.on{border-color:rgba(10,132,255,.35)}
+.cf-line{display:flex;align-items:flex-start;gap:8px}
+.cf-k{font-size:11px;color:var(--t3);width:32px;flex:none;padding-top:6px}
+.cf-meta{font-size:11px;color:var(--t3)}
+.cf-meta.on{color:var(--ac);background:var(--acg);border-radius:4px;padding:2px 8px}
 /* 特殊广告类别受众警告条（组卡受众区）：FB 强制忽略年龄/性别/部分兴趣定向 */
 .scat-warn{padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.5;background:rgba(249,115,22,.1);color:var(--warning);border:1px solid rgba(249,115,22,.35)}
 .seg{display:flex;gap:4px}
