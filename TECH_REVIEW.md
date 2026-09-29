@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-09-29 — 保活权限链定案 + 导入即区分投放授权（硬拒）
+
+### 概述
+三段（bfc6fde / fab7ce4 / 706eebf，迁移 0111，均已部署验证）：
+
+**① 保活建不上根因（Deedunsd30x 批）**：CLI 实测 5 账户全令牌池——4 个令牌仅 BM 间接可读（写操作 2490585 拒，读全通：账户/系列/广告/insights 全 200）；Deedunsd301 是新代账户（4834011 需 is_adset_budget_sharing_enabled=false，已统一修进 build_campaign+保活）+ 强绑主页熔断（1815645，待号商告知绑定主页）。
+
+**② 投放授权判据（导入手前）**：`/me/adaccounts` = 「直接分配」权威面（在列=可投放）；点查可达≠授权（BM 间接）。无更细只读判据（tasks 字段无数据、userpermissions 废弃 v3.2+）。`_verify_ids_pointwise` 每令牌拉授权 ID 集比对 → 行带 authorized（列表拉取失败=None 不误拦）。
+
+**③ 导入行为（用户两轮拍板，终版=硬拒）**：
+- 初版：readonly 默认拒 + 「仍导入（只读）」确认弹窗（allow_readonly 重发）
+- **终裁（706eebf）：只读导入无任何意义——直接拒**。理由存档：BM 可读（analyst 级）能读全部数据，但投放/保活/**止损暂停**（暂停也是写）全不可用；本产品用户场景=自己投放，「监控他人代投」场景不存在 → 只读账户零价值。**不要加回「仍导入」选项。**
+- 保留件：write_authorized 列（迁移 0111）、「只读」徽标（存量/号商事后撤权可见）、保活+部署遇 2490585 自动反标 False。
+
+### 关键端点行为（终版）
+```
+POST /fb/import
+  authorized=True  → 正常纳管（write_authorized=true）
+  authorized=False → 拒：skipped_readonly=[{act_id,name}]，不入库
+  authorized=None  → 放行（授权列表拉取失败，宁放行不误拦；write_authorized=NULL）
+列表导入（loadable）→ 天然全授权（/me/adaccounts 本身）
+```
+
+### 变更表
+| 文件 | 变更 | 验证 |
+|---|---|---|
+| fb.py | _authorized_act_ids/_loadable_ids_cache + pointwise authorized + import 硬拒 + list_accounts 带 write_authorized | E2E：302 拒/301 放行实测 |
+| schemas/fb.py | 删 allow_readonly | — |
+| guard_engine / launch_templates | 2490585 → write_authorized=False 反标 | 代码路径 |
+| ad_builder + 保活内联 | is_adset_budget_sharing_enabled=false（新代账户） | 探针建删 ✓ 老账户无害 ✓ |
+| fb_client 错误字典 | 2490585/4834011 人话文案 | — |
+| 迁移 0111 | accounts.write_authorized | upgrade ✓ 存量回填 24可投/4仅读 |
+| Tokens.vue/Ads.vue/locales | 硬拒提示 + 只读徽标 | build+审计 PASS + live hash ✓ |
+
+### commit
+bfc6fde / fab7ce4 / 706eebf
+
+---
+
 ## 2026-09-27（二轮）— 今日交付对抗复审修复批（06f7e8a/5b4edd4/2f44950）
 
 ### 概述
