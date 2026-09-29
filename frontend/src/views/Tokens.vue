@@ -51,6 +51,7 @@ const loadSearch = ref('')
 const loadSelected = ref({})
 const loadIdText = ref('')
 const loadImporting = ref(false)
+const loadDegraded = ref([])   // 拉取失败令牌（限流/失效）→ 名下账户不在清单里，弹窗顶部提示
 
 // 数据健康（超管）：令牌/账户关联脏数据诊断 + 手动清理
 const isSuper = ref(isSuperadminSync())
@@ -573,8 +574,11 @@ const openLoad = async (tk = null) => {
   loadSearch.value = ''
   loadIdText.value = ''
   loadSelected.value = {}
-  loadScopeCred.value = tk?.id || 0
-  loadScopeAlias.value = tk ? (tk.alias || tk.fb_user_name || `#${tk.id}`) : ''
+  loadDegraded.value = []
+  // 只有真实令牌对象才当 scope——@click 裸传会把 DOM Event 穿透进来（Event.id 恒 undefined）
+  const scope = (tk && tk.id) ? tk : null
+  loadScopeCred.value = scope ? scope.id : 0
+  loadScopeAlias.value = scope ? (scope.alias || scope.fb_user_name || `#${scope.id}`) : ''
   loadLoading.value = true
   try {
     // 端点返回裸 list（旧形状）；import_default_all 走 X-Import-Default-All 响应头（原生 fetch 才拿得到头）
@@ -596,6 +600,11 @@ const openLoad = async (tk = null) => {
       for (const a of loadableAccounts.value) if (!a.imported) sel[a.account_id] = true
       loadSelected.value = sel
     }
+    // 拉取失败令牌（限流/失效）→ 名下账户不在清单里，显式提示防「以为账户不存在」
+    try {
+      const d = JSON.parse(_resp.headers.get('x-loadable-degraded') || '[]')
+      if (Array.isArray(d) && d.length) loadDegraded.value = d
+    } catch {}
   }
   catch (e) { ElMessage.error(t('tokens.fetchFail')+(e.message||'')); loadableAccounts.value = [] }
   loadLoading.value = false
@@ -608,6 +617,21 @@ const filteredLoadable = computed(() => {
     || (a.imported ? 1 : 0) - (b.imported ? 1 : 0))
 })
 const loadSelectedCount = computed(() => Object.values(loadSelected.value).filter(Boolean).length)
+// 未识别 ID 明细弹窗：列前 5 个具体 ID + 指路文案（比一条「未找到 N」toast 可排查）
+const _alertNotFound = (ids) => {
+  const shown = ids.slice(0, 5).join('、') + (ids.length > 5 ? ' …' : '')
+  return ElMessageBox.alert(t('tokens.notFoundDetail', { n: ids.length, ids: shown }), t('tokens.notFoundTitle'),
+    { confirmButtonText: t('common.ok') }).catch(() => {})
+}
+// FB 导入成功 → 引导去广告账户页（照 TT 导入 ttImportedGoAds 模式）
+const _promptGoAds = async (n) => {
+  if (!n) return
+  try {
+    await ElMessageBox.confirm(t('tokens.fbImportedGoAds', { n }), t('common.confirm'),
+      { type: 'success', confirmButtonText: t('tokens.goAdsPage'), cancelButtonText: t('common.close') })
+    router.push('/ads')
+  } catch {}
+}
 const doImport = async (ids) => {
   // 导入保护（>50 确认一次——几千账户一次进来炸巡检/同步）
   if (ids.length > 50) {
@@ -617,7 +641,8 @@ const doImport = async (ids) => {
   }
   loadImporting.value = true
   try {
-    const r = await POST('/fb/import', { account_ids: ids })
+    // cred_id=令牌域导入：选中令牌进入时（含 ID 粘贴）只在该令牌下识别账户
+    const r = await POST('/fb/import', { account_ids: ids, cred_id: loadScopeCred.value || 0 })
     // 无投放权限账户被拒（2026-09-29 终裁：只读无意义，直接拒+指路，不做「仍导入」）
     if (r.skipped_readonly && r.skipped_readonly.length) {
       const names = r.skipped_readonly.slice(0, 3).map(x => x.name || x.act_id).join('、')
@@ -627,17 +652,19 @@ const doImport = async (ids) => {
       if (!r.not_found?.length && !r.skipped_existing) {
         loadOpen.value = false
         await Promise.all([load(), loadSummary(), loadAtRisk()])
+        await _promptGoAds(r.count)
         return
       }
     }
     const parts = [t('tokens.importedCount', { n: r.count })]
     if (r.skipped_existing) parts.push(t('tokens.skippedExisting', { n: r.skipped_existing }))
-    if (r.not_found && r.not_found.length) parts.push(t('tokens.notFound', { n: r.not_found.length }))
     if (r.skipped_over_limit && r.skipped_over_limit.length) parts.push(t('tokens.skippedOverLimit', { n: r.skipped_over_limit.length }))
     ElMessage.success(parts.join(' · '))
     loadOpen.value = false
     await Promise.all([load(), loadSummary(), loadAtRisk()])
     if (drawerToken.value) await loadDrawerAssets(drawerToken.value)
+    if (r.not_found && r.not_found.length) await _alertNotFound(r.not_found)   // 先看未识别明细，再弹去向指引（不叠窗）
+    await _promptGoAds(r.count)
   } catch (e) { ElMessage.error(t('tokens.importFail')+(e.message||'')) }
   loadImporting.value = false
 }
@@ -647,8 +674,15 @@ const commitLoadList = async () => {
   if (!ids.length) { ElMessage.warning(t('tokens.selectUnimported')); return }
   await doImport(ids)
 }
+// ID 粘贴实时解析条：识别数 / 去重数 / >200 禁提交
+const ID_PARSE_MAX = 200
+const loadIdParse = computed(() => {
+  const all = loadIdText.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+  const unique = [...new Set(all)]
+  return { total: all.length, unique: unique.length, dup: all.length - unique.length, over: unique.length > ID_PARSE_MAX }
+})
 const commitLoadIds = async () => {
-  const ids = loadIdText.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean)
+  const ids = [...new Set(loadIdText.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean))]
   if (!ids.length) { ElMessage.warning(t('tokens.pasteIds')); return }
   await doImport(ids)
 }
@@ -730,7 +764,7 @@ const deleteToken = async (tk) => {
       <div class="ph-actions">
         <template v-if="platform==='fb'">
           <button class="head-btn primary" @click="popOverlay(); importOpen = true">{{ t('tokens.connectFacebook') }}</button>   <!-- 全库审查P2：入口补 popOverlay 取 z-index -->
-          <button class="head-btn" @click="openLoad">{{ t('tokens.importAccounts') }}</button>
+          <button class="head-btn" @click="openLoad()">{{ t('tokens.importAccounts') }}</button>
           <button class="head-btn" :disabled="refreshAllRunning" @click="refreshAll">{{ refreshAllLabel }}</button>
           <button v-if="isSuper" class="head-btn" @click="openHealth">{{ t('tokens.dataHealth') }}</button>
         </template>
@@ -911,7 +945,7 @@ const deleteToken = async (tk) => {
           <div v-if="drawerToken && statusMeta(drawerToken).dot !== 'ok'" class="token-warn">
             ⚠ {{ t('tokens.tokenWarn', { status: statusMeta(drawerToken).label }) }}
           </div>
-          <div class="add-row"><button class="add-btn" @click="openLoad">+ {{ t('tokens.addAccount') }}</button></div>
+          <div class="add-row"><button class="add-btn" @click="openLoad()">+ {{ t('tokens.addAccount') }}</button></div>
           <div v-if="drawerAccounts.length" class="asset-list">
             <div v-for="a in drawerAccounts" :key="a.account_id" class="asset-item">
               <div class="ai-main">
@@ -1037,6 +1071,7 @@ const deleteToken = async (tk) => {
           <button class="mt-btn" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">{{ t('tokens.tabIdImport') }}</button>
         </div>
         <div v-if="loadTab==='list'">
+          <div v-if="loadDegraded.length" class="load-degraded">{{ t('ads.loadDegraded', { names: loadDegraded.map(d => d.alias).join(', ') }) }}</div>
           <input v-model="loadSearch" class="input load-search" :placeholder="t('tokens.searchAccountPlaceholder')" />
           <div class="load-meta">{{ t('tokens.loadableMeta', { total: loadableAccounts.length, selected: loadSelectedCount }) }}</div>
           <div v-loading="loadLoading" class="load-list">
@@ -1058,11 +1093,14 @@ const deleteToken = async (tk) => {
           </div>
         </div>
         <div v-if="loadTab==='ids'">
-          <div class="hint-left">{{ t('tokens.idImportHint') }}</div>
+          <div class="hint-left">{{ t('tokens.idImportHint') }}<template v-if="loadScopeCred"> {{ t('tokens.idImportScopedHint', { name: loadScopeAlias }) }}</template></div>
           <textarea v-model="loadIdText" class="input load-area" placeholder="act_1234567890&#10;9876543210&#10;..."></textarea>
+          <div v-if="loadIdParse.total" class="id-parse" :class="{over: loadIdParse.over}">
+            {{ t('tokens.idParseLine', { n: loadIdParse.total, m: loadIdParse.unique }) }}<template v-if="loadIdParse.dup"> · {{ t('tokens.idParseDedup', { k: loadIdParse.dup }) }}</template><template v-if="loadIdParse.over"> · {{ t('tokens.idParseTooMany') }}</template>
+          </div>
           <div class="m-foot">
             <button class="btn" @click="confirmCloseLoad">{{ t('common.cancel') }}</button>
-            <button class="btn primary" :disabled="loadImporting" @click="commitLoadIds">{{ t('common.import') }}</button>
+            <button class="btn primary" :disabled="loadImporting || loadIdParse.over" @click="commitLoadIds">{{ t('common.import') }}</button>
           </div>
         </div>
       </div>
@@ -1280,6 +1318,9 @@ const deleteToken = async (tk) => {
 .tk-badge.dead{background:rgba(255,159,10,.12);color:var(--warning)}
 .imp-mark{font-size:10px   /* UI审计B：9px 中文笔画不可读 */;padding:1px 5px;border-radius:4px;background:var(--bg2);color:var(--t3)}
 .load-area{min-height:120px;resize:vertical;font-family:'SF Mono','Fira Code',monospace;font-size:12px}
+.load-degraded{margin-bottom:8px;padding:8px 10px;border:1px solid rgba(230,162,60,.4);background:rgba(230,162,60,.08);border-radius:6px;font-size:12px;line-height:1.5;color:var(--warning)}
+.id-parse{font-size:11px;color:var(--t3);margin-top:6px;line-height:1.5;font-variant-numeric:tabular-nums}
+.id-parse.over{color:var(--error)}
 .hint-left{font-size:11px;color:var(--t3);margin-bottom:8px;line-height:1.5}
 .hint-left code{font-family:'SF Mono',monospace;font-size:10px;background:var(--bg3);padding:0 4px;border-radius:3px}
 

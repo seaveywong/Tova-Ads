@@ -219,8 +219,13 @@ const toggleAcc = async (id) => {
   if (s.has(id)) await ensureAccConfig(id)
 }
 // 批量选择：排除异常账户（account_status≠1 建 广告必失败）+ 跟帖模式排除无主页权限账户
-const _selectableAccs = () => filteredDeployAccounts.value.filter(a => a.account_status === 1 && (!reuseDeployPage.value || accManagesReusePage(a.act_id)))
+// + 只读账户（write_authorized===false：令牌无投放权限，部署必被拒）+ 无令牌账户（巡检/部署不可用）
 const accAbnormal = (a) => a.account_status !== 1
+const accReadonly = (a) => a.write_authorized === false
+const accNoToken = (a) => a.no_token === true
+const accBlocked = (a) => accAbnormal(a) || accReadonly(a) || accNoToken(a)
+  || (deployTpl.value?.post_source === 'reuse' && !accManagesReusePage(a.act_id))
+const _selectableAccs = () => filteredDeployAccounts.value.filter(a => a.account_status === 1 && !accReadonly(a) && !accNoToken(a) && (!reuseDeployPage.value || accManagesReusePage(a.act_id)))
 const deploySelectAll = () => {
   // 全选=只选可选集（正常账户；异常账户 checkbox 本就禁用——「只选正常账户」按钮曾与其
   // 语义重复，复审P2 已删）
@@ -618,12 +623,12 @@ defineExpose({ open, showPreflight })
       {{ t('launch.nodePageHint', { n: tplNodePages.length }) }}
     </div>
     <div class="acc-list" v-loading="accLoading">
-      <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: (deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)}]">
+      <div v-for="a in filteredDeployAccounts" :key="a.act_id" :class="['acc-block', {disabled: accBlocked(a)}]">
         <label class="acc-row" :class="{on:selectedAccs.has(a.act_id)}">
-          <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="(deployTpl?.post_source === 'reuse' && !accManagesReusePage(a.act_id)) || accAbnormal(a)" @change="toggleAcc(a.act_id)" />
+          <input type="checkbox" :checked="selectedAccs.has(a.act_id)" :disabled="accBlocked(a)" @change="toggleAcc(a.act_id)" />
           <span class="acc-main">
             <span class="acc-name">{{ a.name || a.act_id }}</span>
-            <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span><span v-if="a.owner_email" class="acc-owner" :title="a.owner_email">· {{ (a.owner_email || '').split('@')[0] }}</span></span>
+            <span class="acc-sub"><span class="acc-id mono">{{ a.act_id }}</span><span class="acc-cur">{{ a.currency }}</span><span v-if="a.owner_email" class="acc-owner" :title="a.owner_email">· {{ (a.owner_email || '').split('@')[0] }}</span><span v-if="accReadonly(a)" class="acc-flag warn" :title="t('ads.readonlyTip')">{{ t('ads.readonlyTag') }}</span><span v-if="accNoToken(a)" class="acc-flag danger" :title="t('ads.noTokenTip')">{{ t('ads.noTokenTag') }}</span></span>
           </span>
           <!-- 可用额度（花费上限−历史总消耗，USD）；无上限账户显示 ∞；未知币种算不出则不显示。
                曾拿 balance_usd（FB 未结欠款）兜底冒充可用额度——口径错误已移除 -->
@@ -833,6 +838,10 @@ defineExpose({ open, showPreflight })
 .acc-sub{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--t3);min-width:0}
 .acc-owner{color:var(--ac);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px}
 .acc-id{font-family:var(--font-mono);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 只读/无令牌标记：随行禁选（checkbox disabled + 行灰化），hover 看原因 */
+.acc-flag{font-size:10px;border-radius:4px;padding:0 5px;white-space:nowrap;flex:none;line-height:1.5}
+.acc-flag.warn{color:var(--warning);border:1px solid rgba(255,159,10,.4)}
+.acc-flag.danger{color:var(--error);border:1px solid rgba(239,68,68,.4)}
 .acc-bal{font-size:12px;color:var(--t2);white-space:nowrap;font-variant-numeric:tabular-nums}
 .acc-status{font-size:11px;padding:1px 8px;border-radius:var(--rs);font-weight:600;white-space:nowrap;line-height:1.5}
 .acc-status.ok{color:var(--success);background:rgba(52,199,89,.13)}

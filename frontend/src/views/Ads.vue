@@ -30,13 +30,23 @@ const platAccounts = computed(() => platform.value === 'all' ? accounts.value : 
 const groupFilter = ref('')   // ''=全部分组
 const groupSort = ref(false)  // 列头点击切换：开=同组相邻（无组沉底）；关=恢复后端「需关注在上」原序
 const groupOptions = computed(() => [...new Set(platAccounts.value.map(a => (a.group_label || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)))
+// ── 归属人筛选（与其他筛选并列）：选项从 accounts distinct owner_email 动态生成 ──
+const ownerFilter = ref('')   // ''=全部归属人
+const ownerOptions = computed(() => {
+  const seen = new Map()
+  for (const a of accounts.value) {
+    if (a.owner_email && !seen.has(a.owner_email)) seen.set(a.owner_email, a.owner_email.split('@')[0])
+  }
+  return [...seen.entries()].map(([email, label]) => ({ email, label }))
+})
 const _NOGRP = String.fromCharCode(0xFFFF)   // 无分组哨兵：码点极大值，排序时无分组行沉底
 const sortForView = (rows) => groupSort.value
   ? [...rows].sort((a, b) => ((a.group_label || '').trim() || _NOGRP).localeCompare((b.group_label || '').trim() || _NOGRP))
   : rows
 const filteredAccounts = computed(() => {
-  // 分组筛选与搜索叠加（都在 platAccounts 基础上收窄）
+  // 分组/归属人筛选与搜索叠加（都在 platAccounts 基础上收窄）
   let rows = groupFilter.value ? platAccounts.value.filter(a => (a.group_label || '').trim() === groupFilter.value) : platAccounts.value
+  if (ownerFilter.value) rows = rows.filter(a => (a.owner_email || '') === ownerFilter.value)
   if (!searchQ.value.trim()) return sortForView(rows)
   // 搜索只过滤、保序（fuse.search 按相关度重排会打乱列表既有排序——同 Dashboard 修法）
   const fuseAcc = new Fuse(rows, { keys: ['name', 'act_id'], threshold: 0.3 })
@@ -168,26 +178,55 @@ const load = async () => {
 const loadDegraded = ref([])
 const loadTab = ref('list')   // 列表勾选 / 粘贴 ID 双模式（对齐令牌页载入，2026-09-29）
 const loadIdText = ref('')
+const loadSearch = ref('')
+// 列表 tab 本地搜索（照令牌页 load-search：按名称/账户 ID 过滤）
+const filteredLoadables = computed(() => {
+  const q = loadSearch.value.trim().toLowerCase()
+  if (!q) return loadables.value
+  return loadables.value.filter(a => (a.name || '').toLowerCase().includes(q) || (a.account_id || '').includes(q))
+})
+const loadCheckedCount = computed(() => loadables.value.filter(a => a._checked).length)
+// 关闭载入弹窗：有勾选未导入时先确认（防点遮罩/✕ 误丢一排勾选，对齐令牌页）
+const confirmCloseLoad = async () => {
+  if (!loadCheckedCount.value) { loadOpen.value = false; return }
+  try { await ElMessageBox.confirm(t('tokens.closeLoadConfirm', { n: loadCheckedCount.value }), t('common.confirm'), { type: 'warning', confirmButtonText: t('common.close'), cancelButtonText: t('common.cancel') }) }
+  catch { return }
+  loadOpen.value = false
+}
+// 未识别 ID 明细弹窗：列前 5 个具体 ID + 指路文案（比一条「未找到 N」toast 可排查）
+const _alertNotFound = (ids) => {
+  const shown = ids.slice(0, 5).join('、') + (ids.length > 5 ? ' …' : '')
+  return ElMessageBox.alert(t('tokens.notFoundDetail', { n: ids.length, ids: shown }), t('tokens.notFoundTitle'),
+    { confirmButtonText: t('common.ok') }).catch(() => {})
+}
+// ID 粘贴实时解析条：识别数 / 去重数 / >200 禁提交
+const ID_PARSE_MAX = 200
+const loadIdParse = computed(() => {
+  const all = loadIdText.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
+  const unique = [...new Set(all)]
+  return { total: all.length, unique: unique.length, dup: all.length - unique.length, over: unique.length > ID_PARSE_MAX }
+})
 const commitLoadIds = async () => {
-  const ids = loadIdText.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
+  const ids = [...new Set(loadIdText.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean))]
   if (!ids.length) return ElMessage.warning(t('tokens.pasteIds'))
   importing.value = true
   try {
     const r = await POST('/fb/import', { account_ids: ids })
-    if (r.count) ElMessage.success(t('ads.imported', { n: r.count, skipped: 0 }))
+    if (r.count) ElMessage.success(t('ads.imported', { n: r.count, skipped: r.skipped_existing || 0 }))
+    else if (r.skipped_existing) ElMessage.info(t('tokens.skippedExisting', { n: r.skipped_existing }))   // 全部已导入时仍有反馈
     if (r.skipped_readonly && r.skipped_readonly.length) {
       const names = r.skipped_readonly.slice(0, 3).map(x => x.name || x.act_id).join('、')
         + (r.skipped_readonly.length > 3 ? ` 等 ${r.skipped_readonly.length} 个` : '')
       ElMessage.warning(t('tokens.readonlyRejected', { n: r.skipped_readonly.length, names }))
     }
-    if (r.skipped_existing) ElMessage.info(t('tokens.skippedExisting', { n: r.skipped_existing }))
-    if (r.not_found && r.not_found.length) ElMessage.warning(t('tokens.notFound', { n: r.not_found.length }))
+    if (r.skipped_over_limit && r.skipped_over_limit.length) ElMessage.warning(t('tokens.skippedOverLimit', { n: r.skipped_over_limit.length }))
+    if (r.not_found && r.not_found.length) _alertNotFound(r.not_found)
     loadOpen.value = false; loadIdText.value = ''; await load()
   } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
   importing.value = false
 }
 const openLoad = async () => {
-  loadOpen.value = true; loadLoading.value = true; loadDegraded.value = []
+  loadOpen.value = true; loadLoading.value = true; loadDegraded.value = []; loadSearch.value = ''
   // 平台分流：FB 勾选清单 + TT 授权未纳管账户并拉（一侧失败不影响另一侧展示）
   const rows = []
   const [fb, tt] = await Promise.allSettled([
@@ -211,6 +250,11 @@ const doImport = async () => {
   const fbIds = loadables.value.filter(a => a._checked && a.platform !== 'tt' && !a.imported).map(a => a.account_id).filter(Boolean)
   const ttIds = loadables.value.filter(a => a._checked && a.platform === 'tt').map(a => a.account_id).filter(Boolean)
   if (!fbIds.length && !ttIds.length) return ElMessage.warning(t('ads.selectToImport'))
+  // FB 大批量导入保护（照令牌页 doImport：>50 确认一次——大量账户炸巡检/同步）
+  if (fbIds.length > 50) {
+    try { await ElMessageBox.confirm(t('tokens.importBigBatchConfirm', { n: fbIds.length }), t('common.confirm'), { type: 'warning' }) }
+    catch { return }
+  }
   importing.value = true
   try {
     let ok = 0, skipped = 0
@@ -222,7 +266,8 @@ const doImport = async () => {
           + (r.skipped_readonly.length > 3 ? ` 等 ${r.skipped_readonly.length} 个` : '')
         ElMessage.warning(t('tokens.readonlyRejected', { n: r.skipped_readonly.length, names }))
       }
-      if (r.not_found && r.not_found.length) ElMessage.warning(t('tokens.notFound', { n: r.not_found.length }))
+      if (r.skipped_over_limit && r.skipped_over_limit.length) ElMessage.warning(t('tokens.skippedOverLimit', { n: r.skipped_over_limit.length }))
+      if (r.not_found && r.not_found.length) _alertNotFound(r.not_found)
     }
     if (ttIds.length) {
       const r = await POST('/tt/import', { act_ids: ttIds })
@@ -442,6 +487,10 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
         <option value="">{{ t('ads.groupAll') }}</option>
         <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
       </select>
+      <select v-model="ownerFilter" class="grp-filter" :title="t('ads.ownerFilterTip')">
+        <option value="">{{ t('ads.ownerAll') }}</option>
+        <option v-for="o in ownerOptions" :key="o.email" :value="o.email">{{ o.label }}</option>
+      </select>
     </div>
     <div v-if="selectedAccs.size" class="batch-bar">
       <span class="batch-count">{{ t('ads.selected', { n: selectedAccs.size }) }}</span>
@@ -524,31 +573,35 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
       </div>
     </div>
 
-    <div v-if="loadOpen" class="overlay" @click.self="loadOpen = false">
+    <div v-if="loadOpen" class="overlay" @click.self="confirmCloseLoad">
       <div class="modal">
-        <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="loadOpen = false">✕</button></div>
+        <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="confirmCloseLoad">✕</button></div>
         <div style="display:flex;gap:6px;margin-bottom:10px">
           <button class="mb" :class="{on:loadTab==='list'}" @click="loadTab='list'">{{ t('tokens.tabChecklist') }}</button>
           <button class="mb" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">{{ t('tokens.tabIdImport') }}</button>
         </div>
         <div v-if="loadTab==='list'">
         <div v-if="loadDegraded.length" class="load-degraded">{{ t('ads.loadDegraded', { names: loadDegraded.map(d => d.alias).join(', ') }) }}</div>
+        <input v-model="loadSearch" class="load-search" :placeholder="t('tokens.searchAccountPlaceholder')" />
         <div class="load-list" v-loading="loadLoading">
-          <div v-for="a in loadables" :key="a.platform + ':' + a.account_id" class="load-row">
+          <div v-for="a in filteredLoadables" :key="a.platform + ':' + a.account_id" class="load-row">
             <input type="checkbox" v-model="a._checked" :disabled="a.imported" />
             <span v-if="platChip(a)" :class="['plat-chip', platChip(a)]">{{ platChip(a).toUpperCase() }}</span>
             <span class="lm-name">{{ a.name }}</span>
             <code>{{ a.account_id }}</code>
             <span class="tag" :class="a.imported ? 'off' : 'ok'">{{ a.imported ? t('ads.importedTag') : t('ads.importableTag') }}</span>
           </div>
-          <div v-if="!loadables.length && !loadLoading" class="empty">{{ t('ads.noLoadable') }}</div>
+          <div v-if="!filteredLoadables.length && !loadLoading" class="empty">{{ loadSearch.trim() ? t('tokens.noMatchAccounts') : t('ads.noLoadable') }}</div>
         </div>
         <button class="btn primary" :disabled="importing" style="margin-top:12px" @click="doImport">{{ importing ? t('ads.importing') : t('ads.importSelected') }}</button>
         </div>
         <div v-if="loadTab==='ids'">
           <div class="hint-left" style="font-size:12px;color:var(--t3);margin-bottom:8px">{{ t('ads.idImportHint') }}</div>
           <textarea v-model="loadIdText" class="input" rows="6" placeholder="act_1234567890&#10;9876543210&#10;..." style="width:100%;font-family:var(--font-mono,monospace);font-size:12px"></textarea>
-          <button class="btn primary" :disabled="importing" style="margin-top:10px" @click="commitLoadIds">{{ t('common.import') }}</button>
+          <div v-if="loadIdParse.total" class="id-parse" :class="{over: loadIdParse.over}">
+            {{ t('tokens.idParseLine', { n: loadIdParse.total, m: loadIdParse.unique }) }}<template v-if="loadIdParse.dup"> · {{ t('tokens.idParseDedup', { k: loadIdParse.dup }) }}</template><template v-if="loadIdParse.over"> · {{ t('tokens.idParseTooMany') }}</template>
+          </div>
+          <button class="btn primary" :disabled="importing || loadIdParse.over" style="margin-top:10px" @click="commitLoadIds">{{ t('common.import') }}</button>
         </div>
       </div>
     </div>
@@ -779,8 +832,13 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
 .ka-reason{color:var(--t3);font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ka-empty{text-align:center;color:var(--t3);padding:20px;font-size:13px}
 .load-degraded { margin-bottom: 10px; padding: 8px 10px; border: 1px solid rgba(230, 162, 60, .4); background: rgba(230, 162, 60, .08); border-radius: 8px; font-size: 12px; line-height: 1.5; }
-.load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px }
+.load-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--bd); font-size: 13px; flex-wrap: wrap }
 .lm-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.load-row code { color: var(--t3); font-size: 11px }
+.load-row code { color: var(--t3); font-size: 11px; word-break: break-all }
+.load-search { width: 100%; height: 32px; padding: 0 10px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: var(--rs); font-size: 13px; box-sizing: border-box; color-scheme: dark; margin-bottom: 8px }
+.load-search:focus { outline: none; border-color: var(--ac) }
+.load-search::placeholder { color: var(--t3) }
+.id-parse { font-size: 11px; color: var(--t3); margin-top: 6px; line-height: 1.5; font-variant-numeric: tabular-nums }
+.id-parse.over { color: var(--error) }
 /* 平台 chip 用 main.css 全局 .plat-chip */
 </style>
