@@ -28,4 +28,3 @@ class FbCredentialOut(BaseModel):
 
 class ImportAccountsIn(BaseModel):
     account_ids: list[str]
-    allow_readonly: bool = False   # 仅 BM 可读账户需显式确认才纳管（默认拒绝，2026-09-29）

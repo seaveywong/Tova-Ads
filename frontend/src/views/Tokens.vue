@@ -608,7 +608,7 @@ const filteredLoadable = computed(() => {
     || (a.imported ? 1 : 0) - (b.imported ? 1 : 0))
 })
 const loadSelectedCount = computed(() => Object.values(loadSelected.value).filter(Boolean).length)
-const doImport = async (ids, opts) => {
+const doImport = async (ids) => {
   // 导入保护（>50 确认一次——几千账户一次进来炸巡检/同步）
   if (ids.length > 50) {
     try {
@@ -617,26 +617,18 @@ const doImport = async (ids, opts) => {
   }
   loadImporting.value = true
   try {
-    const r = await POST('/fb/import', { account_ids: ids, allow_readonly: !!opts?.allowReadonly })
-    // 仅 BM 可读账户被拒（默认拦截）：弹确认「仍导入」→ allow_readonly 重发（2026-09-29 拍板：导入即区分）
-    if (r.skipped_readonly && r.skipped_readonly.length && !opts?.allowReadonly) {
+    const r = await POST('/fb/import', { account_ids: ids })
+    // 无投放权限账户被拒（2026-09-29 终裁：只读无意义，直接拒+指路，不做「仍导入」）
+    if (r.skipped_readonly && r.skipped_readonly.length) {
       const names = r.skipped_readonly.slice(0, 3).map(x => x.name || x.act_id).join('、')
         + (r.skipped_readonly.length > 3 ? ` 等 ${r.skipped_readonly.length} 个` : '')
-      try {
-        await ElMessageBox.confirm(
-          t('tokens.readonlyConfirm', { n: r.skipped_readonly.length, names }),
-          t('tokens.readonlyTitle'), { type: 'warning',
-            confirmButtonText: t('tokens.readonlyStillImport'), cancelButtonText: t('common.cancel') })
-        await doImport(r.skipped_readonly.map(x => x.act_id), { allowReadonly: true })
+      if (r.count) ElMessage.success(t('tokens.importedCount', { n: r.count }))
+      ElMessage.warning(t('tokens.readonlyRejected', { n: r.skipped_readonly.length, names }))
+      if (!r.not_found?.length && !r.skipped_existing) {
+        loadOpen.value = false
+        await Promise.all([load(), loadSummary(), loadAtRisk()])
         return
-      } catch { /* 取消=不导入只读账户 */ }
-      const parts0 = [t('tokens.importedCount', { n: r.count })]
-      if (r.count) parts0.push(t('tokens.skippedReadonly', { n: r.skipped_readonly.length }))
-      else ElMessage.warning(t('tokens.skippedReadonly', { n: r.skipped_readonly.length }))
-      if (r.count) ElMessage.success(parts0.join(' · '))
-      loadOpen.value = false
-      await Promise.all([load(), loadSummary(), loadAtRisk()])
-      return
+      }
     }
     const parts = [t('tokens.importedCount', { n: r.count })]
     if (r.skipped_existing) parts.push(t('tokens.skippedExisting', { n: r.skipped_existing }))

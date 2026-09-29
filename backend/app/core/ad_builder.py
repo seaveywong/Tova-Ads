@@ -372,6 +372,9 @@ def build_campaign(
         # 声明后定向选项会被强制收窄，由用户显式选择，默认空）
         "special_ad_categories": special_ad_categories or [],
         "buying_type": "AUCTION",
+        # 新一代账户（2024+ 预算共享结构，Deedunsd301 实测 4834011）必须显式声明；
+        # false=每组独立预算（ABO 语义不变，CBO 系列级预算不受影响）；老账户实测无害
+        "is_adset_budget_sharing_enabled": "false",
     }
 
     # 系列支出上限（账户本币 minor units，调用方按汇率换算好）：累计花费达到即停整系列

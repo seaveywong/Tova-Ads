@@ -2129,18 +2129,17 @@ def import_accounts(
         # 有令牌但点查全部不覆盖 → 明确返回 not_found（不是报错）
         return {"imported": [], "count": 0, "skipped_existing": 0,
                 "not_found": sorted(set(cleaned)), "total": len(cleaned)}
-    # 授权分类（2026-09-29 拍板：导入即区分，功课做在事前）：
-    # authorized=False（仅 BM 可读）默认拒绝纳管——前端弹确认后带 allow_readonly 重发
+    # 授权分类（2026-09-29 用户终裁：只读账户无导入意义——直接拒，不做「仍导入」口子；
+    # BM 可读≠投放授权，读得到数据但投放/保活/止损暂停全是写操作全不可用）
     skipped_readonly: list[dict] = []
-    if not body.allow_readonly:
-        _ro = [a for a in cleaned if a in rows and rows[a].get("authorized") is False]
-        if _ro:
-            skipped_readonly = [{"act_id": a, "name": rows[a].get("name") or a} for a in _ro]
-            cleaned = [a for a in cleaned if a not in set(_ro)]
-            if not cleaned:
-                return {"imported": [], "count": 0, "skipped_existing": 0,
-                        "not_found": [], "total": len(cleaned) + len(_ro),
-                        "skipped_readonly": skipped_readonly}
+    _ro = [a for a in cleaned if a in rows and rows[a].get("authorized") is False]
+    if _ro:
+        skipped_readonly = [{"act_id": a, "name": rows[a].get("name") or a} for a in _ro]
+        cleaned = [a for a in cleaned if a not in set(_ro)]
+        if not cleaned:
+            return {"imported": [], "count": 0, "skipped_existing": 0,
+                    "not_found": [], "total": len(cleaned) + len(_ro),
+                    "skipped_readonly": skipped_readonly}
     imported: list[str] = []
     skipped_existing = 0
     covered: set = set()
