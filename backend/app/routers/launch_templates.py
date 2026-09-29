@@ -3946,6 +3946,11 @@ def _run_deploy_job(job_id: int, tenant_id: int, template_id: int):
                                     "adset_id": r.get("adset_id"), "template_id": template_id})
             except FbApiError as e:
                 item.status = "fail"; item.error = (e.friendly or str(e))[:300]; item.error_code = e.category
+                if e.category == "account_write":
+                    _wa_acc = sdb.query(Account).filter(
+                        Account.tenant_id == tenant_id, Account.act_id == item.act_id).first()
+                    if _wa_acc is not None:
+                        _wa_acc.write_authorized = False   # 2490585 反标（部署侧同款）
                 job.failed = (job.failed or 0) + 1
                 write_log(sdb, tenant_id=tenant_id, trace_id=new_trace_id(), actor_type="system",
                           target_type="ad", target_id="",

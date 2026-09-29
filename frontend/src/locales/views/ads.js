@@ -22,6 +22,7 @@ export default {
     throttledLine: '⏳ 令牌限流中 · 约 {n} 分钟后自动恢复',
     tokenDeadLine: '⚠ 令牌已失效，重新授权',
     noTokenTag: '无令牌',
+    readonlyTag: '只读', readonlyTip: '令牌只有查看权限（未正式分配）——无法投放/保活，请联系号商在 BM 给令牌补 advertiser（发布）角色',
     noTokenTip: '令牌已移除/未绑定：巡检与部署不可用。请到令牌页绑定，或移除纳管。',
   },
   en: {
@@ -42,6 +43,7 @@ export default {
     throttledLine: '⏳ Token rate-limited · auto-recovers in ~{n} min',
     tokenDeadLine: '⚠ Token expired, re-authorize',
     noTokenTag: 'No token',
+    readonlyTag: 'Read-only', readonlyTip: 'Token has view access only (not formally assigned) — cannot deploy/keep-alive; ask your provider to grant the advertiser role in BM',
     noTokenTip: 'Token removed/not bound: patrol and deploy are unavailable. Bind a token on the Tokens page, or remove this account from management.',
   },
 }

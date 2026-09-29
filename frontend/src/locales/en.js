@@ -478,6 +478,7 @@ export default {
     maxAccountsBtn: 'Account Cap', maxAccountsPrompt: 'Max accounts this token may bind (currently {n} bound, limit: {cur}). Empty = unlimited. Writable tokens advised ≤100; too many accounts slow down inspection.', maxAccountsLimit: 'Empty or 1-5 digits', maxAccountsUnlimited: 'unlimited',
     importBigBatchConfirm: 'You are about to import {n} accounts — large batches increase inspection time and API call volume, and writable token caps may skip some. Continue?',
     skippedOverLimit: '{n} accounts skipped due to token binding cap (raise the cap or use another token)',
+    readonlyTitle: 'BM-readable only', readonlyConfirm: '{n} account(s) ({names}) — the token only has view access (not in the authorized list): you can view data but CANNOT deploy/keep-alive. Import anyway?', readonlyStillImport: 'Import anyway (read-only)', skippedReadonly: '{n} BM-readable-only accounts not imported',
     pageRenamePrompt: 'New page name (renames the real Facebook page)',
     pageRenameLimit: 'Name must be 1-100 characters',
     pageRenamed: 'Page renamed',

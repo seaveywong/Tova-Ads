@@ -71,6 +71,9 @@ class Account(Base):
     keepalive_state = Column(Text)
     keepalive_note = Column(Text)
     keepalive_page_id = Column(Text)   # 手动指定保活主页（强绑户熔断后指定；run_keepalive 优先用它）
+    # 投放授权（2026-09-29 迁移0111）：True=令牌被正式分配（/me/adaccounts 在列，可投放）；
+    # False=仅 BM 间接可读（可导入看数、不可投放/保活）；NULL=未探测（存量/列表拉取失败）
+    write_authorized = Column(Boolean)
     is_managed = Column(Boolean, nullable=False, default=True)  # false=已取消纳管（软删：保留行+名字+历史消耗）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

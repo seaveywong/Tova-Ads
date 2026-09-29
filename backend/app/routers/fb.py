@@ -1849,13 +1849,44 @@ def _get_loadable_rows(db, tenant_id: int) -> tuple[list[dict], list[dict]]:
     return rows, degraded
 
 
+def _loadable_ids_cache(tenant_id: int) -> set:
+    """载入列表缓存里的 ID 集（来源=/me/adaccounts=直接分配面）；无缓存返空集。"""
+    import time as _t
+    ent = _LOADABLE_CACHE.get(tenant_id)
+    if ent and _t.time() - ent[0] < _LOADABLE_TTL:
+        return {r["account_id"] for r in ent[1]}
+    return set()
+
+
+def _authorized_act_ids(fb) -> set | None:
+    """该令牌「直接分配」的账户 ID 集（/me/adaccounts 全量翻页）。
+    返回 None=列表拉取失败（限流/过期）→ 调用方不判定不拦截（宁放行不误拦）。"""
+    ids: set = set()
+    after = None
+    try:
+        for _ in range(15):   # 15×200=3000 上限
+            r = fb.get("/me/adaccounts", params={
+                "fields": "account_id", "limit": 200, **({"after": after} if after else {})})
+            for a in (r.get("data") or []):
+                if a.get("account_id"):
+                    ids.add(a["account_id"])
+            after = ((r.get("paging") or {}).get("cursors") or {}).get("after") if r.get("paging") else None
+            if not after:
+                return ids
+    except Exception:
+        return None
+    return ids
+
+
 def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
     """逐 ID 点查验证令牌覆盖（1.0 _fetch_single_account 思路 + FB batch 加速）。
 
     ID 粘贴导入只有几十个目标——为此拉令牌全量账户列表（2000+ 账户 50s+，
-    载入弹窗才需要全量）纯属浪费且超时；点查 GET /act_{id} 即
-    「该令牌可读 = 可纳管」的权威判定（无权限 FB 返回 error）。
-    返回 {aid: row}，row 结构与 _get_loadable_rows 行一致。
+    载入弹窗才需要全量）纯属浪费且超时；点查 GET /act_{id} 判可达。
+    ⚠️ 2026-09-29 Deedunsd30x 实证修正：点查可达 ≠ 可投放（BM 间接可读也算可达，
+    保活/部署写操作被拒 2490585）——「正式分配」的权威面 = /me/adaccounts 列表
+    （在列=直接分配可投放）。此处每令牌拉一次授权 ID 集（翻页），行带 authorized。
+    返回 {aid: row}，row 结构与 _get_loadable_rows 行一致 + authorized: True/False/None(列表拉取失败未判定)。
     """
     from ..core.fb_tokens import _is_cred_available
     # 审计#2/#6：同 _get_loadable_rows——含 rate_limited（曾硬过滤让限流令牌的账户导入"找不到"）
@@ -1870,6 +1901,8 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
             break
         fb = FbClient(decrypt(c.access_token_enc))
         avail = _is_cred_available(c)
+        # 该令牌的授权账户 ID 集（「直接分配」权威面；拉取失败=None=不判定不拦截）
+        authed_ids = _authorized_act_ids(fb)
         for i in range(0, len(pending), 50):
             chunk = pending[i:i + 50]
             urls = [f"act_{a}?fields=account_id,name,currency,timezone_name,account_status,disable_reason"
@@ -1889,6 +1922,7 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
                         "disable_reason": meta.get("disable_reason"),
                         "tokens": [{"id": c.id, "alias": c.alias or c.fb_user_name,
                                     "available": avail}],
+                        "authorized": (aid in authed_ids) if authed_ids is not None else None,
                     }
     return out
 
@@ -2095,6 +2129,18 @@ def import_accounts(
         # 有令牌但点查全部不覆盖 → 明确返回 not_found（不是报错）
         return {"imported": [], "count": 0, "skipped_existing": 0,
                 "not_found": sorted(set(cleaned)), "total": len(cleaned)}
+    # 授权分类（2026-09-29 拍板：导入即区分，功课做在事前）：
+    # authorized=False（仅 BM 可读）默认拒绝纳管——前端弹确认后带 allow_readonly 重发
+    skipped_readonly: list[dict] = []
+    if not body.allow_readonly:
+        _ro = [a for a in cleaned if a in rows and rows[a].get("authorized") is False]
+        if _ro:
+            skipped_readonly = [{"act_id": a, "name": rows[a].get("name") or a} for a in _ro]
+            cleaned = [a for a in cleaned if a not in set(_ro)]
+            if not cleaned:
+                return {"imported": [], "count": 0, "skipped_existing": 0,
+                        "not_found": [], "total": len(cleaned) + len(_ro),
+                        "skipped_readonly": skipped_readonly}
     imported: list[str] = []
     skipped_existing = 0
     covered: set = set()
@@ -2165,10 +2211,14 @@ def import_accounts(
                 _cred_slot_take(cred_id)   # 复审P2：真实新增绑定才扣槽
             skipped_existing += 1
             continue
+        _wa = row.get("authorized")
+        if _wa is None and aid in _loadable_ids_cache(user.tenant_id):
+            _wa = True   # 列表缓存来源（/me/adaccounts 本身）=直接分配
         new_acc = Account(
             tenant_id=user.tenant_id,
             fb_credential_id=cred_id,
             act_id=aid,
+            write_authorized=_wa,
             name=row.get("name") or "",
             currency=row.get("currency", "USD"),
             timezone_name=row.get("timezone_name", "UTC"),
@@ -2199,7 +2249,8 @@ def import_accounts(
     return {"imported": imported, "count": len(imported),
             "skipped_existing": skipped_existing,
             "skipped_over_limit": skipped_over_limit,
-            "not_found": not_found, "total": len(cleaned)}
+            "skipped_readonly": skipped_readonly,
+            "not_found": not_found, "total": len(cleaned) + len(skipped_readonly)}
 
 
 @router.get("/accounts")
@@ -2298,6 +2349,7 @@ def list_accounts(
             # 均不可用。复用上方 pool_map（一次 JOIN 批量查好，无 N+1）；与
             # fb_credential_id 主令牌冗余列无关——令牌删除时该表已无 active 行。
             "no_token": pool_map.get(a.id, 0) == 0,
+            "write_authorized": a.write_authorized,
             "recent_spend": perf.get("spend", 0.0), "recent_conversions": perf.get("conversions", 0),
         })
     return out

@@ -489,6 +489,7 @@ export default {
     maxAccountsBtn: '账户数上限', maxAccountsPrompt: '该令牌最多绑定多少个账户（当前已绑 {n} 个，现为 {cur}）。留空 = 不限。可写令牌建议 ≤100，账户过多会显著拖慢巡检。', maxAccountsLimit: '留空或 1-5 位数字', maxAccountsUnlimited: '不限',
     importBigBatchConfirm: '本次将导入 {n} 个账户——大量账户会显著增加巡检耗时与接口调用量，且可写令牌有绑定上限（超额账户会被跳过）。确定继续？',
     skippedOverLimit: '有 {n} 个账户因令牌绑定上限被跳过（调上限或换令牌后重导）',
+    readonlyTitle: '仅 BM 可读账户', readonlyConfirm: '{n} 个账户（{names}）的令牌只有查看权限（未在正式授权列表）：可导入查看数据，但无法投放/保活。仍要导入？', readonlyStillImport: '仍导入（只读）', skippedReadonly: '{n} 个账户仅 BM 可读未导入',
     pageRenamePrompt: '新的主页名称（将真实修改 Facebook 主页名）',
     pageRenameLimit: '名称需 1-100 字符',
     pageRenamed: '主页已重命名',

@@ -3634,6 +3634,8 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope
                     try:
                         camp = fb.post(f"act_{acc.act_id}/campaigns", {
                             "name": f"{prefix} Page Like", "objective": "OUTCOME_ENGAGEMENT",
+                            # 新一代账户预算共享声明（4834011，2026-09-29 Deedunsd301 实测定案）
+                            "is_adset_budget_sharing_enabled": "false",
                             "status": "ACTIVE", "buying_type": "AUCTION", "special_ad_categories": [],
                             "is_adset_budget_sharing_enabled": False,
                         })
@@ -3737,6 +3739,8 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope
             except FbApiError as e:
                 failed += 1; results.append(_ka_res(acc, "fail", e.category, e.friendly))
                 acc.keepalive_state = "failed"; acc.keepalive_note = e.friendly[:150]
+                if getattr(e, "category", "") == "account_write":
+                    acc.write_authorized = False   # 2490585：令牌无该账户写角色（BM间接只读）
                 logger.warning(f"[Keepalive] 账户 {acc.act_id} 失败: {e.friendly}")
                 write_log(db, tenant_id=acc.tenant_id, trace_id=new_trace_id(),
                           actor_type="system", action_type="keepalive", source="keepalive",
