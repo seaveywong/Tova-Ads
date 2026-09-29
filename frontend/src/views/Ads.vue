@@ -166,6 +166,26 @@ const load = async () => {
   if (isLatest()) loading.value = false
 }
 const loadDegraded = ref([])
+const loadTab = ref('list')   // 列表勾选 / 粘贴 ID 双模式（对齐令牌页载入，2026-09-29）
+const loadIdText = ref('')
+const commitLoadIds = async () => {
+  const ids = loadIdText.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
+  if (!ids.length) return ElMessage.warning(t('tokens.pasteIds'))
+  importing.value = true
+  try {
+    const r = await POST('/fb/import', { account_ids: ids })
+    if (r.count) ElMessage.success(t('ads.imported', { n: r.count, skipped: 0 }))
+    if (r.skipped_readonly && r.skipped_readonly.length) {
+      const names = r.skipped_readonly.slice(0, 3).map(x => x.name || x.act_id).join('、')
+        + (r.skipped_readonly.length > 3 ? ` 等 ${r.skipped_readonly.length} 个` : '')
+      ElMessage.warning(t('tokens.readonlyRejected', { n: r.skipped_readonly.length, names }))
+    }
+    if (r.skipped_existing) ElMessage.info(t('tokens.skippedExisting', { n: r.skipped_existing }))
+    if (r.not_found && r.not_found.length) ElMessage.warning(t('tokens.notFound', { n: r.not_found.length }))
+    loadOpen.value = false; loadIdText.value = ''; await load()
+  } catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
+  importing.value = false
+}
 const openLoad = async () => {
   loadOpen.value = true; loadLoading.value = true; loadDegraded.value = []
   // 平台分流：FB 勾选清单 + TT 授权未纳管账户并拉（一侧失败不影响另一侧展示）
@@ -197,6 +217,12 @@ const doImport = async () => {
     if (fbIds.length) {
       const r = await POST('/fb/import', { account_ids: fbIds })
       ok += r.count || 0; skipped += r.skipped_existing || 0
+      if (r.skipped_readonly && r.skipped_readonly.length) {
+        const names = r.skipped_readonly.slice(0, 3).map(x => x.name || x.act_id).join('、')
+          + (r.skipped_readonly.length > 3 ? ` 等 ${r.skipped_readonly.length} 个` : '')
+        ElMessage.warning(t('tokens.readonlyRejected', { n: r.skipped_readonly.length, names }))
+      }
+      if (r.not_found && r.not_found.length) ElMessage.warning(t('tokens.notFound', { n: r.not_found.length }))
     }
     if (ttIds.length) {
       const r = await POST('/tt/import', { act_ids: ttIds })
@@ -501,6 +527,11 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
     <div v-if="loadOpen" class="overlay" @click.self="loadOpen = false">
       <div class="modal">
         <div class="modal-title">{{ t('ads.loadAccounts') }} <button class="mb" @click="loadOpen = false">✕</button></div>
+        <div style="display:flex;gap:6px;margin-bottom:10px">
+          <button class="mb" :class="{on:loadTab==='list'}" @click="loadTab='list'">{{ t('tokens.tabChecklist') }}</button>
+          <button class="mb" :class="{on:loadTab==='ids'}" @click="loadTab='ids'">{{ t('tokens.tabIdImport') }}</button>
+        </div>
+        <div v-if="loadTab==='list'">
         <div v-if="loadDegraded.length" class="load-degraded">{{ t('ads.loadDegraded', { names: loadDegraded.map(d => d.alias).join(', ') }) }}</div>
         <div class="load-list" v-loading="loadLoading">
           <div v-for="a in loadables" :key="a.platform + ':' + a.account_id" class="load-row">
@@ -513,6 +544,12 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
           <div v-if="!loadables.length && !loadLoading" class="empty">{{ t('ads.noLoadable') }}</div>
         </div>
         <button class="btn primary" :disabled="importing" style="margin-top:12px" @click="doImport">{{ importing ? t('ads.importing') : t('ads.importSelected') }}</button>
+        </div>
+        <div v-if="loadTab==='ids'">
+          <div class="hint-left" style="font-size:12px;color:var(--t3);margin-bottom:8px">{{ t('ads.idImportHint') }}</div>
+          <textarea v-model="loadIdText" class="input" rows="6" placeholder="act_1234567890&#10;9876543210&#10;..." style="width:100%;font-family:var(--font-mono,monospace);font-size:12px"></textarea>
+          <button class="btn primary" :disabled="importing" style="margin-top:10px" @click="commitLoadIds">{{ t('common.import') }}</button>
+        </div>
       </div>
     </div>
 
