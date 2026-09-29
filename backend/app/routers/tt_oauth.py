@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import BackgroundTasks, APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -437,7 +437,7 @@ def tt_loadable_accounts(user: CurrentUser = Depends(require_permission("ads.rea
 
 
 @router.post("/import")
-def tt_import(body: TtImportIn, user: CurrentUser = Depends(require_permission("ads.create")),
+def tt_import(body: TtImportIn, background_tasks: BackgroundTasks, user: CurrentUser = Depends(require_permission("ads.create")),
               db: Session = Depends(get_db)):
     """TT 账户显式纳管（is_managed=True）。只收 OAuth 授权过的账户行——未授权的
     act_id 一律 not_found（不做任何 API 侧隐式拉取）。重复导入=恢复纳管。"""
@@ -464,12 +464,19 @@ def tt_import(body: TtImportIn, user: CurrentUser = Depends(require_permission("
             skipped += 1
             continue
         acc.is_managed = True
+        if not acc.owner_user_id:
+            acc.owner_user_id = user.id   # 认领归属（对齐 FB 2026-09-18 口径——operator 导入自己可见）
         imported.append(aid)
     if imported:
         write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
                   actor_user_id=user.id, target_type="account", target_id="tt_batch",
                   action_type="import", source="user", result="success",
                   metadata={"platform": "tt", "imported": imported})
+    # 导入后即时广告同步（2026-09-29 对齐 FB：消 15min 广告管理器隐身；
+    # run_ads_cache_sync 自带 advisory lock 幂等，只拉 TT 账户）
+    if imported:
+        from ..services.ads_cache_sync import run_ads_cache_sync
+        background_tasks.add_task(run_ads_cache_sync)
     db.commit()
     return {"imported": imported, "skipped_existing": skipped,
             "not_found": not_found, "total": len(cleaned)}

@@ -87,8 +87,11 @@ def _done_page(ok: bool, msg: str = ""):
         "<title>Facebook " + title + "</title><style>" + css + "</style></head><body>"
         "<div class='c'><div class='i'>" + icon + "</div><h1>" + title + "</h1>"
         "<p class='d'>" + html.escape(detail) + "</p>"
-        # 成功=授权窗由令牌页打开，直接关掉即可（不跳回令牌管理）；失败=保留返回入口去重试
-        + ("<a class='a' href='javascript:void(0)' onclick=\"window.close()\">关闭此页面 ✕</a>" if ok
+        # 成功=授权窗由令牌页打开，直接关掉即可；但本页跳转场景浏览器可能拒绝 window.close
+        # （2026-09-29 复审：用户被搁浅在无出口的成功页）——并排给回应用链接+下一步指引
+        + (("<a class='a' href='javascript:void(0)' onclick=\"window.close()\">关闭此页面 ✕</a>"
+           "&nbsp;&nbsp;·&nbsp;&nbsp;<a class='a' href='" + FRONTEND_URL + "/#/tokens'>返回令牌管理 →</a>"
+           "<p class='d' style='margin-top:14px;font-size:12px'>下一步：在令牌页「载入账户」导入该令牌下的广告账户</p>") if ok
            else "<a class='a' href='" + FRONTEND_URL + "/#/tokens'>返回令牌管理重试 →</a>")
         + "</div></body></html>"
     )

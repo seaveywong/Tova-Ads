@@ -3487,6 +3487,9 @@ def run_keepalive(reset_burnt: bool = False, only_act_id: str = "", tenant_scope
             Account.is_managed == True,  # noqa: E712
             Account.account_status == 1,
             Account.platform == "fb",
+            # 只读账户不保活（2026-09-29 用户拍板「不允许出现只读账户」）：write_authorized=False
+            # 的账户保活必失败（2490585），每天空跑一轮 FB 写请求+失败日志
+            Account.write_authorized != False,  # noqa: E712（NULL=未探也放行——宁跑不错杀）
         )
         enabled_tenants = {tid for tid, c in tenant_cfgs.items() if c.get("enabled")}
         if only_act_id:

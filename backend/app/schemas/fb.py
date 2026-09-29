@@ -28,3 +28,4 @@ class FbCredentialOut(BaseModel):
 
 class ImportAccountsIn(BaseModel):
     account_ids: list[str]
+    cred_id: int = 0   # >0=限定该令牌域（令牌页选中令牌进入的导入；判定+绑定都在它之下）

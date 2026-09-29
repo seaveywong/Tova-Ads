@@ -226,6 +226,7 @@ def set_page_category(
               actor_user_id=user.id, target_type="page", target_id=body.page_id,
               action_type="page_category", source="user", result="success",
               metadata={"category": cat})
+    _LOADABLE_CACHE.pop(tenant_id, None)   # 2026-09-29：建/换令牌即失效载入缓存（否则 5min 内新令牌账户在列表静默缺失）
     db.commit()
     return {"page_id": body.page_id, "category": cat}
 
@@ -561,6 +562,7 @@ def delete_credential(
         TokenHealth.fb_credential_id == cred_id,
     ).delete(synchronize_session="fetch")
     db.delete(cred)
+    _LOADABLE_CACHE.pop(user.tenant_id, None)   # 删令牌即失效载入缓存
     db.commit()
     # token-delete: 即时重绑孤儿到其他可用 token（不等 2h watchdog）
     try:
@@ -705,6 +707,7 @@ def check_credential(
             reassociate_orphan_accounts(db, user.tenant_id)
         except Exception:
             pass
+    _LOADABLE_CACHE.pop(cred.tenant_id, None)   # 令牌状态翻转即失效载入缓存（check_credential）
     return result
 
 
@@ -716,7 +719,6 @@ def check_credential(
 # fresh=1 绕过。gunicorn 多 worker 各自持缓存（独立命中，无一致性问题——资产数据）。
 _ASSET_CACHE: dict = {}
 _ASSET_CACHE_TTL = 300.0
-
 
 def _asset_cache_get(key: str):
     hit = _ASSET_CACHE.get(key)
@@ -1673,6 +1675,10 @@ def refresh_credential_accounts(
         live = fb_map.get(acc.act_id)
         if not live:
             continue
+        # 授权回写（2026-09-29）：/me/adaccounts 命中=直接分配——不重导的账户走刷新
+        # 也能从只读恢复（修「False 无回写路径」的另一半）
+        if acc.write_authorized is not True:
+            acc.write_authorized = True
         acc.account_status = live.get("account_status") or acc.account_status
         # 显式判 None 而非 or 兜底：disable_reason=0（恢复正常）是合法值，or 会跳过导致旧原因残留
         _dr = live.get("disable_reason")
@@ -1858,13 +1864,24 @@ def _loadable_ids_cache(tenant_id: int) -> set:
     return set()
 
 
-def _authorized_act_ids(fb) -> set | None:
-    """该令牌「直接分配」的账户 ID 集（/me/adaccounts 全量翻页）。
-    返回 None=列表拉取失败（限流/过期）→ 调用方不判定不拦截（宁放行不误拦）。"""
+_AUTH_IDS_CACHE: dict = {}   # {cred_id: (ts, ids|None)} 授权面 60s 短缓存（重复粘贴免翻页）
+
+
+def _authorized_act_ids(fb, cred=None, db=None) -> set | None:
+    """该令牌「直接分配」的账户 ID 集（/me/adaccounts 全量翻页）+ 60s 进程内缓存。
+    返回 None=列表拉取失败（限流/过期）→ 调用方不判定不拦截（宁放行不误拦）。
+    2026-09-29 修正①：翻满 25 页（5000=与列表面同上限）仍有 after → 返 None
+    （视为未判定，绝不拿截断集充当权威面——3k+ 大代理令牌粘贴被误判只读的坑）。
+    修正②：FbApiError 过 mark_expired_on_auth_error 判死（批JJ 全域接线，此为第五路）。"""
+    import time as _t
+    if cred is not None:
+        ent = _AUTH_IDS_CACHE.get(cred.id)
+        if ent and _t.time() - ent[0] < 60:
+            return ent[1]
     ids: set = set()
     after = None
     try:
-        for _ in range(15):   # 15×200=3000 上限
+        for _ in range(25):   # 25×200=5000（对齐列表面上限；超限返 None 不误判）
             r = fb.get("/me/adaccounts", params={
                 "fields": "account_id", "limit": 200, **({"after": after} if after else {})})
             for a in (r.get("data") or []):
@@ -1872,58 +1889,93 @@ def _authorized_act_ids(fb) -> set | None:
                     ids.add(a["account_id"])
             after = ((r.get("paging") or {}).get("cursors") or {}).get("after") if r.get("paging") else None
             if not after:
-                return ids
+                break
+        result = ids if not after else None   # 仍有下一页=超 5000，不充当权威面
+    except FbApiError as e:
+        from ..core.fb_tokens import mark_expired_on_auth_error
+        if db is not None and cred is not None:
+            mark_expired_on_auth_error(db, cred, e)   # 过期判死（非过期错 no-op）
+        result = None
     except Exception:
-        return None
-    return ids
+        result = None
+    if cred is not None:
+        _AUTH_IDS_CACHE[cred.id] = (_t.time(), result)
+    return result
 
 
-def _verify_ids_pointwise(db, tenant_id: int, aids: list[str]) -> dict:
-    """逐 ID 点查验证令牌覆盖（1.0 _fetch_single_account 思路 + FB batch 加速）。
+def _verify_ids_pointwise(db, tenant_id: int, aids: list[str], only_cred_id: int = 0) -> dict:
+    """逐 ID 点查验证令牌覆盖 + 投放授权判定（2026-09-29 两轮修正后的终版 v3）。
 
-    ID 粘贴导入只有几十个目标——为此拉令牌全量账户列表（2000+ 账户 50s+，
-    载入弹窗才需要全量）纯属浪费且超时；点查 GET /act_{id} 判可达。
-    ⚠️ 2026-09-29 Deedunsd30x 实证修正：点查可达 ≠ 可投放（BM 间接可读也算可达，
-    保活/部署写操作被拒 2490585）——「正式分配」的权威面 = /me/adaccounts 列表
-    （在列=直接分配可投放）。此处每令牌拉一次授权 ID 集（翻页），行带 authorized。
-    返回 {aid: row}，row 结构与 _get_loadable_rows 行一致 + authorized: True/False/None(列表拉取失败未判定)。
+    ⚠️ 判定演进（防回退，改动前必读）：
+    - v1（Deedunsd30x 案）：点查可达即可纳管 → BM 间接只读账户混入（保活 2490585 全败）
+    - v2：每令牌拉 /me/adaccounts 授权集，authorized=首个可达令牌独裁 → 多令牌误拒
+      （BM 只读令牌先命中即定死 False，真授权令牌无发言权）+ 3000 截断当权威面
+    - v3（当前）：**两遍法 + OR 语义**——第一遍逐令牌点查收集「全部覆盖令牌」
+      （tokens[] 合并，同列表模式）；第二遍对每个覆盖令牌拉授权集：
+      任一覆盖令牌在列=True；全部确证不在列=False；任一拉取失败=None（不判定不拦）。
+      授权集只对实际覆盖的令牌拉（省 API）+ 60s 缓存。tokens 按 available 优先排前。
+    返回 {aid: row}（与 _get_loadable_rows 行一致 + authorized + tokens 全覆盖令牌）。
     """
     from ..core.fb_tokens import _is_cred_available
-    # 审计#2/#6：同 _get_loadable_rows——含 rate_limited（曾硬过滤让限流令牌的账户导入"找不到"）
     creds = db.query(FbCredential).filter(
         FbCredential.tenant_id == tenant_id,
         FbCredential.status.in_(("active", "rate_limited")),
     ).all()
-    out: dict = {}
+    if only_cred_id:
+        # 令牌域模式（令牌页选中令牌进入的 ID 粘贴）：只在它之下识别/判定/绑定
+        creds = [c for c in creds if c.id == only_cred_id]
+    # 第一遍：点查收集覆盖（每 aid 的全部覆盖令牌 + 首见 meta）
+    coverage: dict = {}   # aid -> {"meta": {...}, "creds": [(cred, avail)]}
     for c in creds:
-        pending = [a for a in aids if a not in out]
+        pending = [a for a in aids if a not in coverage]
         if not pending:
             break
         fb = FbClient(decrypt(c.access_token_enc))
         avail = _is_cred_available(c)
-        # 该令牌的授权账户 ID 集（「直接分配」权威面；拉取失败=None=不判定不拦截）
-        authed_ids = _authorized_act_ids(fb)
         for i in range(0, len(pending), 50):
             chunk = pending[i:i + 50]
             urls = [f"act_{a}?fields=account_id,name,currency,timezone_name,account_status,disable_reason"
                     for a in chunk]
             try:
                 results = fb.batch_get(urls)
-            except FbApiError:
-                break  # 该令牌整批失败（失效/限流）→ 换下一个令牌
+            except FbApiError as e:
+                from ..core.fb_tokens import mark_expired_on_auth_error
+                mark_expired_on_auth_error(db, c, e)   # 整批失败（失效/限流）→ 判死+换令牌
+                break
             for aid, meta in zip(chunk, results):
                 if meta and "error" not in meta and meta.get("account_id"):
-                    out[aid] = {
-                        "account_id": aid,
-                        "name": meta.get("name") or aid,
-                        "currency": meta.get("currency", "USD"),
-                        "timezone_name": meta.get("timezone_name") or "UTC",
-                        "account_status": meta.get("account_status"),
-                        "disable_reason": meta.get("disable_reason"),
-                        "tokens": [{"id": c.id, "alias": c.alias or c.fb_user_name,
-                                    "available": avail}],
-                        "authorized": (aid in authed_ids) if authed_ids is not None else None,
-                    }
+                    ent = coverage.setdefault(aid, {"meta": meta, "creds": []})
+                    ent["creds"].append((c, avail))
+    # 第二遍：授权 OR 判定（只对覆盖令牌拉授权集）
+    auth_sets: dict = {}   # cred_id -> ids|None
+    out: dict = {}
+    for aid, ent in coverage.items():
+        meta = ent["meta"]
+        verdicts: list = []
+        for c, avail in ent["creds"]:
+            if c.id not in auth_sets:
+                auth_sets[c.id] = _authorized_act_ids(FbClient(decrypt(c.access_token_enc)), c, db)
+            ids = auth_sets[c.id]
+            verdicts.append(True if (ids is not None and aid in ids)
+                            else (False if ids is not None else None))
+        if True in verdicts:
+            authorized = True       # 任一覆盖令牌在列=可投放
+        elif None in verdicts:
+            authorized = None       # 有授权面拉取失败=不判定（宁放行不误拦）
+        else:
+            authorized = False      # 全部覆盖令牌确证不在列=仅 BM 可读
+        tokens = [{"id": c.id, "alias": c.alias or c.fb_user_name, "available": av}
+                  for c, av in sorted(ent["creds"], key=lambda x: not x[1])]
+        out[aid] = {
+            "account_id": aid,
+            "name": meta.get("name") or aid,
+            "currency": meta.get("currency", "USD"),
+            "timezone_name": meta.get("timezone_name") or "UTC",
+            "account_status": meta.get("account_status"),
+            "disable_reason": meta.get("disable_reason"),
+            "tokens": tokens,
+            "authorized": authorized,
+        }
     return out
 
 
@@ -1961,12 +2013,25 @@ def _heal_account_links(db, tenant_id: int, act_ids: list[str]) -> dict:
         if not todo:
             continue
         fb = FbClient(decrypt(c.access_token_enc))
+        # 授权过滤（2026-09-29 复审修复）：只挂「正式分配」令牌（/me/adaccounts 在列），
+        # BM 间接只读令牌不进写池——否则部署/保活 RR 选中它必失败并反标误伤账户级
+        # write_authorized（与「False 无回写」曾成死锁）。授权面拉取失败=None=该令牌跳过
+        # （宁少挂不错挂，写池缺员由点查/重导路径补）
+        authed = _authorized_act_ids(fb, c, db)
+        if authed is None:
+            continue
         for i in range(0, len(todo), 50):
             chunk = todo[i:i + 50]
+            # 只点查授权面里的（省 API：chunk 先过滤）
+            chunk = [a for a in chunk if a in authed]
+            if not chunk:
+                continue
             try:
                 results = fb.batch_get([f"act_{a}?fields=account_id" for a in chunk])
-            except FbApiError:
-                break   # 该令牌整批失败（失效/限流）→ 换下一个
+            except FbApiError as e:
+                from ..core.fb_tokens import mark_expired_on_auth_error
+                mark_expired_on_auth_error(db, c, e)   # 整批失败 → 判死+换令牌
+                break
             for aid, meta in zip(chunk, results):
                 if meta and "error" not in meta and meta.get("account_id"):
                     acc = acc_by_id.get(aid)
@@ -2047,9 +2112,10 @@ def _bg_sync_imported_ads(tenant_id: int, act_ids: list[str]):
         from ..core.fb_tokens import client_for_account
         from ..models.fb import Account as _Acc
         if len(act_ids) > 50:
-            log.warning(f"[ImportAdsSync] tenant={tenant_id} {len(act_ids)} 个账户超 50 上限，"
-                        f"本次只同步前 50，其余等 15min cron 兜底")
-        for aid in act_ids[:50]:   # 单批上限 200，广告层拉取较重——50 个封顶防长任务
+            log.info(f"[ImportAdsSync] tenant={tenant_id} {len(act_ids)} 个账户分片同步"
+                     f"（每片 50，串行防长任务）")
+        for aid in act_ids[:200]:   # 分片口径（2026-09-29）：单批导入上限 200 全量即时同步，
+            # 与导入上限对齐——曾 51-200 号账户 15min 广告管理器隐身零反馈（cron 才兜底）
             acc = db.query(_Acc).filter(
                 _Acc.tenant_id == tenant_id, _Acc.act_id == aid,
                 _Acc.is_managed == True,  # noqa: E712
@@ -2106,6 +2172,15 @@ def import_accounts(
     if not cleaned:
         return {"imported": [], "count": 0, "skipped_existing": 0,
                 "not_found": [], "total": 0}
+    # 令牌域模式校验：令牌须属于本租户且可用；operator 还须可见（同令牌页抽屉口径）
+    if body.cred_id:
+        _sc = db.query(FbCredential).filter(
+            FbCredential.id == body.cred_id, FbCredential.tenant_id == user.tenant_id).first()
+        if not _sc:
+            raise HTTPException(404, "令牌不存在")
+        if user.role == "operator":
+            if body.cred_id not in _visible_cred_ids(db, user):
+                raise HTTPException(404, "令牌不在你的可见范围")
     if len(cleaned) > 200:
         raise HTTPException(400, f"单批最多导入 200 个账户（收到 {len(cleaned)}）——请分批（导入保护）")
     import time as _t
@@ -2116,9 +2191,9 @@ def import_accounts(
         # 限流窗口内导入连续 5 分钟「找不到」）。缺的 ID 实时点查补齐，不再盲信缓存。
         _missing = [a for a in cleaned if a not in rows]
         if _missing:
-            rows.update(_verify_ids_pointwise(db, user.tenant_id, _missing))
+            rows.update(_verify_ids_pointwise(db, user.tenant_id, _missing, body.cred_id))
     else:
-        rows = _verify_ids_pointwise(db, user.tenant_id, cleaned)
+        rows = _verify_ids_pointwise(db, user.tenant_id, cleaned, body.cred_id)
     if not rows:
         creds_exist = db.query(FbCredential.id).filter(
             FbCredential.tenant_id == user.tenant_id,
@@ -2176,21 +2251,27 @@ def import_accounts(
         tokens = row.get("tokens") or []
         if not tokens:
             continue
-        # 上限内选第一个可用覆盖令牌；全超额 → 跳过（明细返回，不报错）
-        # 上限只约束「新增绑定」——重导恢复已绑账户/已建绑定不占新槽（曾 take 在查重前：
-        # 满额令牌连恢复自家已绑账户都被 skip，而重导是软删恢复纳管的唯一路径）
-        _pick = next((t["id"] for t in tokens if _cred_slot_ok(t["id"])), None)
+        exists = db.query(Account).filter(
+            Account.tenant_id == user.tenant_id,
+            Account.act_id == aid,
+        ).first()
+        # 2026-09-29 复审修复：先查 exists 再选令牌——已绑定的覆盖令牌优先（已有绑定
+        # 不占新槽），满额令牌不再挡软删账户恢复纳管；仅新建账户严格受上限约束
+        _bound_ok = None
+        if exists and exists.fb_credential_id:
+            _bound_ok = next((t["id"] for t in tokens if t["id"] == exists.fb_credential_id), None)
+        _pick = _bound_ok or next((t["id"] for t in tokens if _cred_slot_ok(t["id"])), None)
         if _pick is None:
             skipped_over_limit.append(aid)
             covered.add(aid)   # 有覆盖但全超额——不算 not_found
             continue
         cred_id = _pick
         touched_creds.add(cred_id)
-        exists = db.query(Account).filter(
-            Account.tenant_id == user.tenant_id,
-            Account.act_id == aid,
-        ).first()
         if exists:
+            # 恢复纳管回写投放授权（修死锁：BM 补完角色 → 重导即恢复 True——点查 rows
+            # 已现算权威面；None=未判定不动旧值）
+            if row.get("authorized") is not None:
+                exists.write_authorized = bool(row["authorized"])
             if exists.fb_credential_id != cred_id:
                 exists.fb_credential_id = cred_id
             exists.is_managed = True  # 重新导入 = 恢复纳管（把软删的拉回活跃管理）
@@ -2245,6 +2326,18 @@ def import_accounts(
         # 导入后最长 15 分钟「隐身」曾让用户以为导入失败（2026-09-16 反馈）。失败静默（cron 兜底）
         background_tasks.add_task(_bg_sync_imported_ads, user.tenant_id, list(imported))
     not_found = sorted(set(cleaned) - covered)
+    # 审计留痕（2026-09-29 复审：批量纳管曾零日志——日志中心查不到谁导的）
+    from sqlalchemy import text as _tx
+    db.execute(_tx("SELECT set_config('app.tenant_id', :tid, false)"), {"tid": str(user.tenant_id)})
+    write_log(db, tenant_id=user.tenant_id, trace_id=new_trace_id(), actor_type="user",
+              actor_user_id=user.id, target_type="account", target_id="*",
+              action_type="import", source="fb", result="success",
+              trigger_detail=f"导入 {len(imported)}（恢复 {skipped_existing} · 只读拒 {len(skipped_readonly)} · 上限跳 {len(skipped_over_limit)} · 未找到 {len(not_found)}）",
+              metadata={"imported": len(imported), "skipped_existing": skipped_existing,
+                        "skipped_readonly": len(skipped_readonly),
+                        "skipped_over_limit": len(skipped_over_limit),
+                        "not_found": len(not_found), "cred_scope": body.cred_id or 0})
+    db.commit()   # 审计行落库（get_db 不自动 commit——曾挂在未提交事务里被丢）
     return {"imported": imported, "count": len(imported),
             "skipped_existing": skipped_existing,
             "skipped_over_limit": skipped_over_limit,
