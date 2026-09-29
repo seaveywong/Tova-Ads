@@ -65,7 +65,7 @@ const load = async () => {
   loading.value = false
 }
 const loadActors = async () => { try { actors.value = await GET('/logs/actors') } catch {} }
-onMounted(() => { load(); loadActors() })
+onMounted(() => { load(); loadActors(); loadAccNames() })
 const setTab = (k) => { tab.value = k; fTrace.value = ''; page.value = 1; load() }
 const goPage = (n) => { page.value = Math.min(Math.max(1, n), totalPages()); jumpPage.value = ''; load() }
 const jumpPage = ref('')
@@ -107,6 +107,49 @@ const ACTION_ZH = {
   warmup_arm: 'audit.actionWarmupArm', inspection_skipped: 'audit.actionInspectionSkipped', update_token: 'audit.actionUpdateToken',
   upload: 'audit.actionUpload', rename: 'audit.actionRename', sync_stalled: 'audit.actionSyncStalled',
   restore: 'audit.actionRestore', spend_spike: 'audit.actionSpendSpike',
+  // 2026-09-29 生产 65 种动作全量对账补齐（用户实测日志裸英文：keepalive_burnt 等）
+  keepalive_burnt: 'audit.actionKeepaliveBurnt', budget_progress_alert: 'audit.actionBudgetProgress',
+  warmup_disarm: 'audit.actionWarmupDisarm', inspection_stale_accounts: 'audit.actionStaleAccounts',
+  subcode_cleanup: 'audit.actionSubcodeCleanup', assign: 'audit.actionAssign', unassign: 'audit.actionUnassign',
+  allowance: 'audit.actionAllowance', allowance_removed: 'audit.actionAllowanceRemoved',
+  emergency_pause: 'audit.actionEmergencyPause', purge_stale_pages: 'audit.actionPurgeStalePages',
+  keepalive_set_page: 'audit.actionKeepaliveSetPage', set_max_accounts: 'audit.actionSetMaxAccounts',
+  page_health: 'audit.actionPageHealth', page_unavailable: 'audit.actionPageUnavailable',
+  ai_quota_exhausted: 'audit.actionAiQuota', adjust: 'audit.actionAdjust',
+  create_pixel: 'audit.actionCreatePixel', storm_suppressed_alert: 'audit.actionStormSuppressed',
+  prune_hash_cache: 'audit.actionPruneHashCache', token_health_warn: 'audit.actionTokenHealthWarn',
+  manual_budget: 'audit.actionManualBudget', upsert: 'audit.actionUpsert',
+}
+// 详情 metadata 的 key 中文名（用户视角；值里的 act_id 再解析为账户名）
+const META_ZH = {
+  act_id: 'audit.metaAct', act: 'audit.metaAct', account_id: 'audit.metaAct', ad_id: 'audit.metaAd',
+  page_id: 'audit.metaPage', cred_id: 'audit.metaCred', campaign_id: 'audit.metaCampaign',
+  tenant_id: 'audit.metaTeam', old: 'audit.metaOld', new: 'audit.metaNew', reason: 'audit.metaReason',
+  budget_cents: 'audit.metaBudget', spend: 'audit.metaSpend', balance: 'audit.metaBalance',
+  count: 'audit.metaCount', pages_mismatch: 'audit.metaPagesMismatch', status: 'audit.metaStatus',
+  template_id: 'audit.metaTemplate', job_id: 'audit.metaJob', slug: 'audit.metaSlug',
+}
+// 账户名映射（act_id → 名称，详情展示用；拉一次轻列表）
+const accNameOf = ref({})
+const loadAccNames = async () => {
+  try {
+    const creds = await GET('/fb/credentials').catch(() => [])
+    const cm = {}
+    for (const c of (creds || [])) cm[String(c.id)] = c.alias || ('#' + c.id)
+    credNameOf.value = cm
+    const accs = await GET('/fb/accounts')
+    const m = {}
+    for (const a of (accs || [])) m[a.act_id] = a.name || ''
+    accNameOf.value = m
+  } catch {}
+}
+const credNameOf = ref({})
+const fmtMetaVal = (k, v) => {
+  const sv = String(v)
+  if ((k === 'act_id' || k === 'act') && accNameOf.value[sv]) return accNameOf.value[sv]
+  if (k === 'cred_id' && credNameOf.value[sv]) return credNameOf.value[sv]
+  if (k === 'budget_cents' && /^\d+$/.test(sv)) return '$' + (parseInt(sv) / 100).toFixed(2)
+  return sv.length > 60 ? sv.slice(0, 60) + '…' : sv
 }
 const TARGET_ZH = {
   scheduler: 'audit.targetScheduler', ad: 'audit.targetAd', account: 'audit.targetAccount', fb_credential: 'audit.targetFbCredential',
@@ -230,7 +273,7 @@ const resetFilters = () => { fAction.value = ''; fUser.value = 0; fTrace.value =
               <span v-if="row.trigger_detail" class="trig">{{ row.trigger_detail }}</span>
               <span v-if="row.metadata" class="meta">
                 <template v-for="(v, k) in row.metadata" :key="k">
-                  <span v-if="v !== null && v !== '' && k !== 'campaign_id' && k !== 'adset_id'" class="meta-kv">{{ k }}={{ v }} </span>
+                  <span v-if="v !== null && v !== '' && k !== 'campaign_id' && k !== 'adset_id' && k !== 'adset_id'" class="meta-kv">{{ META_ZH[k] ? t(META_ZH[k]) : k }}={{ fmtMetaVal(k, v) }} </span>
                 </template>
               </span>
               <span v-if="!row.friendly_error && !row.trigger_detail && !row.metadata" class="dash">—</span>
