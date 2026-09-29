@@ -103,6 +103,7 @@ const emptyForm = () => ({
   protection_rules: {}, block_target: '', block_html: '', template_key: '', template_id: null,
 })
 const form = ref(emptyForm())
+const detailLoading = ref(false)   // 编辑抽屉详情拉取中（点击即开抽屉，防「点了没反应」）
 const tplDesc = computed(() => {
   const tpl = templates.value.find(x => x.key === form.value.template_key)
   return tpl?.desc || ''
@@ -147,8 +148,13 @@ const openCreate = () => {
   _lpSnap()
 }
 const openEdit = async (p) => {
+  if (detailLoading.value) return   // 详情拉取中防连点
   editingId.value = p.id
   protTestResult.value = null; showAdvanced.value = false   // 会话残留清理
+  form.value = emptyForm()
+  _lpSnap()
+  drawerOpen.value = true          // 点击即开抽屉，详情到达再填表
+  detailLoading.value = true
   try {
     const detail = await GET(`/landing/pages/${p.id}`)
     form.value = {
@@ -166,9 +172,11 @@ const openEdit = async (p) => {
       template_key: '',
       template_id: detail.template_id || null,
     }
-    drawerOpen.value = true
     _lpSnap()
-  } catch (e) { ElMessage.error(e.message || t('landing.loadFail')) }
+  } catch (e) {
+    drawerOpen.value = false
+    ElMessage.error(e.message || t('landing.loadFail'))
+  } finally { detailLoading.value = false }
 }
 
 // ── 防护规则编辑器（快速 toggle + 高级自定义）──
@@ -242,6 +250,7 @@ const onLpBeforeClose = (done) => {
     .then(() => done()).catch(() => {})
 }
 const save = async () => {
+  if (detailLoading.value) return   // 详情未就绪不落库（空表单误存）
   if (!form.value.title.trim()) return ElMessage.warning(t('landing.warnTitle'))
   if (!form.value.custom_domains.length) return ElMessage.warning(t('landing.warnDomain'))
   if (form.value.redirect_mode === 'redirect' && !form.value.target_urls.length) {
@@ -806,13 +815,17 @@ const openDomains = async () => {
   try { domainStats.value = {}; for (const r of (await GET('/landing-lib/domains/stats')) || []) domainStats.value[r.domain] = r }
   catch {}   // 统计是辅助信息，失败不阻断
 }
+const importBusy = ref(false)   // 「导入选中」POST 期间按钮 busy
 const importZones = async () => {
   const toImport = cfZones.value.filter(z => z._checked && !z.imported).map(z => z.name)
   if (!toImport.length) return ElMessage.warning(t('landing.warnCheckDomain'))
+  if (importBusy.value) return
+  importBusy.value = true
   try {
     const r = await POST('/landing-lib/domains/import', { domains: toImport })
     ElMessage.success(t('landing.imported', { n: r.added })); await loadLib(); await openDomains()
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  importBusy.value = false
 }
 const delDomain = async (d) => {
   // 批BW：全页唯一裸删 → 补确认（删的是线上域名：解析与 /a/ 链接即时受影响）
@@ -929,7 +942,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
             <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">{{ t('landing.quickTargetBtn') }}</button>
-            <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
+            <button class="mb" :disabled="detailLoading" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='check') checkHealth(p); else if (cmd==='preview') openPreview(p.preview_url); else if (cmd==='archive') archive(p); else if (cmd==='delete') deletePage(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
               <template #dropdown>
@@ -989,7 +1002,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
           <div class="short-ops">
             <button class="mb" @click="openSubcodes(p)">{{ t('landing.subcodes') }}</button>
             <button class="mb" :title="t('landing.editTargetLink')" @click="openQuickTarget(p)">{{ t('landing.quickTargetBtn') }}</button>
-            <button class="mb" @click="openEdit(p)">{{ t('common.edit') }}</button>
+            <button class="mb" :disabled="detailLoading" @click="openEdit(p)">{{ t('common.edit') }}</button>
             <el-dropdown trigger="click" @command="cmd => { if (cmd==='archive') archive(p) }">
               <button class="mb" :title="t('landing.moreOps')">⋯</button>
               <template #dropdown>
@@ -1008,7 +1021,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       </div>
     </div>
 
-    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" :before-close="onLpBeforeClose" v-loading="saving" :element-loading-text="saving ? t('landing.deployingCloud') : ''">
+    <el-drawer v-model="drawerOpen" :title="editingId ? t('landing.editTitle') : t('landing.createTitle')" direction="rtl" size="580px" :destroy-on-close="true" :close-on-click-modal="false" :before-close="onLpBeforeClose" v-loading="saving || detailLoading" :element-loading-text="saving ? t('landing.deployingCloud') : t('common.loading')">
       <div class="lp-section">
         <div class="lp-section-title">{{ t('landing.secBasic') }}</div>
         <div class="lp-section-body">
@@ -1388,7 +1401,7 @@ onMounted(async () => { loadAsnBlocklist(); await init() })   // ASN 清单仅�
       </div>
       <div class="zone-import-bar">
         <span class="zone-sel-hint">{{ t('landing.zonesSelected', { n: zoneSelCount }) }}</span>
-        <button class="btn primary" :disabled="!zoneSelCount" @click="importZones">{{ t('landing.importSelected') }}</button>
+        <button class="btn primary" :disabled="!zoneSelCount || importBusy" @click="importZones">{{ importBusy ? t('landing.importingDots') : t('landing.importSelected') }}</button>
       </div>
       <div class="dm-sec-title">{{ t('landing.importedDomains') }} <i>{{ domains.length }}</i></div>
       <div class="dm-table">

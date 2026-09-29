@@ -264,10 +264,13 @@ const openAssetPicker = async (mode) => {
   assetPickerOpen.value = true
   loadAssets()
 }
+const pickerLoading = ref(false)   // 素材选择抽屉加载态（首拉期间空抽屉无反馈）
 const loadAssets = async () => {
   // 会话级守卫：已加载就不重拉全量素材（选素材只为取 AI 文案，不要求实时新上传）
   if (pickerAssets.value.length) return
+  pickerLoading.value = true
   try { pickerAssets.value = await GET('/assets') } catch {}
+  pickerLoading.value = false
 }
 const pickAsset = (a) => { pickerMode.value === 'msg' ? aiGenerateMsg(a) : aiGenerate(a) }
 const aiGenerate = async (a) => {
@@ -648,7 +651,7 @@ const isWaPreview = computed(() => previewType.value === 'msg' && (previewData.v
     <!-- 素材选择器（AI 生成用） -->
     <el-drawer v-model="assetPickerOpen" :title="t('formtpl.pickerTitle')" direction="rtl" size="min(520px, 100vw)" append-to-body>
       <div class="hint" style="margin-bottom:10px">{{ t('formtpl.pickerHint') }}</div>
-      <div class="picker-grid">
+      <div class="picker-grid" v-loading="pickerLoading">
         <div v-for="a in pickerAssets" :key="a.id" class="picker-card" @click="pickAsset(a)">
           <img v-if="a.type==='image'" :src="a.public_url" class="picker-thumb" />
           <video v-else :src="a.public_url" class="picker-thumb" preload="metadata" />

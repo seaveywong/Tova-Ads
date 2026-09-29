@@ -396,12 +396,15 @@ const onboardZone = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   cfOnboarding.value = false
 }
+const cfDnsLoading = ref('')   // DNS 记录懒加载中的 zone id（展开行 v-loading）
 const toggleZoneDns = async (z) => {
   if (cfExpanded.value === z.id) { cfExpanded.value = ''; return }
   cfExpanded.value = z.id
   if (!cfZoneDns.value[z.id]) {
+    cfDnsLoading.value = z.id
     try { cfZoneDns.value[z.id] = await GET(`/cf-console/zones/${z.id}/dns`, 60000) }
     catch (e) { cfZoneDns.value[z.id] = []; ElMessage.error(e.message || t('common.opFail')) }
+    cfDnsLoading.value = ''
   }
 }
 // TG 通知绑定：用户级绑定/解绑/清单 UI 已组件化（TgManager，与仪表盘共用），这里只留 bot-info（超管验证区用）
@@ -931,7 +934,7 @@ const runKeepaliveNow = async () => {
                 <span class="cf-zone-plan">{{ z.plan }}</span>
                 <i class="cf-arrow" :class="{ open: cfExpanded === z.id }">▸</i>
               </div>
-              <div v-if="cfExpanded === z.id" class="cf-dns">
+              <div v-if="cfExpanded === z.id" class="cf-dns" v-loading="cfDnsLoading === z.id">
                 <div class="cf-ns-line" :title="t('common.copy')" @click="copyText((z.name_servers || []).join(' / '))">
                   NS: {{ (z.name_servers || []).join(' · ') || '-' }}
                 </div>
@@ -941,7 +944,7 @@ const runKeepaliveNow = async () => {
                   <span class="cf-dns-content" :title="r.content">{{ r.content }}</span>
                   <span class="cf-dns-proxy">{{ r.proxied ? '☁' : 'DNS' }}</span>
                 </div>
-                <div v-if="!(cfZoneDns[z.id] || []).length" class="cf-dns-empty">{{ t('settings.cfNoRecords') }}</div>
+                <div v-if="!(cfZoneDns[z.id] || []).length && cfDnsLoading !== z.id" class="cf-dns-empty">{{ t('settings.cfNoRecords') }}</div>
               </div>
             </template>
             <div v-if="!(cfOverview?.zones || []).length && !cfLoading" class="cf-dns-empty">{{ t('settings.cfNoZones') }}</div>
@@ -1190,7 +1193,7 @@ const runKeepaliveNow = async () => {
             <span v-if="a.is_system" class="wh-chip off">{{ t('settings.faSystem') }}</span>
           </div>
           <div class="fa-ops">
-            <button class="btn sm">{{ t('common.edit') }}</button>
+            <button class="btn sm" @click="faOpenEdit(a)">{{ t('common.edit') }}</button>
             <button class="btn sm danger" @click="faDelete(a)">{{ t('common.delete') }}</button>
           </div>
         </div>

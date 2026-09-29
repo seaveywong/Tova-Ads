@@ -128,11 +128,15 @@ const unbind = async (b) => {
   } catch (e) { ElMessage.error(e.message || t('tg.opFail')) }
 }
 
+const testSending = ref(false)   // 测试消息 POST 期间按钮 busy
 const sendTest = async () => {
+  if (testSending.value) return
+  testSending.value = true
   try {
     const r = await POST('/notifications/tg/user-test')
     ElMessage.success(t('tg.testSent', { n: r.sent ?? (r.status === 'sent' ? 1 : 0) }))   // 全库审查P2：?? 与三元优先级，括号显式化
   } catch (e) { ElMessage.error(e.message || t('tg.opFail')) }
+  testSending.value = false
 }
 
 // 偏好开关：el-change 即时 PUT 保存，失败回滚开关状态（不留在"已保存"假象里）
@@ -209,7 +213,7 @@ defineExpose({ open, close, load })
             <button class="btn" @click="unbind(b)">{{ t('tg.unbind') }}</button>
           </div>
           <div class="tg-actions">
-            <button class="btn" @click="sendTest">{{ t('tg.sendTest') }}</button>
+            <button class="btn" :disabled="testSending" @click="sendTest">{{ testSending ? t('tg.sending') : t('tg.sendTest') }}</button>
             <button class="btn primary" @click="tab = 'add'; refreshCode()">{{ t('tg.addAnother') }}</button>
           </div>
           <!-- 通知范围（④白名单矩阵）：critical 锁定恒推，warning/info 开关即时保存 -->

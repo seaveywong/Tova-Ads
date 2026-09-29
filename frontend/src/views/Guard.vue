@@ -155,6 +155,7 @@ const rules = ref([])
 const loading = ref(true)
 const editOpen = ref(false)
 const editing = ref(null)
+const ruleSaving = ref(false)   // 保存按钮 busy 态（点了没反馈防连点）
 const form = ref({})
 const inspecting = ref(false)
 const accountsList = ref([])
@@ -294,6 +295,7 @@ const openEdit = (r) => {
   editOpen.value = true
 }
 const save = async () => {
+  if (ruleSaving.value) return
   if (!form.value.name.trim()) return ElMessage.warning(t('guard.nameRequired'))
   const cleanParams = {}
   Object.entries(form.value.params || {}).forEach(([k, v]) => {
@@ -309,6 +311,7 @@ const save = async () => {
     action: form.value.action, scope_act_id: (form.value.scope_act_ids || []).join(','),
     rule_scope: form.value.rule_scope || 'user',
   }
+  ruleSaving.value = true
   try {
     if (editing.value) await PUT(`/guard/rules/${editing.value}`, body)
     else await POST('/guard/rules', body)
@@ -316,6 +319,7 @@ const save = async () => {
     editOpen.value = false
     await load()
   } catch (e) { ElMessage.error(t('common.opFail') + '：' + (e.message || '')) }
+  ruleSaving.value = false
 }
 const onToggle = async (r, val) => {
   // v-model 已先翻转 r.enabled；PUT 失败则回滚
@@ -532,7 +536,7 @@ const doInspect = async (force = false) => {
           </el-select>
           <div v-if="form.rule_scope === 'user' && scopeAwareAccounts.length" class="scope-hint">{{ t('guard.scopeOwnOnlyHint', { n: scopeAwareAccounts.length }) }}</div>
         </div>
-        <div class="m-foot"><button class="btn" @click="confirmDiscard">{{ t('common.cancel') }}</button><button class="btn primary" @click="save">{{ editing ? t('common.save') : t('common.create') }}</button></div>
+        <div class="m-foot"><button class="btn" @click="confirmDiscard">{{ t('common.cancel') }}</button><button class="btn primary" :disabled="ruleSaving" @click="save">{{ ruleSaving ? t('common.saving') + '…' : (editing ? t('common.save') : t('common.create')) }}</button></div>
       </div>
     </div>
   </div>

@@ -95,6 +95,7 @@ const statusLabel = (s) => accountStatus(s).label
 const statusDot = (s) => accountStatus(s).cls
 const selectedAccs = ref(new Set())
 const accLoading = ref(false)
+const accSyncing = ref({})   // 行菜单「同步状态/余额」per-token 进行中（照 Tokens ttRefreshing 模式）
 const toggleAcc = (id) => { selectedAccs.value.has(id) ? selectedAccs.value.delete(id) : selectedAccs.value.add(id); selectedAccs.value = new Set(selectedAccs.value) }
 const selectAllAccs = () => { if (selectedAccs.value.size === filteredAccounts.value.length) { selectedAccs.value.clear() } else { selectedAccs.value = new Set(filteredAccounts.value.map(a => a.act_id)) }; selectedAccs.value = new Set(selectedAccs.value) }
 const isAccSelected = (id) => selectedAccs.value.has(id)
@@ -381,8 +382,11 @@ const onCmd = async (cmd, a) => {
   else if (cmd === 'group') openGroupEdit(a)
   else if (cmd === 'sync') {
     if (!a.fb_credential_id) return ElMessage.warning(t('ads.noBoundToken'))
+    if (accSyncing.value[a.fb_credential_id]) return
+    accSyncing.value = { ...accSyncing.value, [a.fb_credential_id]: true }
     try { await POST(`/fb/credentials/${a.fb_credential_id}/refresh-accounts`); ElMessage.success(t('ads.refreshedSimple')); await load() }
     catch (e) { ElMessage.error(t('ads.opFailMsg', { msg: e.message || '' })) }
+    accSyncing.value = { ...accSyncing.value, [a.fb_credential_id]: false }
   } else if (cmd === 'warmup') {
     await toggleWarmup([a.act_id], a.warmup_state !== 'warming')
   } else if (cmd === 'kapage') {
@@ -544,7 +548,7 @@ onUnmounted(() => { if (_syncRefreshTimer) { clearTimeout(_syncRefreshTimer); _s
               <el-dropdown-menu>
                 <el-dropdown-item command="manager">{{ t('ads.viewInManager') }}</el-dropdown-item>
                 <el-dropdown-item command="logs">{{ t('ads.viewLandingLogs') }}</el-dropdown-item>
-                <el-dropdown-item command="sync">{{ t('ads.syncStatusBalance') }}</el-dropdown-item>
+                <el-dropdown-item command="sync" :disabled="!!accSyncing[d.a.fb_credential_id]">{{ accSyncing[d.a.fb_credential_id] ? t('tokens.refreshing') : t('ads.syncStatusBalance') }}</el-dropdown-item>
                 <el-dropdown-item command="group">{{ t('ads.groupEditTitle') }}</el-dropdown-item>
                 <el-dropdown-item command="warmup" divided>{{ d.a.warmup_state === 'warming' ? t('ads.warmupDisarm') : t('ads.warmupArm') }}</el-dropdown-item>
                 <el-dropdown-item command="kapage">{{ t('ads.kaPageMenu') }}<span v-if="d.a.keepalive_page_id" class="ka-set-mark">✓</span></el-dropdown-item>

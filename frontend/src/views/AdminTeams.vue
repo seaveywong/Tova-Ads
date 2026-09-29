@@ -155,8 +155,11 @@ const filteredDomainPool = computed(() => {
     .filter(z => !k || z.domain.toLowerCase().includes(k))
     .sort((a, b) => rank(a) - rank(b) || a.domain.localeCompare(b.domain))
 })
+const domainBusy = ref('')   // 分配/收回进行中的域名（勾选禁用防连点）
 const toggleDomainAssign = async (z) => {
+  if (domainBusy.value) return
   const already = z.assigned_to.some(a => a.tenant_id === domainTeamId.value)
+  domainBusy.value = z.domain
   if (already) {
     // 取消分配
     const a = z.assigned_to.find(a => a.tenant_id === domainTeamId.value)
@@ -166,11 +169,15 @@ const toggleDomainAssign = async (z) => {
     try { await POST('/admin/domains/assign', { domain: z.domain, tenant_id: domainTeamId.value }) }
     catch (e) { ElMessage.error(e.message) }
   }
+  domainBusy.value = ''
   openDomains({ id: domainTeamId.value, name: domainTeamName.value }, true)
   load()
 }
 const unassignDomain = async (d) => {
+  if (domainBusy.value) return
+  domainBusy.value = d.domain
   try { await DELETE(`/admin/domains/${d.domain_row_id}`) } catch (e) { ElMessage.error(e.message) }
+  domainBusy.value = ''
   openDomains({ id: domainTeamId.value, name: domainTeamName.value }, true)
   load()
 }
@@ -199,13 +206,16 @@ const loadMembers = async () => {
   catch (e) { ElMessage.error(e.message || t('teams.loadMembersFail')) }
   memberLoading.value = false
 }
+const roleChanging = ref(0)   // 改角色进行中的 membership_id（PUT 期间 select 禁用）
 const changeMemberRole = async (m, role) => {
   if (role === m.role) return
   try {
+    roleChanging.value = m.membership_id
     await PUT(`/admin/tenants/${membersTid.value}/members/${m.membership_id}/role`, { role })
     ElMessage.success(t('teams.roleChanged', { email: m.email, role: t(ROLE_KEY[role] || role) }))
     m.role = role
   } catch (e) { ElMessage.error(e.message || t('teams.changeRoleFail')); await loadMembers() }
+  roleChanging.value = 0
 }
 const removeMemberRow = async (m) => {
   try {
@@ -369,7 +379,7 @@ const saveRolePerms = async () => {
         <div class="mem-list">
           <div v-for="m in memberList" :key="m.membership_id" class="mem-row">
             <span class="mem-email">{{ m.email }}<span v-if="m.is_you" class="mem-you">{{ t('teams.you') }}</span></span>
-            <select class="mem-role-sel" :value="m.role" :disabled="m.is_you && m.role === 'owner'"
+            <select class="mem-role-sel" :value="m.role" :disabled="(m.is_you && m.role === 'owner') || roleChanging === m.membership_id"
                     @change="e => changeMemberRole(m, e.target.value)">
               <option v-for="(rk, k) in ROLE_KEY" :key="k" :value="k">{{ t(rk) }}</option>
             </select>
@@ -399,7 +409,7 @@ const saveRolePerms = async () => {
           <div v-for="d in domainTeamDomains" :key="d.domain_row_id" class="dm-row">
             <code>{{ d.domain }}</code>
             <span v-if="d.label" class="dm-label">{{ d.label }}</span>
-            <button class="dm-rm" @click="unassignDomain(d)"> {{ t('teams.domainRevoke') }}</button>
+            <button class="dm-rm" :disabled="domainBusy === d.domain" @click="unassignDomain(d)"> {{ domainBusy === d.domain ? t('common.loading') : t('teams.domainRevoke') }}</button>
           </div>
           <div v-if="!domainTeamDomains.length && !domainLoading" class="dm-empty">{{ t('teams.domainNone') }}</div>
         </div>
@@ -411,7 +421,7 @@ const saveRolePerms = async () => {
           <label v-for="z in filteredDomainPool" :key="z.domain" class="dm-pool-row"
                  :class="{ mine: z.assigned_to.some(a => a.tenant_id === domainTeamId), taken: z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId) }">
             <input type="checkbox" :checked="z.assigned_to.some(a => a.tenant_id === domainTeamId)"
-                   :disabled="z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId)"
+                   :disabled="domainBusy === z.domain || (z.assigned_to.length > 0 && !z.assigned_to.some(a => a.tenant_id === domainTeamId))"
                    :title="z.assigned_to.length && !z.assigned_to.some(a => a.tenant_id === domainTeamId) ? t('teams.domainOccupied') : ''"
                    @change="toggleDomainAssign(z)" />
             <code>{{ z.domain }}</code>

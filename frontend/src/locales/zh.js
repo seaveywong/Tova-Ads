@@ -20,7 +20,7 @@ export default {
     noneYet: '尚未绑定 Telegram——止损/异常告警将无法第一时间送达。',
     bindNow: '立即绑定',
     verifiedAt: '最后验证 {ts}', unverified: '未验证（发一条测试消息即验证）', boundAt: '绑定于 {ts}',
-    sendTest: '发送测试消息', addAnother: '+ 添加绑定', multiNote: '告警将同时发送到以上全部 Telegram。',
+    sendTest: '发送测试消息', sending: '发送中…', addAnother: '+ 添加绑定', multiNote: '告警将同时发送到以上全部 Telegram。',
     unbind: '解绑', unbindConfirm: '解绑 Telegram {id}？解绑后该 TG 不再收到告警。', unbound: '已解绑',
     testSent: '测试消息已发送到 {n} 个 TG，请查收',
     // 通知范围（TG 偏好矩阵：warning/info 可关，critical 恒推）

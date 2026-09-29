@@ -18,7 +18,7 @@ export default {
     noneYet: 'Telegram not bound yet — stop-loss and anomaly alerts cannot reach you instantly.',
     bindNow: 'Bind now',
     verifiedAt: 'Last verified {ts}', unverified: 'Unverified (send a test message to verify)', boundAt: 'Bound at {ts}',
-    sendTest: 'Send test message', addAnother: '+ Add another', multiNote: 'Alerts are sent to ALL bound Telegrams.',
+    sendTest: 'Send test message', sending: 'Sending…', addAnother: '+ Add another', multiNote: 'Alerts are sent to ALL bound Telegrams.',
     unbind: 'Unbind', unbindConfirm: 'Unbind Telegram {id}? It will no longer receive alerts.', unbound: 'Unbound',
     testSent: 'Test message sent to {n} Telegram(s), please check',
     // Notification scope (TG preference matrix: warning/info toggleable, critical always pushed)

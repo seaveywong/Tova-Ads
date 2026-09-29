@@ -18,6 +18,8 @@ const loading = ref(false)
 const roleOpen = ref(false)
 const editingRole = ref(null)
 const roleForm = ref({ name: '', description: '', permissions: [] })
+const roleSaving = ref(false)   // 保存按钮 busy（照 AdminTeams roleSaving 模式）
+const roleChanging = ref(null)  // 成员改角色进行中的 membership_id（PUT 期间 select 禁用防连点）
 
 // 邀请
 const inviteOpen = ref(false)
@@ -60,7 +62,9 @@ const openEditRole = (r) => {
   roleOpen.value = true
 }
 const saveRole = async () => {
+  if (roleSaving.value) return
   if (!roleForm.value.name.trim()) return ElMessage.warning(t('members.roleNameRequired'))
+  roleSaving.value = true
   try {
     if (editingRole.value) {
       await PUT(`/rbac/roles/${editingRole.value.id}`, roleForm.value)
@@ -72,6 +76,7 @@ const saveRole = async () => {
     roleOpen.value = false
     await load()
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  roleSaving.value = false
 }
 const removeRole = async (r) => {
   if (r.is_system) return ElMessage.warning(t('members.systemRoleNoDelete'))
@@ -110,10 +115,12 @@ const changeRole = async (m, roleName) => {
     await ElMessageBox.confirm(msg, t('members.roleChange'), { type: fromOwner ? 'warning' : 'info', confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel') })
   } catch { return }  // 取消则 select 自动回弹到 m.role（受控）
   try {
+    roleChanging.value = m.membership_id
     await PUT(`/rbac/members/${m.membership_id}/role`, { role: roleName })
     m.role = roleName   // 原地（同 AdminTeams 模式）——省掉 3-GET 全量重拉
     ElMessage.success(t('members.roleUpdated'))
   } catch (e) { ElMessage.error(t('common.fail') + '：' + (e.message || '')) }
+  roleChanging.value = null
 }
 // 批CB：重发临时密码（邀请默认密码弹一次就没了，后端只存哈希——这是唯一恢复入口）
 const resetPwd = async (m) => {
@@ -162,7 +169,7 @@ const permLabel = (key) => {
         <div v-for="m in members" :key="m.membership_id" class="row">
           <div class="nm">{{ m.email }}<span v-if="m.is_you" class="you-tag">{{ t('members.you') }}</span></div>
           <div>
-            <select class="role-sel" :value="m.role" :disabled="m.is_you && m.role === 'owner'"
+            <select class="role-sel" :value="m.role" :disabled="(m.is_you && m.role === 'owner') || roleChanging === m.membership_id"
                     @change="e => changeRole(m, e.target.value)">
               <option v-for="r in roles" :key="r.id" :value="r.name">{{ roleLabel(r.name) }}（{{ t('members.permCount', { n: r.permissions.length }) }}）</option>
             </select>
@@ -229,7 +236,7 @@ const permLabel = (key) => {
         <div class="m-foot">
           <span class="perm-total">{{ t('members.selectedPerms', { n: roleForm.permissions.length }) }}</span>
           <button class="btn" @click="roleOpen=false">{{ t('common.cancel') }}</button>
-          <button class="btn primary" @click="saveRole">{{ editingRole ? t('common.save') : t('common.create') }}</button>
+          <button class="btn primary" :disabled="roleSaving" @click="saveRole">{{ roleSaving ? t('common.saving') + '…' : (editingRole ? t('common.save') : t('common.create')) }}</button>
         </div>
       </div>
     </div>

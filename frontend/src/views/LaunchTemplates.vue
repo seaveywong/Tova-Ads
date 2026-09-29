@@ -531,7 +531,12 @@ const placementAutoAll = computed(() => editMode.value === 'tree'
 // #5 部署历史
 const historyOpen = ref(false)
 const jobs = ref([])
-const loadJobs = async () => { try { jobs.value = await GET('/launch-templates/jobs?limit=20') } catch {} }
+const jobsLoading = ref(false)
+const loadJobs = async () => {
+  jobsLoading.value = true
+  try { jobs.value = await GET('/launch-templates/jobs?limit=20') } catch {}
+  jobsLoading.value = false
+}
 const openHistory = async () => { historyOpen.value = true; await loadJobs() }
 const openJob = (jobId) => { historyOpen.value = false; jobProgress.value?.open(jobId) }
 
@@ -578,13 +583,16 @@ const audienceChip = computed(() => {
   return `${c} · ${t('launch.interestCount', { n: (form.value.audience_interests || []).length })}`
 })
 // 手动定向一键存为受众（POST /audiences 现成端点），下次模板直接下拉选用
+const audSaving = ref(false)   // 存受众 POST 期间按钮 busy
 const saveAsAudience = async () => {
+  if (audSaving.value) return
   try {
     const { value } = await ElMessageBox.prompt(t('launch.audSaveNamePh'), t('launch.saveAsAudience'), {
       confirmButtonText: t('common.save'), cancelButtonText: t('common.cancel'),
       inputPattern: /\S+/, inputErrorMessage: t('launch.audNameRequired'),
     })
     const name = value.trim()
+    audSaving.value = true
     await POST('/audiences', {
       name,
       interests: form.value.audience_interests || [],
@@ -596,6 +604,7 @@ const saveAsAudience = async () => {
     await loadAudiences()
     ElMessage.success(t('launch.audSaved', { name }))
   } catch (e) { if (e !== 'cancel') showError(e, t('common.opFail')) }
+  audSaving.value = false
 }
 
 // 预检结果弹窗随部署抽屉迁入 DeployDrawer（showPreflight 借道）——本页只留触发器
@@ -2097,13 +2106,17 @@ const removeTpl = async (tpl) => {
     ElMessage.success(t('launch.archived'))
   } catch (e) { if (e !== 'cancel') showError(e, t('common.opFail')) }   // 真报错要提示（如 400 有运行中 job）
 }
+const copyingId = ref(null)   // 复制进行中的模板 id（POST 期间菜单项禁用）
 const copyTpl = async (tpl) => {
+  if (copyingId.value) return
+  copyingId.value = tpl.id
   try {
     const r = await POST('/launch-templates/' + tpl.id + '/copy', {})
     ElMessage.success(t('launch.copiedAs', { name: r.name }))
     if (r?.id) list.value.unshift(r)   // 响应即完整模板对象——原地插入，省掉全量重拉
     else await load()
   } catch (e) { showError(e, t('launch.copyFail')) }
+  copyingId.value = null
 }
 // 卡片 ⋯ 下拉分发（部署保留主按钮，其余操作收进来）
 const onCardCmd = (cmd, tpl) => {
@@ -2199,7 +2212,7 @@ const {
             <button class="op dots" @click.stop>⋯</button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="copy">{{ t('common.copy') }}</el-dropdown-item>
+                <el-dropdown-item command="copy" :disabled="copyingId === tpl.id">{{ copyingId === tpl.id ? t('common.loading') : t('common.copy') }}</el-dropdown-item>
                 <el-dropdown-item command="preflight" :disabled="preflighting">{{ t('launch.preflight') }}</el-dropdown-item>
                 <el-dropdown-item command="archive" divided class="danger">{{ t('launch.archive') }}</el-dropdown-item>
                 <el-dropdown-item command="hard-delete" class="danger">{{ t('launch.hardDelete') }}</el-dropdown-item>
@@ -2775,7 +2788,7 @@ const {
           <div class="sa-meta">{{ (selectedSavedAud.countries||[]).join(',') || t('launch.defaultAudience') }} · {{ selectedSavedAud.age_min }}-{{ selectedSavedAud.age_max }} · {{ t('launch.interestCount', { n: (selectedSavedAud.interests||[]).length }) }}</div>
 </div>
         <div v-else class="aud-actions-row">
-          <button class="btn sm ghost" :disabled="!hasManualAudience" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ t('launch.saveAsAudience') }}</button>
+          <button class="btn sm ghost" :disabled="!hasManualAudience || audSaving" :title="hasManualAudience ? '' : t('launch.saveAudNeedTargeting')" @click="saveAsAudience">{{ audSaving ? t('common.saving') + '…' : t('launch.saveAsAudience') }}</button>
 </div>
         <template v-if="!form.audience_id">
         <div class="row"><label>{{ t('launch.countries') }}</label>
@@ -3186,7 +3199,7 @@ const {
 
     <!-- 部署历史 -->
     <el-dialog v-model="historyOpen" :title="t('launch.deployHistory')" width="640px" append-to-body>
-      <div class="history-list">
+      <div class="history-list" v-loading="jobsLoading">
         <div v-for="j in jobs" :key="j.id" class="history-item" @click="openJob(j.id)">
           <div class="hi-main">
             <span class="hi-name">{{ j.template_name }}</span>
@@ -3201,7 +3214,7 @@ const {
             <span>{{ t('launch.elapsed') }} {{ fmtDur(jobElapsed(j)) }}</span>
           </div>
 </div>
-        <div v-if="!jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
+        <div v-if="!jobsLoading && !jobs.length" class="empty-sm">{{ t('launch.noDeployRecords') }}</div>
 </div>
 </el-dialog>
 

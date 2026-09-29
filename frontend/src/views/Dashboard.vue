@@ -34,6 +34,7 @@ const data = ref({
 })
 const recentNotifs = ref([])
 const trendData = ref({ labels: [], spend: [], conversions: [], cpa: [], granularity: 'day' })
+const trendLoading = ref(false)
 const trendGran = ref(datePreset.value === 'today' || datePreset.value === 'yesterday' ? '30min' : 'day')  // 颗粒度：5min / 30min / hour / day；初始跟随日期预设（今日/昨日按天=单点，曾一图一孤点）
 const trendCanvas = ref(null)
 // 主趋势图（全宽单图 + 指标切换）：后端趋势只有 spend/conversions/cpa 三条序列
@@ -59,6 +60,7 @@ const autoGran = () => {
 }
 const loadTrend = async () => {
   const isLatest = _trendGuard.next()
+  trendLoading.value = true
   try {
     const q = showCustom.value
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
@@ -69,6 +71,7 @@ const loadTrend = async () => {
     trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}${ownQ}&granularity=${trendGran.value}`)
   if (!isLatest()) return
   } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
+  finally { if (isLatest()) trendLoading.value = false }
 }
 const renderTrendCharts = () => {
   _charts.forEach(c => c?.destroy())
@@ -326,9 +329,11 @@ const LT_SERIES = computed(() => [
   { key: 'blocked', label: t('dashboard.kpiBlocked'), color: 'rgb(255,69,58)' },
 ])
 const ltCanvas = ref(null)
+const ltLoading = ref(false)   // 落地趋势图加载态（空态守卫防「暂无数据」闪现）
 let _ltCharts = []
 const loadLandingTrend = async () => {
   const isLatest = _landTrendGuard.next()
+  ltLoading.value = true
   try {
     let q = (showCustom.value && customFrom.value && customTo.value)
       ? `date_from=${customFrom.value}&date_to=${customTo.value}`
@@ -336,6 +341,7 @@ const loadLandingTrend = async () => {
     landingTrend.value = await GET(`/dashboard/landing-trend?${q}`)   // 落地事件跨平台，不做 platform 过滤
   if (!isLatest()) return
   } catch { landingTrend.value = { labels: [], visits: [], clicks: [], blocked: [] } }
+  finally { if (isLatest()) ltLoading.value = false }
 }
 const renderLandingTrend = () => {
   _ltCharts.forEach(c => c?.destroy())
@@ -1215,7 +1221,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
     </div>
 
     <!-- 趋势（主视觉）：全宽单图 + 指标切换 + 颗粒度 + 平台范围回显 -->
-    <div v-show="mainTab === 'data'" class="card trend-main">
+    <div v-show="mainTab === 'data'" class="card trend-main" v-loading="trendLoading">
       <div class="card-header">
         <div class="tm-title-wrap">
           <span class="card-title">{{ t('dashboard.trend') }}</span>
@@ -1234,7 +1240,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         </div>
       </div>
       <div v-if="trendOpen && trendData.labels?.length" class="trend-main-canvas"><canvas ref="trendCanvas"></canvas></div>
-      <div v-else-if="trendOpen" class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
+      <div v-else-if="trendOpen && !trendLoading" class="trend-empty">{{ t('dashboard.noTrendData') }}</div>
     </div>
 
     <div v-show="mainTab === 'data'" class="main-split" :class="{ 'no-accs': !hasManagedAccs }">
@@ -1417,7 +1423,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
                   </button>
                   <button v-else-if="pendExpand && pendingAlerts.length > 6" class="ac-fold" @click="pendExpand = false">{{ t('dashboard.foldLess') }} ↑</button>
                 </div>
-                <div v-else class="ac-calm">{{ t('dashboard.acAllClear') }}</div>
+                <div v-else-if="!loading" class="ac-calm">{{ t('dashboard.acAllClear') }}</div>
               </div>
               <div v-if="todaySummary.length" class="ac-strip">
                 <span class="ac-strip-label">{{ t('dashboard.acToday') }}</span>
@@ -1456,7 +1462,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
                 </div>
               </div>
             </div>
-            <div v-if="!alertDays.length" class="empty">{{ notifFilter !== 'all' || notifEventFilter || notifUnreadOnly ? t('dashboard.noNotifsLevel') : t('dashboard.noNotifs') }}</div>
+            <div v-if="!alertDays.length && !loading" class="empty">{{ notifFilter !== 'all' || notifEventFilter || notifUnreadOnly ? t('dashboard.noNotifsLevel') : t('dashboard.noNotifs') }}</div>
             </template>
           </div>
         </div>
@@ -1566,7 +1572,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
         </div>
       </div>
       <div v-if="landingTrend.labels?.length" class="trend-main-canvas lt"><canvas ref="ltCanvas"></canvas></div>
-      <div v-else class="trend-empty">{{ t('dashboard.noLandingTrendData') }}</div>
+      <div v-else-if="!ltLoading" class="trend-empty">{{ t('dashboard.noLandingTrendData') }}</div>
     </div>
       <div v-show="mainTab === 'landing'" class="card landing-subcodes" v-loading="landingLoading">
         <div class="card-header">

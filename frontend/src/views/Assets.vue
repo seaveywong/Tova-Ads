@@ -308,8 +308,10 @@ const batchAnalyze = async () => {
   if (fail) ElMessage.warning(t('assets.batchDonePartial', { ok, fail }))
   else ElMessage.success(t('assets.batchAnalyzed', { n: ok }))
 }
+const batchDeleting = ref(false)
+const batchDeleteProgress = ref({ now: 0, total: 0 })   // 按钮文案轻量进度（照 uploadProgress 模式）
 const batchDelete = async () => {
-  if (!selCount.value) return
+  if (!selCount.value || batchDeleting.value) return
   const ids = [...selected.value]
   // 批BW：批量删与单删同警示——选中里有「使用中」素材的列出提醒（单删有 usage 警、批量原来没有）
   const inUse = assets.value.filter(a => selected.value.has(a.id) && (a.usage_count || 0) > 0)
@@ -318,14 +320,18 @@ const batchDelete = async () => {
       (inUse.length ? `\n\n⚠ ${t('assets.batchDeleteInUse', { n: inUse.length })}：${inUse.slice(0, 5).map(a => a.name).join('、')}${inUse.length > 5 ? '…' : ''}` : ''),
       t('assets.batchDelete'),
       { type: 'warning', confirmButtonText: t('assets.confirmDelete'), cancelButtonText: t('common.cancel'), confirmButtonClass: 'el-button--danger' })
+    batchDeleting.value = true
+    batchDeleteProgress.value = { now: 0, total: ids.length }
     let ok = 0, fail = 0
     for (const id of ids) {
       try { await DELETE('/assets/' + id); ok++ } catch { fail++ }
+      batchDeleteProgress.value.now++
     }
     ElMessage.success(t('assets.deletedCount', { ok }) + (fail ? t('assets.failAppend', { n: fail }) : ''))
     clearSel()
     await load()
   } catch (e) { if (e === 'cancel') return; ElMessage.error(t('assets.deleteFailed')) }
+  batchDeleting.value = false
 }
 const batchTagOpen = ref(false)
 const batchTagStr = ref('')
@@ -516,7 +522,7 @@ const countryLabel = (code) => {
       <button class="btn ghost" @click="selAll">{{ t('assets.selectAll') }}</button>
       <button class="btn" :disabled="analyzingIds.size > 0 || batchAnalyzing" @click="batchAnalyze">{{ batchAnalyzing ? t('assets.analyzingDots') : t('assets.batchAnalyze') }}</button>
       <button class="btn" @click="openBatchTag">{{ t('assets.batchTag') }}</button>
-      <button class="btn danger" @click="batchDelete">{{ t('assets.batchDelete') }}</button>
+      <button class="btn danger" :disabled="batchDeleting" @click="batchDelete">{{ batchDeleting ? t('assets.deletingProgress', { n: batchDeleteProgress.now, m: batchDeleteProgress.total }) : t('assets.batchDelete') }}</button>
       <button class="btn ghost" @click="clearSel">{{ t('assets.clearSelection') }}</button>
     </div>
 

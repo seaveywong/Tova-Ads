@@ -100,12 +100,15 @@ const loadOrders = async () => {
 }
 const stLabel = (st) => ({ pending_payment: t('landing.shStPending'), payment_detected: t('domains.stDetected'), approved: t('landing.shStApproved'), registering: t('landing.shStReg'), registered: t('landing.shStRegd'), bound: t('landing.shStBound'), failed: t('landing.shStFailed'), cancelled: t('landing.shStCancel') }[st] || st)
 const stClass = (st) => st === 'bound' ? 'bound' : st === 'failed' ? 'failed' : ['pending_payment', 'approved', 'registering', 'payment_detected'].includes(st) ? (st === 'payment_detected' ? 'detected' : 'wait') : ''
+const cancelBusy = ref(0)   // 取消订单 POST 期间按钮 busy
 const cancelOrder = async (o) => {
   try {
     await ElMessageBox.confirm(t('landing.shCancelConfirm', { d: o.domain }), t('common.confirm'), { type: 'warning' })
+    cancelBusy.value = o.id
     await POST('/domains-shop/orders/' + o.id + '/cancel', {})
     await loadOrders()
   } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || t('common.opFail')) }
+  cancelBusy.value = 0
 }
 const approveOrder = async (o) => {
   orderBusy.value = o.id
@@ -183,9 +186,13 @@ const submitTopup = async () => {
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
   topupBusy.value = false
 }
+const topupCancelBusy = ref(0)   // 取消充值 POST 期间按钮 busy
 const cancelTopup = async (id) => {
+  if (topupCancelBusy.value) return
+  topupCancelBusy.value = id
   try { await POST(`/wallet/topup/${id}/cancel`, {}); ElMessage.success(t('wallet.topupCancelled')); topupPanel.value = null; loadWallet() }
   catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  topupCancelBusy.value = 0
 }
 // 到账轮询：有待转账充值单时 8s 刷（监听 2min 一轮）
 let _walletTimer = null
@@ -246,12 +253,16 @@ const canRenew = (d) => {
   const n = expDays(d)
   return !!d.registrar && d.registrar !== 'external' && n !== null && n <= 90
 }
+const autoBusy = ref(0)   // 自动续费开关 POST 期间按钮 busy
 const toggleAutoRenew = async (d) => {
+  if (autoBusy.value) return
+  autoBusy.value = d.id
   try {
     const r = await POST(`/domains-shop/domains/${d.id}/auto-renew`, { on: !d.auto_renew })
     d.auto_renew = r.auto_renew
     ElMessage.success(r.auto_renew ? t('dom.autoOn') : t('dom.autoOff'))
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  autoBusy.value = 0
 }
 const renewOpen = ref(false)
 const renewTarget = ref(null)
@@ -333,7 +344,7 @@ const submitRenew = async () => {
           <span :class="['zone-chip', d.cf_zone_status === 'active' ? 'ok' : 'warn']">{{ zoneTxt(d) }}</span>
           <span v-if="d.expires_at" :class="['exp-chip', expTier(d)]" :title="t('dom.expTitle', { d: d.expires_at })">
             {{ d.expires_at }} · {{ expText(d) }}</span>
-          <button v-if="d.registrar && d.registrar !== 'external'" class="ar-toggle" :class="{ on: d.auto_renew }"
+          <button v-if="d.registrar && d.registrar !== 'external'" class="ar-toggle" :class="{ on: d.auto_renew }" :disabled="autoBusy === d.id"
                   :title="t('dom.autoTip')" @click.stop="toggleAutoRenew(d)">{{ t('dom.autoRenew') }} {{ d.auto_renew ? '✓' : '✕' }}</button>
           <button v-if="canRenew(d)" class="ctrl-btn sm primary" @click.stop="openRenew(d)">{{ t('dom.renewBtn') }}</button>
           <span v-if="d.blocked" class="zone-chip fb-block">FB 屏蔽</span>
@@ -402,7 +413,7 @@ const submitRenew = async () => {
         <span class="ds-time">{{ o.created_at }}</span>
         <button v-if="['pending_payment', 'payment_detected'].includes(o.status)" class="ctrl-btn sm" @click="openPayPanel(o); payPanel.status = o.status; payPanel.payment_txid = o.payment_txid">{{ t('domains.payBtn') }}</button>
         <button v-if="['pending_payment', 'payment_detected', 'failed'].includes(o.status) && isSuper" class="ctrl-btn sm primary" :disabled="orderBusy === o.id" @click="approveOrder(o)">{{ orderBusy === o.id ? t('common.loading') : t('domains.approve') }}</button>
-        <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" @click="cancelOrder(o)">{{ t('common.cancel') }}</button>
+        <button v-if="o.status === 'pending_payment'" class="ctrl-btn sm" :disabled="cancelBusy === o.id" @click="cancelOrder(o)">{{ cancelBusy === o.id ? t('common.loading') : t('common.cancel') }}</button>
         <span v-if="o.status === 'failed' && o.error" class="ds-err" :title="o.error">⚠</span>
       </div>
       <div v-if="!orders.length && !ordersLoading" class="ds-empty">{{ t('landing.shopNoOrders') }}<button class="ctrl-btn sm" style="margin-left:10px" @click="sec = 'buy'">{{ t('domains.goBuy') }}</button></div>
@@ -423,7 +434,7 @@ const submitRenew = async () => {
         <span class="pay-addr mono" :title="tp.payment_address">{{ tp.payment_address }}</span>
         <span class="ds-pay tnum" :title="t('domains.payAmtTip')">{{ t('domains.payAmt', { v: tp.pay_amount.toFixed(2) }) }}</span>
         <span class="ds-time">{{ tp.created_at }}</span>
-        <button class="ctrl-btn sm" @click="cancelTopup(tp.id)">{{ t('common.cancel') }}</button>
+        <button class="ctrl-btn sm" :disabled="topupCancelBusy === tp.id" @click="cancelTopup(tp.id)">{{ topupCancelBusy === tp.id ? t('common.loading') : t('common.cancel') }}</button>
       </div>
       <div v-if="wallet?.pending_topups?.length" class="field-hint" style="margin:0 0 6px">{{ t('domains.payAutoDetect') }}</div>
 

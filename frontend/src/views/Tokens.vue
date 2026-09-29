@@ -706,12 +706,19 @@ const _oauthUrl = async (a) => {
   try { const r = await GET(`/fb/oauth/start?app_pk=${a.id}`); return r.url || '' }
   catch (e) { ElMessage.error(t('tokens.startOAuthFail') + (e.message || '')); return '' }
 }
+const oauthBusyApp = ref(null)   // 取授权 URL 进行中的 App（按钮 busy 防连点）
 const startOAuth = async (a) => {  // → 在本浏览器打开（当前页跳转 FB 授权）
+  if (oauthBusyApp.value) return
+  oauthBusyApp.value = a.id
   const url = await _oauthUrl(a)
+  oauthBusyApp.value = null
   if (url) window.location.href = url
 }
 const copyOAuth = async (a) => {  // 复制授权链接（到其他设备/已登录 FB 的浏览器打开）
+  if (oauthBusyApp.value) return
+  oauthBusyApp.value = a.id
   const url = await _oauthUrl(a)
+  oauthBusyApp.value = null
   if (!url) return
   try {
     await navigator.clipboard.writeText(url)
@@ -1163,8 +1170,8 @@ const deleteToken = async (tk) => {
       <div class="modal">
         <div class="m-title">{{ t('tokens.connectFacebook') }}</div>
         <div class="m-tabs"><button class="mt-btn" :class="{on:importTab==='oauth'}" @click="importTab='oauth'">{{ t('tokens.tabOauth') }}</button><button class="mt-btn" :class="{on:importTab==='manual'}" @click="importTab='manual'">{{ t('tokens.tabManual') }}</button></div>
-        <div v-if="importTab==='oauth'" class="m-body">
-          <div v-if="!apps.length" class="hint">
+        <div v-if="importTab==='oauth'" class="m-body" v-loading="appLoading">
+          <div v-if="!apps.length && !appLoading" class="hint">
             <template v-if="appError">
               <span style="color:var(--error)">{{ appError }}</span>
               <div><button class="btn sm" style="margin-top:8px" @click="loadApps">{{ t('common.retry') }}</button></div>
@@ -1177,8 +1184,8 @@ const deleteToken = async (tk) => {
               <span class="oa-name">{{ a.name||a.app_id }}</span>
               <span class="badge" :class="{sys:a.is_system}">{{ a.is_system?t('tokens.systemApp'):t('tokens.myApp') }}</span>
               <span class="oa-actions">
-                <button class="oa-btn ghost" @click="copyOAuth(a)">{{ t('tokens.copyOAuthUrl') }}</button>
-                <button class="oa-btn" @click="startOAuth(a)">{{ t('tokens.openInBrowser') }}</button>
+                <button class="oa-btn ghost" :disabled="oauthBusyApp === a.id" @click="copyOAuth(a)">{{ oauthBusyApp === a.id ? t('common.loading') : t('tokens.copyOAuthUrl') }}</button>
+                <button class="oa-btn" :disabled="oauthBusyApp === a.id" @click="startOAuth(a)">{{ t('tokens.openInBrowser') }}</button>
               </span>
             </div>
           </div>

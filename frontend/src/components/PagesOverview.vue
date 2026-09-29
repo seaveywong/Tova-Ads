@@ -29,10 +29,12 @@ const startEdit = (r, field) => {
   if (editing.value) return
   editing.value = { id: r.id, field, value: field === 'name' ? r.name : '', cred_id: r.via_cred_id, orig: field === 'name' ? r.name : '' }
 }
+const saveBusy = ref(false)   // 行内改名/分类保存 POST 期间按钮 busy
 const saveEdit = async () => {
   const ed = editing.value
-  if (!ed) return
+  if (!ed || saveBusy.value) return
   if (ed.field === 'category' && !ed.value.trim()) { editing.value = null; return }
+  saveBusy.value = true
   try {
     const body = ed.field === 'name' ? { page_id: ed.id, name: ed.value.trim() } : { page_id: ed.id, category: ed.value.trim() }
     await POST(`/fb/credentials/${ed.cred_id}/pages/${ed.field === 'name' ? 'rename' : 'category'}`, body)
@@ -40,6 +42,7 @@ const saveEdit = async () => {
     if (r && ed.field === 'name') r.name = ed.value.trim()
     ElMessage.success(t('common.saved'))
   } catch (e) { ElMessage.error(e.message || t('common.opFail')) }
+  saveBusy.value = false
   editing.value = null
 }
 const catRow = ref(null)
@@ -82,7 +85,7 @@ const copyId = (id) => { navigator.clipboard?.writeText(id)?.catch(() => {}); El
         <span class="pg-name">
           <template v-if="editing && editing.id === r.id && editing.field === 'name'">
             <input v-model="editing.value" class="pg-edit" @keyup.enter="saveEdit" @keyup.esc="editing = null" />
-            <button class="ctrl-btn sm primary" @click="saveEdit">{{ t('common.save') }}</button>
+            <button class="ctrl-btn sm primary" :disabled="saveBusy" @click="saveEdit">{{ saveBusy ? t('common.saving') + '…' : t('common.save') }}</button>
           </template>
           <template v-else>
             <span class="pg-title" :title="r.name" @dblclick="startEdit(r, 'name')" @click="copyId(r.id)">{{ r.name }}<i v-if="r.is_published === false" class="pg-unpub">{{ t('pg.unpublished') }}</i></span>
