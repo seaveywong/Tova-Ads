@@ -563,6 +563,7 @@ def delete_credential(
     ).delete(synchronize_session="fetch")
     db.delete(cred)
     _LOADABLE_CACHE.pop(user.tenant_id, None)   # 删令牌即失效载入缓存
+    _AUTH_IDS_CACHE.pop(cred.id, None)   # 授权面缓存同清（防删令牌残留判定）
     db.commit()
     # token-delete: 即时重绑孤儿到其他可用 token（不等 2h watchdog）
     try:
@@ -1924,12 +1925,13 @@ def _verify_ids_pointwise(db, tenant_id: int, aids: list[str], only_cred_id: int
     if only_cred_id:
         # 令牌域模式（令牌页选中令牌进入的 ID 粘贴）：只在它之下识别/判定/绑定
         creds = [c for c in creds if c.id == only_cred_id]
-    # 第一遍：点查收集覆盖（每 aid 的全部覆盖令牌 + 首见 meta）
+    # 第一遍：点查收集覆盖（每 aid 的全部覆盖令牌 + 首见 meta）。
+    # ⚠️ 不做 per-aid 剪枝（复审 P1：v3 曾沿用旧版 pending 剪枝——aid 被首令牌覆盖后
+    # 后续令牌不再点查，creds 恒长度 1，第二遍 OR 判定沦为死代码=多令牌误拒未修）。
+    # 成本 = 令牌数 × ceil(len/50) 次 batch_get（10 令牌 200 户 = 40 次，可接受）
     coverage: dict = {}   # aid -> {"meta": {...}, "creds": [(cred, avail)]}
     for c in creds:
-        pending = [a for a in aids if a not in coverage]
-        if not pending:
-            break
+        pending = list(dict.fromkeys(aids))
         fb = FbClient(decrypt(c.access_token_enc))
         avail = _is_cred_available(c)
         for i in range(0, len(pending), 50):
@@ -2187,6 +2189,11 @@ def import_accounts(
     ent = _LOADABLE_CACHE.get(user.tenant_id)
     if ent and _t.time() - ent[0] < _LOADABLE_TTL:
         rows = {r["account_id"]: r for r in ent[1]}
+        # 令牌域模式（复审 P1）：缓存行是全租户令牌并集——先按 tokens[] 含该 cred
+        # 过滤，域外 ID 归入 _missing 走点查（否则跨令牌账户静默混入并绑错令牌）
+        if body.cred_id:
+            rows = {aid: r for aid, r in rows.items()
+                    if any(t.get("id") == body.cred_id for t in (r.get("tokens") or []))}
         # 缓存可能残缺：拉列表时有令牌限流失败 → 其名下账户不在缓存（V11 案：
         # 限流窗口内导入连续 5 分钟「找不到」）。缺的 ID 实时点查补齐，不再盲信缓存。
         _missing = [a for a in cleaned if a not in rows]

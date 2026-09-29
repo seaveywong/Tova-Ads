@@ -68,9 +68,10 @@ const loadTrend = async () => {
     const actQ = selectedActs.value.length ? `&act_ids=${selectedActs.value.map(encodeURIComponent).join(',')}` : ''
     const cq = conversionCategory.value !== 'all' ? `&conversion_category=${conversionCategory.value}` : ''   // KPI 卡收窄时趋势线同步
     const ownQ = selectedOwner.value ? `&owner_id=${encodeURIComponent(selectedOwner.value)}` : ''   // ⑤ 对应人：趋势线同步收窄
-    trendData.value = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}${ownQ}&granularity=${trendGran.value}`)
-  if (!isLatest()) return
-  } catch { trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
+    const r = await GET(`/dashboard/trend?${q}${platformQuery()}${actQ}${cq}${ownQ}&granularity=${trendGran.value}`)
+    if (!isLatest()) return   // 复审 P2：赋值先于竞态检查——旧响应曾覆盖/清空新数据
+    trendData.value = r
+  } catch { if (isLatest()) trendData.value = { labels: [], spend: [], conversions: [], cpa: [], granularity: trendGran.value } }
   finally { if (isLatest()) trendLoading.value = false }
 }
 const renderTrendCharts = () => {

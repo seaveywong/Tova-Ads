@@ -209,6 +209,10 @@ const loadIdParse = computed(() => {
 })
 const commitLoadIds = async () => {
   const ids = [...new Set(loadIdText.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean))]
+  if (ids.length > 50) {   // 大批量确认（与其他导入入口同口径，复审 P2 补齐）
+    try { await ElMessageBox.confirm(t('tokens.importBigBatchConfirm', { n: ids.length }), t('common.confirm'), { type: 'warning' }) }
+    catch { return }
+  }
   if (!ids.length) return ElMessage.warning(t('tokens.pasteIds'))
   importing.value = true
   try {

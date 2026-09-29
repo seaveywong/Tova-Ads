@@ -103,7 +103,8 @@ const emptyForm = () => ({
   protection_rules: {}, block_target: '', block_html: '', template_key: '', template_id: null,
 })
 const form = ref(emptyForm())
-const detailLoading = ref(false)   // 编辑抽屉详情拉取中（点击即开抽屉，防「点了没反应」）
+const detailLoading = ref(false)
+let openEditSeq = 0   // 编辑请求令牌（防在途详情覆盖新建表单）   // 编辑抽屉详情拉取中（点击即开抽屉，防「点了没反应」）
 const tplDesc = computed(() => {
   const tpl = templates.value.find(x => x.key === form.value.template_key)
   return tpl?.desc || ''
@@ -134,6 +135,7 @@ const rotationOptions = computed(() => [
   { v: 'sequential', l: t('landing.rotSequential') },
 ])
 const openCreate = () => {
+  openEditSeq++   // 新建使在途编辑详情失效（复审 P1 竞态）
   editingId.value = null
   form.value = emptyForm()
   protTestResult.value = null; showAdvanced.value = false   // 会话残留清理（复审P1：A页防护模拟结果曾带进B页/新建）
@@ -155,8 +157,11 @@ const openEdit = async (p) => {
   _lpSnap()
   drawerOpen.value = true          // 点击即开抽屉，详情到达再填表
   detailLoading.value = true
+  const _editSeq = ++openEditSeq   // 请求令牌（复审 P1：ESC 关抽屉后点新建——在途详情
+  // 曾无条件覆盖新建表单并错建重复页；到达时抽屉已关或已被新建打开则丢弃）
   try {
     const detail = await GET(`/landing/pages/${p.id}`)
+    if (_editSeq !== openEditSeq || !drawerOpen.value) return
     form.value = {
       title: detail.title || '', description: detail.description || '', custom_domain: detail.custom_domain || '',
       target_urls: detail.target_urls || [], rotation_mode: detail.rotation_mode || 'first',
@@ -174,8 +179,10 @@ const openEdit = async (p) => {
     }
     _lpSnap()
   } catch (e) {
-    drawerOpen.value = false
-    ElMessage.error(e.message || t('landing.loadFail'))
+    if (_editSeq === openEditSeq && drawerOpen.value) {
+      drawerOpen.value = false
+      ElMessage.error(e.message || t('landing.loadFail'))
+    }
   } finally { detailLoading.value = false }
 }
 

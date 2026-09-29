@@ -118,7 +118,7 @@ const ACTION_ZH = {
   ai_quota_exhausted: 'audit.actionAiQuota', adjust: 'audit.actionAdjust',
   create_pixel: 'audit.actionCreatePixel', storm_suppressed_alert: 'audit.actionStormSuppressed',
   prune_hash_cache: 'audit.actionPruneHashCache', token_health_warn: 'audit.actionTokenHealthWarn',
-  manual_budget: 'audit.actionManualBudget', upsert: 'audit.actionUpsert',
+  manual_budget: 'audit.actionManualBudget', upsert: 'audit.actionUpsert',  import: 'audit.actionImport',   # 复审 P2：今日新增动作裸键复发
 }
 // 详情 metadata 的 key 中文名（用户视角；值里的 act_id 再解析为账户名）
 const META_ZH = {
