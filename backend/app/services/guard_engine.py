@@ -1178,7 +1178,9 @@ def _inspect_account_worker(ctx: dict) -> dict:
                 # 一次调用拉近7天分天（time_increment=1）：API 调用数与拉单日相同（配额按调用计），
                 # 收益=昨日终值每轮修正（FB 归因延迟）+ 新导入账户立即有近7天历史（不再从导入日才有数据）
                 _since7 = (datetime.strptime(acc_today, "%Y-%m-%d") - timedelta(days=6)).strftime("%Y-%m-%d")
-                _rows7 = fb.get_ad_insights(acc.act_id, "today", 50, only_active=False,
+                # limit 100（P1-3 大租户效率：50→100 翻页减半，700 行 14 页→7 页；
+                # FB insights 单页上限 500，100 保守留余量不撞限流）
+                _rows7 = fb.get_ad_insights(acc.act_id, "today", 100, only_active=False,
                                             since=_since7, until=acc_today, increment=1)
                 ads = [r for r in _rows7 if (r.get("date_start") or acc_today) == acc_today]
                 hist_rows_7d = [r for r in _rows7 if r.get("date_start") and r["date_start"] != acc_today]
@@ -1988,6 +1990,9 @@ def run_inspection(force: bool = False):
     lock = acquire_run_lock(101)
     if not lock:
         return {"skipped": "lock_busy"}
+    import time as _tm
+    _t0 = _tm.monotonic()   # 单轮计时（P1-3 遥测：大租户单轮 >5min 时 APScheduler 静默跳过，
+    # 节奏实质变慢无人知——心跳里带耗时让 watchdog/日志中心可查）
     db = SuperSessionLocal()
     trace_id = new_trace_id()
     total_evaluated = 0
@@ -2154,7 +2159,7 @@ def run_inspection(force: bool = False):
                   source="scheduled", result="success",
                   trigger_detail=f"评估{total_evaluated}条广告 · 命中{total_hits}条 · 停{total_paused} · "
                                  f"扩量{total_scaled} · 学习期跳过{total_learning} · "
-                                 f"跳过{total_skipped_spend}条有消耗广告{_why}")
+                                 f"跳过{total_skipped_spend}条有消耗广告 · 耗时{_tm.monotonic()-_t0:.0f}s{_why}")
         # ── live 拉取降级 streak：连续 ≥3 轮有账户 cache 兜底 → 降级告警（1h/tenant1，与
         # watchdog 同口径——平台级基础设施问题）。偶发一轮抖动不告。
         # 跨进程计数（复审R1-P2）：从 inspection_heartbeat 的 trigger_detail 数连续兜底后缀

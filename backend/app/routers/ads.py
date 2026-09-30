@@ -703,20 +703,28 @@ def list_ads(
 
 
 @router.get("/refresh-status")
-def ads_refresh_status(
-    user: CurrentUser = Depends(require_permission("ads.read")),
-):
-    """后台刷新进度（本 worker 进程内；多 worker 下读到的可能是旧态，前端轮询有上限兜底）。"""
-    st = _REFRESH_STATE.get(user.tenant_id)
-    return st or {"running": False, "done": 0, "total": 0}
-
-
-
-
-# live-status 同账户 10s 内存缓存（防连点/列表抖动重复打 FB；多 worker 各自一份，可接受）
-_LIVE_STATUS_CACHE: dict = {}  # {f"{tenant_id}:{act_id}": (fetched_ts, resp)}
-_DIAG_CACHE: dict = {}   # {f"{tenant_id}:{ad_id}": (ts, result)}——诊断面板 60s 响应缓存
-_LIVE_STATUS_TTL = 10
+async def refresh_status(user: CurrentUser = Depends(require_permission("ads.read")),
+                         db: Session = Depends(get_db)):
+    """手动刷新状态（2026-10-01 P1 修复：改用 advisory lock 探测——跨 worker 真相源。
+    曾用单 worker 进程内存 _REFRESH_STATE，多 worker 下前端打到别的 worker 秒回
+    running:false 假「完成」）。lock 112 被 _bg_refresh 持有=running。"""
+    from ..core.database import SuperSessionLocal
+    from sqlalchemy import text as _t
+    _sdb = SuperSessionLocal()
+    try:
+        row = _sdb.execute(_t(
+            "SELECT pg_try_advisory_lock(112) AS got"
+        )).fetchone()
+        got = row[0] if row else True
+        if got:
+            # 拿到了=没人持有=不在刷——立即释放
+            _sdb.execute(_t("SELECT pg_advisory_unlock(112)"))
+            _sdb.commit()
+            return {"running": False}
+        return {"running": True}
+    finally:
+        _sdb.close()
+    return {"running": False}
 
 
 @router.get("/live-status")

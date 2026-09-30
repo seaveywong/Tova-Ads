@@ -869,12 +869,11 @@ const _snapMins = a => {
   const ts = new Date(a.snapshot_at).getTime()
   return isNaN(ts) ? null : Math.max(0, Math.floor((nowTick.value - ts) / 60000))
 }
-const snapshotStale = a => { const m = _snapMins(a); return m != null && m > 360 }
+const snapshotStale = a => { const m = _snapMins(a); return m != null && m > 60 }   // P2 修复(2026-10-01)：曾 6h 才橙——后端 30min 已告警，UI 感知滞后一个数量级
 const snapshotText = a => {
   const m = _snapMins(a)
   if (m == null) return t('adm.snapshotUnknown')
-  if (m > 360) return t('adm.staleSnapshot', { n: Math.floor(m / 60) })
-  if (m >= 60) return t('adm.snapHour', { n: Math.floor(m / 60) })
+  if (m > 60) return t('adm.staleSnapshot', { n: Math.floor(m / 60) })   // >1h 橙（曾 >6h）
   return t('adm.snapMin', { n: m })
 }
 // 成效（FB）列缺失成因区分：早于采集上线（迁移默认 0）vs 日期范围无完整数据
