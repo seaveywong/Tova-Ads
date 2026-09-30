@@ -1004,7 +1004,7 @@ export default {
     colSeries: 'Campaign', colAdset: 'Ad Set', colObjective: 'Objective', colOptGoal: 'Optimization Goal', colPixel: 'Pixel',
     colBudget: 'Budget', colSpend: 'Spend', colConversion: 'Conv.', colReach: 'Reach', colFrequency: 'Frequency',
     colSubcode: 'Subcode', colVisits: 'Visits', colPass: 'Pass', colPassRate: 'Pass Rate',
-    lpVisit: 'Landing visits', lpPass: 'LP clicks', lpTip: 'Visits = real people who reached the landing page; Pass = successfully redirected',
+    lpVisit: 'Landing visits', lpPass: 'LP clicks', lpTip: 'Visits = real people reaching the LP; LP clicks = button clicks or redirects (dedup) — FB clicks include likes/comments, different calibers',
     activate: 'Activate', editBudget: 'Edit Budget', redirectShort: 'Redirect',
     tabLead: 'Leads',
     leadsCount: '{n} leads', leadsSync: 'Sync from FB', leadsSubscribe: 'Subscribe Page Webhook',
