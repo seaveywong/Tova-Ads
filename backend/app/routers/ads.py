@@ -678,7 +678,16 @@ def list_ads(
                 it.update(_d)
         return items
 
+    # 顶层汇总：全部广告行 metrics_updated_at 的最新值（前端页头「数据截至」——点击/消耗
+    # perf 聚合的回写时刻，区别于 cached_at 的广告实体缓存龄）；无任何值时 null
+    _metrics_as_of = None
+    for a in _ads_out:
+        _m = a.get("metrics_updated_at")
+        if _m and (_metrics_as_of is None or _m > _metrics_as_of):
+            _metrics_as_of = _m
+
     return {
+        "metrics_as_of": _metrics_as_of,
         "act_id": act_id, "date_from": date_from, "date_to": date_to,
         "cached_at": min(_cached_ats).isoformat() if _cached_ats else "",
         "last_sync": max(_cached_ats).isoformat() if _cached_ats else "",

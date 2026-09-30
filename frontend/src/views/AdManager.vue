@@ -211,7 +211,7 @@ const optLabel = (o) => OPT_MAP.value[o] || o || '-'
 const _idOf = (v) => (v && typeof v === 'object') ? v.id : v
 // 金额走中央 useFormat（'-' 显示与 AdManager 现状一致，用单横线）；reach 0→'-' 为"无触达"提示语义，本地保留
 import { fmtUsd as _fmtUsd } from '../composables/useFormat'
-import { fmtTime } from '../composables/useTz'
+import { fmtTime, userTz } from '../composables/useTz'
 const fmtMoney = (v) => (v == null) ? '-' : _fmtUsd(v).replace('—', '-')
 // 币种感知金额：USD → $；非 USD 本币 → "数值 币种代码"（与看板 fmtSpendDual 同约定，本币不加 $）
 const fmtAmount = (v, cur) => {
@@ -265,7 +265,8 @@ const watchRefreshDone = () => {
     catch { done = true }  // 状态端点失败也别死循环
     if (done || n >= 20) {
       clearInterval(_refreshPoller); _refreshPoller = null
-      load()
+      await load()
+      if (!loadError.value) ElMessage.success(t('adm.refetchDone'))
     }
   }, 3000)
 }
@@ -359,6 +360,20 @@ const cacheAgeText = computed(() => {
   return t('adm.cacheAgeSingle', { v: _ageTxt(Math.max(a ?? 0, s ?? 0)) })
 })
 const cacheAgeStale = computed(() => adsAgeMin.value != null && adsAgeMin.value >= 60)
+
+// 点击/消耗（perf 聚合）「数据截至」：后端顶层 metrics_as_of = 全部广告行最新回写时刻。
+// 与上面的缓存龄不同源（那是 ads_cache 实体层）——本 chip 专指点击/消耗口径的新鲜度
+const metricsAsOfText = computed(() => {
+  void nowTick.value
+  const iso = data.value.metrics_as_of
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  const hm = d.toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN',
+    { timeZone: userTz.value, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  const m = _ageMin(iso)
+  return t('adm.dataAsOf', { t: hm }) + (m != null ? t('adm.dataAsOfAgo', { v: _ageTxt(m) }) : '')
+})
 
 // 实时核验：对选中账户逐个调 GET /ads/live-status?act_id=，用返回 {ads:[{id,effective_status}]} 逐条 patch 本地行
 // 失败 toast；同账户 10s 防抖（后端另有缓存，双保险）
@@ -880,6 +895,16 @@ const metricText = (a, id) => {
   if (id === 'pass_rate') return a.landing_visits ? Math.round((a.landing_pass || 0) / a.landing_visits * 100) + '%' : '—'
   return a[id] == null || a[id] === '' ? '—' : typeof a[id] === 'number' ? a[id].toLocaleString() : a[id]
 }
+// 子码双口径：广告名含 [子码:xxx] 宏（铺放时自动改名标注）→ 点击数旁小角标「↩ 访问/通过」，
+// FB 报告点击与落地侧访问/通过对照。数据=行内 landing_visits/landing_pass（巡检聚合，
+// 真人口径，同 subcodes 页）；无宏不显示
+const _SUB_RE = /\[子码:([A-Za-z0-9_-]+)\]/
+const lpStats = (a) => _SUB_RE.test(a.name || '')
+  ? { v: Number(a.landing_visits || 0), p: Number(a.landing_pass || 0) } : null
+const lpTitle = (a) => {
+  const s = lpStats(a)
+  return s ? `${t('adm.lpVisit')} ${s.v} / ${t('adm.lpPass')} ${s.p} · ${t('adm.lpTip')}` : ''
+}
 const sumMetric = id => {
   if (id === 'spend') return sumSpend.value
   if (!['results_fb','impressions','clicks','landing_visits','landing_pass'].includes(id)) return ''
@@ -1041,6 +1066,7 @@ const unsubscribeLeads = async () => {
         <span v-if="currentAccountName" class="ph-fresh">{{ currentAccountName }}</span>
       </div>
       <div class="ph-actions">
+        <span v-if="tab !== 'lead' && metricsAsOfText" class="ph-fresh" :title="t('adm.dataAsOfTip')">{{ metricsAsOfText }}</span>
         <el-dropdown trigger="click" placement="bottom-end" @command="cmd => cmd === 'cache' ? load() : (tab === 'lead' ? loadLeads() : load(true))">
           <button class="head-btn primary" :disabled="loading || (tab === 'lead' && leadsLoading)">
             {{ (tab === 'lead' ? leadsLoading : loading) ? t('common.loading') + '…' : t('adm.refetch') }} ▾
@@ -1197,6 +1223,10 @@ const unsubscribeLeads = async () => {
               <td v-for="col in visibleColumns" :key="col.id">
                 <button v-if="col.id === 'budget'" class="budget-cell sort-button" :disabled="!hasBudget(a) || !!accStateTag(a) || opLoading" @click="openBudget(a)">{{ fmtBudget(a, tab) }}</button>
                 <code v-else-if="col.id === 'slug' && a.slug" class="ad-slug" @click="goLandingLogs(a.slug, a.id)">/a/{{ a.slug }}</code>
+                <div v-else-if="col.id === 'clicks' && tab === 'ad' && lpStats(a)" class="lp-cell">
+                  <span>{{ metricText(a, col.id) }}</span>
+                  <span class="lp-badge" :title="lpTitle(a)">↩ {{ lpStats(a).v }}/{{ lpStats(a).p }}</span>
+                </div>
                 <span v-else :title="col.id === 'results_fb' && fbResult(a) == null ? fbTip(a) : ''">{{ metricText(a, col.id) }}</span>
               </td>
               <td><el-dropdown trigger="click" @command="cmd => onAction(cmd, a)" placement="bottom-end"><button class="more-btn" :aria-label="t('adm.actions')" :disabled="opLoading">···</button><template #dropdown><el-dropdown-menu>
@@ -1672,6 +1702,9 @@ const unsubscribeLeads = async () => {
 .manager-table .status-col { width:190px }
 .manager-table .name-col { width:300px }
 .manager-table .action-col { width:60px }
+/* 子码双口径小角标：点击数下方「↩ 访问/通过」，中性弱色（不与主指标争焦点），全释在 title */
+.manager-table .lp-cell { display:flex; flex-direction:column; gap:1px; min-width:0 }
+.manager-table .lp-badge { font-size:11px; color:var(--t3); white-space:nowrap; cursor:default }
 .manager-table tr.sel { background:color-mix(in srgb,var(--ac) 8%,transparent) }
 .manager-table tbody tr:hover { background:var(--bg2) }
 .manager-table tfoot { background:var(--bg2); font-weight:600 }
