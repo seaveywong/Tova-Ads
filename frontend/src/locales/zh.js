@@ -1014,7 +1014,7 @@ export default {
     colSeries: '系列', colAdset: '广告组', colObjective: '目标', colOptGoal: '优化目标', colPixel: '转化像素',
     colBudget: '预算', colSpend: '消耗', colConversion: '转化', colReach: '覆盖', colFrequency: '频次',
     colSubcode: '子码', colVisits: '访问', colPass: '通过', colPassRate: '通过率',
-    lpVisit: '落地访问', lpPass: '通过', lpTip: '访问=真实到达落地页的真人；通过=成功跳转',
+    lpVisit: '落地访问', lpPass: '落地点击', lpTip: '访问=真实到达落地页的真人；落地点击=点了跳转按钮或自动跳转（去重）——FB点击含点赞评论等互动，两者口径不同',
     activate: '开启', editBudget: '改预算', redirectShort: '跳转',
     tabLead: '潜客',
     leadsCount: '共 {n} 条潜客', leadsSync: '从 FB 同步', leadsSubscribe: '订阅主页 webhook',
