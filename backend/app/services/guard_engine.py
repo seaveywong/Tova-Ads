@@ -2384,6 +2384,14 @@ def _upsert_ad_snapshot(db, tenant_id, acc, platform, ad, ad_id, kpi, conv, snap
         PerfSnapshot.snapshot_date == snap_date,
     ).first()
     if snap:
+        # 2026-10-01 写放大消除（优化扫描 P1）：值未变则跳过重写——巡检 5min 一轮，
+        # 多数广告指标不变，曾每轮强制 UPDATE 整行+bump updated_at（1.2万次/h 零变化写）
+        _unchanged = (
+            snap.spend == spend_usd_snap and snap.spend_native == spend
+            and snap.conversions == conv and snap.clicks == clicks
+            and snap.impressions == impressions and snap.reach == reach)
+        if _unchanged:
+            return   # 零变化跳过（updated_at 不 bump，WAL/vacuum 不膨胀）
         snap.spend = spend_usd_snap
         snap.spend_native = spend
         snap.currency = acc.currency

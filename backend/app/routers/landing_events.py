@@ -5,6 +5,52 @@
 """
 import hashlib
 import json as _json   # 模块级：_resolve_tt_pixel_ids 等辅助函数同用（原仅 route_next 内局部导入）
+import time as _time
+
+# ── P0 热路径统一缓存（2026-10-01 优化扫描批2）──
+# 曾 4 处各自为政：每次落地点击全量拉租户 ads_cache 并 json.loads 全部 ads_json/adsets_json
+# 反查一个 ad_id（MB 级 parse）——流量放量第一个倒下的路径。统一为带 TTL 的缓存：
+# 首次构建后 5min 内复用，单点击成本从 O(全租户 JSON) 降到 O(1) dict lookup。
+_AD_META_CACHE: dict = {}   # {tenant_id: (built_at, {ad_id: {act_id, adset_id, pixel_id}})}
+_AD_META_TTL = 300.0
+
+
+def _ad_meta_map(db, tenant_id: int) -> dict:
+    """ad_id → {act_id, adset_id, pixel_id} 带缓存的索引构建。
+    数据源=ads_cache 三层 JSON（与原 4 处同源，只是不再每次全 parse）。"""
+    ent = _AD_META_CACHE.get(tenant_id)
+    now = _time.time()
+    if ent and now - ent[0] < _AD_META_TTL:
+        return ent[1]
+    from ..models.ads_cache import AdsCache
+    m: dict = {}
+    for _row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
+        try:
+            _ads = _json.loads(_row.ads_json or "[]")
+            _adsets = _json.loads(_row.adsets_json or "[]")
+            _as_px = {}   # adset_id → pixel_id（promoted_object）
+            for _as in _adsets:
+                _po = _as.get("promoted_object") or {}
+                if isinstance(_po, str):
+                    try: _po = _json.loads(_po)
+                    except Exception: _po = {}
+                _pid = _po.get("pixel_id")
+                if _pid:
+                    _as_px[str(_as.get("id", ""))] = str(_pid)
+            for _ad in _ads:
+                _aid = str(_ad.get("id") or "")
+                if not _aid:
+                    continue
+                _asid = _ad.get("adset_id")
+                _asid = str(_asid.get("id") if isinstance(_asid, dict) else _asid) if _asid else ""
+                m[_aid] = {"act_id": _row.act_id, "adset_id": _asid,
+                           "pixel_id": _as_px.get(_asid, "")}
+        except Exception:
+            continue
+    if len(_AD_META_CACHE) > 50:
+        _AD_META_CACHE.clear()
+    _AD_META_CACHE[tenant_id] = (now, m)
+    return m
 import time
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -193,18 +239,9 @@ def ingest_event(body: EventIngestIn, request: Request):
         # FB 不填 {{account.id}}(进来是字面量)→ 从 ad_id 反查 ads_cache 得真实账户
         _act = body.act_id
         if (not _act or "{{" in str(_act)) and body.ad_id:
-            from ..models.ads_cache import AdsCache
-            for _row in db.query(AdsCache).filter(AdsCache.tenant_id == tenant_id).all():
-                try:
-                    import json as _j
-                    for _ad in _j.loads(_row.ads_json or "[]"):
-                        if str(_ad.get("id")) == str(body.ad_id):
-                            _act = _row.act_id
-                            break
-                except Exception:
-                    continue
-                if _act and "{{" not in str(_act):
-                    break
+            _meta = _ad_meta_map(db, tenant_id).get(str(body.ad_id))
+            if _meta and _meta.get("act_id"):
+                _act = _meta["act_id"]   # P0 统一缓存：O(1) lookup 替代全量 JSON parse
         _ua = _parse_ua(body.user_agent)  # worker 只发 UA，这里解析设备/平台/浏览器/系统
         ev = LandingEvent(
             tenant_id=tenant_id, page_id=page_id,
@@ -310,17 +347,9 @@ def _resolve_tt_pixel_ids(db: Session, page, link, ad_id: str, explicit_act: str
     """
     _derived_act = None
     if ad_id and page:
-        from ..models.ads_cache import AdsCache
-        for _row in db.query(AdsCache).filter(AdsCache.tenant_id == page.tenant_id).all():
-            try:
-                for _ad in _json.loads(_row.ads_json or "[]"):
-                    if str(_ad.get("id")) == str(ad_id):
-                        _derived_act = _row.act_id
-                        break
-                if _derived_act:
-                    break
-            except Exception:
-                continue
+        _meta = _ad_meta_map(db, page.tenant_id).get(str(ad_id))
+        if _meta:
+            _derived_act = _meta.get("act_id")   # P0 统一缓存：O(1) 替代全量 JSON parse
     for _act in [c for c in [_derived_act, explicit_act, (link.act_id if link else None)] if c]:
         # tenant 过滤：SuperSession 绕 RLS，必须显式按页租户过滤（同 FB 分支口径）
         ids = [p.pixel_id for p in db.query(LandingPixel).filter(
@@ -404,32 +433,10 @@ def route_next(body: RouteNextIn, dry_run: bool = False):
         _derived_act = None
         _derived_pixel = None  # adset 级像素（FB promoted_object.pixel_id）
         if body.ad_id and page:
-            from ..models.ads_cache import AdsCache
-            for _row in db.query(AdsCache).filter(AdsCache.tenant_id == page.tenant_id).all():
-                try:
-                    _ads = _json.loads(_row.ads_json or "[]")
-                    _found_ad = None
-                    for _ad in _ads:
-                        if str(_ad.get("id")) == str(body.ad_id):
-                            _found_ad = _ad
-                            _derived_act = _row.act_id
-                            break
-                    if _found_ad:
-                        _asid = _found_ad.get("adset_id")
-                        _asid = str(_asid.get("id") if isinstance(_asid, dict) else _asid) if _asid else None
-                        if _asid:
-                            for _as in _json.loads(_row.adsets_json or "[]"):
-                                if str(_as.get("id")) == _asid:
-                                    _po = _as.get("promoted_object") or {}
-                                    if isinstance(_po, str):
-                                        try: _po = _json.loads(_po)
-                                        except Exception: _po = {}
-                                    _pid = _po.get("pixel_id")
-                                    if _pid: _derived_pixel = str(_pid)
-                                    break
-                        break
-                except Exception:
-                    continue
+            _meta = _ad_meta_map(db, page.tenant_id).get(str(body.ad_id))
+            if _meta:
+                _derived_act = _meta.get("act_id")
+                _derived_pixel = _meta.get("pixel_id") or None
         pixel_ids = []
         if _derived_pixel:
             pixel_ids = [_derived_pixel]
