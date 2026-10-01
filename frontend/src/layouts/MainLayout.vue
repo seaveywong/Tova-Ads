@@ -8,6 +8,8 @@ import { useLocale } from '../composables/useLocale'
 import { setUserTz, userTz, fmtTime } from '../composables/useTz'
 const fmtShort = (iso) => { try { if (!iso || iso === 'None') return ''; let d = new Date(iso); if (isNaN(d) && typeof iso === 'string') { const hasTz = iso.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(iso); d = new Date(iso.replace(' ', 'T') + (hasTz ? '' : 'Z')) } if (isNaN(d)) return ''; const p = new Intl.DateTimeFormat('en-US', { timeZone: userTz.value, month: '2-digit', day: '2-digit' }).formatToParts(d); const g = t => (p.find(x => x.type === t) || {}).value || ''; return `${g('month')}-${g('day')}` } catch { return '' } }   // MM-DD（侧栏窄位摘要，locale 无关）
 import { ElMessage, ElMessageBox } from 'element-plus'
+// 图标按需引入（批3）：全量注册 300 图标已移除，只 import 实际用到的（侧栏菜单 + 顶栏）
+import { DataAnalysis, Promotion, Operation, Aim, Document, Picture, Link, SetUp, Connection, Setting, Histogram, User, OfficeBuilding, Fold, Expand, ArrowDown, Sunny, Moon, Bell } from '@element-plus/icons-vue'
 import { getUserPerms, setUserPerms, isSuperadminSync, prefetchRoutes } from '../router'
 import PlatformSeg from '../components/PlatformSeg.vue'
 import CommandPalette from '../components/CommandPalette.vue'
@@ -52,31 +54,31 @@ const NAV_PERMS = {
   settings: [], members: ['members.manage'], logs: ['audit.read'], tokens: ['ads.read'], assets: ['assets.manage'],
 }
 
-// 导航（titleKey/labelKey 走 i18n，locale 切换实时生效）
+// 导航（titleKey/labelKey 走 i18n，locale 切换实时生效；icon 直接持有组件引用，配合 <component :is>）
 const allNavGroups = [
   { titleKey: 'nav.groupData', items: [
-    { name: 'dashboard', labelKey: 'nav.dashboard', icon: 'DataAnalysis' },
+    { name: 'dashboard', labelKey: 'nav.dashboard', icon: DataAnalysis },
   ]},
   { titleKey: 'nav.groupAds', items: [
-    { name: 'ads', labelKey: 'nav.ads', icon: 'Promotion' },
-    { name: 'ad-manager', labelKey: 'nav.ad-manager', icon: 'Operation' },
-    { name: 'launch-templates', labelKey: 'nav.launch-templates', icon: 'Aim' },
-    { name: 'form-templates', labelKey: 'nav.form-templates', icon: 'Document' },
-    { name: 'assets', labelKey: 'nav.assets', icon: 'Picture' },
+    { name: 'ads', labelKey: 'nav.ads', icon: Promotion },
+    { name: 'ad-manager', labelKey: 'nav.ad-manager', icon: Operation },
+    { name: 'launch-templates', labelKey: 'nav.launch-templates', icon: Aim },
+    { name: 'form-templates', labelKey: 'nav.form-templates', icon: Document },
+    { name: 'assets', labelKey: 'nav.assets', icon: Picture },
   ]},
   { titleKey: 'nav.groupAuto', items: [
-    { name: 'landing', labelKey: 'nav.landing', icon: 'Link' },
-    { name: 'guard', labelKey: 'nav.guard', icon: 'SetUp' },
+    { name: 'landing', labelKey: 'nav.landing', icon: Link },
+    { name: 'guard', labelKey: 'nav.guard', icon: SetUp },
   ]},
   { titleKey: 'nav.groupAuth', items: [
-    { name: 'tokens', labelKey: 'nav.tokens', icon: 'Connection' },
+    { name: 'tokens', labelKey: 'nav.tokens', icon: Connection },
   ]},
   { titleKey: 'nav.groupSystem', items: [
-    { name: 'settings', labelKey: 'nav.settings', icon: 'Setting' },
-    { name: 'members', labelKey: 'nav.members', icon: 'User' },
-    { name: 'logs', labelKey: 'nav.logs', icon: 'Document' },
-    { name: 'admin-teams', labelKey: 'nav.admin-teams', icon: 'OfficeBuilding' },
-    { name: 'kpi-mapping', labelKey: 'nav.kpi-mapping', icon: 'Histogram' },
+    { name: 'settings', labelKey: 'nav.settings', icon: Setting },
+    { name: 'members', labelKey: 'nav.members', icon: User },
+    { name: 'logs', labelKey: 'nav.logs', icon: Document },
+    { name: 'admin-teams', labelKey: 'nav.admin-teams', icon: OfficeBuilding },
+    { name: 'kpi-mapping', labelKey: 'nav.kpi-mapping', icon: Histogram },
   ]},
 ]
 // 按权限过滤导航项

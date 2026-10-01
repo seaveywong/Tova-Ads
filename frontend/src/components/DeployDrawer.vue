@@ -7,6 +7,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { GET, POST } from '../api'
 import { showError } from '../composables/useError'
 import { accountStatus } from '../composables/useStatus'

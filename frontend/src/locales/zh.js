@@ -1100,6 +1100,7 @@ export default {
     rename: '重命名', renameTitle: '重命名 · {name}', renamePrompt: '新名称',
     renameEmpty: '名称不能为空', renameTooLong: '名称不能超过 200 字符', renamed: '已重命名',
     filterAbnormal: '异常', scopeAccounts: '{n} 账户', totalRow: '合计（{n} 条）',
+    shownOf: '已显示 {s} / {n} 条，继续滚动加载更多',
   },
   kpi: {
     loadFail: '加载失败',

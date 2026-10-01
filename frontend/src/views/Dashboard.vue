@@ -12,6 +12,8 @@ import { isSuperadminSync } from '../router'
 const isSuper = isSuperadminSync()
 import Fuse from 'fuse.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
+// 图标按需引入（批3）：工具栏/搜索前缀/展开箭头/任务卡与通知眼睛图标
+import { Bell, Download, Refresh, Filter, Search, Close, ArrowDown, View, Hide, CircleCloseFilled, WarningFilled, InfoFilled, TrendCharts, CircleCheckFilled } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import DatePresetBar from '../components/DatePresetBar.vue'
 import TgManager from '../components/TgManager.vue'
@@ -395,25 +397,25 @@ const taskCards = computed(() => {
   const names = (arr) => arr.map(a => (a.name || '').slice(0, 15)).join(t('dashboard.nameSep'))
   // 令牌失效=最高优先级红卡（其覆盖账户全部失明：巡检/止损/看板都停——FBInsider 对标）
   const badTokens = data.value.token_alerts || []
-  if (badTokens.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskTokenDead', { n: badTokens.length }), desc: t('dashboard.taskTokenDeadDesc', { names: badTokens.map(x => x.alias).join(t('dashboard.nameSep')) }), toTokens: true, detailAccounts: [], detailColumns: [] })
+  if (badTokens.length) cards.push({ kind: 'danger', icon: CircleCloseFilled, title: t('dashboard.taskTokenDead', { n: badTokens.length }), desc: t('dashboard.taskTokenDeadDesc', { names: badTokens.map(x => x.alias).join(t('dashboard.nameSep')) }), toTokens: true, detailAccounts: [], detailColumns: [] })
   const _limited = (a) => a.balance_kind === 'limited' && !a.removed  // 已移除账户不进充值提醒（不可操作）
   const critical = accs.filter(a => _limited(a) && a.balance <= 0)
-  if (critical.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskRechargeCritical', { n: critical.length }), desc: t('dashboard.taskRechargeCriticalDesc', { names: names(critical) }), detailAccounts: critical, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+  if (critical.length) cards.push({ kind: 'danger', icon: CircleCloseFilled, title: t('dashboard.taskRechargeCritical', { n: critical.length }), desc: t('dashboard.taskRechargeCriticalDesc', { names: names(critical) }), detailAccounts: critical, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   const recharge = accs.filter(a => _limited(a) && a.balance > 0 && a.balance <= 100)
-  if (recharge.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: t('dashboard.taskRechargeAdvice', { n: recharge.length }), desc: t('dashboard.taskRechargeAdviceDesc', { names: names(recharge) }), detailAccounts: recharge, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+  if (recharge.length) cards.push({ kind: 'warn', icon: WarningFilled, title: t('dashboard.taskRechargeAdvice', { n: recharge.length }), desc: t('dashboard.taskRechargeAdviceDesc', { names: names(recharge) }), detailAccounts: recharge, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   if (!critical.length && !recharge.length) {
     const low = accs.filter(a => _limited(a) && a.balance > 100 && a.balance <= 300)
-    if (low.length) cards.push({ kind: 'info', icon: 'InfoFilled', title: t('dashboard.taskBalanceLow', { n: low.length }), desc: t('dashboard.taskBalanceLowDesc', { names: names(low) }), detailAccounts: low, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
+    if (low.length) cards.push({ kind: 'info', icon: InfoFilled, title: t('dashboard.taskBalanceLow', { n: low.length }), desc: t('dashboard.taskBalanceLowDesc', { names: names(low) }), detailAccounts: low, detailColumns: ['name', 'balance', 'amount_spent_usd', 'spend_cap_usd'] })
   }
   // 真拉取异常（排除已分类的巡检未覆盖/跨时区/无数据）
   const fetchErrors = accs.filter(a => a.error && a.error !== 'uncovered' && a.error !== 'cross_tz' && a.error !== '无数据')
-  if (fetchErrors.length) cards.push({ kind: 'danger', icon: 'CircleCloseFilled', title: t('dashboard.taskFetchError', { n: fetchErrors.length }), desc: t('dashboard.taskFetchErrorDesc', { names: names(fetchErrors), msg: fetchErrors[0]?.error || '' }), detailAccounts: fetchErrors, detailColumns: ['name', 'error'] })
+  if (fetchErrors.length) cards.push({ kind: 'danger', icon: CircleCloseFilled, title: t('dashboard.taskFetchError', { n: fetchErrors.length }), desc: t('dashboard.taskFetchErrorDesc', { names: names(fetchErrors), msg: fetchErrors[0]?.error || '' }), detailAccounts: fetchErrors, detailColumns: ['name', 'error'] })
   // 巡检未覆盖（同日但无快照，需关注：可能 token 失效/巡检漏/新账户未跑到）
   const uncovered = accs.filter(a => a.error && a.error === 'uncovered')
-  if (uncovered.length) cards.push({ kind: 'warn', icon: 'WarningFilled', title: t('dashboard.taskUncovered', { n: uncovered.length }), desc: t('dashboard.taskUncoveredDesc'), detailAccounts: uncovered, detailColumns: ['name', 'error'] })
+  if (uncovered.length) cards.push({ kind: 'warn', icon: WarningFilled, title: t('dashboard.taskUncovered', { n: uncovered.length }), desc: t('dashboard.taskUncoveredDesc'), detailAccounts: uncovered, detailColumns: ['name', 'error'] })
   const bleeding = accs.filter(a => !a.error && a.spend_usd > 5 && a.conversions === 0)
-  if (bleeding.length) cards.push({ kind: 'warn', icon: 'TrendCharts', title: t('dashboard.taskBleeding', { n: bleeding.length }), desc: t('dashboard.taskBleedingDesc', { names: names(bleeding), spend: fmtUsd(bleeding.reduce((s, a) => s + a.spend_usd, 0)) }), detailAccounts: bleeding, detailColumns: ['name', 'spend_usd', 'conversions', 'act_id'] })
-  if (!cards.length) cards.push({ kind: 'ok', icon: 'CircleCheckFilled', title: t('dashboard.taskClean'), desc: t('dashboard.taskCleanDesc'), detailAccounts: [], detailColumns: [] })
+  if (bleeding.length) cards.push({ kind: 'warn', icon: TrendCharts, title: t('dashboard.taskBleeding', { n: bleeding.length }), desc: t('dashboard.taskBleedingDesc', { names: names(bleeding), spend: fmtUsd(bleeding.reduce((s, a) => s + a.spend_usd, 0)) }), detailAccounts: bleeding, detailColumns: ['name', 'spend_usd', 'conversions', 'act_id'] })
+  if (!cards.length) cards.push({ kind: 'ok', icon: CircleCheckFilled, title: t('dashboard.taskClean'), desc: t('dashboard.taskCleanDesc'), detailAccounts: [], detailColumns: [] })
   return cards.slice(0, 8)
 })
 const toggleCard = (i) => {
@@ -1397,7 +1399,7 @@ onActivated(() => { if (!_timer && !_refreshTimer) _startTimers() })
                   <el-option v-for="g in notifEventGroups" :key="g.type" :value="g.type" :label="`${g.label} (${g.count})`" />
                 </el-select>
                 <button class="ac-lv" :class="{ on: notifUnreadOnly }" @click="notifUnreadOnly = !notifUnreadOnly" :title="t('dashboard.unreadOnly')">
-                  <el-icon><component :is="notifUnreadOnly ? 'View' : 'Hide'" /></el-icon>
+                  <el-icon><component :is="notifUnreadOnly ? View : Hide" /></el-icon>
                 </button>
               </template>
               <button class="copy-ids-btn" @click="notifMode = notifMode === 'attention' ? 'all' : 'attention'">

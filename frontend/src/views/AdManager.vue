@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { GET, POST, PATCH, DELETE, downloadFile } from '../api'
 import { useLatest } from '../composables/useLatest'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { fbAdStatus, ttAdStatus } from '../composables/useStatus'
 import { DATE_PRESETS, presetRange } from '../composables/useDateRange'
 import { usePlatform } from '../composables/usePlatform'
@@ -506,6 +507,20 @@ const curList = computed(() => {
 
   })
 })
+// 增量渲染（批3）：千行级列表一次全渲卡顿——先渲 100 行，滚动接近底部再放下一批；
+// 筛选/排序/下钻/数据刷新都会重算 curList，届时自动回到首批。表尾合计仍按完整 curList 计算
+const displayLimit = ref(100)
+watch(curList, () => { displayLimit.value = 100 })
+let _scrollEl = null
+const _onScroll = () => {
+  if (displayLimit.value >= curList.value.length) return
+  if (_scrollEl.scrollTop + _scrollEl.clientHeight >= _scrollEl.scrollHeight - 400) displayLimit.value += 100
+}
+onMounted(() => {
+  _scrollEl = document.querySelector('.main-area .content')   // MainLayout 的滚动容器
+  _scrollEl?.addEventListener('scroll', _onScroll, { passive: true })
+})
+onUnmounted(() => { _scrollEl?.removeEventListener('scroll', _onScroll); _scrollEl = null })
 // 表尾汇总：当前筛选后的消耗/转化合计（多币种折 USD，与列口径一致）
 const sumSpend = computed(() => {
   let native = 0, usd = 0
@@ -1203,7 +1218,7 @@ const unsubscribeLeads = async () => {
           <th class="action-col">{{ t('adm.actions') }}</th>
         </tr></thead>
         <tbody>
-          <template v-for="a in curList" :key="entityKey(a)">
+          <template v-for="a in curList.slice(0, displayLimit)" :key="entityKey(a)">
             <tr :class="{ sel: isSelected(entityKey(a)) }">
               <td><input type="checkbox" :checked="isSelected(entityKey(a))" :aria-label="a.name || String(a.id)" @change="toggleSelect(entityKey(a))" /></td>
               <td><div class="status-cell" :title="stIdleTitle(a, tab)">
@@ -1211,7 +1226,7 @@ const unsubscribeLeads = async () => {
                 <span v-if="accStateTag(a)" :class="['acc-state-tag', accStateTag(a).cls]" :title="accStateTag(a).cls === 'banned' ? t('adm.accBannedTip') : t('adm.accUnmanagedTip')">{{ accStateTag(a).label }}</span>
               </div></td>
               <td><div class="ad-nm">
-                <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
+                <button v-if="tab === 'ad'" class="preview-button" :title="t('adm.thumbTitle')" @click="showThumb(a)"><img v-if="thumbOf(a)" :src="thumbOf(a)" class="ad-thumb" :alt="t('adm.thumbTitle')" loading="lazy" decoding="async" @error="nextThumb(a)" /><span v-else class="ad-thumb ph">{{ t('adm.thumbNoneShort') }}</span></button>
                 <div class="txt"><button class="entity-name" @click="tab === 'campaign' ? drillToAdset(a) : tab === 'adset' ? drillToAd(a) : showThumb(a)">{{ a.name }}</button>
                   <div class="sid">{{ a.account_name }} · {{ a.act_id }}</div>
                   <div v-if="tab !== 'campaign'" class="sid">{{ contextOf(a).campaign?.name }}<template v-if="tab === 'ad' && contextOf(a).adset"> › {{ contextOf(a).adset.name }}</template></div>
@@ -1247,6 +1262,7 @@ const unsubscribeLeads = async () => {
         </tbody>
         <tfoot v-if="curList.length"><tr><td></td><td></td><td>{{ totalLabel }}</td><td v-for="col in visibleColumns" :key="col.id">{{ sumMetric(col.id) }}</td><td></td></tr></tfoot>
       </table>
+      <div v-if="curList.length > displayLimit" class="load-more-hint">{{ t('adm.shownOf', { s: displayLimit, n: curList.length }) }}</div>
       <div v-if="!curList.length && !loading && !loadError" class="empty"><span>{{ t('adm.emptyAdsHint') }}</span><button class="btn primary" @click="router.push({ name: 'launch-templates' })">+ {{ t('launch.newTemplate') }}</button></div>
     </div>
     <div v-if="tab === 'lead'" class="leads-panel">
@@ -1567,6 +1583,7 @@ const unsubscribeLeads = async () => {
 .budget-cell.editable { cursor: pointer; color: var(--ac) }
 .budget-cell.editable:hover { text-decoration: underline; text-decoration-style: dotted }
 .empty { padding: 40px; text-align: center; color: var(--t3); font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 14px }
+.load-more-hint { padding: 8px 0 6px; text-align: center; color: var(--t3); font-size: 12px }
 .budget-form { display: flex; flex-direction: column; gap: 8px }
 .budget-form label { font-size: 12px; color: var(--t3) }
 .budget-input { width: 100%; padding: 8px 12px; font-size: 18px; background: var(--bg3); color: var(--t1); border: 1px solid var(--bd); border-radius: 6px; box-sizing: border-box }

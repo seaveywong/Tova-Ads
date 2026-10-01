@@ -1090,6 +1090,7 @@ export default {
     rename: 'Rename', renameTitle: 'Rename · {name}', renamePrompt: 'New name',
     renameEmpty: 'Name cannot be empty', renameTooLong: 'Name must be 200 characters or fewer', renamed: 'Renamed',
     filterAbnormal: 'Issues', scopeAccounts: '{n} accounts', totalRow: 'Total ({n})',
+    shownOf: 'Showing {s} of {n} — scroll to load more',
   },
   kpi: {
     loadFail: 'Failed to load',
