@@ -28,6 +28,18 @@ uvicorn app.main:app --reload --port 8000
 # 访问 http://localhost:8000/health
 ```
 
+## 测试（pytest）
+```bash
+cd backend
+pip install pytest pytest-asyncio httpx   # 本地无 venv 时用户级安装亦可（其余依赖见 requirements.txt）
+python -m pytest tests/ -v
+```
+- 当前为**纯单元测试**：不需要数据库/网络，Windows 本地直接可跑（`tests/conftest.py`
+  自动垫必填 env 假值并 stub 掉 create_engine，不碰真 PG）。
+- 新增测试放 `backend/tests/test_*.py`，只 import 被测模块；不 mock 整个 app，只 stub
+  函数参数（db session 传简单 stub）。
+- CI：`.github/workflows/test.yml`（push/PR 跑 backend 单测，仓库接入 GitHub Actions 后生效）。
+
 ## 服务器部署
 ```bash
 # 127.0.0.1:8000，gunicorn + uvicorn worker，systemd 守护（见 11 运维）
