@@ -136,9 +136,12 @@ def _emit_account_routed(db, tenant_id: int, *, act_ids: list, level: str, event
         return
     _Acc = Account
     owners: dict = {}
+    # 2026-10-01 N+1 修复：一条 IN 查询替代逐账户 first()（N 账户 N 查询→1 查询）
+    _rows = db.query(_Acc.act_id, _Acc.owner_user_id).filter(
+        _Acc.tenant_id == tenant_id, _Acc.act_id.in_([str(a) for a in act_ids])).all()
+    _owner_by_act = {r[0]: r[1] for r in _rows}
     for act in act_ids:
-        a = db.query(_Acc).filter(_Acc.tenant_id == tenant_id, _Acc.act_id == str(act)).first()
-        owners.setdefault(a.owner_user_id if a else None, []).append(str(act))
+        owners.setdefault(_owner_by_act.get(str(act)), []).append(str(act))
     for oid, acts in owners.items():
         if oid is None:
             continue

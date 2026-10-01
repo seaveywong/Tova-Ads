@@ -16,6 +16,28 @@ from sqlalchemy.orm import Session
 from ..core.ai_client import AiClient, AiError
 from ..core.database import SuperSessionLocal
 from ..models.kpi import KpiConfig
+
+_KPI_CFG_CACHE: dict = {}   # {(tenant_id, campaign_id): (ts, KpiConfig|None)} 60s
+_KPI_CFG_TTL = 60.0
+
+
+def _kpi_config_cache(db, tenant_id: int, campaign_id: str):
+    """KpiConfig L0 手动配置带 60s 进程内缓存（巡检 per-ad 高频调用）。"""
+    import time as _t
+    key = (tenant_id, campaign_id)
+    ent = _KPI_CFG_CACHE.get(key)
+    if ent and _t.time() - ent[0] < _KPI_CFG_TTL:
+        return ent[1]
+    val = db.query(KpiConfig).filter(
+        KpiConfig.tenant_id == tenant_id,
+        KpiConfig.target_type == "campaign",
+        KpiConfig.target_id == campaign_id,
+        KpiConfig.enabled == True,  # noqa: E712
+    ).first()
+    if len(_KPI_CFG_CACHE) > 500:   # 简单有界
+        _KPI_CFG_CACHE.clear()
+    _KPI_CFG_CACHE[key] = (_t.time(), val)
+    return val
 from ..models.system import SystemSetting
 
 logger = logging.getLogger("toveads.kpi")
@@ -216,15 +238,11 @@ def _resolve_kpi_impl(db: Session, tenant_id: int, campaign_id: str, objective: 
     obj = (objective or "").upper()
     og = (opt_goal or "").upper()
 
-    # L0：手动配置（kpi_field + target_cpa）
+    # L0：手动配置（kpi_field + target_cpa）——轮级缓存（2026-10-01 N+1 修复：
+    # 巡检 per-ad 调用曾每广告查一次 DB，多数返回 None；60s 进程内缓存后一轮只查一次）
     manual = None
     if campaign_id:
-        manual = db.query(KpiConfig).filter(
-            KpiConfig.tenant_id == tenant_id,
-            KpiConfig.target_type == "campaign",
-            KpiConfig.target_id == campaign_id,
-            KpiConfig.enabled == True,  # noqa: E712
-        ).first()
+        manual = _kpi_config_cache(db, tenant_id, campaign_id)
     target_cpa = (manual.target_cpa if manual and manual.target_cpa else None)
 
     if manual and manual.kpi_field:

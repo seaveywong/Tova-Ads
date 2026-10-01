@@ -8,12 +8,13 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from .config import settings
 
 # pool_pre_ping: 连接断自动重连；future: SQLAlchemy 2.0 风格
-engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=10, max_overflow=20, future=True)
+# 2026-10-01 收池（优化扫描 P3）：4 worker × 双引擎旧配 = 理论 200 连接 vs PG max=100。
+# 新配 = 4 worker × (10+10) = 80 峰值，留 20 余量给 PG 内部/admin
+engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=5, max_overflow=5, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True, expire_on_commit=False)
 
-# system 连接（toveads_super，BYPASSRLS）——用于注册/登录/平台超管等无租户上下文的操作
-# pool_size=10：巡检并发(默认4,上限8) + 扩量 set_budget 各自开连接的峰值需 ≥15；5 会池等待
-super_engine = create_engine(settings.database_super_url, pool_pre_ping=True, pool_size=10, future=True)
+# system 连接（toveads_super，BYPASSRLS）：巡检 4-8 线程各自开连接
+super_engine = create_engine(settings.database_super_url, pool_pre_ping=True, pool_size=5, max_overflow=5, future=True)
 SuperSessionLocal = sessionmaker(bind=super_engine, autoflush=False, autocommit=False, future=True, expire_on_commit=False)
 
 Base = declarative_base()
